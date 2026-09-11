@@ -5,8 +5,14 @@
 //! 36-ui-render.sh's IUI_POSITION=0 headless mode is, without a live tty.
 //! ASCII-only content (skill names/descriptions are ASCII in manifest.rs),
 //! so byte length is cell width throughout; the box-drawing is plain ASCII
-//! (+, -, |), not the Minecraft glyph set 35/36-ui-*.sh draw -- no mascot,
-//! no palette, no per-role colour in this slice.
+//! (+, -, |), not the Minecraft glyph set 35/36-ui-*.sh draw.
+//!
+//! The mascot itself is NOT drawn here: when `layout.mascot_on`, this just
+//! reserves its rows as blank cells (a separator line, then `mascot::HEIGHT`
+//! blank rows) in the list pane. mod.rs paints the actual sprite as a
+//! colored overlay at an absolute position after this frame is drawn --
+//! mixing SGR escapes into these strings would break the "every line is
+//! exactly `cols` display cells" invariant every test here checks.
 
 use super::layout::Layout;
 use super::model::{Focus, PickerState};
@@ -155,21 +161,34 @@ pub fn render_frame(state: &PickerState, layout: &Layout) -> Vec<String> {
     out
 }
 
-fn render_wide(state: &PickerState, layout: &Layout, out: &mut Vec<String>) {
-    out.push(top_border(layout, state.focus));
-    let info = info_lines(state, layout.right_w);
-    for body in 0..layout.body_rows {
-        let list_cell = if body < state.skills.len().saturating_sub(state.scroll) {
+/// One list-pane cell for body row `body`: a skill row while `body` is
+/// inside `layout.list_rows`, then (only when `layout.mascot_on`) one
+/// separator line and `mascot::HEIGHT` blank rows the overlay paints over,
+/// then blank padding for whatever body rows remain.
+fn list_cell(state: &PickerState, layout: &Layout, body: usize) -> String {
+    if body < layout.list_rows {
+        return if state.scroll + body < state.skills.len() {
             list_row(state, state.scroll + body, layout.left_w)
         } else {
             pad("", layout.left_w)
         };
+    }
+    if layout.mascot_on && body == layout.list_rows {
+        return "-".repeat(layout.left_w);
+    }
+    pad("", layout.left_w)
+}
+
+fn render_wide(state: &PickerState, layout: &Layout, out: &mut Vec<String>) {
+    out.push(top_border(layout, state.focus));
+    let info = info_lines(state, layout.right_w);
+    for body in 0..layout.body_rows {
         let info_index = body + state.info_scroll;
         let info_cell = info
             .get(info_index)
             .cloned()
             .unwrap_or_else(|| pad("", layout.right_w));
-        out.push(format!("|{list_cell}|{info_cell}|"));
+        out.push(format!("|{}|{info_cell}|", list_cell(state, layout, body)));
     }
     out.push(bottom_border(layout));
 }
@@ -222,7 +241,7 @@ mod tests {
     fn every_line_is_exactly_the_terminal_width() {
         let state = PickerState::new(skills(&["todo", "bug-report"]));
         let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(80, 24, &names);
+        let layout = layout::compute(80, 24, &names, true);
         let frame = render_frame(&state, &layout);
         assert_eq!(frame.len(), layout.rows);
         for line in &frame {
@@ -235,7 +254,7 @@ mod tests {
         let mut state = PickerState::new(skills(&["todo", "bug-report"]));
         state.cursor = 1;
         let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(80, 24, &names);
+        let layout = layout::compute(80, 24, &names, true);
         let frame = render_frame(&state, &layout);
         let body_line = &frame[3];
         assert!(body_line.contains(">[x] bug-report"));
@@ -246,7 +265,7 @@ mod tests {
         let mut state = PickerState::new(skills(&["todo"]));
         state.toggle(0);
         let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(80, 24, &names);
+        let layout = layout::compute(80, 24, &names, true);
         let frame = render_frame(&state, &layout);
         assert!(frame[2].contains("[ ] todo"));
     }
@@ -255,7 +274,7 @@ mod tests {
     fn a_narrow_terminal_renders_one_pane_with_no_pipe_divider() {
         let state = PickerState::new(skills(&["todo"]));
         let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(40, 24, &names);
+        let layout = layout::compute(40, 24, &names, true);
         let frame = render_frame(&state, &layout);
         for line in &frame[2..frame.len() - 2] {
             assert_eq!(line.matches('|').count(), 2, "line was: {line:?}");
@@ -268,7 +287,7 @@ mod tests {
         state.toggle(0);
         state.skills[1].installed = true;
         let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(80, 24, &names);
+        let layout = layout::compute(80, 24, &names, true);
         let frame = render_frame(&state, &layout);
         assert!(frame[0].contains("1/3 installed"));
         assert!(frame[0].contains("2 selected"));
@@ -288,5 +307,21 @@ mod tests {
             assert!(!line.contains("  "));
         }
         assert_eq!(lines.join(" "), "one two three four");
+    }
+
+    #[test]
+    fn a_tall_terminal_reserves_blank_rows_for_the_mascot() {
+        let state = PickerState::new(skills(&["todo"]));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = layout::compute(80, 30, &names, true);
+        assert!(layout.mascot_on);
+        let frame = render_frame(&state, &layout);
+        // Every line still comes out exactly `cols` wide even with the
+        // mascot's rows reserved -- the invariant every other test checks.
+        for line in &frame {
+            assert_eq!(line.len(), layout.cols);
+        }
+        let separator_row = 2 + layout.list_rows;
+        assert!(frame[separator_row].contains("-------"));
     }
 }

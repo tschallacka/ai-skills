@@ -114,3 +114,19 @@ pub fn draw(frame: &[String]) {
     let _ = out.write_all(buffer.as_bytes());
     let _ = out.flush();
 }
+
+/// Paints `lines` (already SGR-colored, e.g. by ui::mascot::head_line) at
+/// consecutive rows starting at `row` (1-based), column `col` (1-based) --
+/// the overlay used for the mascot, kept separate from `draw` because a
+/// colored line's byte length is not its display width.
+pub fn draw_overlay(row: usize, col: usize, lines: &[String]) {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    let mut buffer = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        buffer.push_str(&format!("\x1b[{};{}H", row + i, col));
+        buffer.push_str(line);
+    }
+    let _ = out.write_all(buffer.as_bytes());
+    let _ = out.flush();
+}
