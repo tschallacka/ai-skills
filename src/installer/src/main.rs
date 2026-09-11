@@ -4,17 +4,18 @@
 //! tiny curl-piped bootstrap script has fetched and extracted it. Runs from
 //! inside the extracted tree; knows nothing about fetching itself.
 //!
-//! This is an early slice, not full parity with install.sh yet: it installs
-//! skills fresh, atomically, with no digest-based backup/merge on upgrade
-//! (60-install.sh's content_digest/record_digests), no interactive TUI, no
-//! per-agent permission grants. Skill selection is directory discovery
-//! (discover.rs), not install.sh's hand-maintained SKILL_NAMES table with
-//! kinds/descriptions/hidden skills. Those port next.
+//! This is an early slice, not full parity with install.sh yet: no
+//! interactive TUI, no per-agent permission grants, no MCP registration, no
+//! plan migration. Skill discovery (discover.rs) still finds any directory
+//! with a SKILL.md, looser than install.sh's hand-maintained SKILL_NAMES
+//! table (no hidden-skill support yet); manifest.rs supplies descriptions
+//! and the --agent shortcut for the ones it knows about.
 
 mod backup;
 mod digest;
 mod discover;
 mod install;
+mod manifest;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -25,9 +26,13 @@ installer — installs skills from the release tree it ships inside.
 Usage:
   installer --platform                     print the resolved target triple
   installer list [--source DIR]            print every discovered skill
-  installer install --target DIR (--all | --skill NAME [--skill NAME ...])
-                                            [--source DIR]
+  installer install (--target DIR | --agent NAME)
+                     (--all | --skill NAME [--skill NAME ...])
+                     [--source DIR]
   installer --help
+
+--agent NAME is one of: claude, codex, opencode, universal, openclaw, cline
+             (resolves to that agent's own skills directory under $HOME).
 ";
 
 fn main() -> ExitCode {
@@ -92,9 +97,12 @@ fn run_list(argv: &[String]) -> Result<ExitCode, String> {
         i += 1;
     }
     let source = resolve_source(source)?;
-    let skills = discover::discover_skills(&source).map_err(|e| e.to_string())?;
-    for skill in skills {
-        println!("{skill}");
+    let discovered = discover::discover_skills(&source).map_err(|e| e.to_string())?;
+    for skill in discovered {
+        match manifest::known_skill(&skill) {
+            Some(known) => println!("{skill}  -- {}", known.description),
+            None => println!("{skill}"),
+        }
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -104,6 +112,7 @@ struct InstallArgs {
     all: bool,
     source: Option<PathBuf>,
     target: Option<PathBuf>,
+    agent: Option<String>,
 }
 
 fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
@@ -111,6 +120,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
     let mut all = false;
     let mut source: Option<PathBuf> = None;
     let mut target: Option<PathBuf> = None;
+    let mut agent: Option<String> = None;
 
     let mut i = 0;
     while i < argv.len() {
@@ -128,6 +138,10 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
                 i += 1;
                 target = Some(PathBuf::from(argv.get(i).ok_or("--target needs a value")?));
             }
+            "--agent" => {
+                i += 1;
+                agent = Some(argv.get(i).ok_or("--agent needs a value")?.clone());
+            }
             other => return Err(format!("install: unknown option: {other}")),
         }
         i += 1;
@@ -137,7 +151,37 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
         all,
         source,
         target,
+        agent,
     })
+}
+
+/// `--agent NAME` resolves to that agent's own directory under $HOME
+/// (manifest::AGENTS), matching install.sh's TARGET_PATHS; `--target DIR`
+/// names a directory outright. Exactly one of the two selects where skills
+/// land.
+fn resolve_target(target: Option<PathBuf>, agent: Option<String>) -> Result<PathBuf, String> {
+    match (target, agent) {
+        (Some(_), Some(_)) => {
+            Err("install: --target and --agent are mutually exclusive".to_string())
+        }
+        (Some(t), None) => Ok(t),
+        (None, Some(kind)) => {
+            let known = manifest::known_agent(&kind).ok_or_else(|| {
+                let choices: Vec<_> = manifest::AGENTS
+                    .iter()
+                    .map(|a| format!("{} ({})", a.kind, a.name))
+                    .collect();
+                format!(
+                    "install: unknown --agent {kind}; known agents are: {}",
+                    choices.join(", ")
+                )
+            })?;
+            let home = std::env::var("HOME")
+                .map_err(|_| "install: --agent needs $HOME set".to_string())?;
+            Ok(PathBuf::from(home).join(known.home_suffix))
+        }
+        (None, None) => Err("install: --target or --agent is required".to_string()),
+    }
 }
 
 fn run_install(argv: &[String]) -> Result<ExitCode, String> {
@@ -149,7 +193,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
         return Err("install: --all or at least one --skill is required".to_string());
     }
     let source = resolve_source(args.source)?;
-    let target = args.target.ok_or("install: --target is required")?;
+    let target = resolve_target(args.target, args.agent)?;
 
     let skills = if args.all {
         discover::discover_skills(&source).map_err(|e| e.to_string())?
