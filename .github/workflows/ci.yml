@@ -951,21 +951,30 @@ jobs:
           if-no-files-found: error
 
       # ---- installer ---------------------------------------------------------
-      # installer/bootstrap.sh (the curl-piped entry point) is POSIX-only, same
-      # exclusion and same reason as interactive-shell above, so this only
-      # builds the four non-Windows legs. Verified by running it, not just
-      # linking it: --platform must answer with this leg's own target, and a
-      # musl leg must actually BE static -- installer/build-installer-release.sh
-      # itself carries the comment for why that check exists (a prior version
-      # of that script silently linked glibc on a "matches the host" shortcut
-      # and labelled the result musl regardless).
+      # The installer BINARY has no POSIX-only dependency of its own -- it is
+      # cfg-gated on Unix only where that already has a working non-Unix
+      # branch (install.rs/permissions.rs's executable-bit handling), and
+      # installer_platform already resolves x86_64-pc-windows-msvc as a real
+      # target. installer/bootstrap.sh, the curl-piped bash LAUNCHER around
+      # this binary, is the actually POSIX-only piece (same reason
+      # interactive-shell is excluded above) -- but that is a statement about
+      # bootstrap.sh, not about whether this binary builds, runs, and answers
+      # --platform/--help correctly on Windows, which is what this leg checks.
+      # Verified by running it, not just linking it: --platform must answer
+      # with this leg's own target, and a musl leg must actually BE static --
+      # installer/build-installer-release.sh itself carries the comment for
+      # why that check exists (a prior version of that script silently linked
+      # glibc on a "matches the host" shortcut and labelled the result musl
+      # regardless).
       - name: Build the installer binary and prove it launches
-        if: needs.scope.outputs.installer == 'true' && !contains(matrix.target, 'windows')
+        if: needs.scope.outputs.installer == 'true'
         shell: bash
         run: |
           set -euo pipefail
           cargo build --release -p installer --target "${{ matrix.target }}"
-          bin="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/installer"
+          suffix=''
+          case "${{ matrix.target }}" in *windows-msvc) suffix=.exe ;; esac
+          bin="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/installer$suffix"
           reported="$("$bin" --platform)"
           [ "$reported" = "${{ matrix.target }}" ] \
             || { echo "::error::installer --platform said $reported, want ${{ matrix.target }}"; exit 1; }
@@ -983,11 +992,13 @@ jobs:
           esac
 
       - name: Upload the installer artifact
-        if: needs.scope.outputs.installer == 'true' && !contains(matrix.target, 'windows')
+        if: needs.scope.outputs.installer == 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: installer-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/installer
+          path: |
+            target/${{ matrix.target }}/release/installer
+            target/${{ matrix.target }}/release/installer.exe
           if-no-files-found: error
 
       # ---- plan-crypt ------------------------------------------------------

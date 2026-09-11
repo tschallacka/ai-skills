@@ -57,22 +57,38 @@ while [ "$#" -gt 0 ]; do
 done
 
 # Matches installer-platform's Target::resolve and install.sh's
-# normalize_platform. Windows is not in ALL_TARGETS below: bootstrap.sh is
-# POSIX-only by construction (same reasoning as the interactive-shell
-# skill's own PTY wrapper), so nothing downloads a Windows asset through it
-# yet, and this script has nothing to gain from packing one no bootstrap
-# path can reach.
+# normalize_platform. install.sh itself supports Windows via Git Bash/MSYS/
+# Cygwin (B94), so a "100% drop-in" installer needs a Windows asset too, even
+# though installer/bootstrap.sh (the curl-piped LAUNCHER around the binary
+# this packs) is POSIX-only for now: that is a statement about the launcher
+# script, not about the tarball's own contents -- the installer binary this
+# packs has no POSIX-only dependency, and CI's native job (ci.yml) already
+# builds, runs and verifies it on windows-latest. A future Windows-capable
+# bootstrap.sh, or a maintainer downloading this asset by hand, both need
+# this target packed the same as any other.
 host_target() {
     case "$(uname -s):$(uname -m)" in
         Linux:x86_64 | Linux:amd64) printf '%s\n' x86_64-unknown-linux-musl ;;
         Linux:aarch64 | Linux:arm64) printf '%s\n' aarch64-unknown-linux-musl ;;
         Darwin:x86_64) printf '%s\n' x86_64-apple-darwin ;;
         Darwin:arm64 | Darwin:aarch64) printf '%s\n' aarch64-apple-darwin ;;
+        MINGW*:x86_64 | MSYS*:x86_64 | CYGWIN*:x86_64 | Windows_NT:AMD64 | \
+        MINGW*:amd64 | MSYS*:amd64 | CYGWIN*:amd64)
+            printf '%s\n' x86_64-pc-windows-msvc ;;
         *) return 1 ;;
     esac
 }
 
-ALL_TARGETS=(x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin)
+ALL_TARGETS=(x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc)
+
+# The installer binary's own filename for a target -- every other target
+# builds "installer", Windows builds "installer.exe".
+binary_name_for() { # <target>
+    case "$1" in
+        *windows-msvc) printf 'installer.exe\n' ;;
+        *) printf 'installer\n' ;;
+    esac
+}
 
 targets_to_try() {
     if [ -n "$explicit_target" ]; then
@@ -87,7 +103,7 @@ targets_to_try() {
 }
 
 installer_binary_path() { # <target> -> where its binary sits once built
-    printf '%s/target/%s/release/installer\n' "$repo_root" "$1"
+    printf '%s/target/%s/release/%s\n' "$repo_root" "$1" "$(binary_name_for "$1")"
 }
 
 # Builds only when nothing is there yet, same "build-if-missing, staleness is
@@ -149,8 +165,8 @@ pack_target() {
     stage="$(mktemp -d "${TMPDIR:-/tmp}/ai-skills-installer-release.XXXXXX")"
     root="$stage/root"
     cp -R "$universal_root" "$root"
-    cp "$bin" "$root/installer"
-    chmod +x "$root/installer"
+    cp "$bin" "$root/$(binary_name_for "$target")"
+    chmod +x "$root/$(binary_name_for "$target")"
     find "$root" -type f -exec touch -t 202001010000 {} +
     tarball="$out_dir/ai-skills-$target.tar.gz"
     (cd "$root" && find . -type f | sed 's#^\./##' | LC_ALL=C sort \

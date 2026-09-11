@@ -5,18 +5,23 @@
 # builds dist/ai-skills-<version>.tar.gz by hand, and attaches it through the
 # GitHub UI. That tarball is install.sh's payload; it carries no installer
 # binary and is not split per platform, so it cannot be what
-# installer/bootstrap.sh downloads. This workflow adds the four
-# ai-skills-<target-triple>.tar.gz assets bootstrap.sh actually needs,
-# without changing anything about the existing manual step -- the maintainer
-# still creates the release and still attaches the universal tarball by hand;
-# this only adds to it, once that release exists.
+# installer/bootstrap.sh downloads. This workflow adds the five
+# ai-skills-<target-triple>.tar.gz assets bootstrap.sh (or, on Windows, a
+# maintainer downloading the asset directly) needs, without changing
+# anything about the existing manual step -- the maintainer still creates
+# the release and still attaches the universal tarball by hand; this only
+# adds to it, once that release exists.
 #
 # ONE JOB PER PLATFORM, same reasoning as ci.yml's `native` job: each asset is
 # built by installer/build-installer-release.sh on that platform's own native
 # runner, because a cross build that cannot run is not the same claim as one
-# that was actually executed there. Windows has no leg: bootstrap.sh is
-# POSIX-only by construction (interactive-shell's own PTY-wrapper precedent),
-# so nothing ever downloads a Windows asset through it.
+# that was actually executed there. Windows HAS a leg here even though
+# installer/bootstrap.sh (the curl-piped launcher) is POSIX-only and cannot
+# download it yet: that is a statement about the launcher script, not about
+# whether the installer binary itself builds and runs on Windows, which
+# ci.yml's native job already proves on windows-latest. Shipping the asset
+# now means a maintainer (or a future Windows-capable launcher) has it the
+# day it is needed, instead of this workflow needing a second retrofit.
 #
 # Triggered by publishing a GitHub Release (covers both a fresh tag and
 # republishing an existing draft), and by workflow_dispatch for a maintainer
@@ -55,6 +60,8 @@ jobs:
             target: x86_64-apple-darwin
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -76,10 +83,16 @@ jobs:
       # needs, so a release leg pays the same cost the manual "build the
       # package" step in RELEASE.md already pays, once per platform instead
       # of once on the maintainer's own machine.
+      #
+      # Explicit `shell: bash` on both remaining steps: windows-latest's
+      # default `run:` shell is PowerShell, and both of these are bash
+      # scripts (build-installer-release.sh, and the gh upload one-liner).
       - name: Build this platform's installer release asset
+        shell: bash
         run: ./installer/build-installer-release.sh --target ${{ matrix.target }}
 
       - name: Attach the asset to the release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
