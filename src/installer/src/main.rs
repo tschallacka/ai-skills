@@ -496,6 +496,32 @@ fn select_targets_interactively(yes: bool) -> Result<Vec<(PathBuf, Option<String
         return Err("No installed agent roots or saved custom locations were found".to_string());
     }
 
+    // B163: a --yes run with no interactive channel (stdin is not a tty --
+    // a script, a CI job, `</dev/null`) and more than one available root
+    // must refuse rather than silently pick one; reading an unattended
+    // empty line as "1" here would make a scripted run's target depend on
+    // ordering the caller cannot see or control. Exactly one available root
+    // has only one possible answer, so that case is auto-selected instead
+    // of refused.
+    if yes && !ui::terminal::is_tty() {
+        if available.len() == 1 {
+            let target = &available[0];
+            println!(
+                "interactive: no interactive channel; using the only available root: {}",
+                target.path.display()
+            );
+            return Ok(vec![(target.path.clone(), target.kind.clone())]);
+        }
+        let mut msg = String::from(
+            "interactive: --yes with no interactive channel and more than one available root; \
+             pass --target explicitly. Available roots:\n",
+        );
+        for target in &available {
+            msg.push_str(&format!("  --target {}\n", target.path.display()));
+        }
+        return Err(msg.trim_end().to_string());
+    }
+
     println!();
     println!("Install into which skill root?");
     for (index, target) in available.iter().enumerate() {
@@ -733,71 +759,83 @@ fn install_selected_skills(
     Ok(installed)
 }
 
-/// Registers (or removes) each installed skill's mcp adapter with the
-/// target agent's own CLI/config -- ported from
-/// installer/src/72-mcp-registration.sh's `mcp_registration_step`, run once
-/// after the whole install loop, for every installed skill that declares any
-/// integration mode at all (almost none do). Silently does nothing when
-/// `kind` is not one `mcp.rs` knows how to register against, same as
-/// `run_post_install_steps`.
-fn run_mcp_registration_step(kind: Option<&str>, source: &Path, target: &Path, skills: &[String]) {
-    let Some(kind) = kind else { return };
-    if !matches!(kind, "claude" | "opencode" | "codex") {
-        return;
-    }
+/// The mcp/permission/plugin steps below all take a slice of roots instead
+/// of one, because they must each run their own confirm() prompt exactly
+/// ONCE per run and then apply the resulting decision to every root --
+/// install.sh's own worktrees_permission_step/planning_permission_step/
+/// mcp_registration_step/interactive_shell_permission_step/
+/// editor_steering_step each run once, after the whole per-root install
+/// loop, and each loops over every root internally for its own per-root
+/// grant (installer/src/75-main.sh). Calling them once per root instead
+/// (what an earlier version of this file did) asks an identical prompt
+/// once per root in a multi-root run, and re-announces "== MCP
+/// registration ==" per root -- a real, user-visible divergence for
+/// `--target A --target B` or more than one `--agent`.
+fn run_mcp_registration_step(roots: &[(PathBuf, Option<String>)], source: &Path, skills: &[String]) {
     let Some(home) = home_dir_opt() else { return };
     let mut announced = false;
     for skill in skills {
         if integration::modes(source, skill).is_empty() {
             continue;
         }
-        if !announced {
-            println!();
-            println!("== MCP registration ==");
-            announced = true;
-        }
-        let dir = target.join(skill);
-        match integration::mcp_adapter_path(source, skill, &dir) {
-            Some(path) => {
-                let path_str = path.to_string_lossy().to_string();
-                match mcp::register_for_kind(kind, skill, &path_str, &home) {
-                    Ok(mcp::RegisterOutcome::Registered) => {
-                        println!("  {kind}: registered MCP server {skill}")
-                    }
-                    Ok(mcp::RegisterOutcome::Manual) => {
-                        for line in mcp::manual_instructions(kind, skill, &path_str) {
-                            println!("  {line}");
-                        }
-                    }
-                    Err(e) => println!("  {kind}: {e}"),
-                }
+        for (target, kind) in roots {
+            let Some(kind) = kind.as_deref() else { continue };
+            if !matches!(kind, "claude" | "opencode" | "codex") {
+                continue;
             }
-            None => match mcp::unregister_for_kind(kind, skill, &dir, &home) {
-                Ok(true) => println!("  {kind}: removed MCP server {skill}"),
-                Ok(false) => {}
-                Err(e) => println!("  {kind}: {e}"),
-            },
+            if !announced {
+                println!();
+                println!("== MCP registration ==");
+                announced = true;
+            }
+            let dir = target.join(skill);
+            match integration::mcp_adapter_path(source, skill, &dir) {
+                Some(path) => {
+                    let path_str = path.to_string_lossy().to_string();
+                    match mcp::register_for_kind(kind, skill, &path_str, &home) {
+                        Ok(mcp::RegisterOutcome::Registered) => {
+                            println!("  {kind}: registered MCP server {skill}")
+                        }
+                        Ok(mcp::RegisterOutcome::Manual) => {
+                            for line in mcp::manual_instructions(kind, skill, &path_str) {
+                                println!("  {line}");
+                            }
+                        }
+                        Err(e) => println!("  {kind}: {e}"),
+                    }
+                }
+                None => match mcp::unregister_for_kind(kind, skill, &dir, &home) {
+                    Ok(true) => println!("  {kind}: removed MCP server {skill}"),
+                    Ok(false) => {}
+                    Err(e) => println!("  {kind}: {e}"),
+                },
+            }
         }
     }
 }
 
 /// The permission grants, plan migration and vendor plugins install.sh
 /// bundles with a skill's own install step (sections 12-13 of
-/// 70-permissions.sh/65-plan-migration.sh), run here for the same skills
-/// just installed. Silently does nothing beyond the install itself when
-/// `kind` is unknown (a custom --target, or an agent this installer has no
-/// auto-editable grant for) -- the standalone grant-permissions/mcp-register/
-/// migrate-plans/install-*-plugin subcommands remain the manual fallback,
-/// same role install.sh's print_manual_permissions plays for a "custom" row.
+/// 70-permissions.sh/65-plan-migration.sh), run here ONCE for the whole
+/// run across every resolved root -- see the doc comment on
+/// `run_mcp_registration_step` for why this takes `roots` rather than one
+/// target/kind pair. Silently does nothing when no root has a known,
+/// auto-editable agent kind -- the standalone grant-permissions/
+/// mcp-register/migrate-plans/install-*-plugin subcommands remain the
+/// manual fallback, same role install.sh's print_manual_permissions plays
+/// for a "custom" row.
 fn run_post_install_steps(
-    kind: Option<&str>,
+    roots: &[(PathBuf, Option<String>)],
     source: &Path,
-    target: &Path,
     skills: &[String],
     confirms: &mut Confirms,
 ) {
-    let Some(kind) = kind else { return };
-    if !matches!(kind, "claude" | "opencode" | "codex") {
+    let known_roots: Vec<(&Path, &str)> = roots
+        .iter()
+        .filter_map(|(p, k)| k.as_deref().map(|k| (p.as_path(), k)))
+        .filter(|(_, k)| matches!(*k, "claude" | "opencode" | "codex"))
+        .collect();
+    if known_roots.is_empty() {
         return;
     }
     let Some(home) = home_dir_opt() else { return };
@@ -805,32 +843,27 @@ fn run_post_install_steps(
     // install.sh's worktrees_permission_step runs for every install, whatever
     // skills were selected -- unlike everything else below, not gated on any
     // particular skill being among them.
-    run_worktrees_permission_step(kind, confirms, &home);
+    run_worktrees_permission_step(&known_roots, confirms, &home);
 
     if skills.iter().any(|s| s == "planning") {
-        run_planning_post_install(kind, target, &home, confirms);
+        run_planning_post_install(&known_roots, &home, confirms);
     }
-    run_mcp_registration_step(Some(kind), source, target, skills);
+    run_mcp_registration_step(roots, source, skills);
     if skills.iter().any(|s| s == "interactive-shell") {
-        run_interactive_shell_post_install(kind, source, target, &home, confirms);
+        run_interactive_shell_post_install(&known_roots, source, &home, confirms);
     }
-    if kind == "claude" && skills.iter().any(|s| s == "ai-text-editor") {
-        run_editor_steering_step(&home, confirms);
-        match plugins::install_editor_gate_plugin(source, target) {
-            Ok(destination) => println!(
-                "Installed: {} (gates sed -i/perl -i/heredoc writes behind a minted token)",
-                destination.display()
-            ),
-            Err(e) => println!("editor-gate-plugin: {e}"),
-        }
+    if skills.iter().any(|s| s == "ai-text-editor") {
+        run_editor_steering_and_gate_step(&known_roots, source, &home, confirms);
     }
 }
 
-/// Runs for every install with a known agent kind, whatever skills were
-/// selected -- ported from install.sh's `worktrees_permission_step`, which
-/// is deliberately outside the `contains planning ...` branch for the same
-/// reason (any agent may be asked to take a worktree).
-fn run_worktrees_permission_step(kind: &str, confirms: &mut Confirms, home: &Path) {
+/// Runs for every install with at least one known agent root, whatever
+/// skills were selected -- ported from install.sh's
+/// `worktrees_permission_step`, which is deliberately outside the
+/// `contains planning ...` branch for the same reason (any agent may be
+/// asked to take a worktree). The two prompts are asked once for the whole
+/// run; the grant itself is applied once per root.
+fn run_worktrees_permission_step(roots: &[(&Path, &str)], confirms: &mut Confirms, home: &Path) {
     println!();
     println!("== Agent worktree permissions ==");
     let worktrees = permissions::default_worktrees_root(home);
@@ -848,31 +881,31 @@ fn run_worktrees_permission_step(kind: &str, confirms: &mut Confirms, home: &Pat
     )) {
         return;
     }
-    match kind {
-        "claude" => match permissions::claude_worktrees_permissions(&worktrees_str, home) {
-            Ok(outcome) => {
-                print_permission_outcome("claude-code", "worktree permissions already present", outcome)
-            }
-            Err(e) => println!("claude-code: {e}"),
-        },
-        "opencode" => match permissions::opencode_worktrees_permissions(&worktrees_str, home) {
-            Ok(outcome) => print_opencode_outcome("worktree permissions already present", outcome),
-            Err(e) => println!("opencode: {e}"),
-        },
-        "codex" => match permissions::codex_worktrees_permissions(&worktrees_str, home) {
-            Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
-            Err(e) => println!("codex: {e}"),
-        },
-        _ => {}
+    for (_, kind) in roots {
+        match *kind {
+            "claude" => match permissions::claude_worktrees_permissions(&worktrees_str, home) {
+                Ok(outcome) => {
+                    print_permission_outcome("claude-code", "worktree permissions already present", outcome)
+                }
+                Err(e) => println!("claude-code: {e}"),
+            },
+            "opencode" => match permissions::opencode_worktrees_permissions(&worktrees_str, home) {
+                Ok(outcome) => print_opencode_outcome("worktree permissions already present", outcome),
+                Err(e) => println!("opencode: {e}"),
+            },
+            "codex" => match permissions::codex_worktrees_permissions(&worktrees_str, home) {
+                Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
+                Err(e) => println!("codex: {e}"),
+            },
+            _ => {}
+        }
     }
 }
 
-fn run_planning_post_install(kind: &str, target: &Path, home: &Path, confirms: &mut Confirms) {
+fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mut Confirms) {
     println!("== planning runtime permissions ==");
-    let scripts = target.join("planning").join("scripts");
     let plans = plan_migration::default_root(home);
     let tmp = std::env::temp_dir().join("planning-agent");
-    let scripts = scripts.to_string_lossy();
     let plans_str = plans.to_string_lossy();
     let tmp_str = tmp.to_string_lossy();
     if confirms.ask(&format!("Create {plans_str} as the global plans directory?")) {
@@ -886,31 +919,36 @@ fn run_planning_post_install(kind: &str, target: &Path, home: &Path, confirms: &
          execute the planning shell scripts? (Each edited config is backed up beside itself, \
          unless git already tracks it)"
     )) {
-        match kind {
-            "claude" => {
-                match permissions::claude_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
-                    Ok(outcome) => {
-                        print_permission_outcome("claude-code", "permissions already present", outcome)
+        for (target, kind) in roots {
+            let scripts = target.join("planning").join("scripts");
+            let scripts = scripts.to_string_lossy();
+            match *kind {
+                "claude" => {
+                    match permissions::claude_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
+                        Ok(outcome) => {
+                            print_permission_outcome("claude-code", "permissions already present", outcome)
+                        }
+                        Err(e) => println!("claude-code: {e}"),
                     }
-                    Err(e) => println!("claude-code: {e}"),
                 }
-            }
-            "opencode" => {
-                match permissions::opencode_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
-                    Ok(outcome) => print_opencode_outcome("permissions already present", outcome),
-                    Err(e) => println!("opencode: {e}"),
+                "opencode" => {
+                    match permissions::opencode_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
+                        Ok(outcome) => print_opencode_outcome("permissions already present", outcome),
+                        Err(e) => println!("opencode: {e}"),
+                    }
                 }
-            }
-            "codex" => {
-                match permissions::codex_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
-                    Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
-                    Err(e) => println!("codex: {e}"),
+                "codex" => {
+                    match permissions::codex_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
+                        Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
+                        Err(e) => println!("codex: {e}"),
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
     }
-    match plan_migration::migrate_legacy_plans(&[target.to_path_buf()], home) {
+    let target_paths: Vec<PathBuf> = roots.iter().map(|(t, _)| t.to_path_buf()).collect();
+    match plan_migration::migrate_legacy_plans(&target_paths, home) {
         Ok(outcome) => {
             for plan in &outcome.migrated {
                 println!("Migrated plan: -> {}", plan.display());
@@ -924,37 +962,46 @@ fn run_planning_post_install(kind: &str, target: &Path, home: &Path, confirms: &
 }
 
 fn run_interactive_shell_post_install(
-    kind: &str,
+    roots: &[(&Path, &str)],
     source: &Path,
-    target: &Path,
     home: &Path,
     confirms: &mut Confirms,
 ) {
     println!("== interactive-shell execution permission ==");
-    if kind == "claude" {
+    let claude_roots: Vec<&Path> = roots
+        .iter()
+        .filter(|(_, k)| *k == "claude")
+        .map(|(p, _)| *p)
+        .collect();
+    if !claude_roots.is_empty() {
         if confirms.ask(
             "Allow the selected agents to execute the interactive-shell binaries, so driving a \
              terminal program needs no prompt per call? (Each edited config is backed up beside \
              itself, unless git already tracks it)",
         ) {
-            let bins = target.join("interactive-shell").join("bin");
-            match permissions::claude_interactive_shell_permissions(&bins.to_string_lossy(), home) {
-                Ok(outcome) => print_permission_outcome(
-                    "claude-code",
-                    "interactive-shell grant already in place",
-                    outcome,
-                ),
-                Err(e) => println!("claude-code: {e}"),
+            for target in &claude_roots {
+                let bins = target.join("interactive-shell").join("bin");
+                match permissions::claude_interactive_shell_permissions(&bins.to_string_lossy(), home) {
+                    Ok(outcome) => print_permission_outcome(
+                        "claude-code",
+                        "interactive-shell grant already in place",
+                        outcome,
+                    ),
+                    Err(e) => println!("claude-code: {e}"),
+                }
             }
         } else {
             println!("  Left unchanged. A refused wrapper call reads as a broken tool, so");
             println!("  expect the skill to be skipped in favour of a headless command.");
         }
-        match plugins::install_tui_hint_plugin_claude(source, target) {
-            Ok(destination) => println!("Installed: {}", destination.display()),
-            Err(e) => println!("tui-hint-plugin: {e}"),
+        for target in &claude_roots {
+            match plugins::install_tui_hint_plugin_claude(source, target) {
+                Ok(destination) => println!("Installed: {}", destination.display()),
+                Err(e) => println!("tui-hint-plugin: {e}"),
+            }
         }
-    } else if kind == "opencode" {
+    }
+    if roots.iter().any(|(_, k)| *k == "opencode") {
         match plugins::install_tui_hint_plugin_opencode(source, home) {
             Ok(plugins::OpencodePluginOutcome::Registered) => {
                 println!("opencode: added the tui-hint-plugin to the plugin array")
@@ -971,11 +1018,40 @@ fn run_interactive_shell_post_install(
     }
 }
 
-/// Offered only when a Claude Code root was selected (these are Claude
-/// Code's own settings) and the run placed ai-text-editor -- ported from
-/// install.sh's `editor_steering_step`. Two independent off-switches, in
-/// the same order bash offers them; declining both leaves the setting
-/// unchanged, same as bash's own final message.
+/// Offered only when at least one Claude Code root was selected (these are
+/// Claude Code's own settings) and the run placed ai-text-editor -- ported
+/// from install.sh's `editor_steering_step`/`editor_gate_plugin_step`. The
+/// steering prompt runs once for the whole run; the gate plugin is copied
+/// into every Claude Code root.
+fn run_editor_steering_and_gate_step(
+    roots: &[(&Path, &str)],
+    source: &Path,
+    home: &Path,
+    confirms: &mut Confirms,
+) {
+    let claude_roots: Vec<&Path> = roots
+        .iter()
+        .filter(|(_, k)| *k == "claude")
+        .map(|(p, _)| *p)
+        .collect();
+    if claude_roots.is_empty() {
+        return;
+    }
+    run_editor_steering_step(home, confirms);
+    for target in &claude_roots {
+        match plugins::install_editor_gate_plugin(source, target) {
+            Ok(destination) => println!(
+                "Installed: {} (gates sed -i/perl -i/heredoc writes behind a minted token)",
+                destination.display()
+            ),
+            Err(e) => println!("editor-gate-plugin: {e}"),
+        }
+    }
+}
+
+/// Two independent off-switches, in the same order bash offers them;
+/// declining both leaves the setting unchanged, same as bash's own final
+/// message.
 fn run_editor_steering_step(home: &Path, confirms: &mut Confirms) {
     println!();
     println!("== ai-text-editor tool steering ==");
@@ -1057,6 +1133,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     // must still auto-answer every later root's prompts too.
     let mut confirms = Confirms::new(args.yes);
     let mut summary = Summary::default();
+    let mut installed_skills: Vec<String> = Vec::new();
     for (target, kind) in &roots {
         let installed = install_selected_skills(
             &source,
@@ -1066,10 +1143,23 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
             args.dev_build,
             &mut summary,
         )?;
-        run_post_install_steps(kind.as_deref(), &source, target, &installed, &mut confirms);
+        let _ = kind;
+        for skill in installed {
+            if !installed_skills.contains(&skill) {
+                installed_skills.push(skill);
+            }
+        }
     }
+    run_post_install_steps(&roots, &source, &installed_skills, &mut confirms);
     let root_paths: Vec<PathBuf> = roots.iter().map(|(t, _)| t.clone()).collect();
     summary.print(&root_paths, args.yes);
+    // install.sh's own dispatch ends with
+    // `[ -z "$RUNTIME_BLOCKED_SKILLS" ] || exit 1`, so a partial install
+    // (a skill hard-blocked on every root that offered it) cannot read as
+    // success in CI.
+    if !summary.hard_blocked.is_empty() {
+        return Ok(ExitCode::FAILURE);
+    }
     Ok(ExitCode::SUCCESS)
 }
 enum GrantTarget {
@@ -1785,7 +1875,8 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             }
             let mut summary = Summary::default();
             let mut confirms = Confirms::new(yes);
-            for (root, root_kind) in &roots {
+            let mut installed_skills: Vec<String> = Vec::new();
+            for (root, _root_kind) in &roots {
                 let installed = install_selected_skills(
                     &source,
                     root,
@@ -1794,16 +1885,21 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                     dev_build,
                     &mut summary,
                 )?;
-                run_post_install_steps(
-                    root_kind.as_deref(),
-                    &source,
-                    root,
-                    &installed,
-                    &mut confirms,
-                );
+                for skill in installed {
+                    if !installed_skills.contains(&skill) {
+                        installed_skills.push(skill);
+                    }
+                }
             }
+            run_post_install_steps(&roots, &source, &installed_skills, &mut confirms);
             let root_paths: Vec<PathBuf> = roots.iter().map(|(p, _)| p.clone()).collect();
             summary.print(&root_paths, yes);
+            // install.sh's own dispatch ends with
+            // `[ -z "$RUNTIME_BLOCKED_SKILLS" ] || exit 1`, so a partial
+            // install cannot read as success in CI.
+            if !summary.hard_blocked.is_empty() {
+                return Ok(ExitCode::FAILURE);
+            }
             Ok(ExitCode::SUCCESS)
         }
     }

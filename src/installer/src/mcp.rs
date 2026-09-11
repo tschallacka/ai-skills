@@ -106,12 +106,26 @@ fn opencode_mcp_command(home: &Path, name: &str) -> Option<String> {
         .map(String::from)
 }
 
+/// `mcp_entry_is_ours` in install.sh (installer/src/72-mcp-registration.sh)
+/// reads `${CODEX_HOME:-$HOME/.codex}/config.toml` -- a different override
+/// variable from the one its own permission-merge path uses
+/// (`CODEX_CONFIGFILE`, `permissions::codex_configfile`). Two variables for
+/// the same default file is install.sh's own inconsistency, not a slip in
+/// this port: matching it means using CODEX_HOME here specifically, not
+/// reusing `codex_configfile`.
+fn codex_mcp_configfile(home: &Path) -> std::path::PathBuf {
+    std::env::var("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| home.join(".codex"))
+        .join("config.toml")
+}
+
 /// Does an agent's registration for `name` point inside `dir`, the
 /// directory this install owns? Only then is it this installer's to remove.
 pub fn entry_is_ours(kind: &str, name: &str, dir: &Path, home: &Path) -> bool {
     let command = match kind {
         "claude" => claude_mcp_command(home, name),
-        "codex" => fs::read_to_string(permissions::codex_configfile(home))
+        "codex" => fs::read_to_string(codex_mcp_configfile(home))
             .ok()
             .and_then(|content| codex_mcp_command(&content, name)),
         "opencode" => opencode_mcp_command(home, name),
@@ -277,6 +291,12 @@ pub fn manual_instructions(kind: &str, name: &str, path: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // codex_mcp_configfile reads the process-global CODEX_HOME; every test
+    // that overrides it takes this lock first, same reasoning as
+    // plan_migration.rs's own ENV_LOCK.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn write(path: &Path, content: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -301,6 +321,21 @@ command = \"/opt/bar/bin\"
             Some("/opt/bar/bin".to_string())
         );
         assert_eq!(codex_mcp_command(toml, "missing"), None);
+    }
+
+    #[test]
+    fn entry_is_ours_for_codex_honors_codex_home_not_codex_configfile() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let codex_home = tempfile::tempdir().unwrap();
+        write(
+            &codex_home.path().join("config.toml"),
+            "[mcp_servers.todo]\ncommand = \"/skills/todo/bin/adapter\"\n",
+        );
+        std::env::set_var("CODEX_HOME", codex_home.path());
+        let is_ours = entry_is_ours("codex", "todo", Path::new("/skills/todo"), home.path());
+        std::env::remove_var("CODEX_HOME");
+        assert!(is_ours);
     }
 
     #[test]
