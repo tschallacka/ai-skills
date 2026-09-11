@@ -3,6 +3,8 @@ name: ai-text-editor
 description: Use the local ai-text-editor server and short-lived client to inspect, search, navigate, edit, recover, and safely save text or raw-byte files through an agent-oriented protocol.
 ---
 
+<!-- MODE: PROD -->
+
 # ai-text-editor
 
 Use this skill when an agent needs durable editor tabs, server-owned file

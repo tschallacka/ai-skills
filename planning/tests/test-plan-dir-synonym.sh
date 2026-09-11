@@ -150,10 +150,9 @@ upc_pair -dp -dp 2.1 'a rewritten paragraph'
 upc_pair -ap -ap plan current-state 'an appended paragraph'
 upc_pair -f -f plan 'UI affected' yes
 
-# Scripts that read a plan and write nothing. A tree diff proves nothing there,
-# so the differential is exit status plus stdout. Without this they were exempt on
-# a claim that turned out to be false: no test in the suite invoked any of them
-# with --plan-dir at all.
+# Scripts that read a plan and write nothing were exercised by no existing
+# test, so the differential is exit status plus stdout — a tree diff proves
+# nothing here.
 readonly_pair() { # <label> <script> <args...>
     local label="$1" script="$2"
     shift 2

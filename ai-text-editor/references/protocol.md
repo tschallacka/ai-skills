@@ -1,3 +1,4 @@
+<!-- MODE: PROD -->
 # ai-text-editor protocol reference
 
 The authoritative transport is versioned NDJSON: one request per short-lived

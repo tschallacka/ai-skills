@@ -77,8 +77,8 @@ cp "$repo_root/pre-push-check.sh" "$clone/pre-push-check.sh"
 # before measuring anything, and this clone's origin is a local path whose
 # master is the stale one, so a fetch here would undo the pin.
 # It must be origin/master, not master: base resolution is
-# `for ref in origin/master master`, so origin/master wins and pinning the local
-# branch changes nothing. Measured the hard way after two wrong guesses.
+# `for ref in origin/master master`, so origin/master wins and pinning the
+# local branch changes nothing.
 ( cd "$clone" && git update-ref refs/remotes/origin/master HEAD && git branch -f master HEAD )
 
 gate_line='a register is modified outside the registers branch'

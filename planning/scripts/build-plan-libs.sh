@@ -4,11 +4,10 @@
 # shipped libraries.
 #
 # One function per file is the maintainable form: a change touches one file, a
-# review diff shows one function, and a test can source a single function without
-# pulling in the rest. Sourcing 47 files at runtime is not: measured at 2.6x the
-# cost of one file, paid on every helper invocation. So the split is the source
-# and the concatenation is what ships, the same arrangement installer/build.sh
-# uses for install.sh.
+# review diff shows one function, and a test can source a single function
+# without pulling in the rest. Sourcing 47 files at runtime costs more than one
+# on every helper invocation, so the split is the source and the concatenation
+# is what ships, the same arrangement installer/build.sh uses for install.sh.
 #
 # Usage:
 #   build-plan-libs.sh                  # write the libraries (prod target)
