@@ -1,0 +1,89 @@
+# MODE: DEV
+# Attach the Rust installer's per-platform release assets to a GitHub Release.
+#
+# RELEASE.md's own protocol is otherwise entirely manual: a maintainer tags,
+# builds dist/ai-skills-<version>.tar.gz by hand, and attaches it through the
+# GitHub UI. That tarball is install.sh's payload; it carries no installer
+# binary and is not split per platform, so it cannot be what
+# installer/bootstrap.sh downloads. This workflow adds the four
+# ai-skills-<target-triple>.tar.gz assets bootstrap.sh actually needs,
+# without changing anything about the existing manual step -- the maintainer
+# still creates the release and still attaches the universal tarball by hand;
+# this only adds to it, once that release exists.
+#
+# ONE JOB PER PLATFORM, same reasoning as ci.yml's `native` job: each asset is
+# built by installer/build-installer-release.sh on that platform's own native
+# runner, because a cross build that cannot run is not the same claim as one
+# that was actually executed there. Windows has no leg: bootstrap.sh is
+# POSIX-only by construction (interactive-shell's own PTY-wrapper precedent),
+# so nothing ever downloads a Windows asset through it.
+#
+# Triggered by publishing a GitHub Release (covers both a fresh tag and
+# republishing an existing draft), and by workflow_dispatch for a maintainer
+# who needs to re-run one platform's leg after the fact -- the tag must
+# already exist as a release for gh release upload to have somewhere to
+# attach to.
+
+name: release-installer
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to attach the installer assets to
+        required: true
+
+# Only the upload step needs write access; everything else here is read-only.
+permissions:
+  contents: write
+
+jobs:
+  build-and-attach:
+    name: ${{ matrix.target }} installer asset
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Pin the toolchain and target
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install the musl C toolchain
+        if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get install -y -qq musl-tools
+
+      # build-installer-release.sh's own "build" mode (via build-release.sh)
+      # is what actually builds the chat/register binaries, rjq, the plan
+      # libraries and REVIEWER.md -- everything install.sh's release already
+      # needs, so a release leg pays the same cost the manual "build the
+      # package" step in RELEASE.md already pays, once per platform instead
+      # of once on the maintainer's own machine.
+      - name: Build this platform's installer release asset
+        run: ./installer/build-installer-release.sh --target ${{ matrix.target }}
+
+      - name: Attach the asset to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ github.event.release.tag_name || inputs.tag }}'
+          gh release upload "$tag" "dist/ai-skills-${{ matrix.target }}.tar.gz" \
+            --repo "${{ github.repository }}" --clobber

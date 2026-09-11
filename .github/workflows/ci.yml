@@ -605,6 +605,7 @@ jobs:
       plan_crypt: ${{ steps.subjects.outputs.plan_crypt }}
       planning_commands: ${{ steps.subjects.outputs.planning_commands }}
       editor: ${{ steps.subjects.outputs.editor }}
+      installer: ${{ steps.subjects.outputs.installer }}
       tests_scope: ${{ steps.decide_tests.outputs.scope }}
       tests: ${{ steps.decide_tests.outputs.tests }}
     steps:
@@ -677,6 +678,7 @@ jobs:
             printf '| plan-crypt | %s |\n' '${{ steps.subjects.outputs.plan_crypt }}'
             printf '| planning commands | %s |\n' '${{ steps.subjects.outputs.planning_commands }}'
             printf '| ai-text-editor | %s |\n' '${{ steps.subjects.outputs.editor }}'
+            printf '| installer | %s |\n' '${{ steps.subjects.outputs.installer }}'
             crates='${{ steps.decide.outputs.crates }}'
             if [ -n "$crates" ]; then
               printf '\nCrates in scope, with their dependents:\n\n'
@@ -946,6 +948,46 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/interactive-shell
             target/${{ matrix.target }}/release/interactive-shell-input
+          if-no-files-found: error
+
+      # ---- installer ---------------------------------------------------------
+      # installer/bootstrap.sh (the curl-piped entry point) is POSIX-only, same
+      # exclusion and same reason as interactive-shell above, so this only
+      # builds the four non-Windows legs. Verified by running it, not just
+      # linking it: --platform must answer with this leg's own target, and a
+      # musl leg must actually BE static -- installer/build-installer-release.sh
+      # itself carries the comment for why that check exists (a prior version
+      # of that script silently linked glibc on a "matches the host" shortcut
+      # and labelled the result musl regardless).
+      - name: Build the installer binary and prove it launches
+        if: needs.scope.outputs.installer == 'true' && !contains(matrix.target, 'windows')
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release -p installer --target "${{ matrix.target }}"
+          bin="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/installer"
+          reported="$("$bin" --platform)"
+          [ "$reported" = "${{ matrix.target }}" ] \
+            || { echo "::error::installer --platform said $reported, want ${{ matrix.target }}"; exit 1; }
+          "$bin" --help >/dev/null
+
+      - name: The musl installer build must actually be static
+        if: needs.scope.outputs.installer == 'true' && contains(matrix.target, 'musl')
+        shell: bash
+        run: |
+          out="$(ldd "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/installer" 2>&1 || true)"
+          printf '%s\n' "$out"
+          case "$out" in
+            *"not a dynamic executable"*|*"statically linked"*) ;;
+            *) echo "::error::the musl build links against a shared library"; exit 1 ;;
+          esac
+
+      - name: Upload the installer artifact
+        if: needs.scope.outputs.installer == 'true' && !contains(matrix.target, 'windows')
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: installer-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/installer
           if-no-files-found: error
 
       # ---- plan-crypt ------------------------------------------------------

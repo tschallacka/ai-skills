@@ -14,6 +14,7 @@
 #   plan_crypt=true|false
 #   planning_commands=true|false
 #   editor=true|false
+#   installer=true|false
 #
 # Usage:
 #   ci-subjects.sh --scope full|selective|none [--crates "a b c"]
@@ -59,6 +60,7 @@ chat=false
 plan_crypt=false
 planning_commands=false
 editor=false
+installer=false
 
 case "$scope" in
     none)
@@ -71,6 +73,7 @@ case "$scope" in
                 plan-crypt)       plan_crypt=true ;;
                 chat-*)           chat=true ;;
                 ai-text-editor*)  editor=true ;;
+                installer*)       installer=true ;;
                 # Anything else belongs to the planning command registry.
                 ?*)               planning_commands=true ;;
             esac
@@ -83,6 +86,7 @@ case "$scope" in
         plan_crypt=true
         planning_commands=true
         editor=true
+        installer=true
         ;;
 esac
 
@@ -92,6 +96,7 @@ emit() {
     printf 'plan_crypt=%s\n' "$plan_crypt"
     printf 'planning_commands=%s\n' "$planning_commands"
     printf 'editor=%s\n' "$editor"
+    printf 'installer=%s\n' "$installer"
 }
 
 emit
