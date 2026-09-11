@@ -28,6 +28,48 @@ set -euo pipefail
 
 artifact_comparison_registry="$skill_root/artifact-comparisons.json"
 
+# Only the rows under the comparisons heading of one companion; a table
+# elsewhere in the companion is none of this pass's business.
+plan_validate_artifact_comparisons_companion() { # <companion> <legal>
+    local companion="$1" legal="$2" section artifact comparison extension reason line
+    section="$(awk '
+        /^## Artifact comparisons$/ { inside = 1; next }
+        inside && /^## / { exit }
+        inside && /^\|/ { print }
+    ' "$companion")"
+    [ -n "$section" ] || return 0
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        case "$line" in
+            *'---'*) continue ;;
+        esac
+        # trim from validate-plan-common-lib.sh already strips surrounding
+        # whitespace and backticks, so a row needs no awk of its own.
+        IFS='|' read -r _ artifact comparison _ <<<"$line"
+        artifact="$(trim "$artifact")"
+        comparison="$(trim "$comparison")"
+        [ -n "$artifact" ] && [ -n "$comparison" ] || continue
+        case "$artifact" in
+            Artifact) continue ;;
+        esac
+        case "$legal" in
+            *" $comparison "*) ;;
+            *) fail "$companion: comparison '$comparison' for $artifact is not in artifact-comparisons.json (legal:${legal% })"
+               continue ;;
+        esac
+        [ "$comparison" = exact ] || continue
+        extension="${artifact##*.}"
+        [ "$extension" != "$artifact" ] || continue
+        extension="$(printf '%s' "$extension" | tr '[:upper:]' '[:lower:]')"
+        reason="$(rjq -r --arg e "$extension" '.nondeterministic_extensions[$e] // empty' \
+            "$artifact_comparison_registry" 2>/dev/null)"
+        [ -n "$reason" ] || continue
+        fail "$companion: $artifact cannot be compared 'exact' -- $reason. Use one of the non-exact comparisons in artifact-comparisons.json and say what tolerance the proof allows."
+    done <<COMPARISON_ROWS
+$section
+COMPARISON_ROWS
+}
+
 # The registry is the source of truth for both halves of the rule: which
 # comparisons exist at all, and which artifacts cannot be reproduced byte for
 # byte. Absent registry is a hard stop, not a silent pass.
@@ -36,50 +78,13 @@ plan_validate_artifact_comparisons() {
         fail "Artifact comparison registry not found: $artifact_comparison_registry"
         return 0
     }
-    local legal nondet companion section artifact comparison extension reason line
+    local legal companion
     legal=" $(rjq -r '.comparisons | keys[]' "$artifact_comparison_registry" 2>/dev/null | tr '\n' ' ')"
     [ "$legal" != " " ] || { fail "Artifact comparison registry lists no comparisons"; return 0; }
 
     while IFS= read -r companion; do
         [ -n "$companion" ] || continue
-        # Only the rows under the comparisons heading; a table elsewhere in the
-        # companion is none of this pass's business.
-        section="$(awk '
-            /^## Artifact comparisons$/ { inside = 1; next }
-            inside && /^## / { exit }
-            inside && /^\|/ { print }
-        ' "$companion")"
-        [ -n "$section" ] || continue
-        while IFS= read -r line; do
-            [ -n "$line" ] || continue
-            case "$line" in
-                *'---'*) continue ;;
-            esac
-            # trim from validate-plan-common-lib.sh already strips surrounding
-            # whitespace and backticks, so a row needs no awk of its own.
-            IFS='|' read -r _ artifact comparison _ <<<"$line"
-            artifact="$(trim "$artifact")"
-            comparison="$(trim "$comparison")"
-            [ -n "$artifact" ] && [ -n "$comparison" ] || continue
-            case "$artifact" in
-                Artifact) continue ;;
-            esac
-            case "$legal" in
-                *" $comparison "*) ;;
-                *) fail "$companion: comparison '$comparison' for $artifact is not in artifact-comparisons.json (legal:${legal% })"
-                   continue ;;
-            esac
-            [ "$comparison" = exact ] || continue
-            extension="${artifact##*.}"
-            [ "$extension" != "$artifact" ] || continue
-            extension="$(printf '%s' "$extension" | tr '[:upper:]' '[:lower:]')"
-            reason="$(rjq -r --arg e "$extension" '.nondeterministic_extensions[$e] // empty' \
-                "$artifact_comparison_registry" 2>/dev/null)"
-            [ -n "$reason" ] || continue
-            fail "$companion: $artifact cannot be compared 'exact' -- $reason. Use one of the non-exact comparisons in artifact-comparisons.json and say what tolerance the proof allows."
-        done <<COMPARISON_ROWS
-$section
-COMPARISON_ROWS
+        plan_validate_artifact_comparisons_companion "$companion" "$legal"
     done <<COMPANIONS
 $(find "$plan_dir" -type f -name '*-testing.md' -not -path '*/context/*' | LC_ALL=C sort)
 COMPANIONS

@@ -169,7 +169,7 @@ interactive-shell	interactive-shell-input
 PLAN
 }
 
-plan_primary() {
+plan_primary_add_and_infra() {
     cat <<'PLAN'
 add-adversarial-finding	add-adversarial-finding
 add-coverage	add-coverage
@@ -191,6 +191,11 @@ rebuild-plan-progress	rebuild-plan-progress
 register-read	register-read
 register-command	register-command
 register-rebuild	register-rebuild
+PLAN
+}
+
+plan_primary_update_and_verify() {
+    cat <<'PLAN'
 plan-mutate	plan-mutate
 todo-add	todo-add
 todo-update	todo-update
@@ -213,6 +218,11 @@ create-ui-story-run-cache	create-ui-story-run-cache
 create-ui-validation	create-ui-validation
 create-work-unit-inventory	create-work-unit-inventory
 PLAN
+}
+
+plan_primary() {
+    plan_primary_add_and_infra
+    plan_primary_update_and_verify
 }
 
 plan_secondary() {

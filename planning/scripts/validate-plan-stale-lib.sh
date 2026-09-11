@@ -84,6 +84,55 @@ stale_scan_doc() {
     ' "$file"
 }
 
+# --stale default (or --stale with no file) uses the bundled case-count phrase
+# list; --stale <file> uses that file alone (extend it by adding phrases to
+# the file). Sets stale_phrases_file and stale_comparison_active.
+plan_validate_stale_resolve_phrases_file() {
+    if [ -n "$stale_file" ] && [ "$stale_file" != "default" ]; then
+        if [ ! -f "$stale_file" ]; then
+            fail "--stale file not found: $stale_file"
+        fi
+        stale_phrases_file="$stale_file"
+        # A caller-supplied list replaces the bundled one, so the bundled
+        # comparison phrases must not also run alongside it.
+        stale_comparison_active=false
+    else
+        stale_comparison_active=true
+        stale_phrases_file="$(mktemp "${TMPDIR:-/tmp}/plan-stale-default.XXXXXX")"
+        # Register with the entry script's single accumulating cleanup
+        # rather than an EXIT trap here: `trap - EXIT` to "release" it
+        # would discard the process-wide handler too (CODE-STYLE.md §8).
+        cleanup_files+=("$stale_phrases_file")
+        printf '%s\n' "${stale_default_phrases[@]}" > "$stale_phrases_file"
+    fi
+}
+
+plan_validate_stale_scan_phrases() { # reads stale_phrases_file against stale_docs
+    local phrase doc hits
+    while IFS= read -r phrase; do
+        [ -n "${phrase//[[:space:]]/}" ] || continue
+        for doc in "${stale_docs[@]}"; do
+            [ -f "$doc" ] || continue
+            hits="$(stale_scan_doc "$doc" "$phrase")"
+            if [ -n "$hits" ]; then
+                warn "count '$phrase' in an unmarked paragraph: $(printf '%s' "$hits" | tr '\n' ' ') -- a count drifts the moment a case is added, so enumerate the items or name the section that lists them"
+            fi
+        done
+    done < "$stale_phrases_file"
+}
+
+plan_validate_stale_scan_comparisons() { # scans stale_comparison_phrases against stale_docs
+    local comparison doc hits
+    for comparison in ${stale_comparison_phrases[@]+"${stale_comparison_phrases[@]}"}; do
+        for doc in "${stale_docs[@]}"; do
+            [ -f "$doc" ] || continue
+            hits="$(stale_scan_doc "$doc" "$comparison")"
+            [ -n "$hits" ] || continue
+            warn "wording '$comparison' in an unmarked paragraph: $(printf '%s' "$hits" | tr '\n' ' ') -- if this is an acceptance criterion, declare it in the step's '## Artifact comparisons' table (update-plan-content.sh -tp) so the comparison is checked instead of guessed"
+        done
+    done
+}
+
 plan_validate_stale() {
     # The stale sweep INCLUDES the *-testing.md companions, the surface most
     # likely to drift. plan_docs excludes companions for the structural
@@ -94,46 +143,10 @@ plan_validate_stale() {
         stale_docs+=("$step_file")
     done
     if [ "$stale_requested" = true ]; then
-        # --stale default (or --stale with no file) uses the bundled case-count
-        # phrase list; --stale <file> uses that file. When a file is given, it is
-        # used alone (extend it by adding phrases to the file).
-        if [ -n "$stale_file" ] && [ "$stale_file" != "default" ]; then
-            if [ ! -f "$stale_file" ]; then
-                fail "--stale file not found: $stale_file"
-            fi
-            stale_phrases_file="$stale_file"
-            # A caller-supplied list replaces the bundled one, so the bundled
-            # comparison phrases must not also run alongside it.
-            stale_comparison_active=false
-        else
-            stale_comparison_active=true
-            stale_phrases_file="$(mktemp "${TMPDIR:-/tmp}/plan-stale-default.XXXXXX")"
-            # Register with the entry script's single accumulating cleanup
-            # rather than an EXIT trap here: `trap - EXIT` to "release" it
-            # would discard the process-wide handler too (CODE-STYLE.md §8).
-            cleanup_files+=("$stale_phrases_file")
-            printf '%s\n' "${stale_default_phrases[@]}" > "$stale_phrases_file"
-        fi
-        while IFS= read -r phrase; do
-            [ -n "${phrase//[[:space:]]/}" ] || continue
-            for doc in "${stale_docs[@]}"; do
-                [ -f "$doc" ] || continue
-                hits="$(stale_scan_doc "$doc" "$phrase")"
-                if [ -n "$hits" ]; then
-                    warn "count '$phrase' in an unmarked paragraph: $(printf '%s' "$hits" | tr '\n' ' ') -- a count drifts the moment a case is added, so enumerate the items or name the section that lists them"
-                fi
-            done
-        done < "$stale_phrases_file"
+        plan_validate_stale_resolve_phrases_file
+        plan_validate_stale_scan_phrases
         [ "$stale_comparison_active" = true ] || return 0
-        local comparison
-        for comparison in ${stale_comparison_phrases[@]+"${stale_comparison_phrases[@]}"}; do
-            for doc in "${stale_docs[@]}"; do
-                [ -f "$doc" ] || continue
-                hits="$(stale_scan_doc "$doc" "$comparison")"
-                [ -n "$hits" ] || continue
-                warn "wording '$comparison' in an unmarked paragraph: $(printf '%s' "$hits" | tr '\n' ' ') -- if this is an acceptance criterion, declare it in the step's '## Artifact comparisons' table (update-plan-content.sh -tp) so the comparison is checked instead of guessed"
-            done
-        done
+        plan_validate_stale_scan_comparisons
         if [ -z "$stale_file" ] || [ "$stale_file" = "default" ]; then
             rm -f "$stale_phrases_file"
         fi
