@@ -91,6 +91,8 @@ unshipped_reason() { # <skill> <path> → prints the reason, or nothing
             printf 'developer documentation, not part of the installed skill\n' ;;
         planning/rust-migration.tsv)
             printf 'developer migration inventory, not part of the installed skill\n' ;;
+        planning/MODE-MANIFEST.tsv)
+            printf 'the Rust installer'"'"'s own package-tier override list, read by src/installer/src/install.rs directly -- not part of skill_files()'"'"'s own manifest\n' ;;
         # The per-function sources and the compiler that turns them into the
         # shipped plan-*-lib.sh. The compiled libraries are listed; their inputs
         # are not, or every install would carry both copies.

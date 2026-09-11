@@ -16,21 +16,19 @@
 //!
 //! `package_dev` gates whether a raw dev checkout's own maintainer-only
 //! content ships along with a skill -- install.sh's `--package prod|dev`/
-//! `PACKAGE_SELECTION` (default `prod`), driven by a hand-maintained
-//! `skill_files()` manifest (installer/src/50-manifest.sh). This installer
-//! gets install.sh's own, exact answer whenever it can:
-//! `skill_manifest::skill_files_via_install_sh` extracts `skill_files()`'s
-//! own source text out of a real `install.sh` sitting next to `source_root`
-//! and interprets it directly (no `bash` subprocess), so the file list is
-//! install.sh's own, not a re-derivation of it. `collect_relative_files`'s
-//! own `should_ship` (`# MODE: DEV` header / `tests/` directory) is the
-//! fallback for when that is not possible -- no `install.sh` next to
-//! `--source` (a `build-release.sh` tarball, which never ships one;
-//! `bootstrap.sh` downloads the skill payload alone), or `skill_files()`'s
-//! source no longer matches the dialect that parser understands. That
-//! tarball is the common end-user path and is already prod-only content, so
-//! the fallback is a no-op there either way; the exact path only matters --
-//! and only engages -- when `--source` names a raw checkout directly.
+//! `PACKAGE_SELECTION` (default `prod`). This installer never reads or runs
+//! install.sh at all (no dependency on the original bash installer, present
+//! or not): `collect_relative_files` decides independently, from three
+//! sources, in order --
+//!   1. a `bin/<target-triple>/` directory ships only the CURRENT host's own
+//!      triple subdirectory (`installer_platform::current()`), not every
+//!      platform's binaries -- a directory-layout convention, not anything
+//!      read out of install.sh;
+//!   2. `load_mode_manifest`'s per-skill `MODE-MANIFEST.tsv` override, for
+//!      the handful of files whose format has no comment syntax to carry a
+//!      marker;
+//!   3. `should_ship`'s own `# MODE: DEV` header scan for everything else,
+//!      plus a whole-`tests/`-directory exclusion for `package_dev`.
 //!
 //! install.sh's separate `--dev-build`/`DEV_BUILD` ("prefer this host's
 //! freshly-built binary over the shipped one") has no port here: this
@@ -41,10 +39,16 @@
 use crate::backup;
 use crate::digest;
 use crate::integration;
-use crate::skill_manifest;
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+
+/// Per-skill override file for `should_ship`'s own MODE-marker heuristic --
+/// see the module doc comment. Never itself shipped in a `prod` build: it
+/// carries its own `# MODE: DEV` header, same as any other maintainer-only
+/// file.
+const MODE_MANIFEST_FILENAME: &str = "MODE-MANIFEST.tsv";
 
 /// Installs `skill` in whichever mode `integration::resolve_mode` picks for
 /// it (an explicit `--integration` choice, else whatever mode is already on
@@ -141,40 +145,63 @@ pub fn skill_relative_files(source_root: &Path, skill: &str, package_dev: bool) 
     relative_paths_for(source_root, skill, package_dev)
 }
 
-/// install.sh's own `skill_files()` answer when it can be gotten (a real
-/// `install.sh` sits next to `source_root`), else `collect_relative_files`'s
-/// MODE-marker heuristic. A path the exact answer names but that does not
-/// actually exist on disk is dropped with a note on stderr rather than
-/// failing the whole install -- install.sh's own interactive install_skill
-/// has no existence check either (only its CLI-mode handlers do, where a
-/// missing source is a documented `die`), so a missing file here reads as
-/// "this row does not apply on this host" the same way a platform-gated
-/// binary row already does.
+/// `collect_relative_files`'s answer for `skill`, with `MODE-MANIFEST.tsv`
+/// (if the skill has one) loaded as an override first -- see the module doc
+/// comment for the three-source order this follows.
 fn relative_paths_for(source_root: &Path, skill: &str, package_dev: bool) -> io::Result<Vec<String>> {
-    if let Some(exact) = skill_manifest::skill_files_via_install_sh(source_root, skill, package_dev) {
-        let source_dir = source_root.join(skill);
-        return Ok(exact
-            .into_iter()
-            .filter(|relative| {
-                let exists = source_dir.join(relative).is_file();
-                if !exists {
-                    eprintln!(
-                        "{skill}: install.sh's own manifest names {relative}, which does not exist here; skipping"
-                    );
-                }
-                exists
-            })
-            .collect());
+    let skill_dir = source_root.join(skill);
+    let overrides = load_mode_manifest(&skill_dir);
+    collect_relative_files(&skill_dir, &PathBuf::new(), package_dev, &overrides)
+}
+
+/// `<skill>/MODE-MANIFEST.tsv`'s `path\tmode` rows (`mode` is `DEV` or
+/// `PROD`; anything else, and a line with no tab at all, is skipped rather
+/// than rejected -- this is a maintainer-edited file, not a validated
+/// format) as `path -> is_dev_only`. Empty when the skill has no such file,
+/// which is every skill but the ones that have needed one so far.
+fn load_mode_manifest(skill_dir: &Path) -> HashMap<String, bool> {
+    let mut out = HashMap::new();
+    let Ok(content) = fs::read_to_string(skill_dir.join(MODE_MANIFEST_FILENAME)) else {
+        return out;
+    };
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((path, mode)) = line.split_once('\t') else {
+            continue;
+        };
+        let dev_only = match mode.trim() {
+            "DEV" => true,
+            "PROD" => false,
+            _ => continue,
+        };
+        out.insert(path.trim().to_string(), dev_only);
     }
-    collect_relative_files(&source_root.join(skill), &PathBuf::new(), package_dev)
+    out
 }
 
 /// Relative paths (forward-slash joined, regardless of host) of every FILE
 /// under `dir`, recursively. Symlinks are neither a file nor a directory
-/// here: this is an early slice and install.sh's own tree has none under a
-/// skill directory, so refusing silently on one would be a worse surprise
-/// than not handling it at all yet.
-fn collect_relative_files(dir: &Path, prefix: &Path, package_dev: bool) -> io::Result<Vec<String>> {
+/// here: this is an early slice and a skill directory has none, so refusing
+/// silently on one would be a worse surprise than not handling it at all
+/// yet.
+///
+/// A directory literally named `bin` directly under the skill root is
+/// special-cased: only the current host's own `installer_platform::current()`
+/// triple subdirectory is descended into (ship this platform's binary, not
+/// every platform's), matching the `bin/<target-triple>/...` layout every
+/// binary-shipping skill in this repository already uses. A host
+/// `installer_platform` does not resolve ships no `bin/` content at all,
+/// same as install.sh's own `skill_files()` refusing with no build for an
+/// unknown platform (installer/src/50-manifest.sh).
+fn collect_relative_files(
+    dir: &Path,
+    prefix: &Path,
+    package_dev: bool,
+    overrides: &HashMap<String, bool>,
+) -> io::Result<Vec<String>> {
     let mut out = Vec::new();
     let mut entries: Vec<_> = fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
     entries.sort_by_key(|e| e.file_name());
@@ -185,9 +212,34 @@ fn collect_relative_files(dir: &Path, prefix: &Path, package_dev: bool) -> io::R
             if !package_dev && entry.file_name() == "tests" {
                 continue;
             }
-            out.extend(collect_relative_files(&entry.path(), &relative, package_dev)?);
-        } else if file_type.is_file() && (package_dev || should_ship(&entry.path())) {
-            out.push(relative.to_string_lossy().replace('\\', "/"));
+            if prefix.as_os_str().is_empty() && entry.file_name() == "bin" {
+                if let Ok(target) = installer_platform::current() {
+                    let triple = target.as_str();
+                    let triple_dir = entry.path().join(triple);
+                    if triple_dir.is_dir() {
+                        out.extend(collect_relative_files(
+                            &triple_dir,
+                            &relative.join(triple),
+                            package_dev,
+                            overrides,
+                        )?);
+                    }
+                }
+                continue; // never ship another platform's bin/<triple>/ content
+            }
+            out.extend(collect_relative_files(&entry.path(), &relative, package_dev, overrides)?);
+        } else if file_type.is_file() {
+            let relative = relative.to_string_lossy().replace('\\', "/");
+            let ship = if package_dev {
+                true
+            } else if let Some(dev_only) = overrides.get(&relative) {
+                !dev_only
+            } else {
+                should_ship(&entry.path())
+            };
+            if ship {
+                out.push(relative);
+            }
         }
     }
     Ok(out)
@@ -202,7 +254,8 @@ fn collect_relative_files(dir: &Path, prefix: &Path, package_dev: bool) -> io::R
 /// binaries) have no comment syntax to carry one and were always meant to
 /// ship. `declares_prod` can default the other way because build-release.sh
 /// pairs it with a hand-maintained inclusion list (`skill_files()`) for
-/// every real skill; this has no such list to fall back on.
+/// every real skill; a file this ships wrongly here is what
+/// `MODE-MANIFEST.tsv`'s override (above) is for.
 fn should_ship(path: &Path) -> bool {
     let Ok(content) = fs::read_to_string(path) else {
         return true; // not read as text (e.g. a binary) -- never DEV-marked
@@ -568,6 +621,46 @@ mod tests {
 
         install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
         assert!(target_root.path().join("todo/scripts/run.sh").is_file());
+    }
+
+    #[test]
+    fn only_the_current_hosts_own_bin_triple_ships() {
+        let target = installer_platform::current().expect("test host must be a supported platform");
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        write(
+            &source_root.path().join(format!("todo/bin/{target}/todo")),
+            "binary",
+        );
+        write(&source_root.path().join("todo/bin/plan9-riscv64/todo"), "binary");
+        let target_root = tempfile::tempdir().unwrap();
+
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        assert!(target_root.path().join(format!("todo/bin/{target}/todo")).is_file());
+        assert!(!target_root.path().join("todo/bin/plan9-riscv64").exists());
+    }
+
+    #[test]
+    fn a_mode_manifest_override_excludes_an_unmarked_file_from_prod_but_ships_it_in_dev() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        write(&source_root.path().join("todo/.gitignore"), "plans/*\n");
+        write(
+            &source_root.path().join("todo/MODE-MANIFEST.tsv"),
+            "# MODE: DEV\n.gitignore\tDEV\n",
+        );
+        let target_root = tempfile::tempdir().unwrap();
+
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        assert!(!target_root.path().join("todo/.gitignore").exists());
+        assert!(
+            !target_root.path().join("todo/MODE-MANIFEST.tsv").exists(),
+            "the manifest carries its own MODE: DEV marker, so should_ship excludes it from prod too"
+        );
+
+        let dev_target = tempfile::tempdir().unwrap();
+        install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
+        assert!(dev_target.path().join("todo/.gitignore").is_file());
     }
 
     #[cfg(unix)]

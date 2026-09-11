@@ -1,0 +1,28 @@
+# MODE: DEV
+# MODE-MANIFEST.tsv -- lists this skill's own files whose install package
+# tier (DEV ships only in a --package dev build; PROD ships in both, since
+# dev is the inclusive superset) cannot be declared with the usual embedded
+# `# MODE: DEV` / `<!-- MODE: DEV -->` marker, because the format has no
+# comment syntax to carry one.
+#
+# Read ONLY by src/installer/src/install.rs's own collect_relative_files, as
+# an override consulted before a file's own header -- NOT read by
+# install.sh/skill_files() or installer/build-release.sh, which already solve
+# this same "no comment syntax" problem their own way (build-release.sh's
+# listed_by_installer() takes such files straight from skill_files() itself).
+# This manifest is deliberately scoped to the Rust installer only; its
+# entries describe the same real files skill_files()'s planning dev arm
+# lists, not a shared source with it.
+#
+# TODO: once this pattern is proven out, promote MODE-MANIFEST.tsv from an
+# exceptions-only override to the DEFAULT classification mechanism for every
+# file (not just the ones a marker cannot carry), and retire the in-file
+# marker convention for install-tier purposes. Not done yet: markers remain
+# load-bearing for installer/build-release.sh's declares_prod() and for
+# tests/test-mode-markers.sh's own cross-check, so that is a separate,
+# larger migration touching the bash build tooling, not a Rust-only change.
+#
+# path	mode
+.gitignore	DEV
+PACKAGE-MAP.tsv	DEV
+skill-source.txt	DEV
