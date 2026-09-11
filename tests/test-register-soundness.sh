@@ -62,7 +62,7 @@ check_register() { # <kind> <file>
         t_fail "$name breaks $count of its own rules; the writers would have refused these:"
         printf '%s\n' "$findings" | sed 's/^/      /' >&2
         printf '    fix each entry through the shipped bugs/todo binaries, or run\n' >&2
-        printf '    planning/scripts/register-rebuild.sh %s "%s" for structural damage\n' "$kind" "$file" >&2
+        printf '    register-rebuild %s "%s" for structural damage\n' "$kind" "$file" >&2
         return
     fi
     printf '  %s: sound (%s entries)\n' "$name" \

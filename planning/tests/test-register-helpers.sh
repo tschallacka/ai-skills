@@ -13,7 +13,9 @@
 # is "Queued" where it was "Added", and an out-of-vocabulary value is refused
 # by the type at read time with the vocabulary listed.
 #
-# register-rebuild.sh is still a shell script and is still driven as one.
+# register-rebuild.sh (the shell original) is gone too, now that skill_files()
+# ships its compiled replacement -- the rebuild section below drives that
+# binary the same way the writers above drive `bugs`/`todo`.
 set -euo pipefail
 export LC_ALL=C
 
@@ -52,9 +54,11 @@ resolve_register_bin() { # <skill> <name>
 }
 bugs_bin=''
 todo_bin=''
+register_rebuild_bin=''
 if [ -n "$triple" ]; then
     bugs_bin="$(resolve_register_bin bug-report bugs || true)"
     todo_bin="$(resolve_register_bin todo todo || true)"
+    register_rebuild_bin="$(resolve_register_bin planning register-rebuild || true)"
 fi
 if [ -z "$bugs_bin" ] || [ -z "$todo_bin" ]; then
     echo "SKIP: the register binaries are not built for this host; run ./setup-dev-env.sh"
@@ -101,7 +105,7 @@ case "$out" in *'is not one of'*|*rc=65*) : ;; *) fail "an invented status was a
 # ---- B102: 'dropped' is in the shipped schema, so the shared checks must
 # accept it too - a status the schema offers but reg_findings refuses would
 # make a task written through the binary look unsound to every other reader
-# of reg_findings (bugs resolve/todo resolve, register-rebuild.sh, the CI guard).
+# of reg_findings (bugs resolve/todo resolve, register-rebuild, the CI guard).
 out="$(run_todoup T9999 --status dropped --note 'evidence: superseded by T10000')"
 case "$out" in
         *'unknown status'*|*rc=65*) fail "'dropped' (a schema-listed status) was refused: $out" ;;
@@ -173,25 +177,29 @@ cmp -s "$work/bugs-before-damage-refusal.json" "$bugs" \
     || fail "a refused update on a damaged register wrote to it anyway"
 
 # ---- the rebuild repairs what stamps can and refuses what it cannot ---------
-out="$("$BASH" "$scripts/register-rebuild.sh" bugs "$bugs" 2>&1 || true)"
-case "$out" in
-    *'no reproduction'*) : ;;
-    *) fail "the rebuild stayed silent about damage it cannot invent: $out" ;;
-esac
+if [ -z "$register_rebuild_bin" ]; then
+    printf 'register-helpers: SKIP rebuild section (register-rebuild not built)\n' >&2
+else
+    out="$("$register_rebuild_bin" bugs "$bugs" 2>&1 || true)"
+    case "$out" in
+        *'no reproduction'*) : ;;
+        *) fail "the rebuild stayed silent about damage it cannot invent: $out" ;;
+    esac
 
-# A stamp-repairable register (missing timestamps only) rebuilds clean. Built
-# from the PRISTINE register: the rebuild refuses to invent reproductions, so
-# a file carrying the earlier semantic damage must stay refused.
-rjq '{skill, skill_version, comment, bugs: [.bugs[] | .created_at = "" | .updated_at = ""]}' \
-    "$repo_root_tests/BUGS.json" > "$work/stamps.json"
-out="$("$BASH" "$scripts/register-rebuild.sh" bugs "$work/stamps.json" 2>&1 || true)"
-case "$out" in
-    *'rebuilt'*'sound') : ;;
-    *) fail "the rebuild refused a stamp-only repair: $out" ;;
-esac
-stamped="$(rjq '[.bugs[] | select(.created_at != "" and .updated_at != "")] | length' "$work/stamps.json")"
-total="$(rjq '.bugs | length' "$work/stamps.json")"
-[ "$stamped" -eq "$total" ] || fail "the rebuild left empty timestamps behind"
+    # A stamp-repairable register (missing timestamps only) rebuilds clean. Built
+    # from the PRISTINE register: the rebuild refuses to invent reproductions, so
+    # a file carrying the earlier semantic damage must stay refused.
+    rjq '{skill, skill_version, comment, bugs: [.bugs[] | .created_at = "" | .updated_at = ""]}' \
+        "$repo_root_tests/BUGS.json" > "$work/stamps.json"
+    out="$("$register_rebuild_bin" bugs "$work/stamps.json" 2>&1 || true)"
+    case "$out" in
+        *'rebuilt'*'sound') : ;;
+        *) fail "the rebuild refused a stamp-only repair: $out" ;;
+    esac
+    stamped="$(rjq '[.bugs[] | select(.created_at != "" and .updated_at != "")] | length' "$work/stamps.json")"
+    total="$(rjq '.bugs | length' "$work/stamps.json")"
+    [ "$stamped" -eq "$total" ] || fail "the rebuild left empty timestamps behind"
+fi
 
 # ---- every accepted flag is exercised at least once (flag coverage) -------
 # The damage-repair section above leaves the fixture deliberately scarred, so
@@ -206,12 +214,12 @@ cp "$repo_root_tests/BUGS.json" "$bugs"
 out="$(run_todo --id T9999 --title 'Flag probe parent' --detail 'parent for the flag probe')"
 case "$out" in *'Queued T9999'*) : ;; *) fail "the flag probe's parent task was refused: $out" ;; esac
 out="$(run_todo --id T8888 --title 'Flag probe' --parent T9999 --priority low \
-    --blocked-on T9999 --detail 'flag detail' --refs planning/scripts/register-rebuild.sh)"
+    --blocked-on T9999 --detail 'flag detail' --refs planning/scripts/register-rebuild)"
 case "$out" in *'Queued T8888'*) : ;; *) fail "flag-rich todo-add refused: $out" ;; esac
 rjq -e --arg id T8888 '.tasks[] | select(.id == $id
     and .parent == "T9999" and .blocked_on == "T9999"
     and .detail == "flag detail"
-    and (.refs | index("planning/scripts/register-rebuild.sh") != null))' "$todo" >/dev/null \
+    and (.refs | index("planning/scripts/register-rebuild") != null))' "$todo" >/dev/null \
     || fail "todo-add flags (--parent/--blocked-on/--detail/--ref) did not all land"
 out="$(run_todoup T8888 --detail 'detail two' --blocked-on —)"
 case "$out" in *Updated*) : ;; *) fail "todo-update --detail/--blocked-on refused: $out" ;; esac
@@ -276,9 +284,10 @@ for tool in bug-add bug-update todo-add todo-update; do
 done
 
 # The repair advice names the shipped tool. bug-update told a caller to run
-# `register-rebuild.sh`, which a prod install does not carry at all: the script
-# is MODE: DEV and only the binary ships. Read from the source, because the arm
-# that prints it needs an unsound register to reach.
+# `register-rebuild.sh`, which no install carries at all now: the script does
+# not exist anywhere in the tree, and only the compiled binary ships. Read
+# from the source, because the arm that prints it needs an unsound register
+# to reach.
 for advice_source in "$repo_root_tests/src/bug-update/src/main.rs" \
                      "$scripts/register-lib.sh"; do
     [ -f "$advice_source" ] || continue

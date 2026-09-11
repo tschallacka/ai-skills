@@ -108,7 +108,6 @@ planning/scripts/rebuild-plan-progress.sh	runtime-binary	rebuild-plan-progress	p
 planning/scripts/register-command.sh	runtime-binary	register-command	preserve CLI and observable behavior
 planning/scripts/register-lib.sh	library-crate	register-lib	map exports and consumers before choosing crate boundary
 planning/scripts/register-read.sh	runtime-binary	register-read	preserve CLI and observable behavior
-planning/scripts/register-rebuild.sh	runtime-binary	register-rebuild	preserve CLI and observable behavior
 planning/scripts/remove-coverage.sh	runtime-binary	remove-coverage	preserve CLI and observable behavior
 planning/scripts/remove-plan.sh	runtime-binary	remove-plan	preserve CLI and observable behavior
 planning/scripts/remove-work-unit.sh	runtime-binary	remove-work-unit	preserve CLI and observable behavior

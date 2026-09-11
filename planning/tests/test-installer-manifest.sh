@@ -165,14 +165,15 @@ test_rust_migration_registry() {
         "$repo_dir/planning/rust-migration.tsv")"
     excluded="$(awk -F '\t' '$2 == "runtime-binary" && $3 == "render-plans-board" { n++ } END { print n + 0 }' \
         "$repo_dir/planning/rust-migration.tsv")"
-    registry_count_is runtime-binary "$runtime" 49
+    registry_count_is runtime-binary "$runtime" 48
     registry_count_is build-generator "$generator" 1
-    # Zero: register-rebuild.sh (the last dev-binary row) is now decided --
-    # skill_files() lists its compiled binary, same as its already-migrated
-    # siblings. The four register helpers that were here before it went with
-    # their shell originals when the compiled `bugs` and `todo` replaced them
-    # -- every other row's path is a live file, which is the invariant the
-    # loop below enforces, and a completed migration cannot satisfy it.
+    # Zero: register-rebuild.sh's row (the last dev-binary one) is gone
+    # entirely now, not just recategorized -- its shell original was deleted
+    # once the compiled binary's own shipping was decided and skill_files()
+    # took over listing it, the same way the four register helpers before it
+    # went when the compiled `bugs` and `todo` replaced them: every other
+    # row's path is a live file, which is the invariant the loop below
+    # enforces, and a completed migration cannot satisfy it.
     registry_count_is dev-binary "$dev" 0
     registry_count_is 'excluded render-plans-board' "$excluded" 1
 

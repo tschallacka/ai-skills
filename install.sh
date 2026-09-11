@@ -4064,7 +4064,6 @@ tests/test-platform-selection.sh
 tests/test-npm-package.sh
 tests/test-overview-fixtures.sh
 scripts/register-lib.sh
-scripts/register-rebuild.sh
 tests/test-plan-crypt.sh
 tests/test-plan-freshness.sh
 tests/test-roster-cross-reference.sh
