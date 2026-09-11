@@ -25,6 +25,7 @@ mod plugins;
 mod requirements;
 mod ui;
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -36,7 +37,9 @@ Usage:
   installer list [--source DIR]            print every discovered skill
   installer install (--target DIR | --agent NAME)
                      (--all | --skill NAME [--skill NAME ...])
-                     [--source DIR]
+                     [--source DIR] [--integration MODE|SKILL=MODE ...] [--yes]
+                     runs the planning/worktrees/interactive-shell/editor
+                     permission prompts unless --yes auto-answers them
   installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR)
                      grant that agent read/write on the planning skill's own
                      scripts/plan-root/tmp directory, or on a worktree root
@@ -54,6 +57,7 @@ Usage:
   installer set-claude-env --key KEY --value VALUE
                      merge one env.KEY setting into Claude's settings.json
   installer interactive (--target DIR | --agent NAME) [--source DIR]
+                     [--integration MODE|SKILL=MODE ...] [--yes]
                      full-screen skill picker; installs the confirmed
                      selection, or does nothing if the user quits
   installer --help
@@ -150,6 +154,7 @@ struct InstallArgs {
     target: Option<PathBuf>,
     agent: Option<String>,
     integration: Vec<String>,
+    yes: bool,
 }
 
 fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
@@ -159,6 +164,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
     let mut target: Option<PathBuf> = None;
     let mut agent: Option<String> = None;
     let mut integration = Vec::new();
+    let mut yes = false;
 
     let mut i = 0;
     while i < argv.len() {
@@ -184,6 +190,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
                 i += 1;
                 integration.push(argv.get(i).ok_or("--integration needs a mode, or skill=mode")?.clone());
             }
+            "--yes" => yes = true,
             other => return Err(format!("install: unknown option: {other}")),
         }
         i += 1;
@@ -195,7 +202,50 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
         target,
         agent,
         integration,
+        yes,
     })
+}
+
+/// A yes/no prompt gate, ported from install.sh's `confirm()`/`ask()`:
+/// `--yes` (or a prior "a"/"all" answer, `YES_ALL` there) answers every
+/// question without reading stdin at all -- the flag headless runs need so
+/// an unattended install cannot block on a question nobody will answer.
+struct Confirms {
+    yes: bool,
+}
+
+impl Confirms {
+    fn new(yes: bool) -> Self {
+        Confirms { yes }
+    }
+
+    /// Prints `prompt` to stderr (matching install.sh's `ask`, which never
+    /// writes a prompt to stdout) and reads one line from stdin. `y`/`yes`
+    /// answers this question only; `a`/`all` answers it and every question
+    /// after it for the rest of the run, same as install.sh's `YES_ALL`.
+    /// A read error (no stdin at all, e.g. under `curl | bash`) reads as
+    /// "no" rather than blocking -- the same failure mode `ask`'s own `read`
+    /// has on a closed stdin.
+    fn ask(&mut self, prompt: &str) -> bool {
+        if self.yes {
+            return true;
+        }
+        eprint!("{prompt} [y/N/a] ");
+        let _ = std::io::stderr().flush();
+        let mut line = String::new();
+        match std::io::stdin().read_line(&mut line) {
+            Ok(0) | Err(_) => return false, // EOF or no stdin at all
+            Ok(_) => {}
+        }
+        match line.trim().to_lowercase().as_str() {
+            "y" | "yes" => true,
+            "a" | "all" => {
+                self.yes = true;
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// A resolved `--integration` selection: any number of `skill=mode` choices
@@ -403,21 +453,33 @@ fn run_mcp_registration_step(kind: Option<&str>, source: &Path, target: &Path, s
 /// auto-editable grant for) -- the standalone grant-permissions/mcp-register/
 /// migrate-plans/install-*-plugin subcommands remain the manual fallback,
 /// same role install.sh's print_manual_permissions plays for a "custom" row.
-fn run_post_install_steps(kind: Option<&str>, source: &Path, target: &Path, skills: &[String]) {
+fn run_post_install_steps(
+    kind: Option<&str>,
+    source: &Path,
+    target: &Path,
+    skills: &[String],
+    confirms: &mut Confirms,
+) {
     let Some(kind) = kind else { return };
     if !matches!(kind, "claude" | "opencode" | "codex") {
         return;
     }
     let Some(home) = home_dir_opt() else { return };
 
+    // install.sh's worktrees_permission_step runs for every install, whatever
+    // skills were selected -- unlike everything else below, not gated on any
+    // particular skill being among them.
+    run_worktrees_permission_step(kind, confirms, &home);
+
     if skills.iter().any(|s| s == "planning") {
-        run_planning_post_install(kind, target, &home);
+        run_planning_post_install(kind, target, &home, confirms);
     }
     run_mcp_registration_step(Some(kind), source, target, skills);
     if skills.iter().any(|s| s == "interactive-shell") {
-        run_interactive_shell_post_install(kind, source, target, &home);
+        run_interactive_shell_post_install(kind, source, target, &home, confirms);
     }
     if kind == "claude" && skills.iter().any(|s| s == "ai-text-editor") {
+        run_editor_steering_step(&home, confirms);
         match plugins::install_editor_gate_plugin(source, target) {
             Ok(destination) => println!(
                 "Installed: {} (gates sed -i/perl -i/heredoc writes behind a minted token)",
@@ -428,7 +490,48 @@ fn run_post_install_steps(kind: Option<&str>, source: &Path, target: &Path, skil
     }
 }
 
-fn run_planning_post_install(kind: &str, target: &Path, home: &Path) {
+/// Runs for every install with a known agent kind, whatever skills were
+/// selected -- ported from install.sh's `worktrees_permission_step`, which
+/// is deliberately outside the `contains planning ...` branch for the same
+/// reason (any agent may be asked to take a worktree).
+fn run_worktrees_permission_step(kind: &str, confirms: &mut Confirms, home: &Path) {
+    println!();
+    println!("== Agent worktree permissions ==");
+    let worktrees = permissions::default_worktrees_root(home);
+    let worktrees_str = worktrees.to_string_lossy().to_string();
+    if confirms.ask(&format!("Create {worktrees_str} as the agent worktree root?")) {
+        match std::fs::create_dir_all(&worktrees) {
+            Ok(()) => println!("  Created {worktrees_str}"),
+            Err(e) => println!("  cannot create {worktrees_str}: {e}"),
+        }
+    }
+    if !confirms.ask(&format!(
+        "Grant the selected agents read/write/execute on {worktrees_str}, so a worktree there \
+         needs no prompt per file? (Each edited config is backed up beside itself, unless git \
+         already tracks it)"
+    )) {
+        return;
+    }
+    match kind {
+        "claude" => match permissions::claude_worktrees_permissions(&worktrees_str, home) {
+            Ok(outcome) => {
+                print_permission_outcome("claude-code", "worktree permissions already present", outcome)
+            }
+            Err(e) => println!("claude-code: {e}"),
+        },
+        "opencode" => match permissions::opencode_worktrees_permissions(&worktrees_str, home) {
+            Ok(outcome) => print_opencode_outcome("worktree permissions already present", outcome),
+            Err(e) => println!("opencode: {e}"),
+        },
+        "codex" => match permissions::codex_worktrees_permissions(&worktrees_str, home) {
+            Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
+            Err(e) => println!("codex: {e}"),
+        },
+        _ => {}
+    }
+}
+
+fn run_planning_post_install(kind: &str, target: &Path, home: &Path, confirms: &mut Confirms) {
     println!("== planning runtime permissions ==");
     let scripts = target.join("planning").join("scripts");
     let plans = plan_migration::default_root(home);
@@ -436,28 +539,40 @@ fn run_planning_post_install(kind: &str, target: &Path, home: &Path) {
     let scripts = scripts.to_string_lossy();
     let plans_str = plans.to_string_lossy();
     let tmp_str = tmp.to_string_lossy();
-    match kind {
-        "claude" => {
-            match permissions::claude_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
-                Ok(outcome) => {
-                    print_permission_outcome("claude-code", "permissions already present", outcome)
+    if confirms.ask(&format!("Create {plans_str} as the global plans directory?")) {
+        match std::fs::create_dir_all(&plans) {
+            Ok(()) => println!("  Created {plans_str}"),
+            Err(e) => println!("  cannot create {plans_str}: {e}"),
+        }
+    }
+    if confirms.ask(&format!(
+        "Grant the selected agents read/write on {plans_str} and {tmp_str}, and allow them to \
+         execute the planning shell scripts? (Each edited config is backed up beside itself, \
+         unless git already tracks it)"
+    )) {
+        match kind {
+            "claude" => {
+                match permissions::claude_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
+                    Ok(outcome) => {
+                        print_permission_outcome("claude-code", "permissions already present", outcome)
+                    }
+                    Err(e) => println!("claude-code: {e}"),
                 }
-                Err(e) => println!("claude-code: {e}"),
             }
-        }
-        "opencode" => {
-            match permissions::opencode_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
-                Ok(outcome) => print_opencode_outcome("permissions already present", outcome),
-                Err(e) => println!("opencode: {e}"),
+            "opencode" => {
+                match permissions::opencode_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
+                    Ok(outcome) => print_opencode_outcome("permissions already present", outcome),
+                    Err(e) => println!("opencode: {e}"),
+                }
             }
-        }
-        "codex" => {
-            match permissions::codex_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
-                Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
-                Err(e) => println!("codex: {e}"),
+            "codex" => {
+                match permissions::codex_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
+                    Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
+                    Err(e) => println!("codex: {e}"),
+                }
             }
+            _ => {}
         }
-        _ => {}
     }
     match plan_migration::migrate_legacy_plans(&[target.to_path_buf()], home) {
         Ok(outcome) => {
@@ -472,17 +587,32 @@ fn run_planning_post_install(kind: &str, target: &Path, home: &Path) {
     }
 }
 
-fn run_interactive_shell_post_install(kind: &str, source: &Path, target: &Path, home: &Path) {
+fn run_interactive_shell_post_install(
+    kind: &str,
+    source: &Path,
+    target: &Path,
+    home: &Path,
+    confirms: &mut Confirms,
+) {
     println!("== interactive-shell execution permission ==");
     if kind == "claude" {
-        let bins = target.join("interactive-shell").join("bin");
-        match permissions::claude_interactive_shell_permissions(&bins.to_string_lossy(), home) {
-            Ok(outcome) => print_permission_outcome(
-                "claude-code",
-                "interactive-shell grant already in place",
-                outcome,
-            ),
-            Err(e) => println!("claude-code: {e}"),
+        if confirms.ask(
+            "Allow the selected agents to execute the interactive-shell binaries, so driving a \
+             terminal program needs no prompt per call? (Each edited config is backed up beside \
+             itself, unless git already tracks it)",
+        ) {
+            let bins = target.join("interactive-shell").join("bin");
+            match permissions::claude_interactive_shell_permissions(&bins.to_string_lossy(), home) {
+                Ok(outcome) => print_permission_outcome(
+                    "claude-code",
+                    "interactive-shell grant already in place",
+                    outcome,
+                ),
+                Err(e) => println!("claude-code: {e}"),
+            }
+        } else {
+            println!("  Left unchanged. A refused wrapper call reads as a broken tool, so");
+            println!("  expect the skill to be skipped in favour of a headless command.");
         }
         match plugins::install_tui_hint_plugin_claude(source, target) {
             Ok(destination) => println!("Installed: {}", destination.display()),
@@ -502,6 +632,63 @@ fn run_interactive_shell_post_install(kind: &str, source: &Path, target: &Path, 
             }
             Err(e) => println!("tui-hint-plugin: {e}"),
         }
+    }
+}
+
+/// Offered only when a Claude Code root was selected (these are Claude
+/// Code's own settings) and the run placed ai-text-editor -- ported from
+/// install.sh's `editor_steering_step`. Two independent off-switches, in
+/// the same order bash offers them; declining both leaves the setting
+/// unchanged, same as bash's own final message.
+fn run_editor_steering_step(home: &Path, confirms: &mut Confirms) {
+    println!();
+    println!("== ai-text-editor tool steering ==");
+    println!(
+        "  Claude Code may instruct the agent to make file changes with sed, heredocs or short \
+         scripts instead of an editor. While that instruction is active the ai-text-editor MCP \
+         is usually skipped, and these are what it costs:"
+    );
+    println!(
+        "    - an in-place sed rewrites the file and exits 0 whether or not the pattern \
+         matched, so a mistype is indistinguishable from success"
+    );
+    println!(
+        "    - a script heredoc stacks the shell's escaping on top of the language's on top of \
+         the target file's syntax"
+    );
+    println!(
+        "    - neither verifies what it replaces, while the editor's expected_text refuses on \
+         mismatch and its journal survives a git checkout"
+    );
+    println!("  Two settings turn it down, and either is enough:");
+    println!("    CLAUDE_CODE_THRIFTY_SONIC=false  the instruction is not injected at all");
+    println!(
+        "    CLAUDE_CODE_COZY_TEAPOT=relaxed  softer wording that leaves the choice to the \
+         agent, so the editor still competes"
+    );
+    if confirms.ask("Turn the instruction off (env CLAUDE_CODE_THRIFTY_SONIC=false)?") {
+        apply_claude_env_setting("CLAUDE_CODE_THRIFTY_SONIC", "false", home);
+        return;
+    }
+    if confirms.ask("Soften it instead (env CLAUDE_CODE_COZY_TEAPOT=relaxed)?") {
+        apply_claude_env_setting("CLAUDE_CODE_COZY_TEAPOT", "relaxed", home);
+        return;
+    }
+    println!("  Left unchanged. Expect the editor to be bypassed for sed and heredocs.");
+}
+
+fn apply_claude_env_setting(key: &str, value: &str, home: &Path) {
+    match permissions::claude_env_setting(key, value, home) {
+        Ok(permissions::EnvSettingOutcome::NoConfigFile) => {
+            println!("  claude-code: no settings.json found; set env.{key} to \"{value}\" by hand")
+        }
+        Ok(permissions::EnvSettingOutcome::AlreadySet) => {
+            println!("  claude-code: env.{key} is already \"{value}\"")
+        }
+        Ok(permissions::EnvSettingOutcome::Set) => {
+            println!("  claude-code: set env.{key} to \"{value}\"")
+        }
+        Err(e) => println!("  claude-code: {e}"),
     }
 }
 
@@ -530,7 +717,8 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
 
     let integration_selection = build_integration_selection(&source, &args.integration)?;
     let installed = install_selected_skills(&source, &target, &skills, &integration_selection)?;
-    run_post_install_steps(kind.as_deref(), &source, &target, &installed);
+    let mut confirms = Confirms::new(args.yes);
+    run_post_install_steps(kind.as_deref(), &source, &target, &installed, &mut confirms);
     Ok(ExitCode::SUCCESS)
 }
 enum GrantTarget {
@@ -1047,6 +1235,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
     let mut target: Option<PathBuf> = None;
     let mut agent: Option<String> = None;
     let mut integration_args = Vec::new();
+    let mut yes = false;
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -1066,6 +1255,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 i += 1;
                 integration_args.push(argv.get(i).ok_or("--integration needs a mode, or skill=mode")?.clone());
             }
+            "--yes" => yes = true,
             other => return Err(format!("interactive: unknown option: {other}")),
         }
         i += 1;
@@ -1118,7 +1308,8 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 picked.per_skill.insert(name.clone(), mode.clone());
             }
             let installed = install_selected_skills(&source, &target, &names, &picked)?;
-            run_post_install_steps(kind.as_deref(), &source, &target, &installed);
+            let mut confirms = Confirms::new(yes);
+            run_post_install_steps(kind.as_deref(), &source, &target, &installed, &mut confirms);
             Ok(ExitCode::SUCCESS)
         }
     }

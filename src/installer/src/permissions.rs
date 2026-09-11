@@ -35,6 +35,19 @@ fn claude_settings_path(home: &Path) -> PathBuf {
     home.join(".claude").join("settings.json")
 }
 
+/// `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-worktrees` -- ported from
+/// `worktrees_permission_step` in installer/src/70-permissions.sh. Unlike
+/// `plan_migration::default_root`'s plan root, there is no dedicated
+/// override variable for this one in install.sh either.
+pub fn default_worktrees_root(home: &Path) -> PathBuf {
+    let base = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"));
+    base.join("tsch-ai-worktrees")
+}
+
 /// The eight entries install.sh's `claude_permissions` grants for the
 /// planning skill: read/write on the plan root and the tmp directory, plus
 /// read and execute (both a direct and a `bash `-prefixed form) on the
