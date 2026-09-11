@@ -20,6 +20,7 @@ mod manifest;
 mod mcp;
 mod permissions;
 mod cli_mode;
+mod custom_locations;
 mod integration;
 mod plan_migration;
 mod plugins;
@@ -70,10 +71,13 @@ Usage:
                      [--source DIR] [--dev-build]
                      refuses on any unmanaged collision instead of backing
                      up (exit 2 declined, 3 collision, 0 installed)
-  installer interactive (--target DIR | --agent NAME) [--source DIR]
+  installer interactive [--target DIR | --agent NAME] [--source DIR]
                      [--integration MODE|SKILL=MODE ...] [--yes] [--dev-build]
                      full-screen skill picker; installs the confirmed
-                     selection, or does nothing if the user quits
+                     selection, or does nothing if the user quits. With
+                     neither --target nor --agent, prompts to choose an
+                     auto-detected agent root, a saved custom directory, a
+                     new custom directory, or 'a' for every listed root
   installer --help
 
 --agent NAME is one of: claude, codex, opencode, universal, openclaw, cline
@@ -443,6 +447,116 @@ fn resolve_targets_and_kinds(
 
 fn home_dir_opt() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+struct AvailableTarget {
+    path: PathBuf,
+    name: String,
+    kind: Option<String>,
+}
+
+fn read_line_trimmed() -> String {
+    let mut line = String::new();
+    let _ = std::io::stdin().read_line(&mut line);
+    line.trim().to_string()
+}
+
+/// The picker's counterpart to `select_targets` for when `interactive` is
+/// given neither `--target` nor `--agent`: auto-detects installed agent
+/// roots (`manifest::agent_available`), offers saved custom locations too
+/// (`custom_locations::load`), and prompts a numbered/comma-separated
+/// choice, a custom directory, or `a` for every listed root -- ported from
+/// install.sh's `select_targets`. Reached only once this installer already
+/// knows stdin is a real terminal (the picker itself already refused to run
+/// otherwise), so unlike bash this has no separate "no interactive channel"
+/// branch to port: that case never reaches here at all.
+fn select_targets_interactively(yes: bool) -> Result<Vec<(PathBuf, Option<String>)>, String> {
+    let home = home_dir_opt().ok_or("interactive: needs $HOME set to detect agent roots")?;
+
+    let mut available: Vec<AvailableTarget> = Vec::new();
+    for agent in manifest::AGENTS {
+        if manifest::agent_available(agent.kind, &home) {
+            available.push(AvailableTarget {
+                path: home.join(agent.home_suffix),
+                name: agent.name.to_string(),
+                kind: Some(agent.kind.to_string()),
+            });
+        }
+    }
+    for path in custom_locations::load(&home) {
+        let name = format!("Custom: {}", path.display());
+        available.push(AvailableTarget {
+            path,
+            name,
+            kind: None,
+        });
+    }
+    if available.is_empty() {
+        return Err("No installed agent roots or saved custom locations were found".to_string());
+    }
+
+    println!();
+    println!("Install into which skill root?");
+    for (index, target) in available.iter().enumerate() {
+        let tag = if target.path.is_dir() {
+            "[exists]"
+        } else {
+            "[will create]"
+        };
+        println!("  {}) {}: {} {tag}", index + 1, target.name, target.path.display());
+    }
+    let custom_choice = available.len() + 1;
+    println!("  {custom_choice}) custom directory");
+    println!("  a) all listed roots");
+    print!("Choose 1-{custom_choice}, comma-separated numbers, or a [1]: ");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let selection = read_line_trimmed();
+    let selection = if selection.is_empty() { "1" } else { &selection };
+
+    if selection == "a" || selection == "all" {
+        println!("Warning: multiple roots can make the same skill appear more than once.");
+        return Ok(available.into_iter().map(|t| (t.path, t.kind)).collect());
+    }
+
+    let mut confirms = Confirms::new(yes);
+    let mut chosen = Vec::new();
+    for choice in selection.split(',') {
+        let choice = choice.trim();
+        if choice == custom_choice.to_string() {
+            print!("Custom skill root: ");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            let typed = read_line_trimmed();
+            if typed.is_empty() {
+                return Err("A custom directory is required".to_string());
+            }
+            let expanded = if let Some(rest) = typed.strip_prefix('~') {
+                home.join(rest.trim_start_matches('/'))
+            } else {
+                PathBuf::from(&typed)
+            };
+            if !expanded.is_absolute() {
+                return Err("Custom directory must be an absolute path".to_string());
+            }
+            if !expanded.is_dir() {
+                if !confirms.ask(&format!("{} does not exist. Create it?", expanded.display())) {
+                    return Err(format!("Custom directory does not exist: {}", expanded.display()));
+                }
+                std::fs::create_dir_all(&expanded).map_err(|e| e.to_string())?;
+            }
+            custom_locations::save(&home, &expanded).map_err(|e| e.to_string())?;
+            chosen.push((expanded, None));
+        } else {
+            let index: usize = choice
+                .parse()
+                .map_err(|_| format!("Unknown target choice: {choice}"))?;
+            if index < 1 || index > available.len() {
+                return Err(format!("Unknown target choice: {choice}"));
+            }
+            let target = &available[index - 1];
+            chosen.push((target.path.clone(), target.kind.clone()));
+        }
+    }
+    Ok(chosen)
 }
 
 /// Accumulates what a run actually did, for the final `== Summary ==` block
@@ -1575,7 +1689,24 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
         i += 1;
     }
     let source = resolve_source(source)?;
-    let (target, kind) = resolve_target_and_kind(target, agent)?;
+    // install.sh picks skills before roots (select_skills, then
+    // select_targets) -- but its own picker's "already installed" status
+    // does not depend on a target either, so resolving roots first here
+    // changes only the ORDER a user answers "which skills" vs. "which
+    // roots", not the roots themselves or what `a` (all of them) does
+    // (select_targets_interactively ports that part exactly). This
+    // installer's own picker already needs a `target` up front to compute
+    // each skill's installed/mode status against, which is what forces the
+    // order.
+    let roots: Vec<(PathBuf, Option<String>)> = if target.is_some() || agent.is_some() {
+        vec![resolve_target_and_kind(target, agent)?]
+    } else {
+        select_targets_interactively(yes)?
+    };
+    // Only used to compute each skill's own installed/mode status below --
+    // the actual install loop iterates every resolved root, each with its
+    // own kind.
+    let target = roots[0].0.clone();
     let integration_selection = build_integration_selection(&source, &integration_args)?;
 
     let names = discover::discover_skills(&source).map_err(|e| e.to_string())?;
@@ -1622,17 +1753,26 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 picked.per_skill.insert(name.clone(), mode.clone());
             }
             let mut summary = Summary::default();
-            let installed = install_selected_skills(
-                &source,
-                &target,
-                &names,
-                &picked,
-                dev_build,
-                &mut summary,
-            )?;
             let mut confirms = Confirms::new(yes);
-            run_post_install_steps(kind.as_deref(), &source, &target, &installed, &mut confirms);
-            summary.print(std::slice::from_ref(&target), yes);
+            for (root, root_kind) in &roots {
+                let installed = install_selected_skills(
+                    &source,
+                    root,
+                    &names,
+                    &picked,
+                    dev_build,
+                    &mut summary,
+                )?;
+                run_post_install_steps(
+                    root_kind.as_deref(),
+                    &source,
+                    root,
+                    &installed,
+                    &mut confirms,
+                );
+            }
+            let root_paths: Vec<PathBuf> = roots.iter().map(|(p, _)| p.clone()).collect();
+            summary.print(&root_paths, yes);
             Ok(ExitCode::SUCCESS)
         }
     }

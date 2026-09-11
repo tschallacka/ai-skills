@@ -101,6 +101,72 @@ pub fn known_agent(kind: &str) -> Option<&'static Agent> {
     AGENTS.iter().find(|a| a.kind == kind)
 }
 
+fn on_path(bin: &str) -> bool {
+    let Ok(path_var) = std::env::var("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path_var).any(|dir| dir.join(bin).is_file())
+}
+
+/// Any entry directly under `dir` whose filename starts with `prefix` --
+/// Rust's answer to install.sh's `compgen -G "$dir/$prefix*"` glob probe
+/// for Cline's own versioned VS Code extension directory name.
+fn any_entry_starts_with(dir: &std::path::Path, prefix: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().starts_with(prefix))
+}
+
+/// Is this agent worth offering as an install root on this host -- ported
+/// from install.sh's `agent_target_available`, keyed by `kind` instead of
+/// bash's array index (this installer has no positional TARGET_PATHS array
+/// to index into). Universal Agent Skills has no owning application, so it
+/// is always offered; every other kind needs either its own CLI on PATH or
+/// evidence it is already installed. Cline's own check is the widest: no
+/// CLI at all, just its skills directory, its VS Code extension directory
+/// (a fixed name or a versioned `saoudrizwan.claude-dev-<version>` one,
+/// local or on a remote/server VS Code install), or its global storage
+/// directory.
+pub fn agent_available(kind: &str, home: &std::path::Path) -> bool {
+    match kind {
+        "universal" => true,
+        "codex" => on_path("codex") || home.join(".codex").is_dir(),
+        "claude" => on_path("claude") || home.join(".claude").is_dir(),
+        "opencode" => on_path("opencode") || home.join(".config/opencode").is_dir(),
+        "openclaw" => on_path("openclaw") || home.join(".openclaw").is_dir(),
+        "cline" => {
+            let config_home = std::env::var("XDG_CONFIG_HOME")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| home.join(".config"));
+            home.join(".cline/skills").is_dir()
+                || home
+                    .join(".vscode/extensions/saoudrizwan.claude-dev")
+                    .is_dir()
+                || any_entry_starts_with(
+                    &home.join(".vscode/extensions"),
+                    "saoudrizwan.claude-dev-",
+                )
+                || any_entry_starts_with(
+                    &home.join(".vscode-server/extensions"),
+                    "saoudrizwan.claude-dev-",
+                )
+                || config_home
+                    .join("Code/User/globalStorage/saoudrizwan.claude-dev")
+                    .is_dir()
+                || any_entry_starts_with(
+                    &config_home.join("Code/User/globalStorage"),
+                    "saoudrizwan.claude-dev",
+                )
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +185,35 @@ mod tests {
     fn every_other_skill_is_always_supported() {
         assert!(skill_unsupported_here("planning").is_none());
         assert!(skill_unsupported_here("todo").is_none());
+    }
+
+    #[test]
+    fn universal_agent_skills_is_always_available() {
+        let home = tempfile::tempdir().unwrap();
+        assert!(agent_available("universal", home.path()));
+    }
+
+    #[test]
+    fn an_unknown_kind_is_never_available() {
+        let home = tempfile::tempdir().unwrap();
+        assert!(!agent_available("not-a-real-agent", home.path()));
+    }
+
+    #[test]
+    fn claude_is_available_when_its_directory_already_exists() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".claude")).unwrap();
+        assert!(agent_available("claude", home.path()));
+    }
+
+    #[test]
+    fn cline_is_available_from_its_versioned_vscode_extension_directory() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(
+            home.path().join(".vscode/extensions/saoudrizwan.claude-dev-3.1.4"),
+        )
+        .unwrap();
+        assert!(agent_available("cline", home.path()));
     }
 
     #[test]
