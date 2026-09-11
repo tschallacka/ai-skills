@@ -11,6 +11,8 @@
 //! (discover.rs), not install.sh's hand-maintained SKILL_NAMES table with
 //! kinds/descriptions/hidden skills. Those port next.
 
+mod backup;
+mod digest;
 mod discover;
 mod install;
 
@@ -162,7 +164,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     }
 
     for skill in &skills {
-        install::install_skill_fresh(&source, skill, &target).map_err(|e| e.to_string())?;
+        install::install_skill(&source, skill, &target).map_err(|e| e.to_string())?;
         println!("installed {skill} -> {}", target.join(skill).display());
     }
     Ok(ExitCode::SUCCESS)

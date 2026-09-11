@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 installer-platform = { path = "../installer-platform" }
+blake3 = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

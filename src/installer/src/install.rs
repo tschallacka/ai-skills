@@ -1,17 +1,26 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! A fresh (non-merge) skill install: copy `source/<skill>` to
-//! `target/<skill>`, one file at a time, each written to a sibling temp file
-//! and renamed into place. Rename-into-place is what B292 fixed in
+//! Install `source/<skill>` into `target/<skill>`. Every file is written to
+//! a sibling temp file and renamed into place -- what B292 fixed in
 //! install.sh (`cp` onto a running binary aborted the update); every write
 //! here goes through it unconditionally, so there is no separate "existing
 //! file" branch to get wrong.
+//!
+//! A re-install does not silently clobber a user's edits: before overwriting
+//! an existing file that differs from the source, this checks whether the
+//! file is unchanged since the LAST install (digest.rs) and backs it up
+//! first (backup.rs) if not -- the same problem install.sh's
+//! record_digests/unmodified_since_install/backup_file solve
+//! (installer/src/60-install.sh), ported with a different digest (blake3,
+//! not cksum) since this manifest is this installer's own.
 
+use crate::backup;
+use crate::digest;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub fn install_skill_fresh(source_root: &Path, skill: &str, target_root: &Path) -> io::Result<()> {
+pub fn install_skill(source_root: &Path, skill: &str, target_root: &Path) -> io::Result<()> {
     let source_dir = source_root.join(skill);
     if !source_dir.is_dir() {
         return Err(io::Error::new(
@@ -21,28 +30,51 @@ pub fn install_skill_fresh(source_root: &Path, skill: &str, target_root: &Path) 
     }
     let dest_dir = target_root.join(skill);
     fs::create_dir_all(&dest_dir)?;
-    copy_tree(&source_dir, &dest_dir)?;
+
+    let relative_paths = collect_relative_files(&source_dir, &PathBuf::new())?;
+    for relative in &relative_paths {
+        let source_file = source_dir.join(relative);
+        let dest_file = dest_dir.join(relative);
+        if dest_file.is_file()
+            && !files_equal(&source_file, &dest_file)?
+            && !digest::unmodified_since_install(&dest_dir, relative, &dest_file)
+        {
+            backup::backup_file(&dest_file)?;
+        }
+        if let Some(parent) = dest_file.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        copy_file_atomic(&source_file, &dest_file)?;
+        #[cfg(unix)]
+        preserve_executable_bit(&source_file, &dest_file)?;
+    }
+    digest::record_digests(&dest_dir, &relative_paths)?;
     Ok(())
 }
 
-fn copy_tree(source_dir: &Path, dest_dir: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(source_dir)? {
-        let entry = entry?;
+/// Relative paths (forward-slash joined, regardless of host) of every FILE
+/// under `dir`, recursively. Symlinks are neither a file nor a directory
+/// here: this is an early slice and install.sh's own tree has none under a
+/// skill directory, so refusing silently on one would be a worse surprise
+/// than not handling it at all yet.
+fn collect_relative_files(dir: &Path, prefix: &Path) -> io::Result<Vec<String>> {
+    let mut out = Vec::new();
+    let mut entries: Vec<_> = fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
         let file_type = entry.file_type()?;
-        let dest_path = dest_dir.join(entry.file_name());
+        let relative = prefix.join(entry.file_name());
         if file_type.is_dir() {
-            fs::create_dir_all(&dest_path)?;
-            copy_tree(&entry.path(), &dest_path)?;
+            out.extend(collect_relative_files(&entry.path(), &relative)?);
         } else if file_type.is_file() {
-            copy_file_atomic(&entry.path(), &dest_path)?;
-            #[cfg(unix)]
-            preserve_executable_bit(&entry.path(), &dest_path)?;
+            out.push(relative.to_string_lossy().replace('\\', "/"));
         }
-        // Symlinks are neither: this is an early slice and install.sh's own
-        // tree has none under a skill directory, so refusing silently on one
-        // here would be a worse surprise than not handling it at all yet.
     }
-    Ok(())
+    Ok(out)
+}
+
+fn files_equal(a: &Path, b: &Path) -> io::Result<bool> {
+    Ok(fs::read(a)? == fs::read(b)?)
 }
 
 fn copy_file_atomic(source: &Path, dest: &Path) -> io::Result<()> {
@@ -87,7 +119,7 @@ mod tests {
         );
 
         let target_root = tempfile::tempdir().unwrap();
-        install_skill_fresh(source_root.path(), "todo", target_root.path()).unwrap();
+        install_skill(source_root.path(), "todo", target_root.path()).unwrap();
 
         assert_eq!(
             fs::read_to_string(target_root.path().join("todo/SKILL.md")).unwrap(),
@@ -103,7 +135,7 @@ mod tests {
     fn missing_skill_directory_is_refused_not_silently_skipped() {
         let source_root = tempfile::tempdir().unwrap();
         let target_root = tempfile::tempdir().unwrap();
-        let err = install_skill_fresh(source_root.path(), "nope", target_root.path()).unwrap_err();
+        let err = install_skill(source_root.path(), "nope", target_root.path()).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
     }
 
@@ -113,7 +145,7 @@ mod tests {
         write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
         let target_root = tempfile::tempdir().unwrap();
 
-        install_skill_fresh(source_root.path(), "todo", target_root.path()).unwrap();
+        install_skill(source_root.path(), "todo", target_root.path()).unwrap();
 
         let leftovers: Vec<_> = fs::read_dir(target_root.path().join("todo"))
             .unwrap()
@@ -133,12 +165,68 @@ mod tests {
         fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
 
         let target_root = tempfile::tempdir().unwrap();
-        install_skill_fresh(source_root.path(), "todo", target_root.path()).unwrap();
+        install_skill(source_root.path(), "todo", target_root.path()).unwrap();
 
         let mode = fs::metadata(target_root.path().join("todo/scripts/run.sh"))
             .unwrap()
             .permissions()
             .mode();
         assert_eq!(mode & 0o111, 0o111);
+    }
+
+    #[test]
+    fn a_reinstall_over_an_untouched_file_writes_no_backup() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "v1\n");
+        let target_root = tempfile::tempdir().unwrap();
+        install_skill(source_root.path(), "todo", target_root.path()).unwrap();
+
+        write(&source_root.path().join("todo/SKILL.md"), "v2\n");
+        install_skill(source_root.path(), "todo", target_root.path()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(target_root.path().join("todo/SKILL.md")).unwrap(),
+            "v2\n"
+        );
+        let backups: Vec<_> = fs::read_dir(target_root.path().join("todo"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".back"))
+            .collect();
+        assert!(
+            backups.is_empty(),
+            "unexpected backup on an untouched upgrade: {backups:?}"
+        );
+    }
+
+    #[test]
+    fn a_reinstall_over_a_user_edited_file_backs_it_up_first() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "v1\n");
+        let target_root = tempfile::tempdir().unwrap();
+        install_skill(source_root.path(), "todo", target_root.path()).unwrap();
+
+        // The user edits the installed copy directly.
+        fs::write(
+            target_root.path().join("todo/SKILL.md"),
+            "user's own notes\n",
+        )
+        .unwrap();
+
+        write(&source_root.path().join("todo/SKILL.md"), "v2\n");
+        install_skill(source_root.path(), "todo", target_root.path()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(target_root.path().join("todo/SKILL.md")).unwrap(),
+            "v2\n"
+        );
+        let backups: Vec<_> = fs::read_dir(target_root.path().join("todo"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".back"))
+            .collect();
+        assert_eq!(backups.len(), 1, "expected exactly one backup: {backups:?}");
+        let backed_up = fs::read_to_string(backups[0].path()).unwrap();
+        assert_eq!(backed_up, "user's own notes\n");
     }
 }
