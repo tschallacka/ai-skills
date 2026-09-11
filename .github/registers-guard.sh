@@ -61,7 +61,7 @@ changed_paths() {
     [ -n "$base" ] || { printf '%s: --base or --files-from is required\n' "${0##*/}" >&2; exit 64; }
     git rev-parse --verify "$base" >/dev/null 2>&1 \
         || { refuse "the base ref $base does not resolve; refusing rather than guessing"; exit 1; }
-    git diff --name-only "$base..HEAD"
+    git diff --name-only "$base...HEAD"
 }
 
 # ---- 1. nothing but the registers ------------------------------------------
