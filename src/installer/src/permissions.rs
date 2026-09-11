@@ -1,17 +1,16 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Grants Claude Code permission to touch the planning skill's own scripts,
-//! plan root, and tmp directory without a per-call prompt -- ported from
-//! installer/src/70-permissions.sh's `claude_permissions`/`claude_merge_allow`.
+//! Grants Claude Code and opencode permission to touch the planning skill's
+//! own scripts, plan root, and tmp directory without a per-call prompt --
+//! ported from installer/src/70-permissions.sh's `claude_permissions`/
+//! `claude_merge_allow` and `opencode_permissions`/`opencode_merge_permission`.
 //!
-//! install.sh shells out to `rjq` to edit `~/.claude/settings.json`; this
+//! install.sh shells out to `rjq` to edit each agent's JSON config; this
 //! installer is Rust already, so it edits the JSON directly with serde_json
-//! instead of spawning a JSON tool. The merge semantics are kept identical:
-//! non-object JSON (or an unparsable file) reads as `{}`, existing
-//! `permissions.allow` entries are kept in place and never duplicated, and
-//! new ones are appended in a fixed order. Only agents other than Claude Code
-//! (opencode, codex) and the other permission grants (worktrees, planning
-//! interactive-shell, tui-hint-plugin, editor-steering/-gate) remain unported.
+//! instead of spawning a JSON tool. The merge semantics are kept identical
+//! for each agent's own config shape. Still unported: codex (config.toml,
+//! not JSON), the worktrees/interactive-shell/tui-hint-plugin/editor-
+//! steering grants, and opencode's own worktree variant.
 
 use crate::backup;
 use serde_json::{Map, Value};
@@ -133,6 +132,186 @@ fn write_preserving_mode(dest: &Path, content: &str) -> io::Result<()> {
     fs::rename(&temp, dest)
 }
 
+// ---------------------------------------------------------------
+// opencode
+// ---------------------------------------------------------------
+
+pub enum OpencodePermissionOutcome {
+    /// The config exists, is non-empty, and does not parse as JSON (JSON-C
+    /// comments or a trailing comma) -- rewriting it would strip content the
+    /// user wrote, so nothing was touched.
+    NotStrictJson,
+    /// `legacy_removed` and `added` are reported independently, same as
+    /// install.sh's two separate print statements: a stray Claude-style
+    /// `permission.allow` array (not a valid opencode shape) can be dropped
+    /// on the very same run that also adds fresh rules, or on a run that
+    /// adds nothing at all.
+    Merged {
+        legacy_removed: bool,
+        added: Vec<String>,
+    },
+}
+
+fn opencode_configfile(home: &Path) -> PathBuf {
+    if let Ok(explicit) = std::env::var("OPENCODE_CONFIGFILE") {
+        return PathBuf::from(explicit);
+    }
+    let dir = home.join(".config").join("opencode");
+    let json = dir.join("opencode.json");
+    let jsonc = dir.join("opencode.jsonc");
+    if json.is_file() || !jsonc.is_file() {
+        json
+    } else {
+        jsonc
+    }
+}
+
+/// Resolves the config, creating a minimal one if missing, and backs it up
+/// otherwise -- mirrors install.sh's `opencode_prepare_config`. Returns
+/// `None` (having touched nothing) when an existing, non-empty file is not
+/// strict JSON.
+fn opencode_prepare_config(cfg: &Path) -> io::Result<Option<()>> {
+    if !cfg.is_file() {
+        if let Some(parent) = cfg.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(
+            cfg,
+            "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n",
+        )?;
+        return Ok(Some(()));
+    }
+    let raw = fs::read_to_string(cfg)?;
+    if !raw.trim().is_empty() && serde_json::from_str::<Value>(&raw).is_err() {
+        return Ok(None);
+    }
+    backup::backup_file(cfg)?;
+    Ok(Some(()))
+}
+
+/// `rules` in 70-permissions.sh: a tool's own permission entry, normalized
+/// to a pattern->decision map. A bare string (opencode's shorthand for "this
+/// decision for every pattern") becomes a single `"*"` entry.
+fn rules_of(value: Option<&Value>) -> Map<String, Value> {
+    match value {
+        Some(Value::Object(map)) => map.clone(),
+        Some(Value::String(s)) => {
+            let mut m = Map::new();
+            m.insert("*".to_string(), Value::String(s.clone()));
+            m
+        }
+        _ => Map::new(),
+    }
+}
+
+/// `base` in 70-permissions.sh: the existing `.permission` block, with any
+/// top-level Claude-style `allow`/`deny`/`ask` keys dropped, and a bare
+/// string shorthand spread across only the tools this grant cares about.
+fn base_permission(permission: Option<&Value>, wanted_tools: &[&str]) -> Map<String, Value> {
+    match permission {
+        Some(Value::String(s)) => wanted_tools
+            .iter()
+            .map(|&tool| {
+                let mut rule = Map::new();
+                rule.insert("*".to_string(), Value::String(s.clone()));
+                (tool.to_string(), Value::Object(rule))
+            })
+            .collect(),
+        Some(Value::Object(map)) => {
+            let mut m = map.clone();
+            m.remove("allow");
+            m.remove("deny");
+            m.remove("ask");
+            m
+        }
+        _ => Map::new(),
+    }
+}
+
+fn has_legacy_allow_list(permission: Option<&Value>) -> bool {
+    matches!(
+        permission.and_then(|p| p.as_object()).and_then(|p| p.get("allow")),
+        Some(Value::Array(items)) if !items.is_empty()
+    )
+}
+
+/// One (tool, patterns-to-allow) pair, e.g. `("read", &["/plans/**"])`.
+type WantedRule<'a> = (&'a str, &'a [String]);
+
+fn opencode_merge_permission(
+    cfg: &Path,
+    wanted: &[WantedRule],
+) -> io::Result<OpencodePermissionOutcome> {
+    let raw = fs::read_to_string(cfg)?;
+    let doc = as_object(serde_json::from_str(&raw).ok());
+    let tools: Vec<&str> = wanted.iter().map(|(tool, _)| *tool).collect();
+    let legacy = has_legacy_allow_list(doc.get("permission"));
+    let base = base_permission(doc.get("permission"), &tools);
+
+    let mut added = Vec::new();
+    let mut perm = base.clone();
+    for (tool, patterns) in wanted {
+        let mut rule = rules_of(base.get(*tool));
+        for pattern in *patterns {
+            if rule.get(pattern).and_then(Value::as_str) != Some("allow") {
+                added.push(format!("{tool}: {pattern}"));
+            }
+            rule.insert(pattern.clone(), Value::String("allow".to_string()));
+        }
+        perm.insert(tool.to_string(), Value::Object(rule));
+    }
+
+    let mut doc = doc;
+    doc.insert("permission".to_string(), Value::Object(perm));
+    write_preserving_mode(cfg, &serde_json::to_string_pretty(&Value::Object(doc))?)?;
+
+    Ok(OpencodePermissionOutcome::Merged {
+        legacy_removed: legacy,
+        added,
+    })
+}
+
+pub fn opencode_planning_permissions(
+    scripts: &str,
+    plans: &str,
+    tmp: &str,
+    home: &Path,
+) -> io::Result<OpencodePermissionOutcome> {
+    let cfg = opencode_configfile(home);
+    if opencode_prepare_config(&cfg)?.is_none() {
+        return Ok(OpencodePermissionOutcome::NotStrictJson);
+    }
+    let plans = strip_trailing_slashes(plans).to_string();
+    let scripts = strip_trailing_slashes(scripts).to_string();
+    let tmp = strip_trailing_slashes(tmp).to_string();
+
+    let read = vec![
+        format!("{plans}/**"),
+        format!("{scripts}/**"),
+        format!("{tmp}/**"),
+    ];
+    let edit = vec![format!("{plans}/**"), format!("{tmp}/**")];
+    let bash = vec![
+        format!("{scripts}/**"),
+        format!("bash {scripts}/**"),
+        format!("{tmp}/**"),
+    ];
+    let external_directory = vec![
+        format!("{plans}/**"),
+        format!("{scripts}/**"),
+        format!("{tmp}/**"),
+    ];
+    opencode_merge_permission(
+        &cfg,
+        &[
+            ("read", &read),
+            ("edit", &edit),
+            ("bash", &bash),
+            ("external_directory", &external_directory),
+        ],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +412,115 @@ mod tests {
 
         let mode = fs::metadata(&cfg).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    fn opencode_cfg(home: &Path) -> PathBuf {
+        home.join(".config").join("opencode").join("opencode.json")
+    }
+
+    #[test]
+    fn a_missing_opencode_config_is_created_and_gains_every_rule() {
+        let home = tempfile::tempdir().unwrap();
+
+        let outcome =
+            opencode_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+
+        let (legacy_removed, added) = match outcome {
+            OpencodePermissionOutcome::Merged {
+                legacy_removed,
+                added,
+            } => (legacy_removed, added),
+            _ => panic!("expected Merged"),
+        };
+        assert!(!legacy_removed);
+        // read(3) + edit(2) + bash(3) + external_directory(3)
+        assert_eq!(added.len(), 11);
+        assert!(added.contains(&"read: /plans/**".to_string()));
+        assert!(added.contains(&"bash: bash /scripts/**".to_string()));
+
+        let cfg = opencode_cfg(home.path());
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(doc["permission"]["read"]["/plans/**"], "allow");
+    }
+
+    #[test]
+    fn a_second_opencode_grant_reports_already_present() {
+        let home = tempfile::tempdir().unwrap();
+        opencode_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+
+        let outcome =
+            opencode_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+        match outcome {
+            OpencodePermissionOutcome::Merged {
+                legacy_removed,
+                added,
+            } => {
+                assert!(!legacy_removed);
+                assert!(added.is_empty());
+            }
+            _ => panic!("expected Merged"),
+        }
+    }
+
+    #[test]
+    fn not_strict_json_is_left_untouched() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = opencode_cfg(home.path());
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        fs::write(&cfg, "{ // a comment\n}\n").unwrap();
+        let before = fs::read_to_string(&cfg).unwrap();
+
+        let outcome =
+            opencode_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+
+        assert!(matches!(outcome, OpencodePermissionOutcome::NotStrictJson));
+        assert_eq!(fs::read_to_string(&cfg).unwrap(), before);
+    }
+
+    #[test]
+    fn a_legacy_claude_style_allow_list_is_dropped_and_reported() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = opencode_cfg(home.path());
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        fs::write(&cfg, r#"{"permission":{"allow":["Bash(ls:*)"]}}"#).unwrap();
+
+        let outcome =
+            opencode_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+        match outcome {
+            OpencodePermissionOutcome::Merged {
+                legacy_removed,
+                added,
+            } => {
+                assert!(legacy_removed);
+                assert_eq!(added.len(), 11);
+            }
+            _ => panic!("expected Merged"),
+        }
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        assert!(doc["permission"].get("allow").is_none());
+
+        // The stray key is gone now, so a rerun reports no further removal.
+        let outcome =
+            opencode_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+        match outcome {
+            OpencodePermissionOutcome::Merged { legacy_removed, .. } => assert!(!legacy_removed),
+            _ => panic!("expected Merged"),
+        }
+    }
+
+    #[test]
+    fn an_existing_string_shorthand_permission_is_preserved_for_other_tools() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = opencode_cfg(home.path());
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        fs::write(&cfg, r#"{"permission":"ask"}"#).unwrap();
+
+        opencode_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        // The shorthand seeded every wanted tool with {"*": "ask"}, and the
+        // merge then adds "allow" only for the specific patterns requested.
+        assert_eq!(doc["permission"]["read"]["*"], "ask");
+        assert_eq!(doc["permission"]["read"]["/plans/**"], "allow");
     }
 }
