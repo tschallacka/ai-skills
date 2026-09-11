@@ -42,10 +42,10 @@ package/editor-gate-plugin/.claude-plugin/plugin.json	367
 package/editor-gate-plugin/README.md	2162
 package/editor-gate-plugin/hooks/editor-token	1067
 package/editor-gate-plugin/hooks/hooks.json	404
-package/editor-gate-plugin/hooks/lib.sh	7502
-package/editor-gate-plugin/hooks/pre-tool-use-bash.sh	4014
-package/editor-gate-plugin/hooks/pre-tool-use-edit-write.sh	1243
-package/editor-gate-plugin/tests/test-editor-gate-matching.sh	4140
+package/editor-gate-plugin/hooks/lib.sh	5582
+package/editor-gate-plugin/hooks/pre-tool-use-bash.sh	4383
+package/editor-gate-plugin/hooks/pre-tool-use-edit-write.sh	1310
+package/editor-gate-plugin/tests/test-editor-gate-matching.sh	4074
 package/git-merge-resolving/SKILL.md	9341
 package/git-merge-resolving/docs/README.md	2835
 package/git-merge-resolving/requires.tsv	1321
@@ -53,7 +53,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
-package/install.sh	272637
+package/install.sh	273719
 package/interactive-shell/SKILL.md	14192
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/appprofiles/FORMAT.md	3629
@@ -62,7 +62,7 @@ package/interactive-shell/appprofiles/atop.md	2483
 package/interactive-shell/appprofiles/bluetoothctl.md	2056
 package/interactive-shell/appprofiles/chsh.md	1433
 package/interactive-shell/appprofiles/cryptsetup.md	2036
-package/interactive-shell/appprofiles/dialog.md	2325
+package/interactive-shell/appprofiles/dialog.md	2339
 package/interactive-shell/appprofiles/dig.md	1310
 package/interactive-shell/appprofiles/dpkg-reconfigure.md	2556
 package/interactive-shell/appprofiles/ed.md	1731
@@ -70,7 +70,7 @@ package/interactive-shell/appprofiles/emacs.md	3360
 package/interactive-shell/appprofiles/ex.md	1857
 package/interactive-shell/appprofiles/expect.md	2457
 package/interactive-shell/appprofiles/gdb.md	3788
-package/interactive-shell/appprofiles/git-add-patch.md	2403
+package/interactive-shell/appprofiles/git-add-patch.md	2402
 package/interactive-shell/appprofiles/git-bisect.md	2240
 package/interactive-shell/appprofiles/git-subtree.md	760
 package/interactive-shell/appprofiles/gpg.md	3205
@@ -117,7 +117,7 @@ package/interactive-shell/appprofiles/varnishadm.md	1587
 package/interactive-shell/appprofiles/vi.md	1996
 package/interactive-shell/appprofiles/vmstat.md	1474
 package/interactive-shell/appprofiles/watch.md	1177
-package/interactive-shell/appprofiles/whiptail.md	2169
+package/interactive-shell/appprofiles/whiptail.md	2183
 package/interactive-shell/appprofiles/write.md	2257
 package/interactive-shell/binaries.tsv	1996
 package/interactive-shell/docs/README.md	6019
@@ -261,10 +261,10 @@ package/todo/schema.2.0.0-alpha.1.json	2968
 package/tui-hint-plugin/.claude-plugin/plugin.json	387
 package/tui-hint-plugin/README.md	3720
 package/tui-hint-plugin/hooks/hooks.json	214
-package/tui-hint-plugin/hooks/lib.sh	8483
-package/tui-hint-plugin/hooks/pre-tool-use.sh	2979
+package/tui-hint-plugin/hooks/lib.sh	6709
+package/tui-hint-plugin/hooks/pre-tool-use.sh	3132
 package/tui-hint-plugin/opencode/tui-hint-plugin.js	6697
-package/tui-hint-plugin/tests/test-tui-hint-matching.sh	4206
+package/tui-hint-plugin/tests/test-tui-hint-matching.sh	3979
 package/www/SKILL.md	3158
 package/www/docs/README.md	962
 package/www/requires.tsv	1187

@@ -1,10 +1,8 @@
 # git-add-patch
 
-Interactive patch staging tool for selectively adding changes to the index. `git add -p`, `git add --patch`, `git add -i` (interactive mode), etc.
-
 ### Identity
 
-Interactive workflow for staging individual hunks (pieces) of modified files.
+Interactive patch staging tool for selectively adding changes to the index. `git add -p`, `git add --patch`, `git add -i` (interactive mode), etc. Interactive workflow for staging individual hunks (pieces) of modified files.
 
 ### Invocation
 

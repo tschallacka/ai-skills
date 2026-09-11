@@ -46,6 +46,15 @@ t_assert_eq 'lib.sh landed and is executable' \
 t_assert_eq 'README.md is not copied (the plugin loader never reads it)' \
     "$([ -f "$plugin_dir/README.md" ] && printf yes || printf no)" 'no'
 
+# B319: the hard gate resolves rjq from this stable location, not the
+# user's global PATH -- install_shared_rjq must have actually put a working
+# binary there, or the gate fails closed (deny) rather than parsing nothing.
+shared_rjq="$home/.config/tsch-ai-skills/bin/rjq"
+t_assert_eq 'the shared rjq binary landed at its stable location' \
+    "$([ -x "$shared_rjq" ] && printf yes || printf no)" 'yes'
+t_assert_eq 'the shared rjq binary actually runs' \
+    "$("$shared_rjq" -n '1+1' 2>/dev/null)" '2'
+
 # ── a non-Claude root gets nothing: nothing here is that harness's own ─────
 home="$work/opencode-home"
 rc=0

@@ -71,24 +71,24 @@ else
     t_assert_eq 'a placeholder-length --why is refused' no no
 fi
 
-# B319: the hook's own JSON in/out has no rjq dependency -- these run with
-# rjq deliberately hidden from PATH, so a regression back to calling it
-# would fail the same way it did for a real end user, and for this plugin's
-# hard gate specifically would mean failing OPEN on exactly the commands it
-# exists to catch.
-PATH="/usr/bin:/bin"
+# B319: editor_gate_rjq_bin resolves the installer's own shared copy first,
+# never the user's global PATH -- installed at
+# ${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/bin/rjq by install_shared_rjq
+# specifically so this hard gate does not depend on an ambient `rjq`
+# neither ai-text-editor nor interactive-shell ever promised. Getting this
+# wrong risks failing OPEN on exactly the commands the gate exists to catch.
+resolver_work="$(mktemp -d "${TMPDIR:-/tmp}/editor-gate-rjq-resolve.XXXXXX")"
+trap 'rm -rf "$resolver_work" "$work"' EXIT
+export XDG_CONFIG_HOME="$resolver_work/config"
+mkdir -p "$XDG_CONFIG_HOME/tsch-ai-skills/bin"
+printf '#!/bin/sh\necho stub\n' > "$XDG_CONFIG_HOME/tsch-ai-skills/bin/rjq"
+chmod +x "$XDG_CONFIG_HOME/tsch-ai-skills/bin/rjq"
 
-t_assert_eq 'editor_gate_json_field extracts a plain string value' \
-    "$(printf '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | editor_gate_json_field tool_name)" \
-    'Bash'
-t_assert_eq 'editor_gate_json_field extracts a nested string value by its own key' \
-    "$(printf '{"tool_name":"Bash","tool_input":{"command":"'"$SED_I"' s/a/b/ f"}}' | editor_gate_json_field command)" \
-    "$SED_I s/a/b/ f"
-t_assert_eq 'editor_gate_json_escape escapes a quote and a backslash' \
-    "$(editor_gate_json_escape 'a "quoted" \path')" \
-    'a \"quoted\" \\path'
-t_assert_eq 'a value round-trips through escape then field-extraction unchanged' \
-    "$(printf '{"x":"%s"}' "$(editor_gate_json_escape 'weird "value" with \backslash')" | editor_gate_json_field x)" \
-    'weird "value" with \backslash'
+t_assert_eq 'editor_gate_rjq_bin resolves the installed shared copy' \
+    "$(editor_gate_rjq_bin)" "$XDG_CONFIG_HOME/tsch-ai-skills/bin/rjq"
+
+rm -f "$XDG_CONFIG_HOME/tsch-ai-skills/bin/rjq"
+t_assert_eq 'editor_gate_rjq_bin falls back to an ambient rjq on PATH' \
+    "$(editor_gate_rjq_bin)" "$(command -v rjq)"
 
 t_end

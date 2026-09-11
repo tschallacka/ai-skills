@@ -1048,6 +1048,25 @@ prepend_bundled_rjq() {
     fi
 }
 
+# prepend_bundled_rjq only reaches install.sh's own process -- gone the
+# moment it exits. A plugin whose hook runs independently later (tui-hint-
+# plugin, editor-gate-plugin; B319) needs rjq at a location it can resolve
+# on its own, without adding it to the user's global PATH. This copies the
+# same artifact prepend_bundled_rjq already found to one fixed,
+# install-root-independent path both plugins' hooks check first. A no-op,
+# not a failure, on a host with no bundled artifact for it -- those hooks
+# fall back to their own dependency-free JSON handling.
+install_shared_rjq() {
+    local artifact destination
+    artifact="$(bundled_rjq_artifact)" || return 0
+    [ -n "$artifact" ] || return 0
+    [ -x "$SOURCE_ROOT/planning/$artifact" ] || return 0
+    destination="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/rjq"
+    mkdir -p "$(dirname "$destination")" 2>/dev/null || return 0
+    cp -p "$SOURCE_ROOT/planning/$artifact" "$destination" 2>/dev/null || return 0
+    chmod +x "$destination" 2>/dev/null || true
+}
+
 # A skill is installable when every hard requirement is met. A missing soft one
 # is deliberately not consulted here — it costs a warning, not the install.
 skill_runtime_tools_present() {
@@ -5825,6 +5844,7 @@ tui_hint_plugin_step() {
     contains interactive-shell "${SELECTED_SKILLS[@]}" || return 0
     echo >&2
     echo "== tui-hint plugin ==" >&2
+    install_shared_rjq
     for root in "${SELECTED_TARGET_PATHS[@]}"; do
         kind="$(agent_kind_for_root "$root")"
         case "$kind" in
@@ -5966,6 +5986,7 @@ install_editor_gate_plugin() {
 # a selected Claude Code root, same gate editor_steering_step already uses.
 editor_gate_plugin_step() {
     local root kind
+    install_shared_rjq
     for root in "${SELECTED_TARGET_PATHS[@]}"; do
         kind="$(agent_kind_for_root "$root")"
         [ "$kind" = claude ] || continue

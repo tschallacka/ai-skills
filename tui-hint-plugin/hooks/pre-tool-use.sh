@@ -22,9 +22,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tui-hint-plugin/hooks/lib.sh
 source "$script_dir/lib.sh"
 
+rjq_bin="$(tui_hint_rjq_bin)" || { printf '{}'; exit 0; }
 payload="$(cat)"
-tool_name="$(tui_hint_json_field tool_name <<<"$payload" || true)"
-command_line="$(tui_hint_json_field command <<<"$payload" || true)"
+tool_name="$(printf '%s' "$payload" | "$rjq_bin" -r '.tool_name // empty')"
+command_line="$(printf '%s' "$payload" | "$rjq_bin" -r '.tool_input.command // empty')"
 
 if [ "$tool_name" != "Bash" ] || [ -z "$command_line" ]; then
     printf '{}'
@@ -56,6 +57,17 @@ fi
 
 [ -n "$profile" ] || { printf '{}'; exit 0; }
 
-context="$(tui_hint_json_escape "$program") has a shipped interactive-shell app profile at $(tui_hint_json_escape "$profile") -- screen layout, keybindings, dialogs, and known quirks. A plain Bash call cannot observe its screen or send it real keystrokes; consider driving it through the interactive-shell skill instead, especially for anything beyond a one-shot non-interactive invocation."
-
-printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","additionalContext":"%s"}}' "$context"
+"$rjq_bin" -n -c --arg program "$program" --arg profile "$profile" '
+{
+  hookSpecificOutput: {
+    hookEventName: "PreToolUse",
+    permissionDecision: "allow",
+    additionalContext: (
+      "\($program) has a shipped interactive-shell app profile at \($profile) -- "
+      + "screen layout, keybindings, dialogs, and known quirks. A plain Bash call "
+      + "cannot observe its screen or send it real keystrokes; consider driving it "
+      + "through the interactive-shell skill instead, especially for anything beyond "
+      + "a one-shot non-interactive invocation."
+    )
+  }
+}'

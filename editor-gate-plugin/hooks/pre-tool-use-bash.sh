@@ -49,9 +49,20 @@ on top of the target file'"'"'s own syntax. Neither verifies what it replaces,
 while the editor'"'"'s expected_text refuses on mismatch and its journal
 survives a git checkout that had discarded a shell rewrite.'
 
+emit_deny() { # <reason>
+    "$rjq_bin" -n -c --arg reason "$1" \
+        '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
+}
+
+# No rjq resolved is not "allow": a hard gate that cannot even build its
+# own deny decision must fail CLOSED, not silently let the call through.
+rjq_bin="$(editor_gate_rjq_bin)" || {
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"editor-gate-plugin: rjq is missing from its expected installed location; re-run install.sh to restore it. Denying by default rather than skipping this gate."}}'
+    exit 0
+}
 payload="$(cat)"
-tool_name="$(editor_gate_json_field tool_name <<<"$payload" || true)"
-command_line="$(editor_gate_json_field command <<<"$payload" || true)"
+tool_name="$(printf '%s' "$payload" | "$rjq_bin" -r '.tool_name // empty')"
+command_line="$(printf '%s' "$payload" | "$rjq_bin" -r '.tool_input.command // empty')"
 
 if [ "$tool_name" != "Bash" ] || [ -z "$command_line" ]; then
     printf '{}'
@@ -73,11 +84,9 @@ if token="$(printf '%s' "$command_line" | grep -Eo 'EDIT_OK=[0-9a-f]{32}' | head
         printf '{}'
         exit 0
     fi
-    escaped="$(editor_gate_json_escape "Token rejected: $reason
-$MESSAGE")"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}' "$escaped"
+    emit_deny "Token rejected: $reason
+$MESSAGE"
     exit 0
 fi
 
-escaped="$(editor_gate_json_escape "$MESSAGE")"
-printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}' "$escaped"
+emit_deny "$MESSAGE"

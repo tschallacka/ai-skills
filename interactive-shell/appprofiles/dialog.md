@@ -1,5 +1,7 @@
 # dialog
 
+### Identity
+
 ncurses dialog-box toolkit for creating modal dialogs, menus, and forms in shell scripts. `dialog --menu`, `dialog --yesno`, `dialog --inputbox`, `dialog --checklist`, etc.
 
 ### Options

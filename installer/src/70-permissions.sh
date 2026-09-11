@@ -836,6 +836,7 @@ tui_hint_plugin_step() {
     contains interactive-shell "${SELECTED_SKILLS[@]}" || return 0
     echo >&2
     echo "== tui-hint plugin ==" >&2
+    install_shared_rjq
     for root in "${SELECTED_TARGET_PATHS[@]}"; do
         kind="$(agent_kind_for_root "$root")"
         case "$kind" in
@@ -977,6 +978,7 @@ install_editor_gate_plugin() {
 # a selected Claude Code root, same gate editor_steering_step already uses.
 editor_gate_plugin_step() {
     local root kind
+    install_shared_rjq
     for root in "${SELECTED_TARGET_PATHS[@]}"; do
         kind="$(agent_kind_for_root "$root")"
         [ "$kind" = claude ] || continue
