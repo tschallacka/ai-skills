@@ -5,17 +5,19 @@
 //! inside the extracted tree; knows nothing about fetching itself.
 //!
 //! This is an early slice, not full parity with install.sh yet: no
-//! interactive TUI, no per-agent permission grants, no MCP registration, no
-//! plan migration. Skill discovery (discover.rs) still finds any directory
-//! with a SKILL.md, looser than install.sh's hand-maintained SKILL_NAMES
-//! table (no hidden-skill support yet); manifest.rs supplies descriptions
-//! and the --agent shortcut for the ones it knows about.
+//! interactive TUI, no plan migration. Skill discovery (discover.rs) still
+//! finds any directory with a SKILL.md, looser than install.sh's hand-
+//! maintained SKILL_NAMES table (no hidden-skill support yet); manifest.rs
+//! supplies descriptions and the --agent shortcut for the ones it knows
+//! about; permissions.rs and mcp.rs cover the planning/worktree permission
+//! grants and mcp-mode registration for claude/codex/opencode.
 
 mod backup;
 mod digest;
 mod discover;
 mod install;
 mod manifest;
+mod mcp;
 mod permissions;
 
 use std::path::{Path, PathBuf};
@@ -33,6 +35,10 @@ Usage:
   installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR)
                      grant that agent read/write on the planning skill's own
                      scripts/plan-root/tmp directory, or on a worktree root
+  installer mcp-register --agent NAME --name NAME --path PATH
+                     register PATH as an mcp-mode stdio server named NAME
+  installer mcp-unregister --agent NAME --name NAME --dir DIR
+                     remove NAME's registration, only if it points inside DIR
   installer --help
 
 --agent NAME is one of: claude, codex, opencode, universal, openclaw, cline
@@ -65,6 +71,8 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         Some("list") => run_list(&argv[1..]),
         Some("install") => run_install(&argv[1..]),
         Some("grant-permissions") => run_grant_permissions(&argv[1..]),
+        Some("mcp-register") => run_mcp_register(&argv[1..]),
+        Some("mcp-unregister") => run_mcp_unregister(&argv[1..]),
         Some(other) => Err(format!("unknown command: {other}")),
     }
 }
@@ -413,6 +421,129 @@ fn run_grant_permissions(argv: &[String]) -> Result<ExitCode, String> {
             "grant-permissions: unknown --agent {other}; known agents are: claude, codex, opencode"
         ))
         }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn known_mcp_agent(command: &str, agent: &str) -> Result<(), String> {
+    match agent {
+        "claude" | "codex" | "opencode" => Ok(()),
+        other => Err(format!(
+            "{command}: unknown --agent {other}; known agents are: claude, codex, opencode"
+        )),
+    }
+}
+
+struct McpRegisterArgs {
+    agent: String,
+    name: String,
+    path: String,
+}
+
+fn parse_mcp_register_args(argv: &[String]) -> Result<McpRegisterArgs, String> {
+    let mut agent: Option<String> = None;
+    let mut name: Option<String> = None;
+    let mut path: Option<String> = None;
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--agent" => {
+                i += 1;
+                agent = Some(argv.get(i).ok_or("--agent needs a value")?.clone());
+            }
+            "--name" => {
+                i += 1;
+                name = Some(argv.get(i).ok_or("--name needs a value")?.clone());
+            }
+            "--path" => {
+                i += 1;
+                path = Some(argv.get(i).ok_or("--path needs a value")?.clone());
+            }
+            other => return Err(format!("mcp-register: unknown option: {other}")),
+        }
+        i += 1;
+    }
+    Ok(McpRegisterArgs {
+        agent: agent.ok_or("mcp-register: --agent is required")?,
+        name: name.ok_or("mcp-register: --name is required")?,
+        path: path.ok_or("mcp-register: --path is required")?,
+    })
+}
+
+fn run_mcp_register(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_mcp_register_args(argv)?;
+    known_mcp_agent("mcp-register", &args.agent)?;
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map_err(|_| "mcp-register: needs $HOME set".to_string())?;
+
+    match mcp::register_for_kind(&args.agent, &args.name, &args.path, &home)
+        .map_err(|e| e.to_string())?
+    {
+        mcp::RegisterOutcome::Registered => {
+            println!("{}: registered MCP server {}", args.agent, args.name);
+        }
+        mcp::RegisterOutcome::Manual => {
+            for line in mcp::manual_instructions(&args.agent, &args.name, &args.path) {
+                println!("{line}");
+            }
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+struct McpUnregisterArgs {
+    agent: String,
+    name: String,
+    dir: PathBuf,
+}
+
+fn parse_mcp_unregister_args(argv: &[String]) -> Result<McpUnregisterArgs, String> {
+    let mut agent: Option<String> = None;
+    let mut name: Option<String> = None;
+    let mut dir: Option<PathBuf> = None;
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--agent" => {
+                i += 1;
+                agent = Some(argv.get(i).ok_or("--agent needs a value")?.clone());
+            }
+            "--name" => {
+                i += 1;
+                name = Some(argv.get(i).ok_or("--name needs a value")?.clone());
+            }
+            "--dir" => {
+                i += 1;
+                dir = Some(PathBuf::from(argv.get(i).ok_or("--dir needs a value")?));
+            }
+            other => return Err(format!("mcp-unregister: unknown option: {other}")),
+        }
+        i += 1;
+    }
+    Ok(McpUnregisterArgs {
+        agent: agent.ok_or("mcp-unregister: --agent is required")?,
+        name: name.ok_or("mcp-unregister: --name is required")?,
+        dir: dir.ok_or("mcp-unregister: --dir is required")?,
+    })
+}
+
+fn run_mcp_unregister(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_mcp_unregister_args(argv)?;
+    known_mcp_agent("mcp-unregister", &args.agent)?;
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map_err(|_| "mcp-unregister: needs $HOME set".to_string())?;
+
+    let removed = mcp::unregister_for_kind(&args.agent, &args.name, &args.dir, &home)
+        .map_err(|e| e.to_string())?;
+    if removed {
+        println!("{}: removed MCP server {}", args.agent, args.name);
+    } else {
+        println!(
+            "{}: no registration owned by this install found for {}",
+            args.agent, args.name
+        );
     }
     Ok(ExitCode::SUCCESS)
 }

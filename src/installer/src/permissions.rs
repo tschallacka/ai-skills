@@ -91,7 +91,7 @@ pub fn claude_worktrees_permissions(worktrees: &str, home: &Path) -> io::Result<
 /// A JSON document read as an object, same as install.sh's `objectify`:
 /// anything that isn't already an object (a scalar, an array, or a file that
 /// failed to parse at all) reads as `{}` rather than refusing.
-fn as_object(value: Option<Value>) -> Map<String, Value> {
+pub(crate) fn as_object(value: Option<Value>) -> Map<String, Value> {
     match value {
         Some(Value::Object(map)) => map,
         _ => Map::new(),
@@ -135,7 +135,7 @@ fn merge_allow_entries(cfg: &Path, entries: &[String]) -> io::Result<PermissionO
 /// `cp -p`'s effect, in the atomic-write shape the rest of this installer
 /// uses: the replacement file keeps the original's permission bits rather
 /// than whatever `fs::write` on a new file would default to.
-fn write_preserving_mode(dest: &Path, content: &str) -> io::Result<()> {
+pub(crate) fn write_preserving_mode(dest: &Path, content: &str) -> io::Result<()> {
     let file_name = dest.file_name().unwrap_or_default().to_string_lossy();
     let temp = dest.with_file_name(format!(".{file_name}.installer-tmp.{}", std::process::id()));
     fs::write(&temp, content)?;
@@ -170,7 +170,7 @@ pub enum OpencodePermissionOutcome {
     },
 }
 
-fn opencode_configfile(home: &Path) -> PathBuf {
+pub(crate) fn opencode_configfile(home: &Path) -> PathBuf {
     if let Ok(explicit) = std::env::var("OPENCODE_CONFIGFILE") {
         return PathBuf::from(explicit);
     }
@@ -378,7 +378,7 @@ pub enum CodexOutcome {
     NotSingleLineArray,
 }
 
-fn codex_configfile(home: &Path) -> PathBuf {
+pub(crate) fn codex_configfile(home: &Path) -> PathBuf {
     std::env::var("CODEX_CONFIGFILE")
         .map(PathBuf::from)
         .unwrap_or_else(|_| home.join(".codex").join("config.toml"))
