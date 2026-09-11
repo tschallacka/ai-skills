@@ -46,17 +46,9 @@ plan_emit_coverage_id_cells() {
 # plan_validate_inventory_row <id> <type> <file> <scope> <subscope> <intended>
 # <depends> <goal> <step> — the per-row rules for one Work units table line;
 # on a valid row, records it into the unit_* maps and unit_ids.
-plan_validate_inventory_row() {
-    local id="$1" type="$2" file="$3" scope="$4" subscope="$5" intended="$6" depends="$7" goal="$8" step="$9"
-    local sym_count
-    if [[ ! "$id" =~ ^W[0-9][0-9]+$ ]]; then
-        fail "Invalid work-unit ID: $id"
-        return
-    fi
-    if plan_map_has unit_type "$id"; then
-        fail "Duplicate work-unit ID: $id"
-        return
-    fi
+# Type enum, required fields, and the file-naming conventions per type.
+plan_validate_inventory_row_type_and_file() {
+    local id="$1" type="$2" file="$3" scope="$4" subscope="$5" intended="$6" goal="$7" step="$8"
     case "$type" in
         source|markup|style|test|config|docs|data|generated|discovery|verification) ;;
         *) fail "$id has unsupported type '$type'" ;;
@@ -76,6 +68,12 @@ plan_validate_inventory_row() {
     if [[ "$file" == *'*'* || "$file" == */ ]]; then
         fail "$id must name one concrete file, not a glob or directory: $file"
     fi
+}
+
+# The scope/subscope conventions and the goal/step name shapes.
+plan_validate_inventory_row_scope_and_names() {
+    local id="$1" type="$2" scope="$3" subscope="$4" goal="$5" step="$6"
+    local sym_count
     # A scope names one symbol. Key on the count of ::-qualified symbols,
     # not on conjunctions: " and " legitimately joins one file's own
     # description. A comma list still signals multiple scopes.
@@ -102,6 +100,18 @@ plan_validate_inventory_row() {
     if [ "$subscope" != N/A ] && { [[ "$subscope" == *','* ]] || [[ "$subscope" == *' and '* ]]; }; then
         fail "$id lists multiple subscope targets: $subscope"
     fi
+}
+
+plan_validate_inventory_row_shape() {
+    local id="$1" type="$2" file="$3" scope="$4" subscope="$5" intended="$6" goal="$7" step="$8"
+    plan_validate_inventory_row_type_and_file "$id" "$type" "$file" "$scope" "$subscope" "$intended" "$goal" "$step"
+    plan_validate_inventory_row_scope_and_names "$id" "$type" "$scope" "$subscope" "$goal" "$step"
+}
+
+# Bookkeeping once a row has been shape-checked: records the row's fields,
+# the goal/step assignment, and the per-goal unit-id accumulator.
+plan_validate_inventory_row_record() {
+    local id="$1" type="$2" file="$3" scope="$4" subscope="$5" depends="$6" goal="$7" step="$8"
     plan_map_set unit_type "$id" "$type"
     plan_map_set unit_file "$id" "$file"
     plan_map_set unit_scope "$id" "$scope"
@@ -118,6 +128,20 @@ plan_validate_inventory_row() {
     # (callers word-split it and one caller strips the leading space).
     plan_map_load goal_units "$goal" || plan_map_value=""
     plan_map_set goal_units "$goal" "$plan_map_value $id"
+}
+
+plan_validate_inventory_row() {
+    local id="$1" type="$2" file="$3" scope="$4" subscope="$5" intended="$6" depends="$7" goal="$8" step="$9"
+    if [[ ! "$id" =~ ^W[0-9][0-9]+$ ]]; then
+        fail "Invalid work-unit ID: $id"
+        return
+    fi
+    if plan_map_has unit_type "$id"; then
+        fail "Duplicate work-unit ID: $id"
+        return
+    fi
+    plan_validate_inventory_row_shape "$id" "$type" "$file" "$scope" "$subscope" "$intended" "$goal" "$step"
+    plan_validate_inventory_row_record "$id" "$type" "$file" "$scope" "$subscope" "$depends" "$goal" "$step"
 }
 
 # plan_validate_inventory_coverage — cross-links every recorded unit_id

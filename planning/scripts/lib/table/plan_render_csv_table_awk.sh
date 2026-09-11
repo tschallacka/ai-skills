@@ -2,8 +2,11 @@
 # MODE: DEV
 # PACKAGE: PROD
 # The CSV-to-Markdown-row awk program plan_render_csv_table runs, standalone
-# so that function stays under CODE-STYLE §3's 40-line cap.
-plan_render_csv_table_awk() {
+# so that function stays under CODE-STYLE §3's 40-line cap. Split across two
+# functions itself for the same reason: one string literal, in two pieces
+# concatenated at the call site.
+
+plan_render_csv_table_awk_parse_csv() {
     printf '%s\n' '
         function parse_csv(line, fields,    i, ch, next_ch, quoted, field, count) {
             for (i = 1; i <= length(line); i++) {
@@ -30,6 +33,11 @@ plan_render_csv_table_awk() {
             fields[++count] = field
             return count
         }
+    '
+}
+
+plan_render_csv_table_awk_emit_row() {
+    printf '%s\n' '
         function emit_row(fields, count,    i, cleaned, p) {
             printf "|"
             for (i = 1; i <= count; i++) {
@@ -46,6 +54,18 @@ plan_render_csv_table_awk() {
             }
             printf "\n"
         }
+    '
+}
+
+# The two awk functions the main pattern block below calls.
+plan_render_csv_table_awk_functions() {
+    plan_render_csv_table_awk_parse_csv
+    plan_render_csv_table_awk_emit_row
+}
+
+# The main pattern block and END, which call the two functions above.
+plan_render_csv_table_awk_main() {
+    printf '%s\n' '
         {
             if ($0 ~ /^[[:space:]]*$/) { printf "row %d", NR > diag; exit 5 }
             count = parse_csv($0, fields)
@@ -60,4 +80,9 @@ plan_render_csv_table_awk() {
         }
         END { if (NR == 0) exit 6 }
     '
+}
+
+plan_render_csv_table_awk() {
+    plan_render_csv_table_awk_functions
+    plan_render_csv_table_awk_main
 }

@@ -9,6 +9,11 @@
 # script-scope variables set by plan-context.sh's own argument parsing
 # (plan_dir, entry_id, document_selector_count, and friends).
 
+# shellcheck disable=SC2154
+# plan_dir, document_id, document_selector_count, check_selector_count,
+# read_only, format, max_records, max_bytes, read_bounded_file and
+# read_full_file are set by plan-context.sh's own argument parsing, which
+# a per-file lint cannot see.
 set -euo pipefail
 export LC_ALL=C
 

@@ -7,8 +7,43 @@
 # and base/base_label/repo_root are set. Each function reads those from the
 # caller rather than taking them as arguments.
 
+# shellcheck disable=SC2154
+# repo_root, base and changed_sh are set by pre-push-check.sh before this is
+# sourced; shellcheck lints each file alone and cannot see those assignments.
 set -euo pipefail
 export LC_ALL=C
+
+# Only scripts that still EXIST: a deletion is part of the change set, and
+# feeding a deleted path to shellcheck fails with "openBinaryFile: does not
+# exist" -- so removing a superseded script used to fail this gate, which is
+# precisely the shape that teaches people to bypass a gate rather than use it.
+# Sets $changed_sh for gate_shellcheck and gate_static_scans to share.
+gate_shellcheck_collect_changed() {
+    changed_sh=""
+    for _sh in $(changed -E '\.sh$'); do
+        [ -f "$_sh" ] && changed_sh="${changed_sh}${changed_sh:+
+    }$_sh"
+    done
+    unset _sh
+}
+
+# Runs once $changed_sh is known: reports skip/missing-tool/pass/fail.
+gate_shellcheck_report() {
+    if [ -z "$changed_sh" ]; then
+        note "no shell scripts differ from ${base_label:-the base}; shellcheck skipped (CI lints all)"
+    elif command -v shellcheck >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        if shellcheck -x -s bash --severity=warning $changed_sh >/dev/null 2>&1; then
+            ok "shellcheck -x --severity=warning ($(printf '%s\n' "$changed_sh" | wc -l | tr -d ' ') changed vs ${base_label:-base})"
+        else
+            bad "shellcheck findings at warning severity (CI gates on these)"
+            # shellcheck disable=SC2086
+            shellcheck -x -s bash --severity=warning $changed_sh 2>&1 | sed -n '1,40p' >&2
+        fi
+    else
+        note "shellcheck not installed locally; CI still gates on it"
+    fi
+}
 
 gate_shellcheck() {
     # ---- 3. shellcheck on the scripts that differ from master ------------------
@@ -35,82 +70,100 @@ gate_shellcheck() {
     if [ -x planning/scripts/build-plan-libs.sh ]; then
         planning/scripts/build-plan-libs.sh >/dev/null 2>&1 || true
     fi
-    # Only scripts that still EXIST: a deletion is part of the change set, and
-    # feeding a deleted path to shellcheck fails with "openBinaryFile: does not
-    # exist" -- so removing a superseded script used to fail this gate, which is
-    # precisely the shape that teaches people to bypass a gate rather than use it.
-    changed_sh=""
-    for _sh in $(changed -E '\.sh$'); do
-        [ -f "$_sh" ] && changed_sh="${changed_sh}${changed_sh:+
-    }$_sh"
-    done
-    unset _sh
-    if [ -z "$changed_sh" ]; then
-        note "no shell scripts differ from ${base_label:-the base}; shellcheck skipped (CI lints all)"
-    elif command -v shellcheck >/dev/null 2>&1; then
+    gate_shellcheck_collect_changed
+    gate_shellcheck_report
+}
+
+# The cap check reports what THIS change is responsible for: a function newly
+# over the 40-line cap, or an already over-cap one that grew. It is diffed
+# against $base for exactly that reason -- flagging every over-cap function in
+# a touched file would refuse any edit to a file that already contains one,
+# which is how a gate teaches people to bypass it. It says nothing about the
+# tree-wide COUNT, which is a ratchet (may shrink, never grow) and so a global
+# property no per-file run can evaluate; CI keeps that.
+gate_static_scans_cap() {
+    cap_test="$repo_root/planning/tests/test-function-length-ratchet.sh"
+    if [ -x "$cap_test" ]; then
         # shellcheck disable=SC2086
-        if shellcheck -x -s bash --severity=warning $changed_sh >/dev/null 2>&1; then
-            ok "shellcheck -x --severity=warning ($(printf '%s\n' "$changed_sh" | wc -l | tr -d ' ') changed vs ${base_label:-base})"
+        if cap_out="$("$cap_test" --files --base "$base" $changed_sh 2>&1)"; then
+            ok "no function newly over the 40-line cap"
         else
-            bad "shellcheck findings at warning severity (CI gates on these)"
-            # shellcheck disable=SC2086
-            shellcheck -x -s bash --severity=warning $changed_sh 2>&1 | sed -n '1,40p' >&2
+            bad "this change puts a function over CODE-STYLE.md's 40-line cap"
+            printf '%s\n' "$cap_out" | sed -n '1,20p' >&2
         fi
     else
-        note "shellcheck not installed locally; CI still gates on it"
+        note "no $cap_test to check the function cap with"
     fi
-    
+}
+
+# The portability scan applies the real rules and allowlists to the changed
+# files only, so it cannot see a construct introduced in a file the change did
+# not name. CI remains the authority on the whole tree.
+gate_static_scans_portability() {
+    port_test="$repo_root/planning/tests/test-portability-contract.sh"
+    if [ -x "$port_test" ]; then
+        # shellcheck disable=SC2086
+        if port_out="$("$port_test" --files $changed_sh 2>&1)"; then
+            ok "no banned portability construct in the changed scripts"
+        else
+            bad "a changed script uses a construct PORTABILITY.md bans"
+            printf '%s\n' "$port_out" | sed -n '1,20p' >&2
+        fi
+    else
+        note "no $port_test to check portability constructs with"
+    fi
 }
 
 gate_static_scans() {
     # ---- 3b. the two static shell gates CI fails on, over the same changed set --
     # Both are pure static checks over shell source and both are CI-fatal, so the
     # cheap half of each belongs in the default gate rather than only in the suite.
-    #
     # Scoped to $changed_sh, the list section 3 already built, so the cost is
     # proportional to the change.
-    #
-    # What each scoped form does and does NOT prove:
-    #   - the cap check reports what THIS change is responsible for: a function
-    #     newly over the 40-line cap, or an already over-cap one that grew. It is
-    #     diffed against $base for exactly that reason -- flagging every over-cap
-    #     function in a touched file would refuse any edit to a file that already
-    #     contains one, which is how a gate teaches people to bypass it. It says
-    #     nothing about the tree-wide COUNT, which is a ratchet (may shrink, never
-    #     grow) and so a global property no per-file run can evaluate; CI keeps that.
-    #   - the portability scan applies the real rules and allowlists to the changed
-    #     files only, so it cannot see a construct introduced in a file the change
-    #     did not name. CI remains the authority on the whole tree.
     if [ -z "$changed_sh" ]; then
         note "no shell scripts differ from ${base_label:-the base}; cap and portability scans skipped"
     else
-        cap_test="$repo_root/planning/tests/test-function-length-ratchet.sh"
-        if [ -x "$cap_test" ]; then
-            # shellcheck disable=SC2086
-            if cap_out="$("$cap_test" --files --base "$base" $changed_sh 2>&1)"; then
-                ok "no function newly over the 40-line cap"
-            else
-                bad "this change puts a function over CODE-STYLE.md's 40-line cap"
-                printf '%s\n' "$cap_out" | sed -n '1,20p' >&2
-            fi
-        else
-            note "no $cap_test to check the function cap with"
-        fi
-    
-        port_test="$repo_root/planning/tests/test-portability-contract.sh"
-        if [ -x "$port_test" ]; then
-            # shellcheck disable=SC2086
-            if port_out="$("$port_test" --files $changed_sh 2>&1)"; then
-                ok "no banned portability construct in the changed scripts"
-            else
-                bad "a changed script uses a construct PORTABILITY.md bans"
-                printf '%s\n' "$port_out" | sed -n '1,20p' >&2
-            fi
-        else
-            note "no $port_test to check portability constructs with"
-        fi
+        gate_static_scans_cap
+        gate_static_scans_portability
     fi
-    
+}
+
+gate_rust_crates_fmt_and_test() {
+    while IFS= read -r crate; do
+        m="src/$crate/Cargo.toml"
+        [ -f "$m" ] || continue
+        if cargo fmt --check --manifest-path "$m" >/dev/null 2>&1; then
+            ok "cargo fmt --check: $crate"
+        else
+            bad "cargo fmt --check: $crate (CI runs fmt before the build)"
+        fi
+        if cargo test --manifest-path "$m" >/dev/null 2>&1; then
+            ok "cargo test: $crate"
+        else
+            bad "cargo test: $crate"
+        fi
+    done <<EOF
+$crates
+EOF
+}
+
+# Workspace-wide, not per-crate: CI's own reasoning (native.yml's comment on
+# the workspace gate) is that a per-crate pass misses a library change
+# breaking a consumer selection did not name, and that was proven true here,
+# not hypothetically -- three CI legs failed on exactly this (client.rs's
+# `session_token_path.is_some()` then `.unwrap()`, `-D warnings` turning
+# `unnecessary_unwrap` fatal) while this gate, running fmt and test only,
+# stayed green. `-D warnings` matches CI's own flags so a local pass means the
+# same thing CI's does, not a weaker guarantee with the same wording.
+gate_rust_crates_clippy() {
+    clippy_log="$(mktemp "${TMPDIR:-/tmp}/pre-push-clippy.XXXXXX")"
+    if cargo clippy --workspace --all-targets -- -D warnings >"$clippy_log" 2>&1; then
+        ok "cargo clippy --workspace -D warnings"
+    else
+        bad "cargo clippy --workspace -D warnings (CI gates on this too)"
+        sed -n '1,40p' "$clippy_log" >&2
+    fi
+    rm -f "$clippy_log"
 }
 
 gate_rust_crates() {
@@ -123,39 +176,8 @@ gate_rust_crates() {
         if ! command -v cargo >/dev/null 2>&1; then
             note "src/ changed but cargo is not on PATH (nix develop); CI still runs fmt and test"
         else
-            while IFS= read -r crate; do
-                m="src/$crate/Cargo.toml"
-                [ -f "$m" ] || continue
-                if cargo fmt --check --manifest-path "$m" >/dev/null 2>&1; then
-                    ok "cargo fmt --check: $crate"
-                else
-                    bad "cargo fmt --check: $crate (CI runs fmt before the build)"
-                fi
-                if cargo test --manifest-path "$m" >/dev/null 2>&1; then
-                    ok "cargo test: $crate"
-                else
-                    bad "cargo test: $crate"
-                fi
-            done <<EOF
-$crates
-EOF
-            # Workspace-wide, not per-crate: CI's own reasoning (native.yml's
-            # comment on the workspace gate) is that a per-crate pass misses a
-            # library change breaking a consumer selection did not name, and that
-            # was proven true here, not hypothetically -- three CI legs failed on
-            # exactly this (client.rs's `session_token_path.is_some()` then
-            # `.unwrap()`, `-D warnings` turning `unnecessary_unwrap` fatal) while
-            # this gate, running fmt and test only, stayed green. `-D warnings`
-            # matches CI's own flags so a local pass means the same thing CI's
-            # does, not a weaker guarantee with the same wording.
-            clippy_log="$(mktemp "${TMPDIR:-/tmp}/pre-push-clippy.XXXXXX")"
-            if cargo clippy --workspace --all-targets -- -D warnings >"$clippy_log" 2>&1; then
-                ok "cargo clippy --workspace -D warnings"
-            else
-                bad "cargo clippy --workspace -D warnings (CI gates on this too)"
-                sed -n '1,40p' "$clippy_log" >&2
-            fi
-            rm -f "$clippy_log"
+            gate_rust_crates_fmt_and_test
+            gate_rust_crates_clippy
         fi
     else
         note "no crates under src/ changed; rust gates skipped"

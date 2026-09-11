@@ -7,6 +7,9 @@
 # ci-failures.sh's own argument parsing (repo_override, target, format,
 # raw_dir, and friends).
 
+# shellcheck disable=SC2154
+# esc, target and want_all are set by ci-failures.sh's own argument parsing,
+# which a per-file lint cannot see.
 set -euo pipefail
 export LC_ALL=C
 

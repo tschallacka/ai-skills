@@ -6,6 +6,9 @@
 # Sourced by setup-dev-env.sh only. Every function here reads repo_root from
 # the caller rather than resolving its own copy.
 
+# shellcheck disable=SC2154
+# repo_root is set by setup-dev-env.sh before this is sourced; shellcheck
+# lints each file alone and cannot see that assignment.
 set -euo pipefail
 export LC_ALL=C
 

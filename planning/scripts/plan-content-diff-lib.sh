@@ -17,53 +17,66 @@ export LC_ALL=C
 # visible here). A changed paragraph label is usually an UNCHANGED diff line,
 # so labels come from the document, not the diff. POSIX awk (CODE-STYLE.md §1)
 # with the default single-character RS, for mawk/BSD-awk parity.
+# The diff hunks matter, tracking which new-file line numbers changed.
+# After "@@ -a,b +c,d @@" the new-file side is numbered from c. POSIX ERE has
+# no \d, hence [0-9]+.
+plan_content_diff_changed_lines_awk() {
+    printf '%s\n' '
+        /^@@/ {
+            if (match($0, /\+[0-9]+/)) {
+                new_line = substr($0, RSTART + 1, RLENGTH - 1) + 0
+                in_hunk = 1
+            } else {
+                in_hunk = 0
+            }
+            next
+        }
+        in_hunk != 1 { next }
+        {
+            lead = substr($0, 1, 1)
+            # "+++" is the file header, not added content.
+            if (lead == "+" && substr($0, 1, 3) != "+++") {
+                order[++changed_lines] = new_line
+                is_changed[new_line] = 1
+            }
+            # A "-" line does not exist on the new-file side.
+            if (lead != "-") new_line++
+        }
+    '
+}
+
+# Walks the document once, resolving each changed line to the last § label
+# seen before it, then prints each label once in first-appearance order.
+plan_content_diff_labels_end_awk() {
+    printf '%s\n' '
+        END {
+            number = 0
+            while ((getline document_line < doc) > 0) {
+                number++
+                if (document_line ~ /^§ [0-9]+\.[0-9]+$/) label = document_line
+                if (number in is_changed) label_of[number] = label
+            }
+            close(doc)
+            # First-appearance order, deduplicated. A line before the first
+            # label has none and is skipped.
+            for (position = 1; position <= changed_lines; position++) {
+                found = label_of[order[position]]
+                if (found == "") continue
+                if (found in seen) continue
+                seen[found] = 1
+                print found
+            }
+        }
+    '
+}
+
 plan_content_diff_paragraph_labels() {
-    local doc="$1" path
+    local doc="$1" path awk_program
     path="$doc"
     [ "$plan_rel" = "." ] || path="$plan_rel/$doc"
+    awk_program="$(plan_content_diff_changed_lines_awk)$(plan_content_diff_labels_end_awk)"
     git -C "$repo_root" diff -U0 "$git_ref" -- "$path" 2>/dev/null |
-        awk -v doc="$plan_abs/$doc" '
-            # After "@@ -a,b +c,d @@" the new-file side is numbered from
-            # c. POSIX ERE has no \d, hence [0-9]+.
-            /^@@/ {
-                if (match($0, /\+[0-9]+/)) {
-                    new_line = substr($0, RSTART + 1, RLENGTH - 1) + 0
-                    in_hunk = 1
-                } else {
-                    in_hunk = 0
-                }
-                next
-            }
-            in_hunk != 1 { next }
-            {
-                lead = substr($0, 1, 1)
-                # "+++" is the file header, not added content.
-                if (lead == "+" && substr($0, 1, 3) != "+++") {
-                    order[++changed_lines] = new_line
-                    is_changed[new_line] = 1
-                }
-                # A "-" line does not exist on the new-file side.
-                if (lead != "-") new_line++
-            }
-            END {
-                number = 0
-                while ((getline document_line < doc) > 0) {
-                    number++
-                    if (document_line ~ /^§ [0-9]+\.[0-9]+$/) label = document_line
-                    if (number in is_changed) label_of[number] = label
-                }
-                close(doc)
-                # First-appearance order, deduplicated. A line before the
-                # first label has none and is skipped.
-                for (position = 1; position <= changed_lines; position++) {
-                    found = label_of[order[position]]
-                    if (found == "") continue
-                    if (found in seen) continue
-                    seen[found] = 1
-                    print found
-                }
-            }
-        '
+        awk -v doc="$plan_abs/$doc" "$awk_program"
 }
 
 # plan_content_diff_json_escape <value> — built byte by byte rather than with
