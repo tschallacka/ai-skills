@@ -38,7 +38,8 @@ Usage:
   installer list [--source DIR]            print every discovered skill
   installer install (--target DIR | --agent NAME)
                      (--all | --skill NAME [--skill NAME ...])
-                     [--source DIR] [--integration MODE|SKILL=MODE ...] [--yes]
+                     [--source DIR] [--integration MODE|SKILL=MODE ...]
+                     [--editor-integration skill|mcp] [--yes]
                      [--dev-build]
                      runs the planning/worktrees/interactive-shell/editor
                      permission prompts unless --yes auto-answers them;
@@ -197,6 +198,11 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
                 i += 1;
                 integration.push(argv.get(i).ok_or("--integration needs a mode, or skill=mode")?.clone());
             }
+            "--editor-integration" => {
+                i += 1;
+                let mode = argv.get(i).ok_or("--editor-integration needs skill or mcp")?;
+                integration.push(format!("ai-text-editor={mode}"));
+            }
             "--yes" => yes = true,
             "--dev-build" => dev_build = true,
             other => return Err(format!("install: unknown option: {other}")),
@@ -285,12 +291,23 @@ impl IntegrationSelection {
 /// own declared modes -- a `skill=mode` naming a mode that skill does not
 /// offer is refused by name, same as install.sh's `record_skill_integration`
 /// refusing at the door rather than failing silently mid-install.
+///
+/// `EDITOR_INTEGRATION` (install.sh's older, ai-text-editor-only env-var
+/// spelling of the same choice) is folded in first, so an explicit
+/// `--integration`/`--editor-integration` on the command line still
+/// overrides it -- same precedence install.sh's own INTEGRATION_SELECTION
+/// prepend order gives the CLI flag over the env var.
 fn build_integration_selection(
     source: &Path,
     raw: &[String],
 ) -> Result<IntegrationSelection, String> {
     let mut selection = IntegrationSelection::default();
-    for arg in raw {
+    let env_editor_integration = std::env::var("EDITOR_INTEGRATION")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .map(|mode| format!("ai-text-editor={mode}"));
+    let combined: Vec<String> = env_editor_integration.into_iter().chain(raw.iter().cloned()).collect();
+    for arg in &combined {
         let (skill, mode) = match arg.split_once('=') {
             Some((s, m)) => (Some(s.to_string()), m.to_string()),
             None => (None, arg.clone()),
@@ -1277,6 +1294,11 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             "--integration" => {
                 i += 1;
                 integration_args.push(argv.get(i).ok_or("--integration needs a mode, or skill=mode")?.clone());
+            }
+            "--editor-integration" => {
+                i += 1;
+                let mode = argv.get(i).ok_or("--editor-integration needs skill or mcp")?;
+                integration_args.push(format!("ai-text-editor={mode}"));
             }
             "--yes" => yes = true,
             "--dev-build" => dev_build = true,
