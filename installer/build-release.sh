@@ -213,25 +213,31 @@ case "$mode" in
         # chat/bin/<host-triple>/ so the collect() copy loop below finds them
         # (skill_files resolves the host's platform to one triple dir). If cargo
         # is absent the build fails loudly rather than producing an empty package.
+        #
+        # ALWAYS built with --target, even though every case below names the
+        # very host this is running on: `uname` cannot tell a glibc host from
+        # a musl one, so a plain `cargo build --release` here would link
+        # against whatever libc the host's default toolchain happens to use
+        # and land the result under a directory named for the musl triple
+        # regardless -- the same bug installer/build-installer-release.sh's
+        # own history already records and fixed for the installer binary.
+        # host_target() -- the resolver this whole file already uses for
+        # prepare_planning_rust_commands() -- names the target once so the
+        # build and the destination directory can never disagree.
         if command -v cargo >/dev/null 2>&1; then
-            ( cd "$repo_root" && cargo build --release --package chat-server-rs ) \
+            chat_dir="$(host_target)" \
+                || { printf '%s: unsupported host for chat binaries\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-server-rs ) \
                 || { printf '%s: cargo build chat-server-rs failed\n' "${0##*/}" >&2; exit 66; }
-            ( cd "$repo_root" && cargo build --release --package chat-client-rs ) \
+            ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-client-rs ) \
                 || { printf '%s: cargo build chat-client-rs failed\n' "${0##*/}" >&2; exit 66; }
-            ( cd "$repo_root" && cargo build --release --package chat-mcp ) \
+            ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-mcp ) \
                 || { printf '%s: cargo build chat-mcp failed\n' "${0##*/}" >&2; exit 66; }
-            case "$(uname -s):$(uname -m)" in
-                Linux:x86_64|Linux:amd64) chat_dir=x86_64-unknown-linux-musl ;;
-                Linux:aarch64|Linux:arm64) chat_dir=aarch64-unknown-linux-musl ;;
-                Darwin:x86_64) chat_dir=x86_64-apple-darwin ;;
-                Darwin:arm64) chat_dir=aarch64-apple-darwin ;;
-                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64) chat_dir=x86_64-pc-windows-msvc ;;
-                *) printf '%s: unsupported host for chat binaries\n' "${0##*/}" >&2; exit 66 ;;
-            esac
             mkdir -p "$repo_root/chat/bin/$chat_dir"
-            cp "$repo_root/target/release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
-            cp "$repo_root/target/release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
-            cp "$repo_root/target/release/chat-mcp" "$repo_root/chat/bin/$chat_dir/chat-mcp"
+            chat_release="$repo_root/target/$chat_dir/release"
+            cp "$chat_release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
+            cp "$chat_release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
+            cp "$chat_release/chat-mcp" "$repo_root/chat/bin/$chat_dir/chat-mcp"
         else
             # Prebuilt binaries must already be in place (CI build step).
             ls "$repo_root/chat/bin/"*/chat-server-rs >/dev/null 2>&1 \
@@ -246,16 +252,13 @@ case "$mode" in
         # for each -- so the copy loop below requires them for THIS host. Build
         # them when cargo is here and otherwise require the CI step's output,
         # rather than letting the loop fail with a bare "does not exist" on a
-        # path nothing in this script ever writes.
-        register_dir=''
-        case "$(uname -s):$(uname -m)" in
-            Linux:x86_64|Linux:amd64) register_dir=x86_64-unknown-linux-musl ;;
-            Linux:aarch64|Linux:arm64) register_dir=aarch64-unknown-linux-musl ;;
-            Darwin:x86_64) register_dir=x86_64-apple-darwin ;;
-            Darwin:arm64) register_dir=aarch64-apple-darwin ;;
-            MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64) register_dir=x86_64-pc-windows-msvc ;;
-            *) printf '%s: unsupported host for the register binaries\n' "${0##*/}" >&2; exit 66 ;;
-        esac
+        # path nothing in this script ever writes. host_target(), not a fourth
+        # copy of the case statement -- same --target reasoning as the chat
+        # binaries above: uname cannot distinguish a glibc host from a musl
+        # one, so the build and the destination directory it is named for must
+        # come from the same resolved target or they can silently disagree.
+        register_dir="$(host_target)" \
+            || { printf '%s: unsupported host for the register binaries\n' "${0##*/}" >&2; exit 66; }
         register_exe=''
         case "$register_dir" in *windows*) register_exe='.exe' ;; esac
         for register_pair in 'bug-report:bugs' 'todo:todo'; do
@@ -264,11 +267,11 @@ case "$mode" in
             if [ -x "$repo_root/$register_skill/bin/$register_dir/$register_bin" ]; then
                 continue
             elif command -v cargo >/dev/null 2>&1; then
-                ( cd "$repo_root" && cargo build --release \
+                ( cd "$repo_root" && cargo build --release --target "$register_dir" \
                     --manifest-path "src/$register_skill/Cargo.toml" ) \
                     || { printf '%s: cargo build %s failed\n' "${0##*/}" "$register_skill" >&2; exit 66; }
                 mkdir -p "$repo_root/$register_skill/bin/$register_dir"
-                cp "$repo_root/target/release/$register_bin" \
+                cp "$repo_root/target/$register_dir/release/$register_bin" \
                     "$repo_root/$register_skill/bin/$register_dir/$register_bin"
                 chmod +x "$repo_root/$register_skill/bin/$register_dir/$register_bin"
             else
