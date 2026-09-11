@@ -17,7 +17,10 @@
 //! tree's own prebuilt `planning/bin/<target-triple>/rjq` ahead of PATH
 //! before any dependency check runs, so a host with no system-wide rjq
 //! still satisfies the requirement as long as the release shipped one for
-//! this host's triple. `tool_available` reproduces that one exception; every
+//! this host's triple. This installer adds one further rung install.sh does
+//! not have: rjq is a jq-compatible reimplementation, so a system `jq` on
+//! PATH also satisfies the requirement when neither rjq nor a bundled
+//! artifact is found. `tool_available` is where all three rungs live; every
 //! other tool is a plain PATH lookup. Install hints
 //! (`runtime_requirement_install_hint`) are not ported: they belong to the
 //! picker's ACTIONS pane (`d`, reverify/hint), which stays unported along
@@ -198,11 +201,16 @@ fn bundled_rjq_path(source_root: &Path) -> Option<PathBuf> {
 }
 
 /// A tool is available when it is on PATH, or -- for rjq only -- when this
-/// release bundled one for the running host. Every other tool has no such
-/// fallback: install.sh's own generated `runtime_tool_verify()` is a plain
-/// `command -v` for everything but rjq.
+/// release bundled one for the running host, or (last resort) when a system
+/// `jq` is on PATH: rjq is a jq-compatible reimplementation, so wherever
+/// rjq itself would satisfy this requirement, jq does too. Every other tool
+/// has no such fallback: install.sh's own generated `runtime_tool_verify()`
+/// is a plain `command -v` for everything but rjq.
 fn tool_available(source_root: &Path, tool: &str) -> bool {
-    tool_on_path(tool) || (tool == "rjq" && bundled_rjq_path(source_root).is_some())
+    if tool != "rjq" {
+        return tool_on_path(tool);
+    }
+    tool_on_path("rjq") || bundled_rjq_path(source_root).is_some() || tool_on_path("jq")
 }
 
 pub fn requirement_met(source_root: &Path, req: &Requirement) -> bool {
@@ -283,12 +291,29 @@ pub fn skill_status(source_root: &Path, skill: &str) -> SkillStatus {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::sync::Mutex;
 
     fn write_requires(dir: &Path, skill: &str, content: &str) {
         let skill_dir = dir.join(skill);
         fs::create_dir_all(&skill_dir).unwrap();
         let mut f = fs::File::create(skill_dir.join("requires.tsv")).unwrap();
         f.write_all(content.as_bytes()).unwrap();
+    }
+
+    // tool_available("rjq", ...) reads the process-global PATH, so every test
+    // that overrides it takes this lock first -- same reasoning as
+    // plan_migration.rs's ENV_LOCK.
+    static PATH_LOCK: Mutex<()> = Mutex::new(());
+
+    fn write_fake_tool(dir: &Path, name: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
     }
 
     #[test]
@@ -360,6 +385,7 @@ mod tests {
 
     #[test]
     fn tool_on_path_finds_a_real_binary_and_rejects_a_fake_one() {
+        let _guard = PATH_LOCK.lock().unwrap();
         assert!(tool_on_path("ls") || tool_on_path("cmd.exe"));
         assert!(!tool_on_path("definitely-not-a-real-tool-xyz"));
     }
@@ -409,6 +435,41 @@ mod tests {
              also-not-real-xyz\t*:*\thard\tneeds it\n",
         );
         let status = skill_status(dir.path(), "s");
+        assert_eq!(status.state, SkillState::Blocked);
+    }
+
+    #[test]
+    fn a_missing_rjq_falls_back_to_a_system_jq() {
+        let _guard = PATH_LOCK.lock().unwrap();
+        let source = tempfile::tempdir().unwrap(); // no bundled planning/bin/*/rjq
+        write_requires(
+            source.path(),
+            "s",
+            "tool\tcondition\tstrength\twhy\nrjq\t*:*\thard\tneeds json\n",
+        );
+        let fake_path_dir = tempfile::tempdir().unwrap();
+        write_fake_tool(fake_path_dir.path(), "jq");
+        let original = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", fake_path_dir.path());
+        let status = skill_status(source.path(), "s");
+        std::env::set_var("PATH", original);
+        assert_eq!(status.state, SkillState::Ok);
+    }
+
+    #[test]
+    fn no_rjq_and_no_jq_still_blocks() {
+        let _guard = PATH_LOCK.lock().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        write_requires(
+            source.path(),
+            "s",
+            "tool\tcondition\tstrength\twhy\nrjq\t*:*\thard\tneeds json\n",
+        );
+        let empty_path_dir = tempfile::tempdir().unwrap();
+        let original = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", empty_path_dir.path());
+        let status = skill_status(source.path(), "s");
+        std::env::set_var("PATH", original);
         assert_eq!(status.state, SkillState::Blocked);
     }
 }
