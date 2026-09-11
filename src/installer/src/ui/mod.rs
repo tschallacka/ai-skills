@@ -16,13 +16,14 @@ pub mod terminal;
 
 use input::Key;
 use mascot::{ColorMode, EyeAnimator};
-use model::{PickerState, SkillEntry};
+use model::{Focus, PickerState, SkillEntry};
 
 /// `None` when fd 0 is not a tty (the caller's cue to fall back to a plain
 /// listing, same as install.sh's iui_run returning 69) or the user quit
-/// (q/Esc/Ctrl-C/EOF); `Some(names)` in original skill order once `i`
-/// confirms.
-pub fn run_picker(skills: Vec<SkillEntry>) -> Option<Vec<String>> {
+/// (q/Esc/Ctrl-C/EOF); `Some(names_and_modes)` in original skill order once
+/// `i` confirms, the mode being whatever `m` last cycled it to (or the
+/// run's already-resolved default, if `m` was never pressed for that skill).
+pub fn run_picker(skills: Vec<SkillEntry>) -> Option<Vec<(String, String)>> {
     if !terminal::is_tty() {
         return None;
     }
@@ -64,7 +65,7 @@ pub fn run_picker(skills: Vec<SkillEntry>) -> Option<Vec<String>> {
 
     terminal::leave(&saved);
     if state.confirmed {
-        Some(state.selected_names())
+        Some(state.selected_with_modes())
     } else {
         None
     }
@@ -120,6 +121,11 @@ fn handle_key(state: &mut PickerState, key: Key, layout: &layout::Layout) {
         Key::Tab | Key::ShiftTab => state.toggle_focus(),
         Key::Char('a') => state.select_all(),
         Key::Char('n') => state.select_none(),
+        // Focus-gated like a future d/r would be: the ACTIONS lines are only
+        // usable when the info pane holds focus, same as install.sh's
+        // iui_handle_key ('i' already means "install", so cycling the mode
+        // could not reuse it).
+        Key::Char('m') if state.focus == Focus::Info => state.cycle_integration_mode(),
         Key::Char('i') => {
             state.done = true;
             state.confirmed = true;

@@ -1081,13 +1081,23 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             let description = manifest::known_skill(&name)
                 .map(|s| s.description.to_string())
                 .unwrap_or_default();
-            let installed = target.join(&name).join("SKILL.md").is_file();
+            let destination = target.join(&name);
+            let installed = destination.join("SKILL.md").is_file();
             let status = requirements::skill_status(&source, &name);
+            let offered_modes = integration::modes(&source, &name);
+            let mode = integration::resolve_mode(
+                &source,
+                &name,
+                Some(&destination),
+                integration_selection.choice_for(&name),
+            );
             ui::model::SkillEntry {
                 name,
                 description,
                 installed,
                 status,
+                offered_modes,
+                mode,
             }
         })
         .collect();
@@ -1102,8 +1112,12 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(selected) => {
-            let installed =
-                install_selected_skills(&source, &target, &selected, &integration_selection)?;
+            let names: Vec<String> = selected.iter().map(|(name, _)| name.clone()).collect();
+            let mut picked = IntegrationSelection::default();
+            for (name, mode) in &selected {
+                picked.per_skill.insert(name.clone(), mode.clone());
+            }
+            let installed = install_selected_skills(&source, &target, &names, &picked)?;
             run_post_install_steps(kind.as_deref(), &source, &target, &installed);
             Ok(ExitCode::SUCCESS)
         }

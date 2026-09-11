@@ -3,10 +3,11 @@
 //! Picker state -- selection, cursor, scroll, focus -- ported in spirit from
 //! installer/src/35-ui-model.sh's IUI_* state, trimmed to what this slice
 //! actually drives: [[requirements]] supplies the per-skill ok/degraded/
-//! blocked state and DEPENDENCIES section, but there is still no
-//! integration-mode cycling (T95, needs integration.tsv) and no ACTIONS pane
-//! (d/r/m -- install-hint text, reverify, mode cycling) since none of those
-//! read from a model this installer has yet.
+//! blocked state and DEPENDENCIES section, and `offered_modes`/`mode` carry
+//! T95's integration-mode cycling (`m`, `iui_action_cycle_integration`).
+//! There is still no `d`/`r` (dependency-install-hint text, reverify) --
+//! those read installer/tools.tsv's own hint table, which nothing in this
+//! installer parses yet.
 
 use crate::requirements::{SkillState, SkillStatus};
 
@@ -15,6 +16,14 @@ pub struct SkillEntry {
     pub description: String,
     pub installed: bool,
     pub status: SkillStatus,
+    /// Every integration mode this skill declares (`[]` for the near-total
+    /// majority with no `integration.tsv`, meaning it offers no choice at
+    /// all -- same as install.sh's `IUI_INTEGRATION_OFFERED` being empty).
+    pub offered_modes: Vec<String>,
+    /// The mode this skill installs in if selected right now: the run's
+    /// already-resolved default until `m` cycles it, from then on whatever
+    /// was last cycled to.
+    pub mode: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -163,13 +172,37 @@ impl PickerState {
         }
     }
 
-    pub fn selected_names(&self) -> Vec<String> {
+    /// Every selected skill's name paired with the mode it will install in
+    /// -- the answer `i` hands the caller, the mode being whatever `m` last
+    /// cycled it to (or the run's already-resolved default otherwise).
+    pub fn selected_with_modes(&self) -> Vec<(String, String)> {
         self.skills
             .iter()
             .zip(self.selected.iter())
             .filter(|(_, sel)| **sel)
-            .map(|(skill, _)| skill.name.clone())
+            .map(|(skill, _)| (skill.name.clone(), skill.mode.clone()))
             .collect()
+    }
+
+    /// Advances the skill under the cursor to its next offered mode,
+    /// wrapping -- ported from installer/src/37-ui-input.sh's
+    /// `iui_action_cycle_integration`. A no-op, with no message, for a
+    /// skill offering fewer than two modes -- there is nothing to refuse,
+    /// so unlike `toggle` this never has anything to say.
+    pub fn cycle_integration_mode(&mut self) {
+        let Some(skill) = self.skills.get_mut(self.cursor) else {
+            return;
+        };
+        if skill.offered_modes.len() < 2 {
+            return;
+        }
+        let current_index = skill.offered_modes.iter().position(|m| m == &skill.mode);
+        let next_index = match current_index {
+            Some(i) => (i + 1) % skill.offered_modes.len(),
+            None => 0,
+        };
+        skill.mode = skill.offered_modes[next_index].clone();
+        self.message = vec![format!("{} will be installed in {} mode", skill.name, skill.mode)];
     }
 
     pub fn selected_count(&self) -> usize {
@@ -209,6 +242,8 @@ mod tests {
                 description: format!("{n} description"),
                 installed: false,
                 status: ok_status(),
+                offered_modes: Vec::new(),
+                mode: "skill".to_string(),
             })
             .collect()
     }
@@ -293,7 +328,12 @@ mod tests {
     fn selected_names_preserves_skill_order() {
         let mut state = PickerState::new(skills(&["a", "b", "c"]));
         state.toggle(1);
-        assert_eq!(state.selected_names(), vec!["a", "c"]);
+        let names: Vec<String> = state
+            .selected_with_modes()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(names, vec!["a", "c"]);
     }
 
     #[test]
@@ -335,5 +375,49 @@ mod tests {
         state.select_none();
         state.select_all();
         assert_eq!(state.selected, vec![true, false]);
+    }
+
+    #[test]
+    fn cycling_a_skill_with_no_offered_modes_is_a_no_op() {
+        let mut state = PickerState::new(skills(&["a"]));
+        state.cycle_integration_mode();
+        assert_eq!(state.skills[0].mode, "skill");
+        assert!(state.message.is_empty());
+    }
+
+    #[test]
+    fn cycling_advances_to_the_next_offered_mode_and_wraps() {
+        let mut list = skills(&["a"]);
+        list[0].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
+        let mut state = PickerState::new(list);
+        state.cycle_integration_mode();
+        assert_eq!(state.skills[0].mode, "mcp");
+        assert!(state.message[0].contains("a will be installed in mcp mode"));
+        state.cycle_integration_mode();
+        assert_eq!(state.skills[0].mode, "skill");
+    }
+
+    #[test]
+    fn cycling_operates_on_the_skill_under_the_cursor() {
+        let mut list = skills(&["a", "b"]);
+        list[1].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
+        let mut state = PickerState::new(list);
+        state.cursor = 1;
+        state.cycle_integration_mode();
+        assert_eq!(state.skills[0].mode, "skill");
+        assert_eq!(state.skills[1].mode, "mcp");
+    }
+
+    #[test]
+    fn selected_with_modes_reports_each_selected_skills_current_mode() {
+        let mut list = skills(&["a", "b"]);
+        list[1].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
+        let mut state = PickerState::new(list);
+        state.cursor = 1;
+        state.cycle_integration_mode();
+        assert_eq!(
+            state.selected_with_modes(),
+            vec![("a".to_string(), "skill".to_string()), ("b".to_string(), "mcp".to_string())]
+        );
     }
 }

@@ -93,10 +93,10 @@ fn list_row(state: &PickerState, index: usize, width: usize) -> String {
     pad(&format!("{cursor}{checkbox} {name}{suffix}"), width)
 }
 
-/// Name, description, install status, and (when requires.tsv named any)
-/// DEPENDENCIES -- no ACTIONS pane yet (iui_info_status's `d`/`r`/`m` hint
-/// carousel and integration-mode cycling stay unported until integration.tsv
-/// has a Rust model).
+/// Name, description, install status, DEPENDENCIES (when requires.tsv named
+/// any), and ACTIONS' `m` line (when the skill offers more than one
+/// integration mode) -- `d`/`r` (dependency-install-hint text, reverify)
+/// stay unported, since those read installer/tools.tsv's own hint table.
 pub(crate) fn info_lines(state: &PickerState, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let skill = &state.skills[state.cursor];
@@ -139,6 +139,20 @@ pub(crate) fn info_lines(state: &PickerState, width: usize) -> Vec<String> {
             for line in wrap(&format!("  {label} ({strength}): {mark} -- {}", req.why), width) {
                 lines.push(pad(&line, width));
             }
+        }
+    }
+    if skill.offered_modes.len() > 1 {
+        lines.push(pad("", width));
+        lines.push(pad("ACTIONS", width));
+        for line in wrap(
+            &format!(
+                "  m  integration mode: {}   (cycles: {})",
+                skill.mode,
+                skill.offered_modes.join(" ")
+            ),
+            width,
+        ) {
+            lines.push(pad(&line, width));
         }
     }
     if !state.message.is_empty() {
@@ -276,6 +290,8 @@ mod tests {
                     blocker: None,
                     requirements: Vec::new(),
                 },
+                offered_modes: Vec::new(),
+                mode: "skill".to_string(),
             })
             .collect()
     }
@@ -366,5 +382,26 @@ mod tests {
         }
         let separator_row = 2 + layout.list_rows;
         assert!(frame[separator_row].contains("-------"));
+    }
+
+    #[test]
+    fn a_skill_offering_more_than_one_mode_shows_the_actions_line() {
+        let mut list = skills(&["ai-text-editor"]);
+        list[0].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
+        list[0].mode = "mcp".to_string();
+        let state = PickerState::new(list);
+        let width = 60;
+        let lines = info_lines(&state, width);
+        assert!(lines.iter().any(|l| l.contains("ACTIONS")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("integration mode: mcp") && l.contains("cycles: skill mcp")));
+    }
+
+    #[test]
+    fn a_skill_with_one_mode_shows_no_actions_line() {
+        let state = PickerState::new(skills(&["todo"]));
+        let lines = info_lines(&state, 60);
+        assert!(!lines.iter().any(|l| l.contains("ACTIONS")));
     }
 }
