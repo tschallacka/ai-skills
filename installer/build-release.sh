@@ -201,11 +201,23 @@ editor_gate_plugin_files() {
     printf 'editor-gate-plugin/hooks/pre-tool-use-edit-write.sh\n'
 }
 
+# The exact files src/installer/src/plugins.rs's own
+# AGENT_IDENTITY_PLUGIN_FILES carries. T122/T123: rides unconditionally with
+# chat/ai-text-editor/interactive-shell on a Claude Code root, same as the
+# two plugins above.
+agent_identity_plugin_files() {
+    printf 'agent-identity-plugin/.claude-plugin/plugin.json\n'
+    printf 'agent-identity-plugin/hooks/hooks.json\n'
+    printf 'agent-identity-plugin/hooks/lib.sh\n'
+    printf 'agent-identity-plugin/hooks/subagent-start.sh\n'
+}
+
 collect() {
     {
         printf 'README.md\nLICENSE\npackage.json\n'
         tui_hint_plugin_files
         editor_gate_plugin_files
+        agent_identity_plugin_files
         local path
         while IFS= read -r path; do
             [ -n "$path" ] || continue

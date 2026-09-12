@@ -64,6 +64,9 @@ Usage:
   installer install-editor-gate-plugin --source DIR --target DIR
                      install the vendor-shipped plugin that rides with
                      interactive-shell / ai-text-editor
+  installer install-agent-identity-plugin --source DIR --target DIR
+                     install the vendor-shipped plugin that rides with
+                     chat / ai-text-editor / interactive-shell (Claude Code only)
   installer set-claude-env --key KEY --value VALUE
                      merge one env.KEY setting into Claude's settings.json
   installer print-skill-files planning [--source DIR]
@@ -119,6 +122,7 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         Some("migrate-plans") => run_migrate_plans(&argv[1..]),
         Some("install-tui-hint-plugin") => run_install_tui_hint_plugin(&argv[1..]),
         Some("install-editor-gate-plugin") => run_install_editor_gate_plugin(&argv[1..]),
+        Some("install-agent-identity-plugin") => run_install_agent_identity_plugin(&argv[1..]),
         Some("set-claude-env") => run_set_claude_env(&argv[1..]),
         Some("print-skill-files") => run_print_skill_files(&argv[1..]),
         Some("resolve-source") => run_resolve_source(&argv[1..]),
@@ -948,6 +952,59 @@ fn run_post_install_steps(
     if skills.iter().any(|s| s == "ai-text-editor") {
         run_editor_steering_and_gate_step(&known_roots, source, &home, confirms);
     }
+    run_agent_identity_post_install(&known_roots, source, skills);
+}
+
+/// T122/T123: a session-dependent skill (chat, ai-text-editor,
+/// interactive-shell -- each keys state per calling agent) must not install
+/// on a Claude Code root without the plugin that tells each subagent its own
+/// id at `SubagentStart`, or two agents sharing one run silently share one
+/// tab/socket/nick and neither is told. Unconditional, no confirm prompt --
+/// same as `run_interactive_shell_post_install`'s tui-hint-plugin and
+/// `run_editor_steering_and_gate_step`'s editor-gate-plugin, both installed
+/// the same way for the same reason (a companion plugin, not an optional
+/// grant). One OR check so selecting more than one of the three still
+/// installs it exactly once. opencode/codex have no `SubagentStart`
+/// equivalent measured yet (agent-identity-plugin/README.md), so those roots
+/// get a plain statement that the guarantee is absent there instead of a
+/// silent no-op.
+fn run_agent_identity_post_install(roots: &[(&Path, &str)], source: &Path, skills: &[String]) {
+    let session_dependent = skills
+        .iter()
+        .any(|s| matches!(s.as_str(), "chat" | "ai-text-editor" | "interactive-shell"));
+    if !session_dependent {
+        return;
+    }
+    println!();
+    println!("== per-subagent identity (SubagentStart hook) ==");
+    let claude_roots: Vec<&Path> = roots
+        .iter()
+        .filter(|(_, k)| *k == "claude")
+        .map(|(p, _)| *p)
+        .collect();
+    for target in &claude_roots {
+        match plugins::install_agent_identity_plugin_claude(source, target) {
+            Ok(destination) => println!(
+                "Installed: {} (injects AGENT_ID/AGENT_TYPE into each subagent's context)",
+                destination.display()
+            ),
+            Err(e) => println!("agent-identity-plugin: {e}"),
+        }
+    }
+    let mut other_kinds: Vec<&str> = roots
+        .iter()
+        .map(|(_, k)| *k)
+        .filter(|k| *k == "opencode" || *k == "codex")
+        .collect();
+    other_kinds.sort_unstable();
+    other_kinds.dedup();
+    for kind in other_kinds {
+        println!(
+            "  {kind}: SubagentStart is a Claude Code hook; {kind} has no equivalent measured \
+             yet, so a subagent here still shares its parent's chat nick, editor tabs, and \
+             interactive-shell socket unless another mechanism separates them."
+        );
+    }
 }
 
 /// Runs for every install with at least one known agent root, whatever
@@ -1749,6 +1806,20 @@ fn run_install_editor_gate_plugin(argv: &[String]) -> Result<ExitCode, String> {
         plugins::install_editor_gate_plugin(&args.source, &target).map_err(|e| e.to_string())?;
     println!(
         "Installed: {} (gates sed -i/perl -i/heredoc writes behind a minted token; see editor-gate-plugin/README.md)",
+        destination.display()
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_install_agent_identity_plugin(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_plugin_args("install-agent-identity-plugin", argv)?;
+    let target = args
+        .target
+        .ok_or("install-agent-identity-plugin: --target is required")?;
+    let destination = plugins::install_agent_identity_plugin_claude(&args.source, &target)
+        .map_err(|e| e.to_string())?;
+    println!(
+        "Installed: {} (injects AGENT_ID/AGENT_TYPE into each subagent's context at SubagentStart; see agent-identity-plugin/README.md)",
         destination.display()
     );
     Ok(ExitCode::SUCCESS)

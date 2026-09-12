@@ -3,6 +3,12 @@ package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	11904
 package/LICENSE	1068
 package/README.md	17963
+package/agent-identity-plugin/.claude-plugin/plugin.json	405
+package/agent-identity-plugin/README.md	3064
+package/agent-identity-plugin/hooks/hooks.json	192
+package/agent-identity-plugin/hooks/lib.sh	2779
+package/agent-identity-plugin/hooks/subagent-start.sh	1325
+package/agent-identity-plugin/tests/test-agent-identity-injection.sh	1934
 package/ai-text-editor/SKILL.md	20715
 package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	16672
@@ -127,7 +133,7 @@ package/interactive-shell/tests/test-interactive-shell.sh	7688
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
-package/package.json	2011
+package/package.json	2040
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	19826
 package/planning/REVIEWER.md	24342

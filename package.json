@@ -35,6 +35,7 @@
     "post-implementation-review",
     "ai-text-editor",
     "editor-gate-plugin",
+    "agent-identity-plugin",
     "www",
     "ci-failures",
     ".agents",

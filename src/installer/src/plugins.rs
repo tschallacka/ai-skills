@@ -41,6 +41,14 @@ const EDITOR_GATE_PLUGIN_EXECUTABLES: &[&str] = &[
     "hooks/pre-tool-use-edit-write.sh",
 ];
 
+const AGENT_IDENTITY_PLUGIN_FILES: &[&str] = &[
+    ".claude-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/lib.sh",
+    "hooks/subagent-start.sh",
+];
+const AGENT_IDENTITY_PLUGIN_EXECUTABLES: &[&str] = &["hooks/lib.sh", "hooks/subagent-start.sh"];
+
 /// Copies `files` (relative to `source_root/plugin_name`) into
 /// `target_root/plugin_name`, then makes `executables` (a subset of `files`)
 /// executable on unix. A file the shipped tree does not have is silently
@@ -100,6 +108,23 @@ pub fn install_editor_gate_plugin(source_root: &Path, target_root: &Path) -> io:
         "editor-gate-plugin",
         EDITOR_GATE_PLUGIN_FILES,
         EDITOR_GATE_PLUGIN_EXECUTABLES,
+        target_root,
+    )
+}
+
+/// T122/T123: rides unconditionally with chat/ai-text-editor/interactive-shell
+/// on a Claude Code root, same as the two plugins above -- no opencode variant,
+/// since `SubagentStart` is a Claude-Code-only hook (nothing measured
+/// equivalent on opencode/codex yet; see agent-identity-plugin/README.md).
+pub fn install_agent_identity_plugin_claude(
+    source_root: &Path,
+    target_root: &Path,
+) -> io::Result<PathBuf> {
+    copy_plugin_files(
+        source_root,
+        "agent-identity-plugin",
+        AGENT_IDENTITY_PLUGIN_FILES,
+        AGENT_IDENTITY_PLUGIN_EXECUTABLES,
         target_root,
     )
 }
@@ -251,6 +276,35 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = fs::metadata(destination.join("hooks/editor-token"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0o111);
+        }
+    }
+
+    #[test]
+    fn agent_identity_plugin_copies_its_own_file_set_and_marks_hooks_executable() {
+        let source_root = tempfile::tempdir().unwrap();
+        let dir = source_root.path().join("agent-identity-plugin");
+        write(&dir.join(".claude-plugin/plugin.json"), "{}");
+        write(&dir.join("hooks/hooks.json"), "{}");
+        write(&dir.join("hooks/lib.sh"), "#!/bin/sh\n");
+        write(&dir.join("hooks/subagent-start.sh"), "#!/bin/sh\n");
+        write(&dir.join("README.md"), "not shipped");
+        let target_root = tempfile::tempdir().unwrap();
+
+        let destination =
+            install_agent_identity_plugin_claude(source_root.path(), target_root.path()).unwrap();
+
+        assert!(destination.join(".claude-plugin/plugin.json").is_file());
+        assert!(destination.join("hooks/subagent-start.sh").is_file());
+        assert!(!destination.join("README.md").exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(destination.join("hooks/subagent-start.sh"))
                 .unwrap()
                 .permissions()
                 .mode();

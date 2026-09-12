@@ -148,6 +148,9 @@ suites=(
     # Same reasoning: tui-hint-plugin/tests covers the profile-matching logic
     # its Claude Code hook and opencode plugin both depend on.
     tui-hint-plugin/tests
+    # Same reasoning: agent-identity-plugin/tests covers the context-building
+    # logic its SubagentStart hook depends on.
+    agent-identity-plugin/tests
     # .github/tests covers ci-scope.sh and ci-subjects.sh, which decide how much
     # of the workspace CI compiles, and registers-guard.sh, which decides
     # whether a registers push may reach master WITHOUT review. Undiscovered
