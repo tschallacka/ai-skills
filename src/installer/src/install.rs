@@ -192,7 +192,7 @@ pub fn skill_relative_files(
 /// `collect_relative_files`'s answer for `skill`, with `MODE-MANIFEST.tsv`
 /// (if the skill has one) loaded as an override first -- see the module doc
 /// comment for the three-source order this follows.
-fn relative_paths_for(
+pub(crate) fn relative_paths_for(
     source_root: &Path,
     skill: &str,
     package_dev: bool,

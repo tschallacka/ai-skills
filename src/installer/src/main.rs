@@ -28,6 +28,7 @@ mod requirements;
 mod shared_bin;
 mod tools;
 mod ui;
+mod uninstall;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -50,6 +51,14 @@ Usage:
                      $PACKAGE_SELECTION) also ships MODE:DEV-marked files
                      (tests, maintainer docs) instead of filtering them out,
                      for installing straight from a raw checkout during dev
+  installer uninstall (--target DIR [--target DIR ...] | --agent NAME [--agent NAME ...])
+                     --skill NAME [--skill NAME ...] [--source DIR] [--yes]
+                     removes each named skill's own installed directory;
+                     garbage-collects its shared binary and any co-installed
+                     plugin only when no other still-installed skill (on any
+                     root this installer can discover under $HOME) needs
+                     them; deregisters its MCP entry. Does not touch
+                     permission grants written into settings.json.
   installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR)
                      grant that agent read/write on the planning skill's own
                      scripts/plan-root/tmp directory, or on a worktree root
@@ -115,6 +124,7 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         }
         Some("list") => run_list(&argv[1..]),
         Some("install") => run_install(&argv[1..]),
+        Some("uninstall") => run_uninstall(&argv[1..]),
         Some("interactive") => run_interactive(&argv[1..]),
         Some("grant-permissions") => run_grant_permissions(&argv[1..]),
         Some("mcp-register") => run_mcp_register(&argv[1..]),
@@ -1340,6 +1350,120 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     }
     Ok(ExitCode::SUCCESS)
 }
+
+struct UninstallArgs {
+    skills: Vec<String>,
+    source: Option<PathBuf>,
+    targets: Vec<PathBuf>,
+    agents: Vec<String>,
+    yes: bool,
+}
+
+fn parse_uninstall_args(argv: &[String]) -> Result<UninstallArgs, String> {
+    let mut skills = Vec::new();
+    let mut source: Option<PathBuf> = None;
+    let mut targets: Vec<PathBuf> = Vec::new();
+    let mut agents: Vec<String> = Vec::new();
+    let mut yes = false;
+
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--skill" => {
+                i += 1;
+                skills.push(argv.get(i).ok_or("--skill needs a value")?.clone());
+            }
+            "--source" => {
+                i += 1;
+                source = Some(PathBuf::from(argv.get(i).ok_or("--source needs a value")?));
+            }
+            "--target" => {
+                i += 1;
+                targets.push(PathBuf::from(argv.get(i).ok_or("--target needs a value")?));
+            }
+            "--agent" => {
+                i += 1;
+                agents.push(argv.get(i).ok_or("--agent needs a value")?.clone());
+            }
+            "--yes" => yes = true,
+            other => return Err(format!("uninstall: unknown option: {other}")),
+        }
+        i += 1;
+    }
+    Ok(UninstallArgs {
+        skills,
+        source,
+        targets,
+        agents,
+        yes,
+    })
+}
+
+/// T142 (first pass): removes a skill's own installed directory, garbage-
+/// collects its shared binary and any co-installed vendor plugin only when
+/// nothing else still installed needs them, and deregisters its MCP entry --
+/// see `uninstall.rs`'s module doc comment for what this deliberately does
+/// NOT cover yet (permission-grant reversal, the opencode tui-hint variant,
+/// a TUI action).
+fn run_uninstall(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_uninstall_args(argv)?;
+    if args.skills.is_empty() {
+        return Err("uninstall: at least one --skill is required".to_string());
+    }
+    let source = resolve_source(args.source)?;
+    let roots = resolve_targets_and_kinds(args.targets, args.agents)?;
+    let home = home_dir_opt().ok_or("uninstall: HOME is not set")?;
+    let mut confirms = Confirms::new(args.yes);
+
+    for (target, kind) in &roots {
+        for skill in &args.skills {
+            let dest_dir = target.join(skill);
+            if !dest_dir.is_dir() {
+                println!("{}: {skill} is not installed there", target.display());
+                continue;
+            }
+            if !confirms.ask(&format!(
+                "Remove {skill} from {}? Its shared binary and any co-installed plugin are only \
+                 removed if nothing else still installed needs them.",
+                target.display()
+            )) {
+                println!("Left in place: {skill} at {}", target.display());
+                continue;
+            }
+            let report = uninstall::uninstall_skill(&source, skill, target, &home, kind.as_deref())
+                .map_err(|e| format!("{skill}: {e}"))?;
+            if !report.was_installed {
+                // Removed between the check above and this call -- rare, but
+                // the report is the authoritative answer, not the earlier
+                // is_dir() probe.
+                println!("{}: {skill} is not installed there", target.display());
+                continue;
+            }
+            println!("Removed: {skill} from {}", target.display());
+            if report.mcp_entry_removed {
+                println!("  deregistered its MCP entry");
+            }
+            for binary in &report.removed_shared_binaries {
+                println!("  removed shared binary: {binary}");
+            }
+            for binary in &report.kept_shared_binaries {
+                println!("  kept shared binary (still needed elsewhere): {binary}");
+            }
+            for plugin in &report.removed_plugins {
+                println!("  removed companion plugin: {plugin}");
+            }
+            if !report.modified_files.is_empty() {
+                println!(
+                    "  NOTE: these files differed from what the last install wrote, and were \
+                     removed along with the rest: {}",
+                    report.modified_files.join(", ")
+                );
+            }
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 enum GrantTarget {
     Planning {
         scripts: String,

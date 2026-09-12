@@ -55,6 +55,20 @@ pub fn recorded_digest(skill_dest: &Path, relative: &str) -> Option<String> {
     })
 }
 
+/// Every relative path a prior install recorded a digest for, in file order
+/// -- used by `uninstall::uninstall_skill` to warn about a user's edits
+/// before deleting the whole directory rather than silently discarding them
+/// unremarked.
+pub fn recorded_relative_paths(skill_dest: &Path) -> Vec<String> {
+    let Ok(content) = fs::read_to_string(manifest_path(skill_dest)) else {
+        return Vec::new();
+    };
+    content
+        .lines()
+        .filter_map(|line| line.split_once(' ').map(|(_, name)| name.to_string()))
+        .collect()
+}
+
 /// True when `file` is byte-for-byte what a prior install last wrote there,
 /// so replacing it destroys nothing the user added.
 pub fn unmodified_since_install(skill_dest: &Path, relative: &str, file: &Path) -> bool {
@@ -70,6 +84,25 @@ pub fn unmodified_since_install(skill_dest: &Path, relative: &str, file: &Path) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recorded_relative_paths_lists_every_row_in_order() {
+        let dest = tempfile::tempdir().unwrap();
+        fs::write(dest.path().join("a"), "1").unwrap();
+        fs::write(dest.path().join("b"), "2").unwrap();
+        record_digests(dest.path(), &["a".to_string(), "b".to_string()]).unwrap();
+
+        assert_eq!(
+            recorded_relative_paths(dest.path()),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
+    fn recorded_relative_paths_is_empty_with_no_manifest() {
+        let dest = tempfile::tempdir().unwrap();
+        assert!(recorded_relative_paths(dest.path()).is_empty());
+    }
 
     #[test]
     fn a_file_matching_its_recorded_digest_is_unmodified() {
