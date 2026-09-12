@@ -152,6 +152,35 @@ fn mutating_required() -> Vec<&'static str> {
     vec!["expected_revision"]
 }
 
+/// T127 (Codex prompts for approval on every ai-text-editor call, unlike a
+/// normal read-only tool): a conforming MCP client may skip its per-call
+/// approval prompt for a tool this schema marks `readOnlyHint`, per the MCP
+/// tool annotations spec. Confirmed live 2026-09-12 by driving a real Codex
+/// session through the interactive-shell skill: `read` ran with zero prompts
+/// while `insert` (not in this list) still asked "Allow the ai-text-editor
+/// MCP server to run tool insert?" in the same session -- the hint changes
+/// exactly the calls it should and nothing else. None
+/// of these ever change the bytes of the file a tab addresses or delete
+/// anything: `open` only creates in-memory tab state (the file on disk is
+/// untouched until `save`), `history`/`page`/`search`/`cursor` inspect
+/// existing state, and `job_poll` only reads a job record. Everything else —
+/// including `index` (persists a cache to SQLite), `save_as` (creates a file),
+/// `close` (can delete journal/metadata under `journal_action: clean`), and
+/// `resolve` (can discard external bytes under `force_save`) — writes
+/// something, so it is left with the schema's default (not read-only) rather
+/// than guessed safe.
+const READ_ONLY_TOOLS: &[&str] = &[
+    "open",
+    "capabilities",
+    "resources",
+    "read",
+    "history",
+    "page",
+    "search",
+    "cursor",
+    "job_poll",
+];
+
 type ToolProperties = Vec<(&'static str, Value)>;
 type ToolSpec = (
     &'static str,
@@ -685,6 +714,15 @@ fn tool_definitions() -> Vec<Value> {
                     "properties": Value::Object(properties),
                     "required": required,
                     "additionalProperties": false
+                },
+                // T127: readOnlyHint lets a conforming client skip its
+                // per-call approval prompt on a tool that never writes.
+                // openWorldHint is false on every tool: this server only ever
+                // reaches the local filesystem and its own SQLite metadata,
+                // never an external system.
+                "annotations": {
+                    "readOnlyHint": READ_ONLY_TOOLS.contains(&name),
+                    "openWorldHint": false
                 }
             })
         })
@@ -1077,6 +1115,67 @@ mod tests {
                 properties(named(name)).contains_key("action"),
                 "{name} reads action and must still advertise it"
             );
+        }
+    }
+
+    /// T127: a conforming client (Codex among them) can skip its per-call
+    /// approval prompt on a tool marked readOnlyHint. Walk every advertised
+    /// tool rather than naming one, so a tool added to READ_ONLY_TOOLS with a
+    /// typo'd name is caught here instead of silently advertising nothing.
+    #[test]
+    fn every_read_only_tool_is_named_and_no_other_tool_claims_the_hint() {
+        let tools = tools();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        for expected in super::READ_ONLY_TOOLS {
+            assert!(
+                names.contains(expected),
+                "READ_ONLY_TOOLS names {expected}, which tools/list does not advertise"
+            );
+        }
+        for tool in &tools {
+            let name = tool["name"].as_str().unwrap();
+            let hint = tool["annotations"]["readOnlyHint"].as_bool().unwrap();
+            assert_eq!(
+                hint,
+                super::READ_ONLY_TOOLS.contains(&name),
+                "{name}'s readOnlyHint does not match READ_ONLY_TOOLS"
+            );
+        }
+    }
+
+    /// A tool that writes the document must never claim readOnlyHint, however
+    /// READ_ONLY_TOOLS is edited later — this pins specific, known-mutating
+    /// tool names directly rather than only round-tripping the same const.
+    #[test]
+    fn a_mutating_tool_never_claims_read_only() {
+        let tools = tools();
+        let named = |n: &str| {
+            tools
+                .iter()
+                .find(|t| t["name"] == n)
+                .unwrap_or_else(|| panic!("tools/list does not advertise {n}"))
+        };
+        for name in [
+            "insert",
+            "replace",
+            "save",
+            "large_edit",
+            "close",
+            "resolve",
+        ] {
+            assert_eq!(
+                named(name)["annotations"]["readOnlyHint"],
+                json!(false),
+                "{name} writes something and must not claim readOnlyHint"
+            );
+        }
+    }
+
+    /// This server never reaches an external system; every tool should say so.
+    #[test]
+    fn every_tool_declares_a_closed_world() {
+        for tool in tools() {
+            assert_eq!(tool["annotations"]["openWorldHint"], json!(false));
         }
     }
 
