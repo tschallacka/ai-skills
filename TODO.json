@@ -23,19 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T83",
-      "title": "Tools available for register work, and where they came from (PR #15)",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "PR #15 adds two things any agent touching BUGS.json or TODO.json should know about. (1) planning/scripts/register-resolve.sh resolves an id collision in a conflicted register. Usage: '--check <register>' exits 1 when conflicted and 0 when clean, so it fits a hook; '<register>' with no decisions lists every collision with BOTH sides' titles plus a suggested free id and exits 65; '<register> side:old:new side:old:new ...' takes every decision in ONE run, applies them, and prints the resolved register to stdout with a confirmation on stderr; re-running the SAME command prefixed with CONFIRM=<that hash> writes it in place. side is ours|theirs or either branch name. It reads git index stages (:1 base, :2 ours, :3 theirs) so it needs no checkout, refuses a divergence (both sides editing one base entry differently) as something a rename cannot fix, refuses to resolve into a register whose own side is already unsound, follows a rename into parent and into an id-valued blocked_on, and REPORTS prose mentions rather than rewriting them. (2) tests/test-register-soundness.sh runs the rules over the committed registers, which nothing did before: a finding there means the entry did not come from the writers, because bug-add.sh and todo-update.sh refuse exactly those. Run it after any hand edit. Both are MODE: DEV and repository-side only - shipping equivalents to the two skills is T81.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T16:12:10Z",
-      "updated_at": "2026-09-01T16:12:10Z"
-    },
-    {
       "id": "T89",
       "title": "a question skill: numbered questions with lettered options, never an unordered list",
       "status": "open",
@@ -1354,6 +1341,19 @@
       "note": "Moot as a checklist for a port that never happened this way; its content is generic verification practice already followed as a matter of course (bash -n, shellcheck, targeted tests, full ./run-tests.sh, mutation-testing new assertions) rather than anything specific to unbuilt work.",
       "created_at": "2026-09-01T16:05:03Z",
       "updated_at": "2026-09-09T22:22:05Z"
+    },
+    {
+      "id": "T83",
+      "title": "Tools available for register work, and where they came from (PR #15)",
+      "status": "obsolete",
+      "priority": "normal",
+      "parent": null,
+      "detail": "PR #15 adds two things any agent touching BUGS.json or TODO.json should know about. (1) planning/scripts/register-resolve.sh resolves an id collision in a conflicted register. Usage: '--check <register>' exits 1 when conflicted and 0 when clean, so it fits a hook; '<register>' with no decisions lists every collision with BOTH sides' titles plus a suggested free id and exits 65; '<register> side:old:new side:old:new ...' takes every decision in ONE run, applies them, and prints the resolved register to stdout with a confirmation on stderr; re-running the SAME command prefixed with CONFIRM=<that hash> writes it in place. side is ours|theirs or either branch name. It reads git index stages (:1 base, :2 ours, :3 theirs) so it needs no checkout, refuses a divergence (both sides editing one base entry differently) as something a rename cannot fix, refuses to resolve into a register whose own side is already unsound, follows a rename into parent and into an id-valued blocked_on, and REPORTS prose mentions rather than rewriting them. (2) tests/test-register-soundness.sh runs the rules over the committed registers, which nothing did before: a finding there means the entry did not come from the writers, because bug-add.sh and todo-update.sh refuse exactly those. Run it after any hand edit. Both are MODE: DEV and repository-side only - shipping equivalents to the two skills is T81.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Superseded by T81's own resolution (closed 2026-09-09): register-resolve.sh's porting was T81f-i, marked obsolete there because the capability shipped instead as todo resolve/bugs resolve subcommands on the compiled binaries -- register-resolve.sh itself is retired and does not exist in this tree. tests/test-register-soundness.sh (the other tool this ticket named) is unaffected and still ships, still runs in pre-push-check.sh as 'TODO.json/BUGS.json is sound'. T83 was simply never closed when T81 resolved the same ground; closing it now to match reality.",
+      "created_at": "2026-09-01T16:12:10Z",
+      "updated_at": "2026-09-12T17:36:53Z"
     }
   ]
 }
