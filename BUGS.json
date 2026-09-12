@@ -4383,6 +4383,49 @@
       "updated_at": "2026-09-10T16:33:00Z"
     },
     {
+      "id": "B322",
+      "title": "chat-mcp's session/agent override never keyed conn.rs's own cursor bookkeeping",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Join #c with no override (default identity), join #c again with session:sub-a, send as sub-a, then read #c with no override (default identity).",
+      "observed": "The default identity's read reported cursor:1 but messages:[] -- send (as sub-a) had advanced the SAME shared cursor file the default identity's read then trusted as its own, since both went through the unkeyed chat_client_rs::Session::load/save_cursor regardless of which resolved session_key each Held/Owner belonged to.",
+      "expected": "Each resolved identity's cursor bookkeeping stays under its own key, the same way its nick and connection already are.",
+      "mechanism": "T143 added a resolved session_key to lib.rs's held()/resolve()/open_connection() and to chat_client_rs's Session::load_with_key/save_with_key/apply_session_with_key/save_session_with_key, but conn.rs's own Owner (send/read/join/leave/deliver) still called the unkeyed Session::load/save_cursor, which resolve via the process's single default session_key() regardless of which connection's owner thread called them.",
+      "surfaces": [
+        "src/chat-mcp/src/conn.rs",
+        "src/chat-client-rs/src/lib.rs"
+      ],
+      "fix": "Held::open and Owner now carry the resolved session_key (threaded from lib.rs's resolved_session_key()); every Session::load/save_cursor call inside conn.rs (join, leave, send, read, deliver) now uses Session::load_with_key/save_cursor_with_key with that key instead of the unkeyed default. chat_client_rs grew save_cursor_with_key alongside the T143 keyed functions it already had.",
+      "verification": "cargo test -p chat-mcp -p chat-client-rs -p chat-server-rs (125/125), including the previously-failing distinct_session_overrides test now passing across 3 repeated runs. cargo fmt/clippy clean. Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer 6be90b14.",
+      "found_by": "verifying T91c (chat-server-rs's writers RwLock): the new distinct_session_overrides_get_their_own_nick_and_hold_separate_connections integration test (T143's own) failed with this exact symptom",
+      "notes": null,
+      "created_at": "2026-09-12T18:28:30Z",
+      "updated_at": "2026-09-12T18:28:30Z"
+    },
+    {
+      "id": "B323",
+      "title": "chat-mcp's trigger-wake fetched the woken message through a filter that could exclude it",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Register a trigger (trigger_add pattern:install), have another connection send a message matching the pattern but not mentioning this agent's nick, call wait with mentions:true.",
+      "observed": "wait woke correctly (timed_out:false) but returned messages:[] -- the message that woke it was missing from its own answer.",
+      "expected": "The message that woke wait, whether it woke it via a real @mention or a registered trigger, is the one wait hands back.",
+      "mechanism": "deliver() (conn.rs) always fetched the follow-up FETCH with the server's own mentions suffix (fetch_mentions in chat-server-rs, a literal '@nick' text filter) whenever mentions:true was requested, regardless of WHY pending() had decided to wake -- a trigger match on a message with no '@nick' in it is exactly the case fetch_mentions excludes, so the wake fired but the corresponding fetch came back empty.",
+      "surfaces": [
+        "src/chat-mcp/src/conn.rs"
+      ],
+      "fix": "New fetch_rows() helper separates 'which FETCH suffix to send' from read()'s cursor/inbox side effects. deliver() now fetches the raw backlog (fetch_rows(chan, since, false), never server-side mention-filtered) whenever mentions:true, then applies the identical (mention OR wakes_on_trigger) predicate client-side before returning rows -- the same predicate pending()/inbox-retain already use to decide whether to wake at all, so a caller only ever sees what it was allowed to wake on. wakes_on_trigger's signature changed from taking a &Push to taking (nick, text) directly so the same check applies to a fetched Row too.",
+      "verification": "cargo test -p chat-mcp (31/31, incl. the previously-failing trigger test now passing across 3 repeated runs). cargo fmt/clippy clean. Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer 6be90b14.",
+      "found_by": "verifying T91c (chat-server-rs's writers RwLock): the pre-existing a_registered_trigger_wakes_wait_on_a_message_with_no_mention_at_all integration test failed with this exact symptom, reproducibly, checked out and confirmed present at T104's own original commit (07bc8fa7) too -- not a regression from later work, a defect in T104 itself that its own closing verification missed.",
+      "notes": null,
+      "created_at": "2026-09-12T18:28:43Z",
+      "updated_at": "2026-09-12T18:28:43Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
