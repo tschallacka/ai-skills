@@ -66,6 +66,13 @@ struct Tab {
     /// Journal edits replayed when this tab opened; reported by `open` so a
     /// recovered revision is never mistaken for fresh work (B196).
     replayed_edits: usize,
+    /// This file's outbound CodeGraph references, recomputed at open and
+    /// after every save (T100). `None` means CodeGraph is not enabled for
+    /// this project, not that the file has no outbound references.
+    jump_points: Option<Vec<ai_text_editor::jump_points::JumpPoint>>,
+    /// The revision `jump_points` was computed at; a dirty tab whose
+    /// `revision` has since moved past this is reported `stale`.
+    jump_points_revision: Option<u64>,
 }
 
 struct ServerState {
@@ -312,6 +319,8 @@ fn main() {
         large_redo,
         saved_digest,
         replayed_edits,
+        jump_points: None,
+        jump_points_revision: None,
     };
     // B204 (both constructors): a tab recovered from the journal holds the
     // journal's buffer while `disk_digest` was stamped from the disk that
@@ -334,6 +343,7 @@ fn main() {
     if !loaded_index {
         persist_index(&mut tab);
     }
+    refresh_jump_points(&mut tab);
     let tab = Arc::new(Mutex::new(tab));
     let default_key = tab_key(&path);
     let state = Arc::new(Mutex::new(ServerState {
@@ -582,6 +592,35 @@ fn persist_index(tab: &mut Tab) {
     );
 }
 
+/// Recomputes `tab.jump_points` against CodeGraph's on-disk index (T100):
+/// runs `codegraph sync` first (the watcher lags a write by about a second)
+/// then derives this file's outbound references. A missing `codegraph`
+/// binary, a non-zero exit, or no `.codegraph/` project at all are all the
+/// same soft "not available for this project" outcome the sync step and
+/// `jump_points::derive` both already model as `None` -- never a hard
+/// failure of the open/save this is attached to.
+fn refresh_jump_points(tab: &mut Tab) {
+    let Some(project_root) = ai_text_editor::jump_points::find_project_root(&tab.path) else {
+        tab.jump_points = None;
+        tab.jump_points_revision = None;
+        return;
+    };
+    let _ = std::process::Command::new("codegraph")
+        .arg("sync")
+        .current_dir(&project_root)
+        .output();
+    match ai_text_editor::jump_points::derive(&project_root, &tab.path) {
+        Ok(points) => {
+            tab.jump_points = Some(points);
+            tab.jump_points_revision = Some(tab.revision);
+        }
+        Err(_) => {
+            tab.jump_points = None;
+            tab.jump_points_revision = None;
+        }
+    }
+}
+
 fn open_additional_tab(
     path: PathBuf,
     mode: DocumentMode,
@@ -757,6 +796,8 @@ fn open_additional_tab(
         large_redo,
         saved_digest,
         replayed_edits,
+        jump_points: None,
+        jump_points_revision: None,
     };
     // B204: a tab recovered from the journal holds the journal's buffer,
     // while `disk_digest` was stamped from the disk that exists now. When
@@ -778,6 +819,7 @@ fn open_additional_tab(
     if !index_loaded {
         persist_index(&mut tab);
     }
+    refresh_jump_points(&mut tab);
     Ok(tab)
 }
 
@@ -1766,6 +1808,15 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         "history" => {
             let (undo_depth, redo_depth) = tab.history.depths();
             frames.push(response(&envelope.request_id, json!({"revision": tab.revision, "undo_depth": undo_depth + tab.large_undo.len(), "redo_depth": redo_depth + tab.large_redo.len(), "text_undo_depth": undo_depth, "text_redo_depth": redo_depth, "large_undo_depth": tab.large_undo.len(), "large_redo_depth": tab.large_redo.len(), "journal_sequence": tab.journal_seq})));
+        }
+        "jump_points" => {
+            let stale = tab.jump_points.is_some() && tab.jump_points_revision != Some(tab.revision);
+            let note = if tab.jump_points.is_none() {
+                Some("codegraph is not enabled for this project, or its index is not in a shape this reader supports -- no jump points were computed")
+            } else {
+                None
+            };
+            frames.push(response(&envelope.request_id, json!({"jump_points": tab.jump_points, "revision": tab.jump_points_revision, "stale": stale, "note": note})));
         }
         "begin_transaction" => {
             if tab.transaction_before.is_some() {
@@ -3226,6 +3277,7 @@ fn save(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &m
     tab.saved_digest = digest(tab.document.bytes());
     tab.base_bytes = tab.document.bytes().to_vec();
     journal_append(tab, "save", json!({"revision": tab.revision}));
+    refresh_jump_points(tab);
     frames.push(response(
         &envelope.request_id,
         json!({"saved": true, "dirty": false, "revision": tab.revision, "bytes": tab.document.bytes().len()}),

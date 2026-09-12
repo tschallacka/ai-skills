@@ -41,6 +41,7 @@ pub mod history;
 pub mod index;
 pub mod jobs;
 pub mod journal;
+pub mod jump_points;
 pub mod large_file;
 pub mod metadata;
 pub mod navigation;

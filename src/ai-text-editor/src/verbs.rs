@@ -58,6 +58,7 @@ pub const METHODS: &[&str] = &[
     "capabilities",
     "resources",
     "history",
+    "jump_points",
     "begin_transaction",
     "end_transaction",
     "restore",
@@ -97,7 +98,7 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
         // on the command line), which is why `call_tool` keeps it in the
         // payload for this one verb after stripping it for every other.
         "open" => &["document_mode"],
-        "capabilities" | "resources" | "history" => &[],
+        "capabilities" | "resources" | "history" | "jump_points" => &[],
         "begin_transaction" | "end_transaction" | "restore" | "undo" | "redo" | "save" => &[],
         "read" => &[
             "cursor_id",

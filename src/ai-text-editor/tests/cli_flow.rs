@@ -3451,3 +3451,133 @@ fn the_verbosity_ladder_shortens_the_answer_without_dropping_the_guard() {
         "capabilities must answer in full at every level: {caps}"
     );
 }
+
+/// T100: `jump-points` reads CodeGraph's own SQLite index directly rather
+/// than shelling out per symbol. Seeds a fixture `.codegraph/codegraph.db`
+/// with the real schema (no dependency on the `codegraph` binary being
+/// installed -- `refresh_jump_points` swallows a missing `codegraph sync`
+/// the same way it swallows every other soft "unavailable" outcome) and
+/// drives the whole open -> jump-points -> edit -> save -> jump-points path
+/// an agent would.
+#[test]
+fn jump_points_reports_the_outbound_reference_and_tracks_staleness_across_save() {
+    let harness = Harness::new("jump-points");
+    std::fs::create_dir_all(harness.path(".codegraph")).unwrap();
+    {
+        let conn =
+            rusqlite::Connection::open(harness.path(".codegraph").join("codegraph.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE nodes (
+                id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+                qualified_name TEXT NOT NULL, file_path TEXT NOT NULL,
+                language TEXT NOT NULL, start_line INTEGER NOT NULL,
+                end_line INTEGER NOT NULL, start_column INTEGER NOT NULL,
+                end_column INTEGER NOT NULL, updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE edges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL,
+                target TEXT NOT NULL, kind TEXT NOT NULL, metadata TEXT,
+                line INTEGER, col INTEGER, provenance TEXT DEFAULT NULL
+            );
+            INSERT INTO nodes VALUES ('sym:foo','function','foo','a::foo','a.rs','rust',1,3,0,0,0);
+            INSERT INTO nodes VALUES ('sym:bar','function','bar','b::bar','b.rs','rust',5,7,0,0,0);
+            INSERT INTO edges (source,target,kind,line,col) VALUES ('sym:foo','sym:bar','calls',2,4);",
+        )
+        .unwrap();
+    }
+    let file = harness.write("a.rs", "fn foo() {}\n");
+
+    let opened = harness.open(&file);
+    let jump_points = first_payload(&harness.client(&[
+        "jump-points",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]));
+    assert_eq!(jump_points["stale"], json!(false));
+    let points = jump_points["jump_points"]
+        .as_array()
+        .expect("jump_points must be an array once codegraph is enabled");
+    assert_eq!(points.len(), 1, "{jump_points}");
+    assert_eq!(points[0]["target_file"], json!("b.rs"));
+    assert_eq!(points[0]["target_line"], json!(5));
+    assert_eq!(points[0]["target_name"], json!("bar"));
+    assert_eq!(points[0]["edge_kind"], json!("calls"));
+
+    // An edit with no intervening save bumps the tab's own revision past
+    // what jump_points was computed at -- reported stale rather than
+    // silently kept.
+    let revision = revision_of(&opened).to_string();
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "fn foo() { bar(); }\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", stderr_text(&replaced));
+    let jump_points = first_payload(&harness.client(&[
+        "jump-points",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]));
+    assert_eq!(
+        jump_points["stale"],
+        json!(true),
+        "a dirty tab must report its jump points stale rather than pass them off as current"
+    );
+
+    let replaced_revision = revision_of(&replaced).to_string();
+    let saved = harness.client(&[
+        "save",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &replaced_revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    let jump_points = first_payload(&harness.client(&[
+        "jump-points",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]));
+    assert_eq!(
+        jump_points["stale"],
+        json!(false),
+        "save must recompute jump points, not just report them stale forever: {jump_points}"
+    );
+}
+
+/// The soft path: no `.codegraph/` directory at all is CodeGraph not being
+/// enabled for this project, not a hard failure of `open` or `jump-points`.
+#[test]
+fn jump_points_answers_null_when_codegraph_is_not_enabled_for_the_project() {
+    let harness = Harness::new("jump-points-no-index");
+    let file = harness.write("a.rs", "fn foo() {}\n");
+    harness.open(&file);
+    let jump_points = first_payload(&harness.client(&[
+        "jump-points",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]));
+    assert!(jump_points["jump_points"].is_null());
+    assert_eq!(jump_points["stale"], json!(false));
+    assert!(jump_points["note"].is_string());
+}

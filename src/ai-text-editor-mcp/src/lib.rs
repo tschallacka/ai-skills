@@ -175,6 +175,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "resources",
     "read",
     "history",
+    "jump_points",
     "page",
     "search",
     "cursor",
@@ -335,6 +336,12 @@ fn tool_definitions() -> Vec<Value> {
     tools.push((
         "history",
         "Inspect undo/redo depths and journal sequence without changing the tab.",
+        Vec::new(),
+        vec![],
+    ));
+    tools.push((
+        "jump_points",
+        "Inspect this file's outbound CodeGraph references (calls, imports, instantiations, and similar) computed server-side at open and after every save -- each entry is the referring line/column, the edge kind, and where it points (target file, line, name, kind). `revision` is the tab revision they were computed at; `stale: true` means the tab has been edited since (save to recompute). `jump_points: null` means CodeGraph is not enabled for this project (no .codegraph/ index) or its index is not in a shape this reader supports -- not that the file has no references.",
         Vec::new(),
         vec![],
     ));

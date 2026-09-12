@@ -9,9 +9,9 @@ package/agent-identity-plugin/hooks/hooks.json	192
 package/agent-identity-plugin/hooks/lib.sh	2779
 package/agent-identity-plugin/hooks/subagent-start.sh	1325
 package/agent-identity-plugin/tests/test-agent-identity-injection.sh	1934
-package/ai-text-editor/SKILL.md	20715
+package/ai-text-editor/SKILL.md	21399
 package/ai-text-editor/agents/openai.yaml	111
-package/ai-text-editor/ai-text-editor.1	16672
+package/ai-text-editor/ai-text-editor.1	17336
 package/ai-text-editor/binaries.tsv	500
 package/ai-text-editor/docs/README.md	1307
 package/ai-text-editor/integration.tsv	1638

@@ -273,6 +273,16 @@ default gives you.
    `job-progress`, `job-complete`, `job-cancel`, `job-transfer`, and
     `job-release`; detached jobs can outlive a client connection. Use the
     acknowledged `large-edit` operation for streaming large-file rewrites.
+16. Query the read-only `jump-points` command for a file's outbound CodeGraph
+    references (calls, imports, instantiations, and similar), recomputed
+    server-side at `open` and after every `save` by reading CodeGraph's own
+    SQLite index directly -- no tokens spent unless you ask for it. Each
+    entry names the referring line/column, the edge kind, and the target
+    file/line/name/kind. `stale: true` means the tab was edited since the
+    last computation; `save` recomputes them. A `null` result means
+    CodeGraph is not enabled for this project (no `.codegraph/` index) or
+    its index is not in a shape this reader supports, not that the file has
+    no references.
 
 ## Agent responsibilities
 

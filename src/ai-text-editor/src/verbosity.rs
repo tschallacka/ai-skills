@@ -88,6 +88,10 @@ fn declared_tier(key: &str) -> Option<u8> {
         "tab_id" => 0,
         // The content of a read, a search, an index inspection, a page.
         "text" | "bytes_base64" | "matches" | "blocks" | "lines" => 0,
+        // `jump_points`'s own result: a `read` returns its text at every
+        // level, and this is the same rule for the verb whose whole point is
+        // the outbound-reference list.
+        "jump_points" => 0,
         // Terminal facts of a verb that has no other content: without these
         // the answer is empty rather than terse.
         "saved" | "closed" | "restored" | "resolved" | "transaction" | "job" | "id" => 0,
@@ -274,7 +278,14 @@ mod tests {
 
     #[test]
     fn a_verbs_own_result_survives_the_lowest_level() {
-        for key in ["text", "bytes_base64", "matches", "blocks", "saved"] {
+        for key in [
+            "text",
+            "bytes_base64",
+            "matches",
+            "blocks",
+            "saved",
+            "jump_points",
+        ] {
             assert_eq!(tier(key), 0, "{key} is an answer, not metadata");
         }
     }

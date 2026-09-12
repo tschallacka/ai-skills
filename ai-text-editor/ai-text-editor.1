@@ -235,6 +235,15 @@ delimiter and a fresh stream. Consumers must discard frames before that
 delimiter.
 .SH HISTORY AND CURSORS
 \fBhistory\fR reports undo and redo depths without exposing another tab.
+\fBjump-points\fR reports this file's outbound CodeGraph references (calls,
+imports, instantiations, and similar), recomputed server-side at open and
+after every save by reading CodeGraph's own SQLite index directly. Each entry
+names the referring line and column, the edge kind, and the target file, line,
+name and kind it points to. The response's \fBrevision\fR is the tab revision
+they were computed at; \fBstale: true\fR means the tab has since been edited
+and \fBsave\fR would recompute them. \fBjump_points: null\fR means CodeGraph is
+not enabled for this project, or its index is not in a shape this reader
+supports -- not that the file has no references.
 \fBresources\fR reports available memory, estimated server overhead, the
 recommended working set, and the active large-file threshold.
 Mutation responses include every numeric cursor position. The \fBcursor\fR
