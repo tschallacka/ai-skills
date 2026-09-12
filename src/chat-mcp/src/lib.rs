@@ -58,6 +58,10 @@ pub const TOOL_ARGUMENTS: &[&str] = &[
     "text",
     "timeout_seconds",
     "wait_seconds",
+    "pattern",
+    "sender",
+    "trigger_id",
+    "enabled",
 ];
 
 /// The advertised schema for one `TOOL_ARGUMENTS` key. Exhaustive on purpose:
@@ -82,6 +86,18 @@ fn tool_argument(key: &str) -> Value {
         }
         "wait_seconds" => {
             json!({"type":"integer","description":"How long discover listens for announce beacons. Default 3."})
+        }
+        "pattern" => {
+            json!({"type":"string","description":"Text to wake on, matched as a substring of the message (case-insensitive) by default. Add your own '*' (any run of characters) or '?' (exactly one) inside it for finer control -- these are the only two wildcards; anything else is matched literally, never as a regex."})
+        }
+        "sender" => {
+            json!({"type":"string","description":"Only a message from this exact nick can fire the trigger. Omit to match a message from anyone."})
+        }
+        "trigger_id" => {
+            json!({"type":"integer","description":"The id trigger_add returned, or one read back from triggers."})
+        }
+        "enabled" => {
+            json!({"type":"boolean","description":"The trigger's new state: true wakes wait/read on it again, false leaves the definition in place but stops it firing."})
         }
         other => unreachable!("TOOL_ARGUMENTS declares {other} with no schema"),
     }
@@ -152,6 +168,30 @@ fn routing() -> &'static [ToolSpec] {
             &["channel"],
             &["channel"],
         ),
+        (
+            "trigger_add",
+            "Register a content-based wake condition for wait/read (mentions mode): any message matching pattern wakes you, in addition to your own @nick mention -- the nick stays a trigger, it stops being the only one. Returns the trigger_id needed to remove or toggle it later.",
+            &["pattern", "sender"],
+            &["pattern"],
+        ),
+        (
+            "trigger_remove",
+            "Permanently deregister a trigger. Refused by name if trigger_id does not exist (already removed, or never registered by this connection).",
+            &["trigger_id"],
+            &["trigger_id"],
+        ),
+        (
+            "trigger_toggle",
+            "Enable or disable a trigger without losing its definition, so it can be re-enabled later without calling trigger_add again.",
+            &["trigger_id", "enabled"],
+            &["trigger_id", "enabled"],
+        ),
+        (
+            "triggers",
+            "Every trigger this connection holds, enabled or not, with its pattern, sender scope and id -- read this back rather than tracking ids yourself.",
+            &[],
+            &[],
+        ),
     ]
 }
 
@@ -189,13 +229,15 @@ fn call_tool(id: Value, params: Value) -> Value {
         .unwrap_or_else(|| json!({}));
     let result = match name {
         "status" => Ok(status()),
-        "discover" => Ok(discover(u64_argument(&arguments, "wait_seconds").unwrap_or(3))),
+        "discover" => Ok(discover(
+            u64_argument(&arguments, "wait_seconds").unwrap_or(3),
+        )),
         "channels" => Ok(channels()),
-        "join" | "leave" | "send" | "read" | "wait" | "who" => {
-            connected_tool(name, &arguments)
-        }
+        "join" | "leave" | "send" | "read" | "wait" | "who" | "trigger_add" | "trigger_remove"
+        | "trigger_toggle" | "triggers" => connected_tool(name, &arguments),
         other => Err(format!(
-            "unknown tool: {}. The tools are status, discover, channels, join, leave, send, read, wait and who.",
+            "unknown tool: {}. The tools are status, discover, channels, join, leave, send, read, \
+             wait, who, trigger_add, trigger_remove, trigger_toggle and triggers.",
             other
         )),
     };
@@ -262,6 +304,21 @@ fn connected_tool(name: &str, arguments: &Value) -> Result<Value, String> {
         "who" => Op::Who {
             chan: chan.clone().unwrap_or_default(),
         },
+        "trigger_add" => Op::TriggerAdd {
+            pattern: string_argument(arguments, "pattern").unwrap_or_default(),
+            sender: string_argument(arguments, "sender"),
+        },
+        "trigger_remove" => Op::TriggerRemove {
+            id: trigger_id_argument(arguments)?,
+        },
+        "trigger_toggle" => Op::TriggerToggle {
+            id: trigger_id_argument(arguments)?,
+            enabled: arguments
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .ok_or("trigger_toggle needs enabled to be true or false")?,
+        },
+        "triggers" => Op::Triggers,
         other => return Err(format!("unroutable tool: {}", other)),
     };
     let answer = with_connection(|held| held.submit(op.clone()))?;
@@ -287,11 +344,28 @@ fn answer_value(tool: &str, chan: Option<&str>, answer: Answer) -> Value {
     if let Some(chan) = chan {
         out.insert("channel".into(), json!(chan));
     }
-    if tool == "who" {
-        out.insert("members".into(), json!(answer.members));
-    } else {
-        out.insert("messages".into(), Value::Array(rows));
-        out.insert("cursor".into(), json!(answer.cursor));
+    match tool {
+        "who" => {
+            out.insert("members".into(), json!(answer.members));
+        }
+        "trigger_add" => {
+            out.insert("trigger_id".into(), json!(answer.trigger_id));
+        }
+        "trigger_remove" | "trigger_toggle" => {}
+        "triggers" => {
+            let triggers: Vec<Value> = answer
+                .triggers
+                .iter()
+                .map(|t| {
+                    json!({"trigger_id":t.id,"pattern":t.pattern,"sender":t.sender,"enabled":t.enabled})
+                })
+                .collect();
+            out.insert("triggers".into(), Value::Array(triggers));
+        }
+        _ => {
+            out.insert("messages".into(), Value::Array(rows));
+            out.insert("cursor".into(), json!(answer.cursor));
+        }
     }
     if answer.timed_out {
         out.insert("timed_out".into(), json!(true));
@@ -317,6 +391,14 @@ fn u64_argument(arguments: &Value, key: &str) -> Option<u64> {
         Some(Value::String(text)) => text.trim().parse().ok(),
         _ => None,
     }
+}
+
+/// `trigger_id` is required on both tools that take it (checked above by
+/// `required_arguments`), so a present-but-unparseable value is refused by
+/// name here rather than silently defaulting to some other trigger.
+fn trigger_id_argument(arguments: &Value) -> Result<u64, String> {
+    u64_argument(arguments, "trigger_id")
+        .ok_or_else(|| "trigger_id must be a whole number".to_string())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

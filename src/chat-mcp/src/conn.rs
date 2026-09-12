@@ -63,6 +63,32 @@ pub struct Push {
     pub text: String,
 }
 
+/// T104: a caller-defined wake condition, independent of channel and
+/// independent of the `@nick` mention `wait`/`read` already check. Held only
+/// for the life of this connection (like `mention_seen` below), not
+/// persisted to the on-disk session -- a new adapter process registers its
+/// own, same as it re-joins its own channels.
+#[derive(Clone)]
+pub struct Trigger {
+    pub id: u64,
+    pub pattern: String,
+    /// Only a message from this exact nick can fire it; `None` matches any
+    /// sender. Compared case-sensitively, same as every other nick
+    /// comparison in this file (`take_push`'s own-message check above).
+    pub sender: Option<String>,
+    pub enabled: bool,
+}
+
+/// One line of `triggers`' answer -- the registration plus what it would
+/// need to be deregistered or toggled, so a caller need not have kept the id
+/// from `trigger_add` itself.
+pub struct TriggerInfo {
+    pub id: u64,
+    pub pattern: String,
+    pub sender: Option<String>,
+    pub enabled: bool,
+}
+
 /// What the adapter asks the owner thread to do. One variant per tool that
 /// needs the connection; the tools that do not (`status`, `discover`,
 /// `channels`) never reach here.
@@ -92,6 +118,18 @@ pub enum Op {
     Who {
         chan: String,
     },
+    TriggerAdd {
+        pattern: String,
+        sender: Option<String>,
+    },
+    TriggerRemove {
+        id: u64,
+    },
+    TriggerToggle {
+        id: u64,
+        enabled: bool,
+    },
+    Triggers,
 }
 
 /// What an operation answers: rows the caller should see, plus the facts a
@@ -102,6 +140,8 @@ pub struct Answer {
     pub members: Vec<String>,
     pub timed_out: bool,
     pub note: Option<String>,
+    pub trigger_id: Option<u64>,
+    pub triggers: Vec<TriggerInfo>,
 }
 
 impl Answer {
@@ -112,6 +152,8 @@ impl Answer {
             members: Vec::new(),
             timed_out: false,
             note: None,
+            trigger_id: None,
+            triggers: Vec::new(),
         }
     }
 }
@@ -167,6 +209,8 @@ impl Held {
             nick: nick.to_string(),
             state_dir: state_dir.to_path_buf(),
             mention_seen: std::collections::HashMap::new(),
+            triggers: Vec::new(),
+            next_trigger_id: 1,
             closed: false,
         };
         std::thread::spawn(move || owner.run(queue));
@@ -222,6 +266,11 @@ struct Owner {
     /// a second `wait` must not answer with the mention the first one already
     /// returned.
     mention_seen: std::collections::HashMap<String, u64>,
+    /// T104: content-based wake conditions this agent registered, in
+    /// addition to the fixed `@nick` mention above. Checked wherever a
+    /// mention is: `pending`/`deliver` OR it in, never in place of it.
+    triggers: Vec<Trigger>,
+    next_trigger_id: u64,
     closed: bool,
 }
 
@@ -262,6 +311,10 @@ impl Owner {
                 timeout,
             } => self.wait(chan.as_deref(), mentions, timeout),
             Op::Who { chan } => self.who(&chan),
+            Op::TriggerAdd { pattern, sender } => self.trigger_add(pattern, sender),
+            Op::TriggerRemove { id } => self.trigger_remove(id),
+            Op::TriggerToggle { id, enabled } => self.trigger_toggle(id, enabled),
+            Op::Triggers => self.triggers_list(),
         }
     }
 
@@ -423,8 +476,11 @@ impl Owner {
     fn deliver(&mut self, chan: &str, mentions: bool) -> Result<Answer, String> {
         let cursor = client::Session::load(&self.state_dir).cursor(chan);
         let mention = format!("@{}", self.nick);
-        self.inbox
-            .retain(|push| !(push.chan == chan && (!mentions || push.text.contains(&mention))));
+        let triggers = self.triggers.clone();
+        self.inbox.retain(|push| {
+            !(push.chan == chan
+                && (!mentions || push.text.contains(&mention) || wakes_on_trigger(&triggers, push)))
+        });
         let since = if mentions {
             self.mention_seen.get(chan).copied().unwrap_or(cursor)
         } else {
@@ -461,6 +517,90 @@ impl Owner {
         })
     }
 
+    /// Register a content-based wake condition. `pattern` is matched as a
+    /// substring by default (implicitly wrapped in `*...*`): a caller writes
+    /// `install` to mean "anywhere in the message", and adds its own `*`/`?`
+    /// only for finer control within that. Case-insensitive, since a phrase
+    /// is prose a human typed, not a regex a caller opted into.
+    fn trigger_add(&mut self, pattern: String, sender: Option<String>) -> Result<Answer, String> {
+        let pattern = pattern.trim().to_string();
+        if pattern.is_empty() {
+            return Err("trigger_add needs a non-empty pattern".to_string());
+        }
+        let id = self.next_trigger_id;
+        self.next_trigger_id += 1;
+        self.triggers.push(Trigger {
+            id,
+            pattern: pattern.clone(),
+            sender: sender.clone(),
+            enabled: true,
+        });
+        Ok(Answer {
+            trigger_id: Some(id),
+            note: Some(match &sender {
+                Some(sender) => format!(
+                    "trigger {id} registered: \"{pattern}\" from {sender} now wakes wait/read"
+                ),
+                None => format!(
+                    "trigger {id} registered: \"{pattern}\" from anyone now wakes wait/read"
+                ),
+            }),
+            ..Answer::empty()
+        })
+    }
+
+    /// Permanently remove a trigger. Refused by name rather than a silent
+    /// no-op: an id that never existed, or was already removed, is worth
+    /// saying so a caller does not assume it is still active.
+    fn trigger_remove(&mut self, id: u64) -> Result<Answer, String> {
+        let before = self.triggers.len();
+        self.triggers.retain(|t| t.id != id);
+        if self.triggers.len() == before {
+            return Err(format!("no such trigger: {id}"));
+        }
+        Ok(Answer {
+            note: Some(format!("trigger {id} removed")),
+            ..Answer::empty()
+        })
+    }
+
+    /// Enable or disable a trigger without losing its definition, so it can
+    /// be re-enabled later without re-registering the pattern/sender.
+    fn trigger_toggle(&mut self, id: u64, enabled: bool) -> Result<Answer, String> {
+        let trigger = self
+            .triggers
+            .iter_mut()
+            .find(|t| t.id == id)
+            .ok_or_else(|| format!("no such trigger: {id}"))?;
+        trigger.enabled = enabled;
+        Ok(Answer {
+            note: Some(format!(
+                "trigger {id} {}",
+                if enabled { "enabled" } else { "disabled" }
+            )),
+            ..Answer::empty()
+        })
+    }
+
+    /// Every trigger this connection holds, enabled or not -- the list a
+    /// caller who lost an id, or wants to audit what is active, reads back.
+    fn triggers_list(&self) -> Result<Answer, String> {
+        let triggers = self
+            .triggers
+            .iter()
+            .map(|t| TriggerInfo {
+                id: t.id,
+                pattern: t.pattern.clone(),
+                sender: t.sender.clone(),
+                enabled: t.enabled,
+            })
+            .collect();
+        Ok(Answer {
+            triggers,
+            ..Answer::empty()
+        })
+    }
+
     // ---- the wire ---------------------------------------------------------
 
     /// The channel with a pushed message matching the filter, if any.
@@ -470,7 +610,9 @@ impl Owner {
             .iter()
             .find(|push| {
                 chan.map(|want| want == push.chan).unwrap_or(true)
-                    && (!mentions || push.text.contains(&mention))
+                    && (!mentions
+                        || push.text.contains(&mention)
+                        || wakes_on_trigger(&self.triggers, push))
             })
             .map(|push| push.chan.clone())
     }
@@ -602,5 +744,141 @@ impl Owner {
             text: message.trailing.unwrap_or_default(),
         });
         true
+    }
+}
+
+/// Does any enabled, sender-compatible trigger fire on this push? A free
+/// function (not a method) so `deliver`'s `self.inbox.retain(...)` can call
+/// it against a borrowed trigger list without holding `self` for the whole
+/// closure.
+fn wakes_on_trigger(triggers: &[Trigger], push: &Push) -> bool {
+    triggers.iter().any(|t| {
+        t.enabled
+            && t.sender.as_deref().map(|s| s == push.nick).unwrap_or(true)
+            && wildcard_match(&t.pattern, &push.text)
+    })
+}
+
+/// Substring by default, mIRC-style `*`/`?` wildcards for finer control
+/// within that: `pattern` is wrapped as `*pattern*` before matching, so
+/// "install" fires anywhere in the text the way a plain phrase should, and a
+/// caller's own `*`/`?` still composes inside that (T104: "substring, not
+/// regex, unless a caller asks for a regex" -- the wildcards ARE the regex
+/// opt-in, not a fixed anchor). Case-insensitive: a trigger phrase is prose
+/// a human typed, not a pattern language they chose to be exact in.
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    fn matches(pattern: &[char], text: &[char]) -> bool {
+        match pattern.first() {
+            None => text.is_empty(),
+            Some('*') => {
+                matches(&pattern[1..], text) || (!text.is_empty() && matches(pattern, &text[1..]))
+            }
+            Some('?') => !text.is_empty() && matches(&pattern[1..], &text[1..]),
+            Some(want) => {
+                !text.is_empty() && *want == text[0] && matches(&pattern[1..], &text[1..])
+            }
+        }
+    }
+    let padded: Vec<char> = format!("*{}*", pattern.to_lowercase()).chars().collect();
+    let text: Vec<char> = text.to_lowercase().chars().collect();
+    matches(&padded, &text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_phrase_matches_anywhere_in_the_text() {
+        assert!(wildcard_match("install", "please install the thing"));
+        assert!(wildcard_match("install", "install"));
+        assert!(!wildcard_match("install", "unrelated chatter"));
+    }
+
+    #[test]
+    fn matching_is_case_insensitive() {
+        assert!(wildcard_match("Install", "please INSTALL now"));
+    }
+
+    #[test]
+    fn a_star_composes_inside_the_implicit_substring_wrap() {
+        assert!(wildcard_match(
+            "install*registration",
+            "install then registration happens"
+        ));
+        assert!(!wildcard_match(
+            "install*registration",
+            "registration without install"
+        ));
+    }
+
+    #[test]
+    fn a_question_mark_matches_exactly_one_character() {
+        assert!(wildcard_match("rf?", "the rfc is done"));
+        assert!(!wildcard_match("rf?c", "the rfc is done"));
+    }
+
+    #[test]
+    fn an_empty_pattern_matches_everything() {
+        // trigger_add itself refuses an empty pattern before it ever reaches
+        // here; this pins what the matcher alone would do if it did not.
+        assert!(wildcard_match("", "anything at all"));
+    }
+
+    fn push(nick: &str, text: &str) -> Push {
+        Push {
+            chan: "#test".to_string(),
+            nick: nick.to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    fn trigger(id: u64, pattern: &str, sender: Option<&str>, enabled: bool) -> Trigger {
+        Trigger {
+            id,
+            pattern: pattern.to_string(),
+            sender: sender.map(str::to_string),
+            enabled,
+        }
+    }
+
+    #[test]
+    fn an_unscoped_trigger_fires_from_any_sender() {
+        let triggers = vec![trigger(1, "install", None, true)];
+        assert!(wakes_on_trigger(
+            &triggers,
+            &push("anyone", "please install")
+        ));
+    }
+
+    #[test]
+    fn a_sender_scoped_trigger_only_fires_from_that_nick() {
+        let triggers = vec![trigger(1, "install", Some("michael"), true)];
+        assert!(wakes_on_trigger(
+            &triggers,
+            &push("michael", "please install")
+        ));
+        assert!(!wakes_on_trigger(
+            &triggers,
+            &push("someone-else", "please install")
+        ));
+    }
+
+    #[test]
+    fn a_disabled_trigger_never_fires() {
+        let triggers = vec![trigger(1, "install", None, false)];
+        assert!(!wakes_on_trigger(
+            &triggers,
+            &push("anyone", "please install")
+        ));
+    }
+
+    #[test]
+    fn a_message_matching_no_trigger_does_not_wake() {
+        let triggers = vec![trigger(1, "install", None, true)];
+        assert!(!wakes_on_trigger(
+            &triggers,
+            &push("anyone", "unrelated chatter")
+        ));
     }
 }

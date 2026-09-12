@@ -337,6 +337,129 @@ fn wait_returns_when_a_message_lands_not_on_the_next_poll() {
     );
 }
 
+/// T104: a registered trigger wakes `wait` on a message that mentions
+/// nobody at all -- the actual case that cost the most (an instruction
+/// addressed to nobody in particular). Same threaded shape as
+/// `wait_returns_when_a_message_lands_not_on_the_next_poll`, but the message
+/// carries no `@nick` -- only the trigger phrase.
+#[test]
+fn a_registered_trigger_wakes_wait_on_a_message_with_no_mention_at_all() {
+    let Some(mut harness) = Harness::new("trigger") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t104"}));
+    let added = harness.call("trigger_add", json!({"pattern":"install"}));
+    let trigger_id = added["trigger_id"].clone();
+    assert_ne!(
+        trigger_id,
+        Value::Null,
+        "trigger_add did not return an id: {added}"
+    );
+
+    let home = harness.home.clone();
+    let port = harness.port;
+    let bin = bin_dir().join("chat-client-rs");
+    let sender = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(1));
+        let status = Command::new(bin)
+            .args([
+                "send",
+                "--server",
+                &format!("127.0.0.1:{port}"),
+                "--nick",
+                "other",
+                "--chan",
+                "#t104",
+                "--text",
+                "q6 write all configs, cleanup too, and install the new build",
+                "--no-session",
+            ])
+            .env("AI_CHAT_HOME", &home)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("chat-client-rs runs");
+        assert!(status.success());
+    });
+    let started = Instant::now();
+    let woke = harness.call(
+        "wait",
+        json!({"channel":"#t104","timeout_seconds":30,"mentions":true}),
+    );
+    let elapsed = started.elapsed();
+    sender.join().expect("the other agent finished");
+    assert!(
+        woke["timed_out"] != json!(true),
+        "wait timed out instead of waking on the trigger: {woke}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(20),
+        "wait took {elapsed:?}, which is a poll rather than a push"
+    );
+    let messages = woke["messages"].as_array().expect("messages");
+    assert!(
+        messages
+            .iter()
+            .any(|row| row["text"].as_str().unwrap_or_default().contains("install")),
+        "the pushed message is missing: {woke}"
+    );
+
+    // A disabled trigger stops firing without losing its definition.
+    harness.call(
+        "trigger_toggle",
+        json!({"trigger_id": trigger_id, "enabled": false}),
+    );
+    harness.other_sends("#t104", "install again, still nobody mentioned");
+    let after_disable = harness.call(
+        "wait",
+        json!({"channel":"#t104","timeout_seconds":1,"mentions":true}),
+    );
+    assert_eq!(
+        after_disable["timed_out"],
+        json!(true),
+        "a disabled trigger still woke wait: {after_disable}"
+    );
+
+    let listed = harness.call("triggers", json!({}));
+    let entries = listed["triggers"].as_array().expect("triggers");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["trigger_id"], trigger_id);
+    assert_eq!(entries[0]["enabled"], json!(false));
+
+    harness.call("trigger_remove", json!({"trigger_id": trigger_id}));
+    let after_remove = harness.call("triggers", json!({}));
+    assert_eq!(
+        after_remove["triggers"].as_array().map(Vec::len),
+        Some(0),
+        "trigger_remove left a stale entry: {after_remove}"
+    );
+}
+
+/// A sender-scoped trigger only fires from that exact nick -- proven end to
+/// end, not just at the pure-function level `conn::tests` already covers.
+#[test]
+fn a_sender_scoped_trigger_ignores_a_matching_message_from_someone_else() {
+    let Some(mut harness) = Harness::new("triggerscope") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t104b"}));
+    harness.call(
+        "trigger_add",
+        json!({"pattern":"install","sender":"michael"}),
+    );
+    // "other", not "michael": the pattern matches but the sender does not.
+    harness.other_sends("#t104b", "please install this");
+    let unmatched = harness.call(
+        "wait",
+        json!({"channel":"#t104b","timeout_seconds":1,"mentions":true}),
+    );
+    assert_eq!(
+        unmatched["timed_out"],
+        json!(true),
+        "a trigger scoped to a different sender fired anyway: {unmatched}"
+    );
+}
+
 /// Presence: who is on the channel right now.
 #[test]
 fn who_reports_the_members_the_server_knows() {
