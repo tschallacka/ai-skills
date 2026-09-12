@@ -23,21 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T101",
-      "title": "split chat-client-rs/src/lib.rs into modules",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "lib.rs is 2776 lines: the CLI entry point, the CLI verbs, the resolution ladder, the TLS connect and TOFU pin, the session, the local log reader and an in-file test module, in one file. It reached that size as one file because it was main.rs; T90 made it a library without splitting it, deliberately, so an in-flight B266 change on another branch would merge as a rename rather than fight a mass code move. Once feat/t90-chat-mcp and fix/worktrees-tmpdir-chat-relay are both merged that reason is spent. Split by concern, one docblock each: net (resolve, connect, client_config, the TOFU pin, line I/O, wait_for_welcome), discovery (the beacon, the cache, resolve_server), session (the key ladder, Session, cursors), wire (wire_segments, split_at_budget, msg_line_id), local (the channel log reader), and the CLI verbs behind run(). The public surface is already the split: what the MCP adapter imports is exactly the first four groups.",
-      "blocked_on": null,
-      "refs": [
-        "T90"
-      ],
-      "note": null,
-      "created_at": "2026-09-07T20:07:58Z",
-      "updated_at": "2026-09-07T20:07:58Z"
-    },
-    {
       "id": "T102",
       "title": "installable agent profiles: ship .agents/profiles/ the way skills are shipped",
       "status": "open",
@@ -1141,6 +1126,21 @@
       "note": "LIFECYCLE settled with Michael: derive the jump points at open, and RECOMPUTE THEM ON SAVE. Save is the right boundary because codegraph indexes DISK -- save is the moment disk changes -- so staleness is bounded to 'while the tab is dirty' rather than being open-ended. A set still carries the revision it was computed at, so a dirty tab's jump points are reported stale rather than followed silently.\n\nCOST: all of this is server-side, so the scanning, caching and re-derivation cost the agent NO TOKENS. The agent pays only for the jump points it asks for. That is what justifies doing the work eagerly at open and at every save, rather than lazily on request.\n\nINDEX FRESHNESS, worth handling explicitly: codegraph's watcher lags a write by about a second, so a recompute fired immediately on save can read the pre-save index. Run 'codegraph sync' first -- it is incremental and prints 'Already up to date' when there is nothing to do, so a needless run is free -- then re-derive. Useful side effect: editing through the editor would keep the codegraph index warm, which the repository already asks callers to do by hand after changing code.\n\nIMPLEMENTED: new src/ai-text-editor/src/jump_points.rs reads .codegraph/codegraph.db directly (rusqlite, read-only) rather than shelling out to codegraph per symbol -- its CLI has no bulk per-file JSON command. Grounded in codegraph's own source (~/git/codegraph, the colbymchenry/codegraph fork): nodes/edges schema, the getCallees outbound-edge-kind set (calls/references/imports/instantiates/navigates, excluding contains and the type-annotation kinds), and project-root-relative forward-slash file_path normalization. Version robustness (explicit requirement): derive() never branches on a schema version number -- migrations.ts shows every migration v2-v9 only adds columns/tables/indexes, never removing the ones read here -- instead it runtime-checks via PRAGMA table_info(nodes)/table_info(edges) that the specific columns it needs exist, returning JumpPointsError::UnsupportedSchema (not a panic or raw SQL error) when they don't, alongside NoIndex for no .codegraph/ at all. Tab gained jump_points/jump_points_revision; a refresh_jump_points helper (runs codegraph sync, swallowing a missing binary or non-zero exit the same soft way as NoIndex, then derive) is called at both tab-construction sites (server startup and open_additional_tab) and after a successful save. New read-only jump_points verb mirrors history/resources/capabilities exactly, wired through verbs.rs, ai-text-editor-server.rs, ai-text-editor-mcp (READ_ONLY_TOOLS + tool schema), the CLI (jump-points subcommand), the man page, and SKILL.md. Unit tests cover the real fixture, contains/null-line exclusion, NoIndex, and UnsupportedSchema; CLI integration tests cover the full open -> jump-points -> edit -> stale -> save -> recomputed path and the no-.codegraph null path. Full run-tests.sh: 236 passed, 2 failed (test-mode-markers, test-rjq-active-references -- both pre-existing/unrelated, matching the T91c baseline), 2 unconfigured (PLANNING_CONTEXT_CACHE, unrelated).",
       "created_at": "2026-09-07T19:39:33Z",
       "updated_at": "2026-09-12T19:43:18Z"
+    },
+    {
+      "id": "T101",
+      "title": "split chat-client-rs/src/lib.rs into modules",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "lib.rs is 2776 lines: the CLI entry point, the CLI verbs, the resolution ladder, the TLS connect and TOFU pin, the session, the local log reader and an in-file test module, in one file. It reached that size as one file because it was main.rs; T90 made it a library without splitting it, deliberately, so an in-flight B266 change on another branch would merge as a rename rather than fight a mass code move. Once feat/t90-chat-mcp and fix/worktrees-tmpdir-chat-relay are both merged that reason is spent. Split by concern, one docblock each: net (resolve, connect, client_config, the TOFU pin, line I/O, wait_for_welcome), discovery (the beacon, the cache, resolve_server), session (the key ladder, Session, cursors), wire (wire_segments, split_at_budget, msg_line_id), local (the channel log reader), and the CLI verbs behind run(). The public surface is already the split: what the MCP adapter imports is exactly the first four groups.",
+      "blocked_on": null,
+      "refs": [
+        "T90"
+      ],
+      "note": "Split done: lib.rs (was 3,669 lines) is now 897 lines (crate doc comment, mod declarations, the re-export blocks, and the relocated -- byte-for-byte identical, diffed to confirm -- 833-line test module). Six new sibling modules: net.rs (431, TLS connect/TOFU pin/line I/O/crypto helpers), discovery.rs (159, beacon/cache/resolution ladder), session.rs (515, key-resolution ladder + Session), wire.rs (149, wire-segment/JSON/mention helpers), local.rs (98, local channel-log reader), cli.rs (1,521, the CLI verbs plus the tail's control-socket serving for the other verbs -- T104's \"tail owns the connection\" design). control.rs (791) untouched.\n\nZero behavior change, zero public-API change: every symbol chat-mcp and the chat-client-rs binary depended on (valid_chan, client_state_dir, resolve_session_key, apply_session_with_key, resolve_server, DEFAULT_BEACON_PORT, save_session_with_key, session_key, Session, channels_home, discover_candidates, Client, connect, save_cursor_with_key, Session::load_with_key, wait_for_welcome, wire_segments, write_line) is re-exported from lib.rs at exactly its old chat_client_rs::<name> path. git diff --stat on src/chat-mcp/ shows zero changes, and the binary (bin/chat-client-rs.rs) needed none either.\n\nVerified independently (not just accepting the delegated fork's self-report): read every new file, confirmed the test module is byte-identical via diff (833/833 lines, zero differences), reran cargo test -p chat-client-rs (64/64) and -p chat-mcp (12/12... actually 31 across both test binaries) myself, reran cargo fmt --check and cargo clippy -p chat-client-rs -p chat-mcp --all-targets -- -D warnings myself (clean), and confirmed only the 7 intended files are new/changed under src/chat-client-rs/ with no stray scratch files left behind. Full pre-push-check.sh and ./run-tests.sh (both nix-wrapped): 236 passed, 2 failed (test-mode-markers, test-rjq-active-references -- both pre-existing/unrelated, matching this session's established baseline), 2 unconfigured (PLANNING_CONTEXT_CACHE, unrelated).",
+      "created_at": "2026-09-07T20:07:58Z",
+      "updated_at": "2026-09-12T20:41:41Z"
     },
     {
       "id": "T103",
