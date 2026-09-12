@@ -101,10 +101,31 @@ pub fn claude_worktrees_permissions(worktrees: &str, home: &Path) -> io::Result<
     merge_allow_entries(&cfg, &entries)
 }
 
+/// interactive-shell's own two shipped binaries (never
+/// `interactive-shell-fixture`, a maintainer-only build with no use on a
+/// target machine -- see interactive-shell/binaries.tsv). Named explicitly
+/// rather than granted as a directory glob: since T72, `bins` names the
+/// shared XDG bin directory every skill's compiled binary now lives in
+/// together, so a directory-scoped grant there would silently authorize
+/// no-prompt execution of every OTHER skill's binary too, not just these
+/// two.
+const INTERACTIVE_SHELL_BINARIES: &[&str] = &["interactive-shell", "interactive-shell-input"];
+
+fn interactive_shell_entries(bins: &str) -> Vec<String> {
+    let bins = strip_trailing_slashes(bins);
+    INTERACTIVE_SHELL_BINARIES
+        .iter()
+        .map(|name| format!("Bash({bins}/{name}:*)"))
+        .collect()
+}
+
 /// A denied Bash call does not read as "ask for permission" to an agent --
 /// it reads as "this tool does not work", after which the agent falls back
 /// to a headless invocation that cannot observe the program at all. `bins`
-/// is the installed interactive-shell skill's own `bin/` directory.
+/// is the directory interactive-shell's binaries are found in -- the shared
+/// XDG bin directory (`shared_bin::shared_bin_dir`) for the two call sites
+/// that resolve it automatically; a caller of the standalone
+/// `grant-permissions --bins` CLI names it explicitly instead.
 pub fn claude_interactive_shell_permissions(
     bins: &str,
     home: &Path,
@@ -113,8 +134,7 @@ pub fn claude_interactive_shell_permissions(
     if !cfg.is_file() {
         return Ok(PermissionOutcome::NoConfigFile);
     }
-    let bins = strip_trailing_slashes(bins);
-    merge_allow_entries(&cfg, &[format!("Bash({bins}/**:*)")])
+    merge_allow_entries(&cfg, &interactive_shell_entries(bins))
 }
 
 pub enum EnvSettingOutcome {
@@ -265,8 +285,7 @@ pub fn claude_interactive_shell_permissions_remove(
     home: &Path,
 ) -> io::Result<PermissionRemovalOutcome> {
     let cfg = claude_settings_path(home);
-    let bins = strip_trailing_slashes(bins);
-    remove_allow_entries(&cfg, &[format!("Bash({bins}/**:*)")])
+    remove_allow_entries(&cfg, &interactive_shell_entries(bins))
 }
 
 /// `cp -p`'s effect, in the atomic-write shape the rest of this installer

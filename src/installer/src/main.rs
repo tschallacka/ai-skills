@@ -1162,8 +1162,14 @@ fn run_interactive_shell_post_install(
              terminal program needs no prompt per call? (Each edited config is backed up beside \
              itself, unless git already tracks it)",
         ) {
-            for target in &claude_roots {
-                let bins = target.join("interactive-shell").join("bin");
+            // T72: interactive-shell's binaries no longer live under any one
+            // target root at all -- every skill's compiled binary shares one
+            // location keyed only by $HOME. The grant follows them there
+            // (bug found reviewing T144: the old target-rooted path is
+            // always empty post-T72, so this grant silently never matched
+            // anything real).
+            let bins = shared_bin::shared_bin_dir(home);
+            for _target in &claude_roots {
                 match permissions::claude_interactive_shell_permissions(
                     &bins.to_string_lossy(),
                     home,

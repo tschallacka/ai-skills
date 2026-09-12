@@ -146,21 +146,20 @@ pub struct UninstallReport {
     pub opencode_tui_hint_plugin_removed: bool,
 }
 
-/// Reverses `skill`'s own per-skill permission grant on `target_root`, if it
-/// has one. Only interactive-shell's Bash-execute grant is per-skill today;
-/// the planning and worktree grants are run-wide (added once for the whole
-/// run, not tied to any one skill's install), so they are deliberately left
-/// untouched here and remain a future whole-run "deprovision" command's job.
-fn revoke_skill_permissions(
-    skill: &str,
-    target_root: &Path,
-    kind: &str,
-    home: &Path,
-) -> Vec<String> {
+/// Reverses `skill`'s own per-skill permission grant, if it has one. Only
+/// interactive-shell's Bash-execute grant is per-skill today; the planning
+/// and worktree grants are run-wide (added once for the whole run, not tied
+/// to any one skill's install), so they are deliberately left untouched here
+/// and remain a future whole-run "deprovision" command's job.
+///
+/// `target_root` plays no part in locating the grant: since T72 the binaries
+/// it grants execute on live in the shared XDG bin directory, keyed only by
+/// `home`, not under any one target root.
+fn revoke_skill_permissions(skill: &str, kind: &str, home: &Path) -> Vec<String> {
     if skill != "interactive-shell" {
         return Vec::new();
     }
-    let bins = target_root.join("interactive-shell").join("bin");
+    let bins = shared_bin::shared_bin_dir(home);
     let bins = bins.to_string_lossy();
     let removed = match kind {
         "claude" => permissions::claude_interactive_shell_permissions_remove(&bins, home).ok(),
@@ -328,7 +327,7 @@ pub fn uninstall_skill(
     }
 
     let permissions_removed = match kind {
-        Some(kind) => revoke_skill_permissions(skill, target_root, kind, home),
+        Some(kind) => revoke_skill_permissions(skill, kind, home),
         None => Vec::new(),
     };
 
@@ -573,7 +572,7 @@ mod tests {
         let settings = home.path().join(".claude").join("settings.json");
         fs::create_dir_all(settings.parent().unwrap()).unwrap();
         fs::write(&settings, "{}").unwrap();
-        let bins = claude_root.join("interactive-shell").join("bin");
+        let bins = shared_bin::shared_bin_dir(home.path());
         crate::permissions::claude_interactive_shell_permissions(
             &bins.to_string_lossy(),
             home.path(),
@@ -589,7 +588,11 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.permissions_removed.len(), 1);
+        assert_eq!(
+            report.permissions_removed.len(),
+            2,
+            "both interactive-shell and interactive-shell-input must be granted and revoked"
+        );
         let settings = home.path().join(".claude").join("settings.json");
         let doc: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(settings).unwrap()).unwrap();
