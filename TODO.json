@@ -23,23 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T71",
-      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
-      "blocked_on": null,
-      "refs": [
-        "planning/SKILL.md",
-        "planning/MAINTAINER.md",
-        "planning/docs/README.md"
-      ],
-      "note": null,
-      "created_at": "2026-08-30T21:50:27Z",
-      "updated_at": "2026-08-30T21:50:27Z"
-    },
-    {
       "id": "T83",
       "title": "Tools available for register work, and where they came from (PR #15)",
       "status": "open",
@@ -1055,6 +1038,23 @@
       "note": " Re-measured with an awk function-range scan instead of brace matching: two planning/tests files still define their own fail() without lib-test (test-installer-manifest, test-planning-context-contract), both inside the duplication-ratchet cap of 7 tolerated shims; no hidden eighteenth reporter.",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-24T10:33:41Z"
+    },
+    {
+      "id": "T71",
+      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
+      "blocked_on": null,
+      "refs": [
+        "planning/SKILL.md",
+        "planning/MAINTAINER.md",
+        "planning/docs/README.md"
+      ],
+      "note": "Already done: T86/T87 (commit 22fd60de, PR #137) split planning/SKILL.md into a short dispatcher (now 34 lines) plus planning/parts/part-1.md through part-4.md, generated from a single skill-source.txt by planning/scripts/generate-skill-docs.sh, with a load-sanity check (verify-skill-load.sh) on every part. This ticket's own requested reconciliation is already in place: role-context.sh's role_docs() lists parts/part-1..4.md for every role, installer/src/50-manifest.sh's skill_files() declares them, planning/PACKAGE-MANIFEST.tsv/PACKAGE-MAP.tsv and planning/tests/fixtures/overview/npm-package-baseline.tsv all account for them, and the full test suite (236/238 all session, no planning-related failures) confirms nothing regressed. T71 was simply never cross-referenced and closed when T86/T87 shipped -- closing it now to match reality rather than re-doing already-completed work.",
+      "created_at": "2026-08-30T21:50:27Z",
+      "updated_at": "2026-09-12T17:35:26Z"
     },
     {
       "id": "T81e",
