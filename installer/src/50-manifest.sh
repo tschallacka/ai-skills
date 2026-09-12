@@ -552,6 +552,9 @@ EOF
         text-etiquette)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
+        question-etiquette)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
         www)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;

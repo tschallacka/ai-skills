@@ -32,6 +32,7 @@
     "planning/bin",
     "merge-request-etiquette",
     "text-etiquette",
+    "question-etiquette",
     "post-implementation-review",
     "ai-text-editor",
     "editor-gate-plugin",

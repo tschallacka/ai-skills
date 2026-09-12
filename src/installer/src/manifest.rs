@@ -28,6 +28,7 @@ pub const SKILLS: &[Skill] = &[
     Skill { name: "git-merge-resolving", description: "Conflicts resolved by what each side changed, and a merged tree you can trust." },
     Skill { name: "merge-request-etiquette", description: "Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix." },
     Skill { name: "text-etiquette", description: "Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request." },
+    Skill { name: "question-etiquette", description: "Numbered questions, lettered options, never a bullet: so a reply like Q7b is unambiguous and a partial answer names exactly which numbers are still open." },
     Skill { name: "ai-text-editor", description: "Server-owned editor tabs for agents: bounded reads, explicit search modes, revision-aware edits, undo/redo, raw-byte and hex access, SQLite metadata, and Unix-socket or TCP transport." },
     Skill { name: "interactive-shell", description: "Drives unknown full-screen terminal programs through a PTY wrapper and a unix-socket input client." },
     Skill { name: "www", description: "A brake the human can pull, and one the agent pulls on itself when it is thrashing: stop, answer three questions, then one reasoned step." },

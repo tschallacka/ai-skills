@@ -2,7 +2,7 @@ package_path	byte_size
 package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	11904
 package/LICENSE	1068
-package/README.md	17963
+package/README.md	18256
 package/agent-identity-plugin/.claude-plugin/plugin.json	405
 package/agent-identity-plugin/README.md	3064
 package/agent-identity-plugin/hooks/hooks.json	192
@@ -133,7 +133,7 @@ package/interactive-shell/tests/test-interactive-shell.sh	7688
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
-package/package.json	2040
+package/package.json	2066
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	19826
 package/planning/REVIEWER.md	24342
@@ -252,6 +252,9 @@ package/post-implementation-review/requires.tsv	1162
 package/project-specifics/SKILL.md	4057
 package/project-specifics/docs/README.md	1472
 package/project-specifics/requires.tsv	1162
+package/question-etiquette/SKILL.md	2881
+package/question-etiquette/docs/README.md	770
+package/question-etiquette/requires.tsv	1187
 package/resource-limited-testing/SKILL.md	9515
 package/resource-limited-testing/docs/README.md	1115
 package/resource-limited-testing/requires.tsv	1407
