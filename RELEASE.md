@@ -22,7 +22,9 @@ Every file says so in its own header:
 `MODE` alone, because that axis belongs to inputs.
 
 Two independent lists have to agree, and neither is derived from the other:
-the marker in each file, and `skill_files()` in `installer/src/50-manifest.sh`.
+the marker in each file, and `skill_files()` in `installer/src/50-manifest.sh`
+(the one surviving fragment of the retired bash install.sh — see git history —
+that `installer/build-release.sh` still sources for exactly this list).
 `tests/test-mode-markers.sh` fails on any disagreement. That duplication is the
 cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
 
@@ -47,7 +49,6 @@ cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
    `--check` that fails rather than silently rebuilding:
 
    ```sh
-   ./installer/build.sh --check                    # install.sh
    ./planning/scripts/build-plan-libs.sh --check   # the four plan-*-lib.sh
    ./generate-portability.sh --check               # PORTABILITY.md
    ./blast-radius.sh                               # every coupling in coupling.tsv
@@ -86,18 +87,24 @@ cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
    scratch directory and confirm no maintainer file arrived:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/<tag>/install.sh \
-     | bash -s -- --all --target /tmp/release-check
+   curl -fsSL "https://raw.githubusercontent.com/tschallacka/ai-skills/<tag>/installer/bootstrap.sh" \
+     | AI_SKILLS_RELEASE_URL="https://github.com/tschallacka/ai-skills/releases/download/<tag>/ai-skills-<target>.tar.gz" \
+       bash -s -- install --all --target /tmp/release-check
    find /tmp/release-check -path '*/tests/*' -o -path '*/scripts/lib/*' | head
    ```
+
+   `<target>` is the release target triple for your host
+   (`x86_64-unknown-linux-musl`, `aarch64-apple-darwin`, …) — `AI_SKILLS_RELEASE_URL`
+   pins the exact tag's asset instead of bootstrap.sh's default of GitHub's
+   "latest release" redirect, which the just-tagged release is not yet.
 
    That `find` should print nothing.
 
 ## The two packages
 
 ```sh
-install.sh --all                    # prod: what an end user needs
-install.sh --all --package dev      # prod plus the maintainer's files
+installer install --all --source . --target DIR                  # prod: what an end user needs
+installer install --all --source . --target DIR --package dev    # prod plus the maintainer's files
 ```
 
 `--package dev` exists so a contributor can install a working development copy

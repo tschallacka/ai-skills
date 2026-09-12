@@ -9,11 +9,16 @@ directory.
 - `planning/` — durable planning skill and helper scripts.
 - `project-specificies/` — project-deviation skill and example note files.
 - `resource-limited-testing/` — resource-limiting guidance and wrapper.
-- `install.sh` — interactive and non-interactive skill installer. **Generated**:
-  edit `installer/src/` and run `./installer/build.sh`.
-- `installer/` — the installer's source parts, the build script, and
-  `tools.tsv`, the shared registry of how to verify and install each
-  runtime tool. Each skill's own `requires.tsv` says what it needs.
+- `src/installer/` — the compiled Rust installer: interactive picker,
+  headless `install`/`install-skill` subcommands, MCP/permission registration.
+- `installer/` — `bootstrap.sh` (the curl-piped entry point that downloads
+  a release and hands off to the binary above), `build-release.sh` (packs a
+  release tarball), and `tools.tsv`, the shared registry of how to verify and
+  install each runtime tool (`include_str!`'d into the compiled binary). Each
+  skill's own `requires.tsv` says what it needs. `installer/src/05-config.sh`
+  and `installer/src/50-manifest.sh` are the two surviving fragments of the
+  retired bash install.sh — see git history — still sourced by
+  `build-release.sh` for the skill list and file manifest.
 - `package.json` — npm package metadata and the `ai-skills-install` binary.
 
 Each skill directory contains a `SKILL.md` with YAML frontmatter. Supporting
@@ -24,14 +29,13 @@ scripts and references should stay inside the skill directory that uses them.
 1. Create or update the skill directory at the repository root.
 2. Add a valid `SKILL.md` with a unique `name` and a precise `description`.
 3. Document when the skill should and should not be used.
-4. Add the skill to the installer parts if it is new, then run
-   `./installer/build.sh`:
+4. Register the skill if it is new:
    - `SKILL_NAMES` and `SKILL_DESCRIPTIONS` in `installer/src/05-config.sh`
    - `skill_files()` in `installer/src/50-manifest.sh`
    - a `<skill>/requires.tsv`, even when the skill needs nothing — the empty
      table is the statement that it has no runtime dependencies
-   The shop menu and numeric selection derive from `SKILL_NAMES`, so they need
-   no separate edit.
+   The picker's list and numeric selection derive from `SKILL_NAMES`, so they
+   need no separate edit.
 5. Add it to the skills table in `README.md` and the npm `files` list in
    `package.json`.
 
@@ -54,12 +58,14 @@ plus a `shellcheck` pass.
 Check shell syntax and formatting before committing:
 
 ```bash
-./installer/build.sh --check                          # install.sh matches its parts
-bash -n install.sh installer/build.sh installer/src/*.sh
+cargo build --release -p installer
+cargo test -p installer
+cargo clippy -p installer --all-targets -- -D warnings
+bash -n installer/bootstrap.sh installer/build-release.sh installer/src/*.sh
 bash -n planning/scripts/*.sh
 bash -n resource-limited-testing/scripts/limited-run.sh
-shellcheck -s bash install.sh planning/scripts/*.sh   # no new findings
-./run-tests.sh                                        # all 30 tests
+shellcheck -s bash installer/bootstrap.sh planning/scripts/*.sh   # no new findings
+./run-tests.sh                                        # all bash suites
 git diff --check
 ```
 
@@ -71,14 +77,15 @@ which is expected.
 Show installer options without making changes:
 
 ```bash
-AI_SKILLS_NO_SPLASH=1 ./install.sh --help
+./target/release/installer --help
 ```
 
-For an isolated non-interactive install, use a temporary target:
+For an isolated non-interactive install from the checkout, use a temporary
+target:
 
 ```bash
 target="$(mktemp -d)"
-AI_SKILLS_NO_SPLASH=1 ./install.sh --all --target "$target" --yes
+./target/release/installer install --all --source . --target "$target" --yes
 find "$target" -maxdepth 2 -name SKILL.md -print
 ```
 
@@ -95,10 +102,11 @@ npm_config_cache="$(mktemp -d)" npm pack --dry-run --json
 npm run install-skills -- --help
 ```
 
-The package contents should include `install.sh`, `package.json`, `README.md`,
-`LICENSE`, and every skill directory. The `ai-skills-install` binary must point
-to the existing `install.sh`; do not duplicate the installer in JavaScript or
-move the skills to satisfy npm packaging.
+The package contents should include `installer/bootstrap.sh`, `package.json`,
+`README.md`, `LICENSE`, and every skill directory. The `ai-skills-install`
+binary must point to `installer/bootstrap.sh`, which downloads the matching
+compiled installer release on first run; do not duplicate the installer in
+JavaScript or move the skills to satisfy npm packaging.
 
 The generated artifacts the package ships — the five compiled plan libraries
 and `planning/REVIEWER.md` — are built by `npm prepack` from the tracked

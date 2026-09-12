@@ -135,7 +135,7 @@ pass, no state directory, and no `--insecure`.
 It ships only in `mcp` integration mode:
 
 ```bash
-install.sh --integration chat=mcp     # chat-mcp instead of chat-client-rs
+installer install --integration chat=mcp --skill chat --target DIR --yes     # chat-mcp instead of chat-client-rs
 ```
 
 `chat-server-rs` installs in both modes. The adapter finds a server; it does

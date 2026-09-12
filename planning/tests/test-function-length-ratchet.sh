@@ -116,7 +116,7 @@ NOW_EOF
     exit 0
 fi
 
-CAP=31
+CAP=17
 count=0
 worst=""
 for f in $(git -C "$root" ls-files '*.sh' | grep -v '^benchmark/results/'); do

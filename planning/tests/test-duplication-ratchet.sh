@@ -74,7 +74,7 @@ check_cap 'hand-rolled .tmp.$$ temp sites' 42 \
 # Counted with grep -L over planning/tests, not the scripts directory the other
 # rows use. `fail() { t_fail "$*"; }` shims are deliberate and must not count:
 # 32 tests have one, and they are how the call sites stayed unchanged.
-check_cap 'tests not sourcing lib-test.sh' 7 \
+check_cap 'tests not sourcing lib-test.sh' 6 \
     "$( { grep -L 'lib-test\.sh' "$root"/tests/test-*.sh || true; } | wc -l | tr -d ' ')"
 
 # Inline inventory-row parsing with hard-coded field indices. plan_inventory_row

@@ -346,4 +346,12 @@ installer_bin="$extract_dir/installer"
 [ -n "$installer_bin" ] && [ -x "$installer_bin" ] \
     || bootstrap_die "the downloaded release has no executable 'installer'"
 
+# With no arguments this is the README's own one-liner
+# (`curl ... | bash`) -- install.sh defaulted that to the interactive skill
+# picker, and the compiled installer's own argv parsing does not special-case
+# an empty argv the same way (it prints --help instead), so bootstrap.sh is
+# what supplies the default here.
+if [ "$#" -eq 0 ]; then
+    exec "$installer_bin" interactive
+fi
 exec "$installer_bin" "$@"

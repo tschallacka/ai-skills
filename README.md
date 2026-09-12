@@ -81,7 +81,7 @@ them. Every other skill behaves identically on both.
 Run this command and choose the skills and agent destination interactively:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh | bash
 ```
 
 The installer can install all the skills or one skill, and supports these
@@ -109,7 +109,8 @@ still exist.
 
 Install the package globally to expose the installer command. The npm package
 keeps the skills in this repository and links `ai-skills-install` directly to
-the existing `install.sh` script:
+`installer/bootstrap.sh`, which fetches the matching compiled installer
+release for your platform on first run:
 
 ```bash
 npm install -g @tschallacka/ai-skills
@@ -147,8 +148,8 @@ review rather than following the link and modifying an unexpected location.
 Interactively, choose that one skill at the menu. Headless, name it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/install.sh \
-  | bash -s -- --skill planning --target "$HOME/.codex/skills"
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh \
+  | bash -s -- install --skill planning --target "$HOME/.codex/skills"
 ```
 
 `--skill` may be given more than once, and each value may itself be a
@@ -163,18 +164,18 @@ known. `--target` takes a single root, so installing into two roots is two runs.
 
 ```bash
 # Install all skills into the shared Agent Skills root
-curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/install.sh \
-  | bash -s -- --all --target "$HOME/.agents/skills"
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh \
+  | bash -s -- install --all --target "$HOME/.agents/skills"
 
 # Unattended replacement: managed version transitions replace without backups,
 # unmanaged changed files are still backed up as <file>.bak
-curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/install.sh \
-  | bash -s -- --all --target "$HOME/.agents/skills" --yes
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh \
+  | bash -s -- install --all --target "$HOME/.agents/skills" --yes
 ```
 
 Every run ends with a **summary block on stdout** saying what was installed,
 what was not, and why; the progress and diagnostics go to stderr, so
-`install.sh … > summary.txt` keeps the outcome and `2>/dev/null` keeps it
+`installer install … > summary.txt` keeps the outcome and `2>/dev/null` keeps it
 readable. A blocked skill is reported once — not once per root — with the
 commands that finish the job. This is what an `--all` run on a machine without
 `rjq` prints:
@@ -190,15 +191,14 @@ To install planning once its requirements are met:
   1. install rjq:
     sudo apt-get install -y rjq
   2. replay this run:
-  ./install.sh --skill planning --target /home/u/.agents/skills --yes
+  installer install --skill planning --target /home/u/.agents/skills --yes
 ```
 
 The install step is chosen for the detected platform and package manager, and
-the replay line carries the same target and flags as the run that printed it. In
-a piped run there is no script on disk, so the replay is emitted as the
-`curl … | bash -s -- …` form instead of a path. The exit status is non-zero,
-because four of five skills is a partial install and CI must not read it as
-success.
+the replay line carries the same target and flags as the run that printed it,
+naming the installer binary bootstrap.sh downloaded to run it. The exit status
+is non-zero, because four of five skills is a partial install and CI must not
+read it as success.
 
 ### Runtime dependencies
 
@@ -227,24 +227,39 @@ No other skill has a runtime dependency.
 |---|---|
 | 0 | Everything requested was installed. Soft warnings do not change this. |
 | 1 | A requested skill was blocked by a hard requirement, or any other error. |
-| 2 | `--install-skill` only: approval declined, nothing was written. |
-| 3 | `--install-skill` only: an unsafe collision (an existing file that is not a managed version upgrade, or a symlink). |
+| 2 | `install-skill` only: approval declined, nothing was written. |
+| 3 | `install-skill` only: an unsafe collision (an existing file that is not a managed version upgrade, or a symlink). |
 
-Codes 2 and 3 belong to the machine-facing `--install-skill` mode that the
-planning skill's own tooling uses; the interactive and `--all`/`--skill` paths
-only ever return 0 or 1.
+Codes 2 and 3 belong to the machine-facing `install-skill` subcommand that the
+planning skill's own tooling uses; the `interactive`, `install --all`, and
+`install --skill` paths only ever return 0 or 1.
 
 ### Full-screen installer UI
 
-*Placeholder — `install-ui.sh`, a full-screen terminal UI for the same
-installer, is in development and is not yet wired into `install.sh`. Its
-keybindings will be documented here once it is integrated.*
+Running the bare one-liner with no arguments, or `installer interactive`
+directly, opens a full-screen skill picker instead of the numbered menu:
+
+| Key | Action |
+|---|---|
+| `↑`/`k`, `↓`/`j`, `PageUp`, `PageDown`, `Home`, `End` | move the cursor |
+| `Enter` / `Space` | toggle the skill under the cursor |
+| `Tab` / `Shift-Tab` | switch focus between the skill list and the info pane |
+| `a` / `n` | select all / select none |
+| `d`, `r`, `m` (info pane focused) | show dependency hints, re-verify requirements, cycle a skill's integration mode |
+| `i` | confirm and install the current selection |
+| `q` / `Escape` | quit without installing |
+
+With neither `--target` nor `--agent` given, it also prompts to choose an
+auto-detected agent root, a saved custom directory, a new custom directory, or
+`a` for every listed root.
 
 Review the installer before running it if you do not trust the source. Skills
 are instructions that may guide agents to run commands or access files.
 
-`install.sh` is a generated artifact assembled from `installer/src/` — see
-[CONTRIBUTING.md](CONTRIBUTING.md) before editing it.
+`install.sh` retired in favor of a compiled Rust installer
+(`src/installer/`); `installer/bootstrap.sh` is the small, still-bash entry
+point that detects the platform, downloads the matching release, and hands
+off to it — see [CONTRIBUTING.md](CONTRIBUTING.md) before editing either.
 
 ## Supported agent documentation
 
@@ -258,15 +273,23 @@ are instructions that may guide agents to run commands or access files.
 
 ## Development checkout
 
-Run the installer directly from a checkout to use its local files without
-downloading an archive:
+`installer/bootstrap.sh` always downloads a release archive, so it is not how
+a checkout installs its own local files. Build the installer and point it at
+the checkout with `--source` instead:
 
 ```bash
-./install.sh
+cargo build --release -p installer
+./target/release/installer interactive --source .
 ```
 
-The installer also accepts `AI_SKILLS_REPO_URL` and `AI_SKILLS_REF` when a
-different repository or branch must be used.
+`--package dev` (also read from `$PACKAGE_SELECTION`) ships the `MODE: DEV`
+files too — tests, maintainer docs — instead of filtering them out, for
+installing a working development copy rather than the prod set.
+
+`installer/bootstrap.sh` itself accepts `AI_SKILLS_REPO_URL` (a different
+`owner/repo` to resolve GitHub's "latest release" redirect against) and
+`AI_SKILLS_RELEASE_URL` (an exact archive URL, bypassing that redirect
+entirely — how [RELEASE.md](RELEASE.md) verifies one specific tag).
 
 ## Notes
 

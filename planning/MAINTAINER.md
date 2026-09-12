@@ -42,11 +42,11 @@ the maintainer must behave going forward.
 | `scripts/validate-plan-propagation-lib.sh` | `--complete` progress gate plus propagation (a) unowned edit targets, (c) verifier reachability, (c2) companion references, (d) unverified graph leaves, (e) §9.x roster vs inventory. | Runs only when `--propagation` (the default) is on. |
 | `scripts/*.sh` | Thin, single-purpose helpers. | Source `plan-document-lib.sh` (+ `plan-reconcile-lib.sh`). |
 | `PACKAGE-MANIFEST.tsv` / `PACKAGE-MAP.tsv` | Ship manifest / source-destination map. | Every installed file must be registered here. |
-| `install.sh` `skill_files()` | Installer file list. | Must match manifest + map. Every name must exist on disk and every tracked skill file must either be listed or parked in `../installer/unshipped-planning-files.txt` — asserted by `../tests/test-skill-files-manifest.sh`, which also runs as npm `prepack`. |
+| `installer/src/50-manifest.sh` `skill_files()` | Installer file list. | Must match manifest + map. Every name must exist on disk and every tracked skill file must either be listed or parked in `../installer/unshipped-planning-files.txt` — asserted by `../tests/test-skill-files-manifest.sh`, which also runs as npm `prepack`. |
 | `../installer/unshipped-planning-files.txt` | Planning files no install delivers, awaiting a ship-or-not decision. | A ratchet: entries leave by being registered for shipping. Adding one is a decision, and a stale entry fails the test. |
 | Benchmark capsule copy (`setup-benchmark.sh`) | Copies a fixed set into the worker capsule: `SKILL.md`, `REVIEWER.md` (generated into the capsule when absent), `scripts/`, and the UI reference doc. | New files under `scripts/` and changes to `SKILL.md`/`REVIEWER.md` must be reflected here; `ROLES.md`, `roles/*`, `VOICES.md`, and `MAINTAINER-STYLE-CONTRACT.md` are NOT copied into the capsule. |
 | `../verify-both-shells.sh` | Runs the suite on the working tree under the local bash and the bash 3.2 floor, in a linked worktree in `TMPDIR` so editing can continue. Prints each failing test's own output. | Sweeps its own leftover worktrees; never place one under the repo, or the filesystem scans land machine-specific paths in generated artifacts. |
-| `../blast-radius.sh` | Integration-safety report over a change set: freshness of generated artifacts, missing manifest rows, base drift, and the couplings in `coupling.tsv`. Not a correctness check and not shipped. | Reads `coupling.tsv`; runs `installer/build.sh --check`, `generate-portability.sh --check`, `test-reviewer-projection.sh`. Asserted by `test-blast-radius.sh`. |
+| `../blast-radius.sh` | Integration-safety report over a change set: freshness of generated artifacts, missing manifest rows, base drift, and the couplings in `coupling.tsv`. Not a correctness check and not shipped. | Reads `coupling.tsv`; runs `generate-portability.sh --check`, `test-reviewer-projection.sh`. Asserted by `test-blast-radius.sh`. |
 | `../coupling.tsv` | The couplings a change must honour, as data rather than prose: glob, level, consequence, check. | Read by `blast-radius.sh`. Add a row when a new generated artifact or registry appears. |
 | `../BUGS.json` / `../TODO.json` | The defect register and the work queue, written by this repo's own `bug-report` and `todo` skills. Tracked, so they survive a machine. | Update them in the same change (checklist step 8). No gate enforces this — nothing can tell that a commit resolved a defect — so the checklist is the only mechanism. |
 | `../CODE-CONTRACTS.md` | Cross-script behavioural contracts: section shapes and their sole writer, irreversible-last, advisory vs gate, generated artifacts, registry-plus-gate, and human-followable documents. Each entry names the incident behind it. | Read with `CODE-STYLE.md` before changing a helper. Contract 1 is enforced by `document-sections.json` + `test-document-sections.sh`. |
@@ -60,8 +60,9 @@ the maintainer must behave going forward.
 - A changed command/format is a **clean break**. No aliases, legacy modes, or
   inferred defaults. Old forms fail loudly.
 - Coordinated migration: update producer, parser/validator, fixtures, tests,
-  manifest/map, `install.sh skill_files`, capsule copy, and the hash test in
-  the **same** change. Run the plan validator and installer-manifest check.
+  manifest/map, `installer/src/50-manifest.sh`'s `skill_files()`, capsule copy,
+  and the hash test in the **same** change. Run the plan validator and
+  installer-manifest check.
 
 ### 2.2 Small, scoped, single-source docs
 - `SKILL.md` stays a lean index/contract. Never let it regrow into the
@@ -373,14 +374,16 @@ unbuilt tree is not evidence about the code a user gets.
   therefore builds the libraries and appends them to the file list; a
   generated file that is linted, or sourced by something linted, belongs in
   that list.
-- **`install.sh` is the one standing exception, and it stays committed.** It is
-  fetched and run standalone (`curl … | bash`) and is the npm `bin`, so at
-  runtime it has no siblings to source and no pipeline to fetch it from — the
-  artifact *is* the entry point. It keeps its generator (`installer/build.sh`)
-  and its freshness gate (`installer/build.sh --check`, the `installer-build`
-  CI job) instead. Read the rule above as "nothing machine-produced is
-  committed except the one artifact whose whole purpose is to be downloaded on
-  its own", and see `CONTRIBUTING.md` and `RELEASE.md`, which say the same.
+- **This section's exception used to be `install.sh` — machine-assembled yet
+  committed, because it was fetched and run standalone (`curl … | bash`) with
+  no pipeline to fetch it from.** It is retired (see git history and
+  `.agents/MAINTAINER.md`); the exception retired with it. The installer is now
+  a compiled Rust binary (`src/installer/`), built at release time and shipped
+  as a GitHub release asset — never committed, so the rule above already
+  covers it without carve-out. `installer/bootstrap.sh`, the curl-piped entry
+  point that downloads that asset, stays committed for the ordinary reason: it
+  is hand-written source, not generated. See `CONTRIBUTING.md` and
+  `RELEASE.md`, which say the same.
 
 ## 3. Pending consolidation (the duplication inventory)
 
@@ -399,7 +402,7 @@ what keeps this table from rotting the way the comments did.
 | Seed progress-bar literal `` `0%  #### ----------------  100%` `` | 3 files | `plan_progress_bar` | helper exists; glyphs are pinned by `tests/test-progress-bar-shape.sh`, so any migration must stay byte-identical. `rebuild-plan-progress.sh` left the set in T5, which is why the cap is 3, not 4. |
 | percent / bar / icon derivation | 3 files | `plan_progress_percent`, `plan_progress_bar`, `plan_progress_icon` | helper exists; `update-progress.sh` is the canonical copy and the library's arithmetic and glyphs are transcribed from it. The other two agree on output but not on spelling, so do not assume a textual match when converting: `update-plan-progress.sh` collapses the filled/empty and icon branches to one-liners. `rebuild-plan-progress.sh` was migrated onto the helpers in T5, which is why the cap dropped from 4. Half-up rounding (`+ total / 2`) and the 20-column default width are part of the byte-identical contract. |
 | Status `case` map (`incomplete`/`in-progress`/`completed` → glyph) | 1 file | `plan_status_label` | helper exists in `scripts/plan-document-lib.sh`; `update-step.sh` and `update-plan-progress.sh` are migrated. `rebuild-plan-progress.sh` is the remaining site and is a different shape — it derives the glyph from the goal's own progress file rather than from a requested status word, so it needs a second helper or a rewrite, not this one. The glyphs are the on-disk contract. |
-| A test that does not source `lib-test.sh` | 7 of 64 (W17 converted test-progress-helpers to the harness; the remaining seven are benchmark-frozen or self-contained contract probes) | `t_begin` / `t_record` / `t_fail` / `t_end` (`tests/lib-test.sh`) | helper exists; six tests kept a byte-identical copy of its reporter that exited on the first finding, and that count is now 0. The cap counts the library-source line instead, because "a reporter whose body exits" needs brace matching and CODE-STYLE.md section 12 rules out parsing shell structure with a pattern. A `fail() { t_fail "$*"; }` shim is deliberate and is not counted: 32 tests have one, and they are why the call sites did not change. |
+| A test that does not source `lib-test.sh` | 6 of 64 (W17 converted test-progress-helpers to the harness; the remaining six are benchmark-frozen or self-contained contract probes) | `t_begin` / `t_record` / `t_fail` / `t_end` (`tests/lib-test.sh`) | helper exists; six tests kept a byte-identical copy of its reporter that exited on the first finding, and that count is now 0. The cap counts the library-source line instead, because "a reporter whose body exits" needs brace matching and CODE-STYLE.md section 12 rules out parsing shell structure with a pattern. A `fail() { t_fail "$*"; }` shim is deliberate and is not counted: 32 tests have one, and they are why the call sites did not change. The cap fell 7 -> 6 when `test-platform-selection.sh` (one of the bash `install.sh`-specific tests) was deleted with the rest of the retired installer's test suite. |
 | `stat(1)` GNU-vs-BSD probe | `plan-env.sh` + `plan-document-lib.sh` | `plan_stat_mode`, `plan_stat_uid` | helper exists, but `plan-env.sh` sources no library, so migrating it is a structural change |
 
 Migrating any row is a behaviour-preserving change and must be proved as one:
@@ -410,8 +413,8 @@ before and after, and diff. `test-progress-bar-shape.sh` and
 ## 4. Change checklist (minimum, per change)
 
 1. Identify every consumer (parser/validator, other helpers, tests, `role_docs()`
-   in `role-context.sh`, manifest/map, `install.sh skill_files`, capsule copy,
-   hash test).
+   in `role-context.sh`, manifest/map, `installer/src/50-manifest.sh`'s
+   `skill_files()`, capsule copy, hash test).
 2. Update shared logic in the library, keep the helper thin.
 3. Add/update a regression fixture + test for the new behavior, including the
    actionable-error path.
@@ -424,7 +427,7 @@ before and after, and diff. `test-progress-bar-shape.sh` and
    `plan-context-lib.sh` reader composition in sync with `role_docs()`/`ROLES=()`;
    re-run `test-persona-drift.sh` + `test-voice-artifact-drift.sh`.
 6. Register new files in `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv`,
-   and `install.sh skill_files`. If the file is a benchmark capsule dependency
+   and `installer/src/50-manifest.sh`'s `skill_files()`. If the file is a benchmark capsule dependency
    (`scripts/*`, `SKILL.md`, `REVIEWER.md`), reflect it in `setup-benchmark.sh`'s
    capsule copy. The manifest line-count is derived from the map (no constant to
    bump) — `test-installer-manifest.sh` asserts the reconcile.

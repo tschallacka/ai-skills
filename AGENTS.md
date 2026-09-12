@@ -10,7 +10,8 @@ here without rediscovering conventions.
 A portable collection of coding-agent skills (`planning/`, `brainstorm/`,
 `post-implementation-review/`, `project-specificies/`,
 `resource-limited-testing/`) plus a benchmark harness (`benchmark/planning/`)
-and a shell installer (`install.sh`). The skills are plain Markdown meant to
+and a compiled Rust installer (`src/installer/`, fetched via the small
+curl-piped `installer/bootstrap.sh`). The skills are plain Markdown meant to
 work across agent tools; keep them portable.
 
 `BUGS.json` and `TODO.json` are the defect register and the work queue, written
@@ -232,12 +233,13 @@ defaults verbatim.
 - `benchmark/results/` holds immutable benchmark evidence. If you run a
   throwaway benchmark, clean up stray `<run-id>` result dirs you produced
   before committing.
-- New/changed skills must be registered in `install.sh` (`SKILL_NAMES`, the
-  shop menu, `select_skills`, and copy logic), added to the skills table in
-  `README.md`, and to `package.json`'s `files` list. `planning/` also tracks a
-  ship manifest (`planning/PACKAGE-MANIFEST.tsv` + `PACKAGE-MAP.tsv` +
-  `install.sh skill_files()`), which must stay byte-consistent — the
-  installer-manifest test asserts this.
+- New/changed skills must be registered in `installer/src/05-config.sh`
+  (`SKILL_NAMES`, `SKILL_DESCRIPTIONS`) and `installer/src/50-manifest.sh`
+  (`skill_files()`), added to the skills table in `README.md`, and to
+  `package.json`'s `files` list. `planning/` also tracks a ship manifest
+  (`planning/PACKAGE-MANIFEST.tsv` + `PACKAGE-MAP.tsv` +
+  `installer/src/50-manifest.sh`'s `skill_files()`), which must stay
+  byte-consistent — the installer-manifest test asserts this.
 - Follow DEVELOPMENT.md for release/versioning/publishing. It is a human
   release action; confirm before running `npm publish` or creating tags.
 - **`BUGS.json` and `TODO.json` may only change on the `registers` branch.**

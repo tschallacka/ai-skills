@@ -1,8 +1,8 @@
 package_path	byte_size
 package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
-package/.agents/MAINTAINER.md	11239
+package/.agents/MAINTAINER.md	11904
 package/LICENSE	1068
-package/README.md	16518
+package/README.md	17967
 package/ai-text-editor/SKILL.md	20293
 package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	16672
@@ -18,11 +18,11 @@ package/brainstorm/docs/README.md	1387
 package/brainstorm/requires.tsv	1162
 package/bug-report/SKILL.md	18181
 package/bug-report/binaries.tsv	945
-package/bug-report/docs/README.md	1305
+package/bug-report/docs/README.md	1318
 package/bug-report/requires.tsv	1628
 package/bug-report/schema.1.4.2.json	2754
 package/bug-report/schema.2.0.0-alpha.1.json	2499
-package/chat/SKILL.md	48172
+package/chat/SKILL.md	48211
 package/chat/binaries.tsv	1876
 package/chat/docs/README.md	1890
 package/chat/integration.tsv	1652
@@ -53,7 +53,7 @@ package/git-merge-resolving/requires.tsv	1321
 package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
-package/installer/bootstrap.sh	15280
+package/installer/bootstrap.sh	15664
 package/interactive-shell/SKILL.md	14192
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/appprofiles/FORMAT.md	3629
@@ -128,7 +128,7 @@ package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
 package/package.json	2015
-package/planning/MAINTAINER-STYLE-CONTRACT.md	15134
+package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	19826
 package/planning/REVIEWER.md	24342
 package/planning/ROLES.md	4355
@@ -148,7 +148,7 @@ package/planning/never-executable-extensions.json	245
 package/planning/parts/part-1.md	16803
 package/planning/parts/part-2.md	20390
 package/planning/parts/part-3.md	32950
-package/planning/parts/part-4.md	24349
+package/planning/parts/part-4.md	24344
 package/planning/placeholders.json	4713
 package/planning/references/comment-discipline-contract.md	2622
 package/planning/references/plan-read-contract.md	3346
@@ -237,7 +237,7 @@ package/planning/scripts/validate-plan.sh	10820
 package/planning/scripts/verify-fix-keys.sh	9571
 package/planning/scripts/verify-skill-load.sh	3051
 package/planning/scripts/verify-target.sh	9497
-package/planning/skill-source.txt	92627
+package/planning/skill-source.txt	92622
 package/planning/state-change-registry.json	1096
 package/planning/telemetry-schema.json	888
 package/post-implementation-review/SKILL.md	11079

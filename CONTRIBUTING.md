@@ -172,37 +172,34 @@ Then, specific to this repo:
   the commit message. Nothing fails when you skip this, which is exactly why it
   needs saying: a fix whose entry is never closed reads as still broken, and a
   defect noticed in passing and left only in prose is a defect nobody can find.
-- **`install.sh` is generated — never edit it.** It is assembled by
-  `installer/build.sh` from the ordered parts in `installer/src/NN-<concern>.sh`,
-  with the runtime-dependency tables generated into it between the
-  `# BEGIN/END GENERATED DEPENDENCY BLOCK` markers from `installer/tools.tsv` and
-  each skill's `requires.tsv`. Edit the part (or the table), run
-  `./installer/build.sh`, and commit the artifact along with the source. It stays
-  committed and shipped because the README's first command is `curl … | bash` and
-  it is the npm `bin`, so at runtime it has no siblings to source.
-  `./installer/build.sh --check` (mirroring `./generate-portability.sh --check`),
-  `planning/tests/test-installer-build.sh`, and the `installer-build` CI job all
-  fail on a hand edit.
-- **Ordering inside the parts is load-bearing**, and each part's banner says why:
-  the CLI-mode `case` must stay the first argument consumer, `trap cleanup EXIT`
-  must precede the first `mktemp -d`, the fd-3 block must precede any
-  `ask`/`confirm`, and `show_splash` must run before `download_source`. The
-  numeric prefixes are the build order, with gaps so a part can be inserted
-  without renumbering.
+- **The installer is a compiled Rust binary (`src/installer/`), not a script
+  to hand-edit.** `install.sh` — the bash installer this used to be — is
+  retired; see git history and `.agents/MAINTAINER.md` for the writeup. Change
+  installer behavior in `src/installer/src/*.rs`, run its own test suite
+  (`cargo test -p installer`), and rebuild (`cargo build --release -p
+  installer`). `installer/bootstrap.sh` is the one part still bash: a small,
+  self-contained curl-piped entry point that detects the platform, downloads
+  the matching release asset, and hands off to the binary — see its own header
+  comment before editing it, since it cannot source anything else in this
+  repository (nothing else is on disk yet when it runs).
+- **`installer/src/05-config.sh` and `installer/src/50-manifest.sh` are the two
+  surviving fragments of the retired bash installer.** `installer/build-release.sh`
+  still sources both directly for `SKILL_NAMES`/`SKILL_DESCRIPTIONS` and
+  `skill_files()`/`skill_artifact_files()` — the file list a release packs.
+  A new or renamed file under a skill directory moves in four places, or
+  `planning/tests/test-installer-manifest.sh` fails: `planning/PACKAGE-MANIFEST.tsv`,
+  `planning/PACKAGE-MAP.tsv`, `installer/src/50-manifest.sh`'s `skill_files()`,
+  and `package.json`'s `files` (directory level only). The manifest and the map
+  are compared byte-for-byte, so row *order* matters.
 - **A skill's runtime dependencies live in `<skill>/requires.tsv`**: tool id, a
   `<uname -s>:<uname -m>` condition, a strength, and the capability lost without
   it. `hard` means the installer refuses to install *that skill* and exits
   non-zero; `soft` means it installs and warns. How to verify and how to install
-  a tool belongs in the shared `installer/tools.tsv`, once per tool. Both are
+  a tool belongs in the shared `installer/tools.tsv` (`include_str!`'d into the
+  compiled installer binary at build time), once per tool. Both are
   line-oriented TSV rather than JSON, deliberately: `rjq` is itself declared
   there, so a format needing `rjq` to read it could not be read on the machine
   that is missing it.
-- **A new or renamed file under a skill directory moves in four places** or
-  `planning/tests/test-installer-manifest.sh` fails:
-  `planning/PACKAGE-MANIFEST.tsv`, `planning/PACKAGE-MAP.tsv`,
-  `installer/src/50-manifest.sh`'s `skill_files()` (then rebuild), and
-  `package.json`'s `files` (directory level only). The manifest and the map are
-  compared byte-for-byte, so row *order* matters.
 - **Every hard rule needs a regression test.** A rule in `CODE-STYLE.md` with no
   test and no CI leg is a suggestion, and suggestions rot.
 - Match the commit style: short, lowercase-prefixed subjects (`planning:`,
@@ -211,11 +208,10 @@ Then, specific to this repo:
 ## CI
 
 `.github/workflows/ci.yml` runs the suite on `ubuntu-latest` and
-`macos-latest`, plus a leg pinned to macOS's system bash 3.2, the shellcheck
-gate, and the `installer-build` job that rebuilds `install.sh` and fails if the
-committed artifact differs. Both macOS legs are blocking: a regression there
-fails the PR (T37 removed the old informational flag once two consecutive
-runner runs came back green under both shells).
+`macos-latest`, plus a leg pinned to macOS's system bash 3.2 and the
+shellcheck gate. Both macOS legs are blocking: a regression there fails the
+PR (T37 removed the old informational flag once two consecutive runner runs
+came back green under both shells).
 
 ## Testing on bash 3.2 without nix
 
