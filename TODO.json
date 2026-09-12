@@ -159,19 +159,6 @@
       "updated_at": "2026-09-04T08:36:28Z"
     },
     {
-      "id": "T95",
-      "title": "Interactive installer TUI has no way to choose a skill's integration mode (mcp vs skill)",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "install.sh's --integration flag lets an automation caller pick ai-text-editor's mcp bridge vs its skill client, but the interactive terminal UI (iui_info_actions and the rest of the iui_ pane rendering) only offers 'install dependencies' / 'reverify dependencies' as actions -- there is no toggle or prompt anywhere in the TUI for integration mode. A human running the plain interactive installer cannot choose mcp mode at all; only a scripted --integration flag can. Add an action (or a per-skill toggle in the info pane) that lets an interactive user pick among the modes integration_modes() declares for the skill under the cursor, for skills that offer more than one.",
-      "blocked_on": null,
-      "refs": [],
-      "note": "Implemented on fix/worktrees-tmpdir-chat-relay at eb076758; closes on merge. The info pane gains an m action for a skill declaring more than one mode, naming the mode in force and cycling it. Two things the implementation had to move: integration_mode_for() to 05-config.sh (install-ui.sh does not source 50-manifest.sh, so a ui function calling it would repeat B49), and the generated INTEGRATION block into iui_dev_load_tables (the mode tables live only in the artifact, so the standalone picker had an empty integration_modes and would have rendered no line).",
-      "created_at": "2026-09-04T20:52:21Z",
-      "updated_at": "2026-09-07T20:00:00Z"
-    },
-    {
       "id": "T100",
       "title": "jump points: on open, derive a file's outbound references from CodeGraph so a tab can be navigated, not just searched",
       "status": "open",
@@ -324,22 +311,6 @@
       "note": "Reported by Michael, relayed via bridge:session_0114UV8CPfYa9xkB93JbKSDx (relay-ai-skills) after searching TODO.json and interactive-shell/SKILL.md and finding no existing match for the trigger sentence.",
       "created_at": "2026-09-09T09:51:03Z",
       "updated_at": "2026-09-09T09:51:03Z"
-    },
-    {
-      "id": "T127",
-      "title": "ai-text-editor MCP: codex prompts for permission on every call, and the resulting delay routinely expires the servers idle timeout mid-task",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Michael, driving ai-text-editor via codex: codex asks for approval on every single ai-text-editor.open/read/search call, unlike a normal read-only tool. Each approval adds real wall-clock delay between calls, and the autostarted ai-text-editor-server has its own idle_timeout_seconds (open calls in the transcript pass 120, then 300). When the approval delay across several calls exceeds that window, the server exits and every open tab_id in flight goes tab_unknown - \"no session record has tab_id X; the tab may belong to a server that has since exited - open the file again for a current id (the journal replays)\". Codex then has to reopen the same file and retry, compounding the prompt fatigue. Two angles worth investigating together, since fixing either alone only helps half the symptom: (1) why codex prompts per-call at all for a local read-only-by-default MCP server - check whether ai-text-editor tools/list declares read-only tool annotations (e.g. an MCP readOnlyHint-style hint) that a conforming client could use to skip confirmation, and what codexs own MCP trust/allowlist config supports; (2) whether the servers idle_timeout_seconds should scale with, or be immune to, the callers own confirmation latency - a tab dying because a HUMAN was slow to click approve is a different failure than a tab dying because the agent went idle, and only the second is what the timeout is meant to catch.",
-      "blocked_on": null,
-      "refs": [
-        "src/ai-text-editor-mcp/src/lib.rs",
-        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
-      ],
-      "note": "Reported by Michael 2026-09-09, relayed via bridge:session_0114UV8CPfYa9xkB93JbKSDx (relay-ai-skills) from a codex transcript driving ai-text-editor directly - real tab_unknown errors and re-opens shown in the transcript, not hypothesized.",
-      "created_at": "2026-09-09T12:30:19Z",
-      "updated_at": "2026-09-09T12:30:19Z"
     },
     {
       "id": "T128",
@@ -1101,6 +1072,19 @@
       "updated_at": "2026-09-11T08:43:53Z"
     },
     {
+      "id": "T95",
+      "title": "Interactive installer TUI has no way to choose a skill's integration mode (mcp vs skill)",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "install.sh's --integration flag lets an automation caller pick ai-text-editor's mcp bridge vs its skill client, but the interactive terminal UI (iui_info_actions and the rest of the iui_ pane rendering) only offers 'install dependencies' / 'reverify dependencies' as actions -- there is no toggle or prompt anywhere in the TUI for integration mode. A human running the plain interactive installer cannot choose mcp mode at all; only a scripted --integration flag can. Add an action (or a per-skill toggle in the info pane) that lets an interactive user pick among the modes integration_modes() declares for the skill under the cursor, for skills that offer more than one.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Verified live 2026-09-12 against the current Rust installer (src/installer/src/ui/mod.rs), not the bash install-ui.sh this note originally referenced (retired, see git history of 1549ccb2). Drove ./target/release/installer interactive via the interactive-shell skill: Tab to focus the info pane on a multi-mode skill (ai-text-editor) shows an 'm  integration mode: skill (cycles: skill mcp)' action; pressing m cycles skill -> mcp -> skill, confirmed round-trip. The capability this task asked for already exists in the Rust picker (cycle_integration_mode in ui/mod.rs); nothing further to build.",
+      "created_at": "2026-09-04T20:52:21Z",
+      "updated_at": "2026-09-12T10:34:48Z"
+    },
+    {
       "id": "T96",
       "title": "Every ai-text-editor action must be invokable on a tab id",
       "status": "done",
@@ -1189,6 +1173,22 @@
       "note": "Proposal, not law. Peer of T105: that one is a gap inside a rule, this is a gap in the contract's scope. RULED by Tschallacka, 2026-09-08: widen it. 'We started with bash only, so we evolved to rust focussed to get around system limitations etc... So widen it, so it applies to all languages. they are good rules, that should be held globally.'\n\nSo the shell-only scope was an artefact of shell being all there was when the rules were written, never a judgement that Rust deserved fewer. CODE-STYLE.md is now titled 'Code style and structure', opens 'The contract every source file in this repository conforms to, in every language', and section 11's table row reads 'This repository's own source, in every language'. Where a rule is inherently shell-specific -- set -euo pipefail, the bash 3.2 floor, local -- it simply has no counterpart in another language rather than exempting that language from the rest.\n\nSection 11 also now states that // /// and //! are all comments under it: rustdoc prose describing the API is what /// is for and is not why-prose, while an account of how the code came to look this way is, and belongs in the commit message.\n\nPrompted by a nitpicker citing the old scope line to rule a Rust file ungoverned, which is exactly the reading the entry predicted.",
       "created_at": "2026-09-08T10:48:24Z",
       "updated_at": "2026-09-08T20:00:10Z"
+    },
+    {
+      "id": "T127",
+      "title": "ai-text-editor MCP: codex prompts for permission on every call, and the resulting delay routinely expires the servers idle timeout mid-task",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Michael, driving ai-text-editor via codex: codex asks for approval on every single ai-text-editor.open/read/search call, unlike a normal read-only tool. Each approval adds real wall-clock delay between calls, and the autostarted ai-text-editor-server has its own idle_timeout_seconds (open calls in the transcript pass 120, then 300). When the approval delay across several calls exceeds that window, the server exits and every open tab_id in flight goes tab_unknown - \"no session record has tab_id X; the tab may belong to a server that has since exited - open the file again for a current id (the journal replays)\". Codex then has to reopen the same file and retry, compounding the prompt fatigue. Two angles worth investigating together, since fixing either alone only helps half the symptom: (1) why codex prompts per-call at all for a local read-only-by-default MCP server - check whether ai-text-editor tools/list declares read-only tool annotations (e.g. an MCP readOnlyHint-style hint) that a conforming client could use to skip confirmation, and what codexs own MCP trust/allowlist config supports; (2) whether the servers idle_timeout_seconds should scale with, or be immune to, the callers own confirmation latency - a tab dying because a HUMAN was slow to click approve is a different failure than a tab dying because the agent went idle, and only the second is what the timeout is meant to catch.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor-mcp/src/lib.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "note": "Fixed and verified live 2026-09-12. Angle (1) was the real cause: src/ai-text-editor-mcp/src/lib.rs's tool_definitions() declared zero MCP tool annotations on any tool, so a client had no signal that open/read/search/etc. never write. Added an 'annotations' object per tool ({readOnlyHint, openWorldHint: false}), computed from a new READ_ONLY_TOOLS const covering the tools that never change a file's bytes or delete anything (open, capabilities, resources, read, history, page, search, cursor, job_poll); everything else (including index, save_as, close, resolve, and the 9 revision-guarded mutating tools) keeps the default. Two new unit tests pin the const against the wire output and pin specific mutating tools to readOnlyHint:false. Verified live by driving a real Codex session (v0.154.0, gpt-5.5) through the interactive-shell skill: asked it to read a file via the MCP tool, then to insert into it. 'read' ran with NO approval prompt at all; 'insert' immediately showed 'Allow the ai-text-editor MCP server to run tool insert? (1 Allow / 2 Allow for session / 3 Always allow / 4 Cancel)' in the same session -- exactly the intended split. Also drove OpenCode (Big Pickle) and a fresh Claude Code session the same way for comparison: neither showed a distinguishing prompt for read vs insert even before this fix (OpenCode's own permission config already allows the MCP broadly; the Claude Code session had auto mode on), so they were never where T127's symptom lived -- Codex was, and Codex is now fixed. Angle (2) (idle_timeout_seconds scaling with confirmation latency) is untouched: with angle (1) fixed, the read-heavy calls that used to each cost an approval-round-trip now cost none, which should itself much reduce how often the timeout window is exceeded; revisit angle (2) only if tab_unknown recurs in practice. Landed in feat/rust-installer at f56c43ab.",
+      "created_at": "2026-09-09T12:30:19Z",
+      "updated_at": "2026-09-12T10:34:48Z"
     },
     {
       "id": "T140",
