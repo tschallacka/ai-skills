@@ -52,7 +52,10 @@ fn git_output(source_root: &Path, args: &[&str]) -> Option<String> {
 fn source_version(source_root: &Path) -> String {
     let commit = git_output(source_root, &["rev-parse", "--short=12", "HEAD"])
         .unwrap_or_else(|| "unknown".to_string());
-    match git_output(source_root, &["describe", "--tags", "--exact-match", "HEAD"]) {
+    match git_output(
+        source_root,
+        &["describe", "--tags", "--exact-match", "HEAD"],
+    ) {
         Some(tag) => format!("tag:{tag} commit:{commit}"),
         None => {
             let branch = git_output(source_root, &["symbolic-ref", "--short", "-q", "HEAD"])
@@ -75,7 +78,9 @@ fn package_version(source_root: &Path) -> String {
         let Some(rest) = trimmed.strip_prefix("\"version\"") else {
             continue;
         };
-        let Some(colon) = rest.find(':') else { continue };
+        let Some(colon) = rest.find(':') else {
+            continue;
+        };
         let value = rest[colon + 1..].trim();
         let Some(value) = value.strip_prefix('"') else {
             continue;
@@ -167,8 +172,8 @@ pub fn install_skill_cli(
 
     let dest_dir = target.join(skill);
     let mode = integration::resolve_mode(source_root, skill, Some(&dest_dir), None);
-    let relative_paths =
-        install::skill_relative_files(source_root, skill, package_dev).map_err(|e| e.to_string())?;
+    let relative_paths = install::skill_relative_files(source_root, skill, package_dev)
+        .map_err(|e| e.to_string())?;
 
     let mut collision = false;
     let mut unsafe_collision = false;
@@ -286,9 +291,8 @@ mod tests {
     fn install_skill_cli_refuses_an_unknown_skill() {
         let dir = tempfile::tempdir().unwrap();
         let target = tempfile::tempdir().unwrap();
-        let err =
-            install_skill_cli(dir.path(), "not-a-real-skill", target.path(), true, false)
-                .unwrap_err();
+        let err = install_skill_cli(dir.path(), "not-a-real-skill", target.path(), true, false)
+            .unwrap_err();
         assert!(err.contains("unsupported CLI skill"));
     }
 
@@ -320,7 +324,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(&dir.path().join("todo/SKILL.md"), "# todo\n");
         let target = tempfile::tempdir().unwrap();
-        write(&target.path().join("todo/SKILL.md"), "someone else's file\n");
+        write(
+            &target.path().join("todo/SKILL.md"),
+            "someone else's file\n",
+        );
 
         let outcome = install_skill_cli(dir.path(), "todo", target.path(), true, false).unwrap();
         assert!(matches!(outcome, CliInstallOutcome::Collision));
@@ -357,7 +364,10 @@ mod tests {
         write(&dir.path().join("todo/SKILL.md"), "# todo v2\n");
         let target = tempfile::tempdir().unwrap();
         write(&target.path().join("todo/SKILL.md"), "# todo v1 (old)\n");
-        write(&target.path().join("todo/.version"), "format=ai-skills-version-1\nold marker\n");
+        write(
+            &target.path().join("todo/.version"),
+            "format=ai-skills-version-1\nold marker\n",
+        );
 
         let outcome = install_skill_cli(dir.path(), "todo", target.path(), true, false).unwrap();
         assert!(matches!(outcome, CliInstallOutcome::Installed(_)));
@@ -373,7 +383,10 @@ mod tests {
         write(&dir.path().join("todo/SKILL.md"), "# todo v2\n");
         let target = tempfile::tempdir().unwrap();
         fs::create_dir_all(target.path().join("todo")).unwrap();
-        write(&target.path().join("todo/.version"), "format=ai-skills-version-1\nold marker\n");
+        write(
+            &target.path().join("todo/.version"),
+            "format=ai-skills-version-1\nold marker\n",
+        );
         let elsewhere = tempfile::tempdir().unwrap();
         write(&elsewhere.path().join("real-skill-md"), "not the real file");
         std::os::unix::fs::symlink(

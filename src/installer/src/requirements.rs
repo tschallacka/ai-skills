@@ -191,7 +191,11 @@ fn is_executable(candidate: &Path) -> bool {
 /// from) rather than a second copy of the os/arch match.
 fn bundled_rjq_path(source_root: &Path) -> Option<PathBuf> {
     let target = installer_platform::current().ok()?;
-    let name = if target.is_windows() { "rjq.exe" } else { "rjq" };
+    let name = if target.is_windows() {
+        "rjq.exe"
+    } else {
+        "rjq"
+    };
     let path = source_root
         .join("planning")
         .join("bin")
@@ -417,7 +421,10 @@ mod tests {
         );
         let status = skill_status(dir.path(), "s");
         assert_eq!(status.state, SkillState::Blocked);
-        assert_eq!(status.blocker.as_deref(), Some("definitely-not-a-real-tool-xyz"));
+        assert_eq!(
+            status.blocker.as_deref(),
+            Some("definitely-not-a-real-tool-xyz")
+        );
     }
 
     #[test]

@@ -136,7 +136,10 @@ pub(crate) fn info_lines(state: &PickerState, width: usize) -> Vec<String> {
                 crate::requirements::Strength::Hard => "hard",
                 crate::requirements::Strength::Soft => "soft",
             };
-            for line in wrap(&format!("  {label} ({strength}): {mark} -- {}", req.why), width) {
+            for line in wrap(
+                &format!("  {label} ({strength}): {mark} -- {}", req.why),
+                width,
+            ) {
                 lines.push(pad(&line, width));
             }
         }
@@ -408,7 +411,9 @@ mod tests {
         let state = PickerState::new(skills(&["todo"]));
         let lines = info_lines(&state, 60);
         assert!(lines.iter().any(|l| l.contains("ACTIONS")));
-        assert!(lines.iter().any(|l| l.contains("help me install dependencies")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("help me install dependencies")));
         assert!(lines.iter().any(|l| l.contains("reverify dependencies")));
         assert!(!lines.iter().any(|l| l.contains("integration mode")));
     }

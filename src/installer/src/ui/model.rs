@@ -83,10 +83,7 @@ impl PickerState {
                 .blocker
                 .clone()
                 .unwrap_or_else(|| "a required tool".to_string());
-            self.message = vec![format!(
-                "{} is blocked: {reason} is missing",
-                skill.name
-            )];
+            self.message = vec![format!("{} is blocked: {reason} is missing", skill.name)];
             return;
         }
         if let Some(slot) = self.selected.get_mut(index) {
@@ -202,7 +199,10 @@ impl PickerState {
             None => 0,
         };
         skill.mode = skill.offered_modes[next_index].clone();
-        self.message = vec![format!("{} will be installed in {} mode", skill.name, skill.mode)];
+        self.message = vec![format!(
+            "{} will be installed in {} mode",
+            skill.name, skill.mode
+        )];
     }
 
     /// Lists how to install every currently-missing requirement of the
@@ -473,7 +473,10 @@ mod tests {
         state.cycle_integration_mode();
         assert_eq!(
             state.selected_with_modes(),
-            vec![("a".to_string(), "skill".to_string()), ("b".to_string(), "mcp".to_string())]
+            vec![
+                ("a".to_string(), "skill".to_string()),
+                ("b".to_string(), "mcp".to_string())
+            ]
         );
     }
 
@@ -507,9 +510,16 @@ mod tests {
         let mut state = PickerState::new(list);
         state.dep_hint();
         assert_eq!(state.message[0], "HOW TO INSTALL THE MISSING DEPENDENCIES");
-        assert!(state.message.iter().any(|l| l.contains("rjq (hard): needs json")));
+        assert!(state
+            .message
+            .iter()
+            .any(|l| l.contains("rjq (hard): needs json")));
         assert!(!state.message.iter().any(|l| l.contains("bash (hard)")));
-        assert!(state.message.len() > 2, "expected an install hint line too: {:?}", state.message);
+        assert!(
+            state.message.len() > 2,
+            "expected an install hint line too: {:?}",
+            state.message
+        );
     }
 
     #[test]
@@ -538,6 +548,9 @@ mod tests {
         .unwrap();
         state.reverify(dir.path());
         assert_eq!(state.skills[0].status.state, SkillState::Blocked);
-        assert_eq!(state.message, vec!["reverified; each skill is checked fresh".to_string()]);
+        assert_eq!(
+            state.message,
+            vec!["reverified; each skill is checked fresh".to_string()]
+        );
     }
 }

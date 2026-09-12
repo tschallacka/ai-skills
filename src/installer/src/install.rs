@@ -144,14 +144,22 @@ pub fn install_skill(
 /// `cli_install_skill`), which needs the same "what would this skill ship"
 /// answer without going through the backup/digest machinery this module's
 /// own `install_skill` wraps it in.
-pub fn skill_relative_files(source_root: &Path, skill: &str, package_dev: bool) -> io::Result<Vec<String>> {
+pub fn skill_relative_files(
+    source_root: &Path,
+    skill: &str,
+    package_dev: bool,
+) -> io::Result<Vec<String>> {
     relative_paths_for(source_root, skill, package_dev)
 }
 
 /// `collect_relative_files`'s answer for `skill`, with `MODE-MANIFEST.tsv`
 /// (if the skill has one) loaded as an override first -- see the module doc
 /// comment for the three-source order this follows.
-fn relative_paths_for(source_root: &Path, skill: &str, package_dev: bool) -> io::Result<Vec<String>> {
+fn relative_paths_for(
+    source_root: &Path,
+    skill: &str,
+    package_dev: bool,
+) -> io::Result<Vec<String>> {
     let skill_dir = source_root.join(skill);
     let overrides = load_mode_manifest(&skill_dir);
     collect_relative_files(&skill_dir, &PathBuf::new(), package_dev, &overrides)
@@ -274,7 +282,12 @@ fn collect_relative_files(
                 }
                 continue; // never ship another platform's bin/<triple>/ content
             }
-            out.extend(collect_relative_files(&entry.path(), &relative, package_dev, overrides)?);
+            out.extend(collect_relative_files(
+                &entry.path(),
+                &relative,
+                package_dev,
+                overrides,
+            )?);
         } else if file_type.is_file() {
             let relative = relative.to_string_lossy().replace('\\', "/");
             let ship = match overrides.lookup(&relative) {
@@ -372,7 +385,8 @@ mod tests {
     fn missing_skill_directory_is_refused_not_silently_skipped() {
         let source_root = tempfile::tempdir().unwrap();
         let target_root = tempfile::tempdir().unwrap();
-        let err = install_skill(source_root.path(), "nope", target_root.path(), None, false).unwrap_err();
+        let err =
+            install_skill(source_root.path(), "nope", target_root.path(), None, false).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
     }
 
@@ -592,7 +606,14 @@ mod tests {
 
         // No explicit choice this time -- the mcp install already on disk
         // must survive, not silently revert to the `skill` default (T109).
-        install_skill(source_root.path(), "ai-text-editor", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "ai-text-editor",
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
 
         assert!(target_root
             .path()
@@ -616,7 +637,10 @@ mod tests {
 
         install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
         assert!(target_root.path().join("todo/SKILL.md").is_file());
-        assert!(!target_root.path().join("todo/maintainer-notes.md").is_file());
+        assert!(!target_root
+            .path()
+            .join("todo/maintainer-notes.md")
+            .is_file());
 
         let dev_target = tempfile::tempdir().unwrap();
         install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
@@ -678,11 +702,17 @@ mod tests {
             &source_root.path().join(format!("todo/bin/{target}/todo")),
             "binary",
         );
-        write(&source_root.path().join("todo/bin/plan9-riscv64/todo"), "binary");
+        write(
+            &source_root.path().join("todo/bin/plan9-riscv64/todo"),
+            "binary",
+        );
         let target_root = tempfile::tempdir().unwrap();
 
         install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
-        assert!(target_root.path().join(format!("todo/bin/{target}/todo")).is_file());
+        assert!(target_root
+            .path()
+            .join(format!("todo/bin/{target}/todo"))
+            .is_file());
         assert!(!target_root.path().join("todo/bin/plan9-riscv64").exists());
     }
 
@@ -713,7 +743,10 @@ mod tests {
     fn a_never_override_ships_in_neither_package_tier() {
         let source_root = tempfile::tempdir().unwrap();
         write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
-        write(&source_root.path().join("todo/migration-notes.tsv"), "a\tb\n");
+        write(
+            &source_root.path().join("todo/migration-notes.tsv"),
+            "a\tb\n",
+        );
         write(
             &source_root.path().join("todo/MODE-MANIFEST.tsv"),
             "# MODE: DEV\nmigration-notes.tsv\tNEVER\n",
@@ -735,8 +768,14 @@ mod tests {
         let source_root = tempfile::tempdir().unwrap();
         write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
         write(&source_root.path().join("todo/scripts/lib/a.sh"), "a\n");
-        write(&source_root.path().join("todo/scripts/lib/nested/b.sh"), "b\n");
-        write(&source_root.path().join("todo/scripts/run.sh"), "#!/bin/sh\n");
+        write(
+            &source_root.path().join("todo/scripts/lib/nested/b.sh"),
+            "b\n",
+        );
+        write(
+            &source_root.path().join("todo/scripts/run.sh"),
+            "#!/bin/sh\n",
+        );
         write(
             &source_root.path().join("todo/MODE-MANIFEST.tsv"),
             "# MODE: DEV\nscripts/lib/\tNEVER\n",
@@ -773,7 +812,8 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         let bogus_target = elsewhere.path().join("not-really-skill-md");
         write(&bogus_target, "not the real file");
-        std::os::unix::fs::symlink(&bogus_target, target_root.path().join("todo/SKILL.md")).unwrap();
+        std::os::unix::fs::symlink(&bogus_target, target_root.path().join("todo/SKILL.md"))
+            .unwrap();
 
         let err =
             install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap_err();

@@ -210,7 +210,8 @@ mod tests {
     fn cline_is_available_from_its_versioned_vscode_extension_directory() {
         let home = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(
-            home.path().join(".vscode/extensions/saoudrizwan.claude-dev-3.1.4"),
+            home.path()
+                .join(".vscode/extensions/saoudrizwan.claude-dev-3.1.4"),
         )
         .unwrap();
         assert!(agent_available("cline", home.path()));

@@ -129,7 +129,9 @@ pub fn mcp_adapter_path(source_root: &Path, skill: &str, installed_dir: &Path) -
                 continue;
             }
             let filename = file.file_name();
-            if binary_mode(source_root, skill, &filename.to_string_lossy()).as_deref() == Some("mcp") {
+            if binary_mode(source_root, skill, &filename.to_string_lossy()).as_deref()
+                == Some("mcp")
+            {
                 return Some(path);
             }
         }
@@ -255,7 +257,12 @@ mod tests {
     fn file_allowed_is_always_true_outside_bin() {
         let dir = tempfile::tempdir().unwrap();
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
-        assert!(file_allowed(dir.path(), "ai-text-editor", "SKILL.md", "mcp"));
+        assert!(file_allowed(
+            dir.path(),
+            "ai-text-editor",
+            "SKILL.md",
+            "mcp"
+        ));
     }
 
     #[test]
@@ -281,7 +288,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
         let dest = tempfile::tempdir().unwrap();
-        assert_eq!(installed_mode(dir.path(), "ai-text-editor", dest.path()), None);
+        assert_eq!(
+            installed_mode(dir.path(), "ai-text-editor", dest.path()),
+            None
+        );
     }
 
     #[test]
@@ -330,7 +340,10 @@ mod tests {
         fs::create_dir_all(&bin).unwrap();
         fs::write(bin.join("ai-text-editor-mcp"), "").unwrap();
         fs::write(bin.join("ai-text-editor"), "").unwrap();
-        assert_eq!(installed_mode(dir.path(), "ai-text-editor", dest.path()), None);
+        assert_eq!(
+            installed_mode(dir.path(), "ai-text-editor", dest.path()),
+            None
+        );
     }
 
     #[test]
@@ -343,7 +356,12 @@ mod tests {
         fs::write(bin.join("ai-text-editor-mcp"), "").unwrap();
 
         assert_eq!(
-            resolve_mode(dir.path(), "ai-text-editor", Some(dest.path()), Some("skill")),
+            resolve_mode(
+                dir.path(),
+                "ai-text-editor",
+                Some(dest.path()),
+                Some("skill")
+            ),
             "skill"
         );
         assert_eq!(
@@ -356,7 +374,10 @@ mod tests {
     fn resolve_mode_falls_back_to_skill_on_a_first_install_with_no_explicit_choice() {
         let dir = tempfile::tempdir().unwrap();
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
-        assert_eq!(resolve_mode(dir.path(), "ai-text-editor", None, None), "skill");
+        assert_eq!(
+            resolve_mode(dir.path(), "ai-text-editor", None, None),
+            "skill"
+        );
     }
 
     #[test]
@@ -389,7 +410,13 @@ mod tests {
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
         let dest = tempfile::tempdir().unwrap();
         assert_eq!(
-            mode_source(dir.path(), "ai-text-editor", "skill", Some(dest.path()), None),
+            mode_source(
+                dir.path(),
+                "ai-text-editor",
+                "skill",
+                Some(dest.path()),
+                None
+            ),
             "default"
         );
     }

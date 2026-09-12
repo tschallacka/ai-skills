@@ -13,15 +13,15 @@
 //! grants and mcp-mode registration for claude/codex/opencode.
 
 mod backup;
+mod cli_mode;
+mod custom_locations;
 mod digest;
 mod discover;
 mod install;
+mod integration;
 mod manifest;
 mod mcp;
 mod permissions;
-mod cli_mode;
-mod custom_locations;
-mod integration;
 mod plan_migration;
 mod plugins;
 mod requirements;
@@ -233,17 +233,24 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
             }
             "--integration" => {
                 i += 1;
-                integration.push(argv.get(i).ok_or("--integration needs a mode, or skill=mode")?.clone());
+                integration.push(
+                    argv.get(i)
+                        .ok_or("--integration needs a mode, or skill=mode")?
+                        .clone(),
+                );
             }
             "--editor-integration" => {
                 i += 1;
-                let mode = argv.get(i).ok_or("--editor-integration needs skill or mcp")?;
+                let mode = argv
+                    .get(i)
+                    .ok_or("--editor-integration needs skill or mcp")?;
                 integration.push(format!("ai-text-editor={mode}"));
             }
             "--yes" => yes = true,
             "--package" => {
                 i += 1;
-                package_dev = parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
+                package_dev =
+                    parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
             }
             other => return Err(format!("install: unknown option: {other}")),
         }
@@ -346,7 +353,10 @@ fn build_integration_selection(
         .ok()
         .filter(|v| !v.is_empty())
         .map(|mode| format!("ai-text-editor={mode}"));
-    let combined: Vec<String> = env_editor_integration.into_iter().chain(raw.iter().cloned()).collect();
+    let combined: Vec<String> = env_editor_integration
+        .into_iter()
+        .chain(raw.iter().cloned())
+        .collect();
     for arg in &combined {
         let (skill, mode) = match arg.split_once('=') {
             Some((s, m)) => (Some(s.to_string()), m.to_string()),
@@ -358,7 +368,9 @@ fn build_integration_selection(
         if let Some(skill) = &skill {
             let offered = integration::modes(source, skill);
             if offered.is_empty() {
-                return Err(format!("{skill} offers no integration modes to choose between"));
+                return Err(format!(
+                    "{skill} offers no integration modes to choose between"
+                ));
             }
             if !offered.contains(&mode) {
                 return Err(format!(
@@ -552,7 +564,12 @@ fn select_targets_interactively(yes: bool) -> Result<Vec<(PathBuf, Option<String
         } else {
             "[will create]"
         };
-        println!("  {}) {}: {} {tag}", index + 1, target.name, target.path.display());
+        println!(
+            "  {}) {}: {} {tag}",
+            index + 1,
+            target.name,
+            target.path.display()
+        );
     }
     let custom_choice = available.len() + 1;
     println!("  {custom_choice}) custom directory");
@@ -560,7 +577,11 @@ fn select_targets_interactively(yes: bool) -> Result<Vec<(PathBuf, Option<String
     print!("Choose 1-{custom_choice}, comma-separated numbers, or a [1]: ");
     let _ = std::io::Write::flush(&mut std::io::stdout());
     let selection = read_line_trimmed();
-    let selection = if selection.is_empty() { "1" } else { &selection };
+    let selection = if selection.is_empty() {
+        "1"
+    } else {
+        &selection
+    };
 
     if selection == "a" || selection == "all" {
         println!("Warning: multiple roots can make the same skill appear more than once.");
@@ -587,8 +608,14 @@ fn select_targets_interactively(yes: bool) -> Result<Vec<(PathBuf, Option<String
                 return Err("Custom directory must be an absolute path".to_string());
             }
             if !expanded.is_dir() {
-                if !confirms.ask(&format!("{} does not exist. Create it?", expanded.display())) {
-                    return Err(format!("Custom directory does not exist: {}", expanded.display()));
+                if !confirms.ask(&format!(
+                    "{} does not exist. Create it?",
+                    expanded.display()
+                )) {
+                    return Err(format!(
+                        "Custom directory does not exist: {}",
+                        expanded.display()
+                    ));
                 }
                 std::fs::create_dir_all(&expanded).map_err(|e| e.to_string())?;
             }
@@ -637,7 +664,10 @@ impl Summary {
     /// and `YES` fresh when the summary prints, not when the skill was
     /// blocked, since the whole run shares one root list and one --yes.
     fn print(&self, roots: &[PathBuf], yes: bool) {
-        if self.installed.is_empty() && self.platform_blocked.is_empty() && self.hard_blocked.is_empty() {
+        if self.installed.is_empty()
+            && self.platform_blocked.is_empty()
+            && self.hard_blocked.is_empty()
+        {
             return;
         }
         println!();
@@ -656,7 +686,10 @@ impl Summary {
                 "Skipped:   {} -- a hard requirement is missing, nothing was written",
                 blocked.skill
             );
-            println!("To install {} once its requirements are met:", blocked.skill);
+            println!(
+                "To install {} once its requirements are met:",
+                blocked.skill
+            );
             let mut step = 1;
             for (label, hint) in &blocked.unmet {
                 println!("  {step}. install {label}:");
@@ -703,12 +736,17 @@ fn install_selected_skills(
     for skill in skills {
         if let Some(reason) = manifest::skill_unsupported_here(skill) {
             println!("Skipped: {skill} -- {reason}, nothing was written");
-            summary.platform_blocked.push((skill.clone(), reason.to_string()));
+            summary
+                .platform_blocked
+                .push((skill.clone(), reason.to_string()));
             continue;
         }
         let status = requirements::skill_status(source, skill);
         if status.state == requirements::SkillState::Blocked {
-            let reason = status.blocker.clone().unwrap_or_else(|| "a required tool".to_string());
+            let reason = status
+                .blocker
+                .clone()
+                .unwrap_or_else(|| "a required tool".to_string());
             println!("Skipped: {skill} -- {reason} is required and missing; nothing was written");
             // Install hints are per bare tool (installer/tools.tsv is keyed
             // by a single tool id, not a group), so a group requirement's
@@ -725,7 +763,10 @@ fn install_selected_skills(
                     } else {
                         vec![r.tool.as_str()]
                     };
-                    let hint = members.iter().flat_map(|m| tools::install_hint(m)).collect();
+                    let hint = members
+                        .iter()
+                        .flat_map(|m| tools::install_hint(m))
+                        .collect();
                     (label, hint)
                 })
                 .collect();
@@ -767,12 +808,15 @@ fn install_selected_skills(
             let dest = target.join(skill);
             let choice = integration_selection.choice_for(skill);
             let mode = integration::resolve_mode(source, skill, Some(&dest), choice);
-            let source_label = match integration::mode_source(source, skill, &mode, Some(&dest), choice) {
-                "explicit" => "--integration".to_string(),
-                "detected" => "carried forward from the existing install".to_string(),
-                _ => "default, no prior install found".to_string(),
-            };
-            line.push_str(&format!("\n             integration mode: {mode} ({source_label})"));
+            let source_label =
+                match integration::mode_source(source, skill, &mode, Some(&dest), choice) {
+                    "explicit" => "--integration".to_string(),
+                    "detected" => "carried forward from the existing install".to_string(),
+                    _ => "default, no prior install found".to_string(),
+                };
+            line.push_str(&format!(
+                "\n             integration mode: {mode} ({source_label})"
+            ));
         }
         println!("{line}");
         summary.installed.push(line);
@@ -793,7 +837,11 @@ fn install_selected_skills(
 /// once per root in a multi-root run, and re-announces "== MCP
 /// registration ==" per root -- a real, user-visible divergence for
 /// `--target A --target B` or more than one `--agent`.
-fn run_mcp_registration_step(roots: &[(PathBuf, Option<String>)], source: &Path, skills: &[String]) {
+fn run_mcp_registration_step(
+    roots: &[(PathBuf, Option<String>)],
+    source: &Path,
+    skills: &[String],
+) {
     let Some(home) = home_dir_opt() else { return };
     let mut announced = false;
     for skill in skills {
@@ -801,7 +849,9 @@ fn run_mcp_registration_step(roots: &[(PathBuf, Option<String>)], source: &Path,
             continue;
         }
         for (target, kind) in roots {
-            let Some(kind) = kind.as_deref() else { continue };
+            let Some(kind) = kind.as_deref() else {
+                continue;
+            };
             if !matches!(kind, "claude" | "opencode" | "codex") {
                 continue;
             }
@@ -890,7 +940,9 @@ fn run_worktrees_permission_step(roots: &[(&Path, &str)], confirms: &mut Confirm
     println!("== Agent worktree permissions ==");
     let worktrees = permissions::default_worktrees_root(home);
     let worktrees_str = worktrees.to_string_lossy().to_string();
-    if confirms.ask(&format!("Create {worktrees_str} as the agent worktree root?")) {
+    if confirms.ask(&format!(
+        "Create {worktrees_str} as the agent worktree root?"
+    )) {
         match std::fs::create_dir_all(&worktrees) {
             Ok(()) => println!("  Created {worktrees_str}"),
             Err(e) => println!("  cannot create {worktrees_str}: {e}"),
@@ -906,13 +958,17 @@ fn run_worktrees_permission_step(roots: &[(&Path, &str)], confirms: &mut Confirm
     for (_, kind) in roots {
         match *kind {
             "claude" => match permissions::claude_worktrees_permissions(&worktrees_str, home) {
-                Ok(outcome) => {
-                    print_permission_outcome("claude-code", "worktree permissions already present", outcome)
-                }
+                Ok(outcome) => print_permission_outcome(
+                    "claude-code",
+                    "worktree permissions already present",
+                    outcome,
+                ),
                 Err(e) => println!("claude-code: {e}"),
             },
             "opencode" => match permissions::opencode_worktrees_permissions(&worktrees_str, home) {
-                Ok(outcome) => print_opencode_outcome("worktree permissions already present", outcome),
+                Ok(outcome) => {
+                    print_opencode_outcome("worktree permissions already present", outcome)
+                }
                 Err(e) => println!("opencode: {e}"),
             },
             "codex" => match permissions::codex_worktrees_permissions(&worktrees_str, home) {
@@ -930,7 +986,9 @@ fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mu
     let tmp = std::env::temp_dir().join("planning-agent");
     let plans_str = plans.to_string_lossy();
     let tmp_str = tmp.to_string_lossy();
-    if confirms.ask(&format!("Create {plans_str} as the global plans directory?")) {
+    if confirms.ask(&format!(
+        "Create {plans_str} as the global plans directory?"
+    )) {
         match std::fs::create_dir_all(&plans) {
             Ok(()) => println!("  Created {plans_str}"),
             Err(e) => println!("  cannot create {plans_str}: {e}"),
@@ -946,22 +1004,34 @@ fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mu
             let scripts = scripts.to_string_lossy();
             match *kind {
                 "claude" => {
-                    match permissions::claude_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
-                        Ok(outcome) => {
-                            print_permission_outcome("claude-code", "permissions already present", outcome)
-                        }
+                    match permissions::claude_planning_permissions(
+                        &scripts, &plans_str, &tmp_str, home,
+                    ) {
+                        Ok(outcome) => print_permission_outcome(
+                            "claude-code",
+                            "permissions already present",
+                            outcome,
+                        ),
                         Err(e) => println!("claude-code: {e}"),
                     }
                 }
                 "opencode" => {
-                    match permissions::opencode_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
-                        Ok(outcome) => print_opencode_outcome("permissions already present", outcome),
+                    match permissions::opencode_planning_permissions(
+                        &scripts, &plans_str, &tmp_str, home,
+                    ) {
+                        Ok(outcome) => {
+                            print_opencode_outcome("permissions already present", outcome)
+                        }
                         Err(e) => println!("opencode: {e}"),
                     }
                 }
                 "codex" => {
-                    match permissions::codex_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
-                        Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
+                    match permissions::codex_planning_permissions(
+                        &scripts, &plans_str, &tmp_str, home,
+                    ) {
+                        Ok(outcome) => {
+                            print_codex_outcome("writable_roots already present", outcome)
+                        }
                         Err(e) => println!("codex: {e}"),
                     }
                 }
@@ -1003,7 +1073,10 @@ fn run_interactive_shell_post_install(
         ) {
             for target in &claude_roots {
                 let bins = target.join("interactive-shell").join("bin");
-                match permissions::claude_interactive_shell_permissions(&bins.to_string_lossy(), home) {
+                match permissions::claude_interactive_shell_permissions(
+                    &bins.to_string_lossy(),
+                    home,
+                ) {
                     Ok(outcome) => print_permission_outcome(
                         "claude-code",
                         "interactive-shell grant already in place",
@@ -1771,7 +1844,8 @@ fn run_install_skill_cli(argv: &[String]) -> Result<ExitCode, String> {
             }
             "--package" => {
                 i += 1;
-                package_dev = parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
+                package_dev =
+                    parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
             }
             other if skill.is_none() && !other.starts_with("--") => skill = Some(other.to_string()),
             other => return Err(format!("install-skill: unknown option: {other}")),
@@ -1821,17 +1895,24 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             }
             "--integration" => {
                 i += 1;
-                integration_args.push(argv.get(i).ok_or("--integration needs a mode, or skill=mode")?.clone());
+                integration_args.push(
+                    argv.get(i)
+                        .ok_or("--integration needs a mode, or skill=mode")?
+                        .clone(),
+                );
             }
             "--editor-integration" => {
                 i += 1;
-                let mode = argv.get(i).ok_or("--editor-integration needs skill or mcp")?;
+                let mode = argv
+                    .get(i)
+                    .ok_or("--editor-integration needs skill or mcp")?;
                 integration_args.push(format!("ai-text-editor={mode}"));
             }
             "--yes" => yes = true,
             "--package" => {
                 i += 1;
-                package_dev = parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
+                package_dev =
+                    parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
             }
             other => return Err(format!("interactive: unknown option: {other}")),
         }

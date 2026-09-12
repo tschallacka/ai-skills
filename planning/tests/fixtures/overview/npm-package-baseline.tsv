@@ -54,7 +54,8 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
-package/install.sh	270753
+package/install.sh	270750
+package/interactive-shell/MODE-MANIFEST.tsv	326
 package/interactive-shell/SKILL.md	14192
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/appprofiles/FORMAT.md	3629
@@ -130,7 +131,8 @@ package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
 package/package.json	1921
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15134
-package/planning/PACKAGE-MANIFEST.tsv	19711
+package/planning/MODE-MANIFEST.tsv	3203
+package/planning/PACKAGE-MANIFEST.tsv	19826
 package/planning/REVIEWER.md	24342
 package/planning/ROLES.md	4355
 package/planning/RUST-ARTIFACT-MANIFEST.md	716
