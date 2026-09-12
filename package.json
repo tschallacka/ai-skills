@@ -53,7 +53,6 @@
     "!planning/rust-migration.tsv",
     "!planning/MODE-MANIFEST.tsv",
     "!.agents/knowledge/**",
-    "!.agents/profiles/**",
     "!.agents/skill-loading-experiment/**",
     "!.agents/skill-loading-findings.md",
     "!**/.ci-bin",

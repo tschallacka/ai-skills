@@ -39,6 +39,21 @@ pub fn known_skill(name: &str) -> Option<&'static Skill> {
     SKILLS.iter().find(|s| s.name == name)
 }
 
+/// A profile shipped from `.agents/profiles/<name>.json` (T102): one agent
+/// persona, translated per harness kind by `profiles::ProfileTranslator`
+/// rather than copied verbatim -- Claude Code, opencode and codex each read a
+/// different native format for a custom subagent.
+pub struct Profile {
+    pub name: &'static str,
+    /// Repo-root-relative path to the canonical JSON source.
+    pub source: &'static str,
+}
+
+pub const PROFILES: &[Profile] = &[Profile {
+    name: "nitpicker",
+    source: ".agents/profiles/nitpicker.json",
+}];
+
 /// The reason `skill` cannot be installed on the running host, or `None`
 /// when this platform supports it -- ported from
 /// installer/src/50-manifest.sh's `skill_unsupported_here`. Only

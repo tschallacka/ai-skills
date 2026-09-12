@@ -109,6 +109,17 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
     printf 'agent-identity-plugin/hooks/hooks.json\n'
     printf 'agent-identity-plugin/hooks/lib.sh\n'
     printf 'agent-identity-plugin/hooks/subagent-start.sh\n'
+    # T102: agent profiles are not a skill (no skill_files() entry) and their
+    # canonical source is JSON, a format with no comment syntax a MODE marker
+    # could sit in -- same reasoning as the three plugin lists above. Derived
+    # from PROFILE_NAMES/profile_files() (already sourced above), not a
+    # fourth hand-typed copy of the one filename.
+    for profile in "${PROFILE_NAMES[@]}"; do
+        while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            printf '.agents/profiles/%s\n' "$path"
+        done < <(profile_files "$profile")
+    done
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         declares_prod "$path" && printf '%s\n' "$path"

@@ -212,12 +212,30 @@ agent_identity_plugin_files() {
     printf 'agent-identity-plugin/hooks/subagent-start.sh\n'
 }
 
+# T102: agent profiles are not a skill (no entry in skill_files()) and their
+# canonical source is JSON, a format with no comment syntax a MODE marker
+# could sit in -- the same reason the three plugin-file functions above are
+# hardcoded lists rather than relying on declares_prod(). Delegates to
+# installer/src/50-manifest.sh's own profile_files() (source of truth also
+# checked by tests/test-profile-files-manifest.sh) rather than a second copy
+# of the file list.
+profile_files_for_release() {
+    local profile
+    for profile in "${PROFILE_NAMES[@]}"; do
+        while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            printf '.agents/profiles/%s\n' "$path"
+        done < <(profile_files "$profile")
+    done
+}
+
 collect() {
     {
         printf 'README.md\nLICENSE\npackage.json\n'
         tui_hint_plugin_files
         editor_gate_plugin_files
         agent_identity_plugin_files
+        profile_files_for_release
         local path
         while IFS= read -r path; do
             [ -n "$path" ] || continue

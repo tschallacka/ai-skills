@@ -10,7 +10,6 @@
 .agents/knowledge/github-ci-runners.md
 .agents/knowledge/opencode-plugin-loading-and-advisory-injection.md
 .agents/knowledge/unix-sockets-across-platforms.md
-.agents/profiles/nitpicker.md
 .agents/skill-loading-experiment/find-notice.py
 .agents/skill-loading-experiment/gen-marker-file.py
 .agents/skill-loading-experiment/gen-split-skill.py
@@ -54,6 +53,8 @@ MEMORY.md
 RELEASE.md
 TODO.2026-09-01.archive.json
 TODO.json
+agent-identity-plugin/README.md
+agent-identity-plugin/tests/test-agent-identity-injection.sh
 benchmark/flake.nix
 benchmark/planning/ARCHITECTURE.md
 benchmark/planning/README.md
@@ -2954,6 +2955,7 @@ src/ai-text-editor/src/history.rs
 src/ai-text-editor/src/index.rs
 src/ai-text-editor/src/jobs.rs
 src/ai-text-editor/src/journal.rs
+src/ai-text-editor/src/jump_points.rs
 src/ai-text-editor/src/large_file.rs
 src/ai-text-editor/src/lib.rs
 src/ai-text-editor/src/metadata.rs
@@ -2984,8 +2986,14 @@ src/bug-update/Cargo.toml
 src/bug-update/src/main.rs
 src/chat-client-rs/Cargo.toml
 src/chat-client-rs/src/bin/chat-client-rs.rs
+src/chat-client-rs/src/cli.rs
 src/chat-client-rs/src/control.rs
+src/chat-client-rs/src/discovery.rs
 src/chat-client-rs/src/lib.rs
+src/chat-client-rs/src/local.rs
+src/chat-client-rs/src/net.rs
+src/chat-client-rs/src/session.rs
+src/chat-client-rs/src/wire.rs
 src/chat-mcp/Cargo.toml
 src/chat-mcp/src/conn.rs
 src/chat-mcp/src/lib.rs
@@ -3038,6 +3046,7 @@ src/installer/src/permissions.rs
 src/installer/src/plan_migration.rs
 src/installer/src/plugins.rs
 src/installer/src/requirements.rs
+src/installer/src/shared_bin.rs
 src/installer/src/tools.rs
 src/installer/src/ui/input.rs
 src/installer/src/ui/layout.rs
@@ -3046,6 +3055,8 @@ src/installer/src/ui/mod.rs
 src/installer/src/ui/model.rs
 src/installer/src/ui/render.rs
 src/installer/src/ui/terminal.rs
+src/installer/src/ui/uninstall_picker.rs
+src/installer/src/uninstall.rs
 src/interactive-shell/Cargo.toml
 src/interactive-shell/src/bin/interactive-shell-fixture.rs
 src/interactive-shell/src/bin/interactive-shell-input.rs

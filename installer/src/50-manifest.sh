@@ -781,6 +781,21 @@ ISHEOF
     esac
 }
 
+# profile_files <profile> -- T102's own declaration, parallel to skill_files()
+# but keyed by profile name rather than skill name: a profile lives under
+# .agents/profiles/, not under any skill directory, and installer/src/main.rs
+# reads its JSON directly rather than copying a directory tree. A hand list
+# for the same reason skill_files() is one -- tests/test-profile-files-manifest.sh
+# is what notices a tracked profile file nobody declared, or a declared file
+# that does not exist.
+profile_files() {
+    case "$1" in
+        nitpicker)
+            printf '%s\n' nitpicker.json
+            ;;
+    esac
+}
+
 # integration_mode_for() moved to 05-config.sh, beside the INTEGRATION_*
 # variables it reads and the writers that set them: the picker calls it too
 # (T95), and install-ui.sh does not source this part.

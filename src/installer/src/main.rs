@@ -24,6 +24,7 @@ mod mcp;
 mod permissions;
 mod plan_migration;
 mod plugins;
+mod profiles;
 mod requirements;
 mod shared_bin;
 mod tools;
@@ -78,6 +79,9 @@ Usage:
   installer install-agent-identity-plugin --source DIR --target DIR
                      install the vendor-shipped plugin that rides with
                      chat / ai-text-editor / interactive-shell (Claude Code only)
+  installer install-profiles --agent claude|opencode|codex --source DIR --target DIR
+                     (re)install every shipped agent profile (.agents/profiles/),
+                     translated into that agent's own custom-subagent format
   installer set-claude-env --key KEY --value VALUE
                      merge one env.KEY setting into Claude's settings.json
   installer print-skill-files planning [--source DIR]
@@ -136,6 +140,7 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         Some("install-tui-hint-plugin") => run_install_tui_hint_plugin(&argv[1..]),
         Some("install-editor-gate-plugin") => run_install_editor_gate_plugin(&argv[1..]),
         Some("install-agent-identity-plugin") => run_install_agent_identity_plugin(&argv[1..]),
+        Some("install-profiles") => run_install_profiles(&argv[1..]),
         Some("set-claude-env") => run_set_claude_env(&argv[1..]),
         Some("print-skill-files") => run_print_skill_files(&argv[1..]),
         Some("resolve-source") => run_resolve_source(&argv[1..]),
@@ -966,6 +971,56 @@ fn run_post_install_steps(
         run_editor_steering_and_gate_step(&known_roots, source, &home, confirms);
     }
     run_agent_identity_post_install(&known_roots, source, skills);
+    run_profiles_post_install(&known_roots, source);
+}
+
+/// T102: installs every `manifest::PROFILES` entry into each root whose kind
+/// has a registered `profiles::ProfileTranslator` -- unconditional, like the
+/// worktrees step, since a profile is not gated behind any particular
+/// installed skill. A kind with no translator (universal, openclaw, cline)
+/// is skipped silently rather than refused, the same shape T90's
+/// session-dependent skill gating already established.
+fn run_profiles_post_install(roots: &[(&Path, &str)], source: &Path) {
+    if manifest::PROFILES.is_empty() {
+        return;
+    }
+    let supported: Vec<(&Path, &dyn profiles::ProfileTranslator)> = roots
+        .iter()
+        .filter_map(|(target, kind)| profiles::translator_for(kind).map(|t| (*target, t)))
+        .collect();
+    if supported.is_empty() {
+        return;
+    }
+    println!();
+    println!("== agent profiles ==");
+    for profile in manifest::PROFILES {
+        let text = match std::fs::read_to_string(source.join(profile.source)) {
+            Ok(text) => text,
+            Err(e) => {
+                println!("{}: cannot read {}: {e}", profile.name, profile.source);
+                continue;
+            }
+        };
+        let spec = match profiles::ProfileSpec::from_json(&text) {
+            Ok(spec) => spec,
+            Err(e) => {
+                println!("{}: {e}", profile.name);
+                continue;
+            }
+        };
+        for (target, translator) in &supported {
+            match profiles::install_profile(&spec, *translator, target) {
+                Ok(destination) => println!(
+                    "Installed: {} (agent profile \"{}\" -- restart {} before it is available, \
+                     since the profile registry is read once at session start)",
+                    destination.display(),
+                    spec.name,
+                    translator.kind()
+                ),
+                Err(e) => println!("{}: {e}", spec.name),
+            }
+        }
+    }
 }
 
 /// T122/T123: a session-dependent skill (chat, ai-text-editor,
@@ -2068,6 +2123,35 @@ fn run_install_agent_identity_plugin(argv: &[String]) -> Result<ExitCode, String
         "Installed: {} (injects AGENT_ID/AGENT_TYPE into each subagent's context at SubagentStart; see agent-identity-plugin/README.md)",
         destination.display()
     );
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `installer install-profiles --source DIR --target DIR --agent KIND` --
+/// reinstalls every `manifest::PROFILES` entry alone, mirroring
+/// `install-agent-identity-plugin`'s standalone precedent, for a caller that
+/// wants to (re)install profiles without a full skill reinstall.
+fn run_install_profiles(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_plugin_args("install-profiles", argv)?;
+    let agent = args.agent.ok_or("install-profiles: --agent is required")?;
+    let target = args
+        .target
+        .ok_or("install-profiles: --target is required")?;
+    let translator = profiles::translator_for(&agent).ok_or_else(|| {
+        format!("install-profiles: no known profile translator for --agent {agent}")
+    })?;
+    for profile in manifest::PROFILES {
+        let text = std::fs::read_to_string(args.source.join(profile.source))
+            .map_err(|e| format!("{}: cannot read {}: {e}", profile.name, profile.source))?;
+        let spec = profiles::ProfileSpec::from_json(&text)
+            .map_err(|e| format!("{}: {e}", profile.name))?;
+        let destination =
+            profiles::install_profile(&spec, translator, &target).map_err(|e| e.to_string())?;
+        println!(
+            "Installed: {} (agent profile \"{}\" -- restart {agent} before it is available)",
+            destination.display(),
+            spec.name
+        );
+    }
     Ok(ExitCode::SUCCESS)
 }
 
