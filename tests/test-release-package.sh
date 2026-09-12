@@ -178,17 +178,19 @@ t_assert_eq 'and every expected file was actually compared' "$compared" "$expect
 # ── property 3: nothing marked MODE: DEV is inside it ──────────────────────
 # Read the header only: a heredoc lower down mentions the marker strings.
 # grep -I skips a binary compiled artifact (rjq, ai-text-editor, ...) rather
-# than reading it: piping head's bytes straight into grep -- never through a
-# `$( )` capture -- means a binary's null bytes never reach a bash string,
-# which used to trigger "command substitution: ignored null byte in input"
-# on every one of the release's own compiled binaries.
+# than reading it, so its bytes are never searched for the marker text at
+# all. -c, not -q: PORTABILITY(pipefail-grep-q) -- grep -q exits on the
+# first match and closes the pipe, so under set -o pipefail the writer
+# (head) dies of SIGPIPE and the pipeline's own status is 141, not grep's;
+# -c reads to completion, so no writer ever sees a closed pipe, and its
+# output is a small decimal count rather than the matched (possibly
+# binary) content, which is what keeps a capture safe here.
 leaked=''
 while IFS= read -r path; do
     [ -n "$path" ] || continue
-    if head -25 "$extracted/$path" 2>/dev/null \
-        | grep -Iq -e '# MODE: DEV' -e '<!-- MODE: DEV -->'; then
-        leaked="$leaked $path"
-    fi
+    hits="$(head -25 "$extracted/$path" 2>/dev/null \
+        | grep -Ic -e '# MODE: DEV' -e '<!-- MODE: DEV -->' || true)"
+    [ "${hits:-0}" -gt 0 ] && leaked="$leaked $path"
 done < "$work/expected"
 t_assert_eq 'no maintainer file reached the release' "${leaked# }" ''
 # The categories that motivated the split, named so a regression says which.
