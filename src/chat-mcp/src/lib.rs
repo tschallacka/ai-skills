@@ -16,6 +16,7 @@ pub mod conn;
 
 use conn::{Answer, Failure, Held, Op};
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -62,6 +63,8 @@ pub const TOOL_ARGUMENTS: &[&str] = &[
     "sender",
     "trigger_id",
     "enabled",
+    "session",
+    "agent",
 ];
 
 /// The advertised schema for one `TOOL_ARGUMENTS` key. Exhaustive on purpose:
@@ -99,6 +102,12 @@ fn tool_argument(key: &str) -> Value {
         "enabled" => {
             json!({"type":"boolean","description":"The trigger's new state: true wakes wait/read on it again, false leaves the definition in place but stops it firing."})
         }
+        "session" => {
+            json!({"type":"string","description":"This agent's own identity, if you have one (e.g. the AGENT_ID a SubagentStart hook gave you). Keeps your nick, cursors and held connection separate from your parent's and from any sibling subagent -- omit it and every call shares one process-wide identity instead."})
+        }
+        "agent" => {
+            json!({"type":"string","description":"Same as session; either name works, session wins if both are given."})
+        }
         other => unreachable!("TOOL_ARGUMENTS declares {other} with no schema"),
     }
 }
@@ -135,61 +144,61 @@ fn routing() -> &'static [ToolSpec] {
         (
             "join",
             "Join a channel and start receiving its messages on this connection. Seeds your cursor to the channel's current end, so the first read returns what arrives next rather than the whole backlog; pass since to start further back.",
-            &["channel", "since"],
+            &["channel", "since", "session", "agent"],
             &["channel"],
         ),
         (
             "leave",
             "Leave a channel: stop receiving it and forget its cursor, so a later join starts at the end again.",
-            &["channel"],
+            &["channel", "session", "agent"],
             &["channel"],
         ),
         (
             "send",
             "Post a message to a channel, and report the id the server stored it as. Multi-line text is kept whole.",
-            &["channel", "text"],
+            &["channel", "text", "session", "agent"],
             &["channel", "text"],
         ),
         (
             "read",
             "Every message stored after your cursor, each with its id, and advance the cursor. With no cursor and no since, this returns nothing and records where reading starts rather than dumping the channel's history.",
-            &["channel", "since", "mentions"],
+            &["channel", "since", "mentions", "session", "agent"],
             &["channel"],
         ),
         (
             "wait",
             "Block until a message arrives, then return it as read would. This is what the connection is held for: the message is delivered when it lands, not on a later poll. Answers timed_out rather than failing when nothing arrives.",
-            &["channel", "mentions", "timeout_seconds"],
+            &["channel", "mentions", "timeout_seconds", "session", "agent"],
             &[],
         ),
         (
             "who",
             "Which nicks are in a channel right now, from the server's own membership list.",
-            &["channel"],
+            &["channel", "session", "agent"],
             &["channel"],
         ),
         (
             "trigger_add",
             "Register a content-based wake condition for wait/read (mentions mode): any message matching pattern wakes you, in addition to your own @nick mention -- the nick stays a trigger, it stops being the only one. Returns the trigger_id needed to remove or toggle it later.",
-            &["pattern", "sender"],
+            &["pattern", "sender", "session", "agent"],
             &["pattern"],
         ),
         (
             "trigger_remove",
             "Permanently deregister a trigger. Refused by name if trigger_id does not exist (already removed, or never registered by this connection).",
-            &["trigger_id"],
+            &["trigger_id", "session", "agent"],
             &["trigger_id"],
         ),
         (
             "trigger_toggle",
             "Enable or disable a trigger without losing its definition, so it can be re-enabled later without calling trigger_add again.",
-            &["trigger_id", "enabled"],
+            &["trigger_id", "enabled", "session", "agent"],
             &["trigger_id", "enabled"],
         ),
         (
             "triggers",
             "Every trigger this connection holds, enabled or not, with its pattern, sender scope and id -- read this back rather than tracking ids yourself.",
-            &[],
+            &["session", "agent"],
             &[],
         ),
     ]
@@ -261,6 +270,7 @@ fn connected_tool(name: &str, arguments: &Value) -> Result<Value, String> {
             return Err(format!("{} needs {}", name, key));
         }
     }
+    let session_key = resolved_session_key(arguments);
     let chan = string_argument(arguments, "channel");
     if let Some(chan) = chan.as_deref() {
         if !chat_client_rs::valid_chan(chan) {
@@ -321,7 +331,7 @@ fn connected_tool(name: &str, arguments: &Value) -> Result<Value, String> {
         "triggers" => Op::Triggers,
         other => return Err(format!("unroutable tool: {}", other)),
     };
-    let answer = with_connection(|held| held.submit(op.clone()))?;
+    let answer = with_connection(&session_key, |held| held.submit(op.clone()))?;
     Ok(answer_value(name, chan.as_deref(), answer))
 }
 
@@ -405,32 +415,42 @@ fn trigger_id_argument(arguments: &Value) -> Result<u64, String> {
 // Resolution: the part a model no longer has to do.
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn held() -> &'static Mutex<Option<Held>> {
-    static HELD: OnceLock<Mutex<Option<Held>>> = OnceLock::new();
-    HELD.get_or_init(|| Mutex::new(None))
+/// T143: a subagent sharing its parent's Claude Code session is otherwise
+/// indistinguishable from it (B303) -- the agent-identity-plugin (T122)
+/// hands a subagent its own id specifically so it can declare itself here.
+/// One process now holds a connection PER resolved key, not one connection
+/// for its whole life: two agents naming different ids get their own nick,
+/// cursors and server connection, keyed by exactly what `save_session_with_key`/
+/// `Session::load_with_key` already key their on-disk state by.
+fn held() -> &'static Mutex<HashMap<String, Held>> {
+    static HELD: OnceLock<Mutex<HashMap<String, Held>>> = OnceLock::new();
+    HELD.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Run one operation against the held connection, opening it first if this is
-/// the first call that needs it. A connection the server has closed is
-/// discarded and reopened once, so a restarted server costs one retry rather
-/// than a dead adapter.
-fn with_connection<F>(operation: F) -> Result<Answer, String>
+/// Run one operation against the connection held for `session_key`, opening
+/// it first if this is the first call under that key. A connection the
+/// server has closed is discarded and reopened once, so a restarted server
+/// costs one retry rather than a dead adapter -- unchanged from the
+/// single-connection version, just scoped to one map entry instead of the
+/// whole process.
+fn with_connection<F>(session_key: &str, operation: F) -> Result<Answer, String>
 where
     F: Fn(&Held) -> Result<Answer, Failure>,
 {
-    let mut slot = held()
+    let mut map = held()
         .lock()
         .map_err(|_| "the connection lock is poisoned; restart the adapter".to_string())?;
     for attempt in 0..2 {
-        if slot.is_none() {
-            *slot = Some(open_connection()?);
+        if !map.contains_key(session_key) {
+            map.insert(session_key.to_string(), open_connection(session_key)?);
         }
-        match operation(slot.as_ref().expect("just opened")) {
+        let conn = map.get(session_key).expect("just opened");
+        match operation(conn) {
             Ok(answer) => return Ok(answer),
             // The link is gone: drop it and open a new one once, so a restarted
             // server costs a retry rather than a dead adapter.
             Err(failure) if failure.dead => {
-                *slot = None;
+                map.remove(session_key);
                 if attempt == 1 {
                     return Err(failure.message);
                 }
@@ -447,12 +467,29 @@ fn state_dir() -> PathBuf {
     chat_client_rs::client_state_dir(&[])
 }
 
-/// The server and nick this agent uses, resolved the way the client resolves
-/// them: an explicit saved session first, then a live server from the cache,
-/// then the announce beacon.
-fn resolve() -> Result<(String, String), String> {
+/// The identity a connected-tool call resolves to: an explicit `session`/
+/// `agent` argument (`session` winning if both are given) if the caller
+/// declared one, else this process's own default identity -- exactly what
+/// every call used before T143, unchanged for a caller that never declares
+/// one. `resolve_session_key`'s own explicit rung (chat_client_rs) always
+/// wins over env/worktree, so env and worktree_root are never consulted for
+/// a declared id and are passed as `None` rather than computed for nothing.
+fn resolved_session_key(arguments: &Value) -> String {
+    let explicit =
+        string_argument(arguments, "session").or_else(|| string_argument(arguments, "agent"));
+    match explicit.as_deref().filter(|s| !s.is_empty()) {
+        Some(id) => chat_client_rs::resolve_session_key(Some(id), &|_| None, None, None).0,
+        None => chat_client_rs::session_key().0.clone(),
+    }
+}
+
+/// The server and nick this agent uses under `session_key`, resolved the way
+/// the client resolves them: an explicit saved session first, then a live
+/// server from the cache, then the announce beacon.
+fn resolve(session_key: &str) -> Result<(String, String), String> {
     let dir = state_dir();
-    let (session_server, nick, _) = chat_client_rs::apply_session("", "", &dir, false);
+    let (session_server, nick, _) =
+        chat_client_rs::apply_session_with_key("", "", &dir, false, session_key);
     let server = chat_client_rs::resolve_server("", &session_server, &dir, false);
     if server.is_empty() {
         return Err(format!(
@@ -462,18 +499,18 @@ fn resolve() -> Result<(String, String), String> {
             chat_client_rs::DEFAULT_BEACON_PORT
         ));
     }
-    Ok((server, resolved_nick(nick)))
+    Ok((server, resolved_nick(nick, session_key)))
 }
 
-/// The nick to register as. A saved one wins; otherwise one is minted from the
-/// session key and saved, so an agent with no setup at all still has a stable
-/// identity across calls rather than a fresh one each time.
-fn resolved_nick(saved: String) -> String {
+/// The nick to register as. A saved one wins; otherwise one is minted from
+/// the resolved session key and saved, so an agent with no setup at all
+/// still has a stable identity across calls rather than a fresh one each
+/// time.
+fn resolved_nick(saved: String, session_key: &str) -> String {
     if !saved.is_empty() {
         return saved;
     }
-    let (key, _) = chat_client_rs::session_key();
-    let short: String = key
+    let short: String = session_key
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .take(10)
@@ -488,11 +525,11 @@ fn resolved_nick(saved: String) -> String {
     )
 }
 
-fn open_connection() -> Result<Held, String> {
-    let (server, nick) = resolve()?;
+fn open_connection(session_key: &str) -> Result<Held, String> {
+    let (server, nick) = resolve(session_key)?;
     let dir = state_dir();
     let held = Held::open(&server, &nick, &dir)?;
-    chat_client_rs::save_session(&dir, &server, &nick);
+    chat_client_rs::save_session_with_key(&dir, session_key, &server, &nick);
     Ok(held)
 }
 
@@ -509,11 +546,14 @@ fn status() -> Value {
         .iter()
         .map(|(chan, id)| (chan.clone(), json!(id)))
         .collect();
-    let connected = held().lock().map(|slot| slot.is_some()).unwrap_or(false);
+    let connected = held()
+        .lock()
+        .map(|map| map.contains_key(key.as_str()))
+        .unwrap_or(false);
     json!({
         "tool": "status",
         "server": session.server,
-        "nick": if session.nick.is_empty() { resolved_nick(String::new()) } else { session.nick.clone() },
+        "nick": if session.nick.is_empty() { resolved_nick(String::new(), key) } else { session.nick.clone() },
         "nick_is_saved": !session.nick.is_empty(),
         "session": key,
         "session_from": source.as_str(),

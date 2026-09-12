@@ -523,17 +523,30 @@ impl Session {
         state_dir.join("session.json")
     }
 
-    /// Load the session, recovering from a missing or malformed file. A
-    /// malformed file is reported on stderr (so an agent knows the cursors were
-    /// reset) and an empty session is returned; the next save overwrites it.
-    ///
-    /// An agent that has no session file of its own yet inherits the old shared
-    /// `session.json` if one is there, so an upgrade mid-conversation does not
-    /// drop the nick and cursors an agent was already using. The shared file is
-    /// only read, never moved or rewritten: every agent still holding state in
-    /// it needs it to stay put, and each writes to its own file from then on.
+    /// Load the session under this process's own resolved key -- see
+    /// `load_with_key` for the recovery behavior, identical here.
     pub fn load(state_dir: &std::path::Path) -> Session {
-        let mut path = Session::path(state_dir);
+        Session::load_with_key(state_dir, &session_key().0)
+    }
+
+    /// Load the session stored under an explicit `key` rather than this
+    /// process's own resolved `session_key()` -- what a caller multiplexing
+    /// several identities in one process (chat-mcp, T143) uses to keep each
+    /// one's server/nick/cursors apart, without disturbing anything that
+    /// still calls `load` unkeyed.
+    ///
+    /// Recovers from a missing or malformed file. A malformed file is
+    /// reported on stderr (so an agent knows the cursors were reset) and an
+    /// empty session is returned; the next save overwrites it.
+    ///
+    /// An agent that has no session file of its own yet inherits the old
+    /// shared `session.json` if one is there, so an upgrade mid-conversation
+    /// does not drop the nick and cursors an agent was already using. The
+    /// shared file is only read, never moved or rewritten: every agent still
+    /// holding state in it needs it to stay put, and each writes to its own
+    /// file from then on.
+    pub fn load_with_key(state_dir: &std::path::Path, key: &str) -> Session {
+        let mut path = Session::path_for(state_dir, key);
         if !path.exists() {
             let legacy = Session::legacy_path(state_dir);
             if legacy.exists() {
@@ -557,7 +570,13 @@ impl Session {
     }
 
     pub fn save(&self, state_dir: &std::path::Path) -> std::io::Result<()> {
-        let path = Session::path(state_dir);
+        self.save_with_key(state_dir, &session_key().0)
+    }
+
+    /// Save under an explicit `key` rather than this process's own resolved
+    /// `session_key()` -- see `load_with_key`.
+    pub fn save_with_key(&self, state_dir: &std::path::Path, key: &str) -> std::io::Result<()> {
+        let path = Session::path_for(state_dir, key);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -744,10 +763,22 @@ pub fn apply_session(
     state_dir: &std::path::Path,
     no_session: bool,
 ) -> (String, String, bool) {
+    apply_session_with_key(server, nick, state_dir, no_session, &session_key().0)
+}
+
+/// `apply_session`, loading under an explicit `key` rather than this
+/// process's own resolved `session_key()` -- see `Session::load_with_key`.
+pub fn apply_session_with_key(
+    server: &str,
+    nick: &str,
+    state_dir: &std::path::Path,
+    no_session: bool,
+    key: &str,
+) -> (String, String, bool) {
     if no_session {
         return (server.to_string(), nick.to_string(), false);
     }
-    let s = Session::load(state_dir);
+    let s = Session::load_with_key(state_dir, key);
     let server = if server.is_empty() {
         s.server.clone()
     } else {
@@ -864,14 +895,20 @@ pub fn save_cursor(state_dir: &std::path::Path, chan: &str, id: u64, no_session:
 
 /// Remember the server+nick for later calls.
 pub fn save_session(state_dir: &std::path::Path, server: &str, nick: &str) {
-    let mut s = Session::load(state_dir);
+    save_session_with_key(state_dir, &session_key().0, server, nick)
+}
+
+/// `save_session`, keyed explicitly rather than under this process's own
+/// resolved `session_key()` -- see `Session::save_with_key`.
+pub fn save_session_with_key(state_dir: &std::path::Path, key: &str, server: &str, nick: &str) {
+    let mut s = Session::load_with_key(state_dir, key);
     if !server.is_empty() {
         s.server = server.to_string();
     }
     if !nick.is_empty() {
         s.nick = nick.to_string();
     }
-    let _ = s.save(state_dir);
+    let _ = s.save_with_key(state_dir, key);
 }
 
 fn parse_flag(args: &[String], name: &str) -> Option<String> {
@@ -3192,6 +3229,39 @@ mod tests {
         assert_eq!(loaded.nick, "agent");
         assert_eq!(loaded.cursor("#ops"), 7);
         assert_eq!(loaded.cursor("#other"), 0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn two_keys_keep_separate_sessions_in_one_state_dir() {
+        let d = tmp_state("two_keys_keep_separate_sessions_in_one_state_dir");
+        save_session_with_key(&d, "agent-a", "h:1", "alice");
+        save_session_with_key(&d, "agent-b", "h:2", "bob");
+
+        let a = Session::load_with_key(&d, "agent-a");
+        let b = Session::load_with_key(&d, "agent-b");
+        assert_eq!(a.server, "h:1");
+        assert_eq!(a.nick, "alice");
+        assert_eq!(b.server, "h:2");
+        assert_eq!(b.nick, "bob");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn apply_session_with_key_fills_from_the_named_keys_own_session() {
+        let d = tmp_state("apply_session_with_key_fills_from_the_named_keys_own_session");
+        save_session_with_key(&d, "agent-a", "h:1", "alice");
+
+        let (server, nick, used) = apply_session_with_key("", "", &d, false, "agent-a");
+        assert_eq!(server, "h:1");
+        assert_eq!(nick, "alice");
+        assert!(used);
+
+        // A different key sees no session at all, even in the same state dir.
+        let (server, nick, used) = apply_session_with_key("", "", &d, false, "agent-b");
+        assert_eq!(server, "");
+        assert_eq!(nick, "");
+        assert!(!used);
         let _ = fs::remove_dir_all(&d);
     }
 

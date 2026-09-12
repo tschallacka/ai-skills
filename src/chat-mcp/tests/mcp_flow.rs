@@ -512,3 +512,81 @@ fn a_bad_argument_is_refused_by_name() {
         .unwrap_or_default();
     assert!(text.contains("text"), "unexpected refusal: {text}");
 }
+
+/// T143: a subagent that declares its own identity gets its own nick and
+/// connection, separate from its parent's -- proven by a real `who` on a
+/// channel every identity joined, and by a message one identity sent
+/// carrying that identity's nick when another connection reads it back.
+#[test]
+fn distinct_session_overrides_get_their_own_nick_and_hold_separate_connections() {
+    let Some(mut harness) = Harness::new("multiplex") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t143"}));
+    harness.call("join", json!({"channel":"#t143","session":"sub-a"}));
+    harness.call("join", json!({"channel":"#t143","session":"sub-b"}));
+
+    let who = harness.call("who", json!({"channel":"#t143"}));
+    let members: Vec<String> = who["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .map(|m| m.as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(members.contains(&"tester".to_string()), "{who}");
+    assert!(members.contains(&"agent-suba".to_string()), "{who}");
+    assert!(members.contains(&"agent-subb".to_string()), "{who}");
+
+    harness.call(
+        "send",
+        json!({"channel":"#t143","text":"hi from a","session":"sub-a"}),
+    );
+    let read = harness.call("read", json!({"channel":"#t143"}));
+    let senders: Vec<String> = read["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .map(|m| m["nick"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(
+        senders.contains(&"agent-suba".to_string()),
+        "the message must be attributed to the sub-a identity's own nick, not the default \
+         connection's: {read}"
+    );
+}
+
+/// `agent` is documented as an alias for `session`; prove it resolves to the
+/// exact same identity rather than a second, silently different one.
+#[test]
+fn the_agent_argument_is_an_alias_for_session() {
+    let Some(mut harness) = Harness::new("agent-alias") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t143b","agent":"sub-a"}));
+    let who = harness.call("who", json!({"channel":"#t143b"}));
+    let members: Vec<String> = who["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .map(|m| m.as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(members.contains(&"agent-suba".to_string()), "{who}");
+}
+
+/// An empty override is not a declared identity: it must fall back to the
+/// adapter's own default connection rather than minting a nick from nothing.
+#[test]
+fn an_empty_session_argument_falls_back_to_the_default_identity() {
+    let Some(mut harness) = Harness::new("empty-session") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t143c","session":""}));
+    let who = harness.call("who", json!({"channel":"#t143c"}));
+    let members: Vec<String> = who["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .map(|m| m.as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(members.contains(&"tester".to_string()), "{who}");
+}
