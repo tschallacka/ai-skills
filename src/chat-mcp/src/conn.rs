@@ -191,7 +191,22 @@ impl Held {
     /// `insecure` is deliberately absent: the TOFU pin is always enforced, so
     /// there is no flag for a model to reach for when a pin mismatch is
     /// inconvenient. A mismatch is a refusal with the reason in it.
-    pub fn open(server: &str, nick: &str, state_dir: &std::path::Path) -> Result<Held, String> {
+    ///
+    /// T143: `session_key` is the resolved identity `held()`'s map is keyed
+    /// by in lib.rs -- every session/cursor read or write this connection's
+    /// owner thread does must go through THIS key, not the process's own
+    /// default `session_key()`. Missing this the first time round (T143's
+    /// own initial cut) meant every distinct identity still shared one
+    /// cursor file: `send`'s `save_cursor` and `read`/`join`'s `Session::load`
+    /// all resolved the same process-wide default regardless of which
+    /// connection called them, so one identity's `send` silently advanced a
+    /// cursor another identity's `read` then trusted as its own.
+    pub fn open(
+        server: &str,
+        nick: &str,
+        state_dir: &std::path::Path,
+        session_key: &str,
+    ) -> Result<Held, String> {
         // message-tags negotiation result unused here: chat-mcp's own push
         // consumer does not yet track a msgid cursor the way chat-client-rs
         // tail does (T135 scoped there only) -- left for a follow-up.
@@ -208,6 +223,7 @@ impl Held {
             inbox: Vec::new(),
             nick: nick.to_string(),
             state_dir: state_dir.to_path_buf(),
+            session_key: session_key.to_string(),
             mention_seen: std::collections::HashMap::new(),
             triggers: Vec::new(),
             next_trigger_id: 1,
@@ -260,6 +276,10 @@ struct Owner {
     inbox: Vec<Push>,
     nick: String,
     state_dir: PathBuf,
+    /// T143: the resolved identity this connection belongs to. Every
+    /// session/cursor read or write below must use this, not the process's
+    /// own default `client::session_key()` -- see `Held::open`'s doc comment.
+    session_key: String,
     /// How far mention-filtered waiting has reported, per channel. Held in
     /// memory rather than in the session, because a mention read must NOT move
     /// the shared cursor -- the messages it skipped are still unread -- and yet
@@ -330,9 +350,9 @@ impl Owner {
         self.await_line(Duration::from_secs(2), |line| line.contains(" 366 "));
         let current = self.last_id(chan)?;
         let seed = since.unwrap_or(current);
-        let mut session = client::Session::load(&self.state_dir);
+        let mut session = client::Session::load_with_key(&self.state_dir, &self.session_key);
         session.cursors.insert(chan.to_string(), seed);
-        let _ = session.save(&self.state_dir);
+        let _ = session.save_with_key(&self.state_dir, &self.session_key);
         Ok(Answer {
             cursor: seed,
             note: Some(format!(
@@ -346,9 +366,9 @@ impl Owner {
     /// Part, and drop the cursor so a later join starts at the end again.
     fn leave(&mut self, chan: &str) -> Result<Answer, String> {
         self.write(&format!("PART {}", chan))?;
-        let mut session = client::Session::load(&self.state_dir);
+        let mut session = client::Session::load_with_key(&self.state_dir, &self.session_key);
         session.cursors.remove(chan);
-        let _ = session.save(&self.state_dir);
+        let _ = session.save_with_key(&self.state_dir, &self.session_key);
         self.inbox.retain(|push| push.chan != chan);
         Ok(Answer {
             note: Some(format!("left {}", chan)),
@@ -367,7 +387,7 @@ impl Owner {
             self.write(&format!("PRIVMSG {} :{}", chan, segment))?;
         }
         let id = self.last_id(chan)?;
-        client::save_cursor(&self.state_dir, chan, id, false);
+        client::save_cursor_with_key(&self.state_dir, &self.session_key, chan, id, false);
         Ok(Answer {
             cursor: id,
             note: Some(format!(
@@ -381,6 +401,28 @@ impl Owner {
         })
     }
 
+    /// Sends FETCH and parses the rows, with no cursor or inbox side effects
+    /// -- the mechanical half `read` and `deliver` both build on.
+    /// `server_side_mentions` picks the FETCH suffix (the server's own
+    /// literal-`@nick` filter, `fetch_mentions`); it is a property of the
+    /// wire request, independent of whatever `read`/`deliver` decide to do
+    /// with the cursor afterward.
+    fn fetch_rows(
+        &mut self,
+        chan: &str,
+        since: u64,
+        server_side_mentions: bool,
+    ) -> Result<Vec<Row>, String> {
+        let suffix = if server_side_mentions {
+            " mentions"
+        } else {
+            ""
+        };
+        self.write(&format!("FETCH {} {}{}", chan, since, suffix))?;
+        let lines = self.collect_until(Duration::from_secs(5), |line| line.starts_with(FETCH_END));
+        Ok(lines.iter().filter_map(|line| Row::parse(line)).collect())
+    }
+
     /// The delta: every stored message after the cursor, from the server's own
     /// history, so each row carries its id.
     ///
@@ -392,7 +434,7 @@ impl Owner {
         // an empty channel records 0, and reading "after 0" is exactly right
         // there. Treating the two alike skipped the first message a brand-new
         // channel ever received.
-        let stored = client::Session::load(&self.state_dir)
+        let stored = client::Session::load_with_key(&self.state_dir, &self.session_key)
             .cursors
             .get(chan)
             .copied();
@@ -400,7 +442,7 @@ impl Owner {
             (Some(explicit), _) => explicit,
             (None, None) => {
                 let end = self.last_id(chan)?;
-                client::save_cursor(&self.state_dir, chan, end, false);
+                client::save_cursor_with_key(&self.state_dir, &self.session_key, chan, end, false);
                 return Ok(Answer {
                     cursor: end,
                     note: Some(format!(
@@ -412,16 +454,13 @@ impl Owner {
             }
             (None, Some(cursor)) => cursor,
         };
-        let suffix = if mentions { " mentions" } else { "" };
-        self.write(&format!("FETCH {} {}{}", chan, since, suffix))?;
-        let lines = self.collect_until(Duration::from_secs(5), |line| line.starts_with(FETCH_END));
-        let rows: Vec<Row> = lines.iter().filter_map(|line| Row::parse(line)).collect();
+        let rows = self.fetch_rows(chan, since, mentions)?;
         let top = rows.iter().map(|row| row.id).max().unwrap_or(since);
         // A mention-filtered read must not move the cursor: the messages it
         // skipped were never shown to anyone, and advancing past them would
         // lose them permanently. The CLI makes the same exception.
         if !mentions {
-            client::save_cursor(&self.state_dir, chan, top, false);
+            client::save_cursor_with_key(&self.state_dir, &self.session_key, chan, top, false);
             self.inbox.retain(|push| push.chan != chan);
         }
         Ok(Answer {
@@ -474,25 +513,48 @@ impl Owner {
     /// rung, which answers an empty delta on the channel a message just
     /// arrived on.
     fn deliver(&mut self, chan: &str, mentions: bool) -> Result<Answer, String> {
-        let cursor = client::Session::load(&self.state_dir).cursor(chan);
+        let cursor =
+            client::Session::load_with_key(&self.state_dir, &self.session_key).cursor(chan);
         let mention = format!("@{}", self.nick);
         let triggers = self.triggers.clone();
         self.inbox.retain(|push| {
             !(push.chan == chan
-                && (!mentions || push.text.contains(&mention) || wakes_on_trigger(&triggers, push)))
+                && (!mentions
+                    || push.text.contains(&mention)
+                    || wakes_on_trigger(&triggers, &push.nick, &push.text)))
         });
         let since = if mentions {
             self.mention_seen.get(chan).copied().unwrap_or(cursor)
         } else {
             cursor
         };
-        let answer = self.read(chan, Some(since), mentions)?;
-        if mentions {
-            if let Some(top) = answer.rows.iter().map(|row| row.id).max() {
-                self.mention_seen.insert(chan.to_string(), top);
-            }
+        if !mentions {
+            return self.read(chan, Some(since), false);
         }
-        Ok(answer)
+        // T104: `wakes_on_trigger` above is exactly why the server's own
+        // `fetch_mentions` (FETCH ... mentions) cannot be used here -- it
+        // matches only a literal `@nick`, so a message that woke this `wait`
+        // via a TRIGGER rather than a real mention would vanish from the
+        // fetch that is supposed to hand it back. Fetch the raw backlog
+        // instead and apply the identical (mention OR trigger) predicate
+        // client-side, so a caller only ever sees what it was allowed to
+        // wake on -- never the rest of the channel -- regardless of which
+        // half of that condition fired.
+        let rows: Vec<Row> = self
+            .fetch_rows(chan, since, false)?
+            .into_iter()
+            .filter(|row| {
+                row.text.contains(&mention) || wakes_on_trigger(&triggers, &row.nick, &row.text)
+            })
+            .collect();
+        if let Some(top) = rows.iter().map(|row| row.id).max() {
+            self.mention_seen.insert(chan.to_string(), top);
+        }
+        Ok(Answer {
+            cursor: since,
+            rows,
+            ..Answer::empty()
+        })
     }
 
     /// Who is in the channel, from the server's own membership list.
@@ -612,7 +674,7 @@ impl Owner {
                 chan.map(|want| want == push.chan).unwrap_or(true)
                     && (!mentions
                         || push.text.contains(&mention)
-                        || wakes_on_trigger(&self.triggers, push))
+                        || wakes_on_trigger(&self.triggers, &push.nick, &push.text))
             })
             .map(|push| push.chan.clone())
     }
@@ -747,15 +809,17 @@ impl Owner {
     }
 }
 
-/// Does any enabled, sender-compatible trigger fire on this push? A free
+/// Does any enabled, sender-compatible trigger fire on this message? A free
 /// function (not a method) so `deliver`'s `self.inbox.retain(...)` can call
 /// it against a borrowed trigger list without holding `self` for the whole
-/// closure.
-fn wakes_on_trigger(triggers: &[Trigger], push: &Push) -> bool {
+/// closure. Takes `nick`/`text` rather than a `Push` so the same check also
+/// applies to a `Row` fetched back from history (`deliver`'s own re-filter,
+/// below) without constructing a throwaway `Push` for it.
+fn wakes_on_trigger(triggers: &[Trigger], nick: &str, text: &str) -> bool {
     triggers.iter().any(|t| {
         t.enabled
-            && t.sender.as_deref().map(|s| s == push.nick).unwrap_or(true)
-            && wildcard_match(&t.pattern, &push.text)
+            && t.sender.as_deref().map(|s| s == nick).unwrap_or(true)
+            && wildcard_match(&t.pattern, text)
     })
 }
 
@@ -825,14 +889,6 @@ mod tests {
         assert!(wildcard_match("", "anything at all"));
     }
 
-    fn push(nick: &str, text: &str) -> Push {
-        Push {
-            chan: "#test".to_string(),
-            nick: nick.to_string(),
-            text: text.to_string(),
-        }
-    }
-
     fn trigger(id: u64, pattern: &str, sender: Option<&str>, enabled: bool) -> Trigger {
         Trigger {
             id,
@@ -845,40 +901,29 @@ mod tests {
     #[test]
     fn an_unscoped_trigger_fires_from_any_sender() {
         let triggers = vec![trigger(1, "install", None, true)];
-        assert!(wakes_on_trigger(
-            &triggers,
-            &push("anyone", "please install")
-        ));
+        assert!(wakes_on_trigger(&triggers, "anyone", "please install"));
     }
 
     #[test]
     fn a_sender_scoped_trigger_only_fires_from_that_nick() {
         let triggers = vec![trigger(1, "install", Some("michael"), true)];
-        assert!(wakes_on_trigger(
-            &triggers,
-            &push("michael", "please install")
-        ));
+        assert!(wakes_on_trigger(&triggers, "michael", "please install"));
         assert!(!wakes_on_trigger(
             &triggers,
-            &push("someone-else", "please install")
+            "someone-else",
+            "please install"
         ));
     }
 
     #[test]
     fn a_disabled_trigger_never_fires() {
         let triggers = vec![trigger(1, "install", None, false)];
-        assert!(!wakes_on_trigger(
-            &triggers,
-            &push("anyone", "please install")
-        ));
+        assert!(!wakes_on_trigger(&triggers, "anyone", "please install"));
     }
 
     #[test]
     fn a_message_matching_no_trigger_does_not_wake() {
         let triggers = vec![trigger(1, "install", None, true)];
-        assert!(!wakes_on_trigger(
-            &triggers,
-            &push("anyone", "unrelated chatter")
-        ));
+        assert!(!wakes_on_trigger(&triggers, "anyone", "unrelated chatter"));
     }
 }

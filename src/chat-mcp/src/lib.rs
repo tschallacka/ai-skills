@@ -528,7 +528,7 @@ fn resolved_nick(saved: String, session_key: &str) -> String {
 fn open_connection(session_key: &str) -> Result<Held, String> {
     let (server, nick) = resolve(session_key)?;
     let dir = state_dir();
-    let held = Held::open(&server, &nick, &dir)?;
+    let held = Held::open(&server, &nick, &dir, session_key)?;
     chat_client_rs::save_session_with_key(&dir, session_key, &server, &nick);
     Ok(held)
 }

@@ -22,7 +22,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chat_proto::message::{numeric, numerics, Message, Tag, FETCH_END};
@@ -240,7 +240,11 @@ struct Hub {
     nicks: Mutex<HashMap<String, u64>>, // nick -> conn index
     // One peer per connection, keyed by index. Taken alone and held only long
     // enough to snapshot the list: nothing that can block is done under it.
-    writers: Mutex<Vec<Arc<Peer>>>,
+    // T91c: read on every broadcast (peers_except) and on every deregister,
+    // written only by the accept loop registering a new connection -- an
+    // RwLock lets concurrent broadcasts and deregisters proceed together,
+    // rather than queuing behind one another for a lock none of them mutate.
+    writers: RwLock<Vec<Arc<Peer>>>,
 }
 
 impl Hub {
@@ -303,7 +307,7 @@ impl Hub {
         // one.
         let peer = self
             .writers
-            .lock()
+            .read()
             .ok()
             .and_then(|writers| writers.get(idx).map(Arc::clone));
         if let Some(peer) = peer {
@@ -421,7 +425,7 @@ impl Hub {
     /// can block is done while holding it. Shared by `relay` and
     /// `relay_privmsg` so the two cannot drift on who gets addressed.
     fn peers_except(&self, except_idx: usize) -> Vec<Arc<Peer>> {
-        match self.writers.lock() {
+        match self.writers.read() {
             Ok(writers) => writers
                 .iter()
                 .enumerate()
@@ -1729,7 +1733,7 @@ fn main() {
         channels: Mutex::new(HashMap::new()),
         topics: Mutex::new(HashMap::new()),
         nicks: Mutex::new(HashMap::new()),
-        writers: Mutex::new(Vec::new()),
+        writers: RwLock::new(Vec::new()),
     });
 
     // Announcing is on unless switched off. A server nobody can discover is
@@ -1815,7 +1819,7 @@ fn main() {
         stream.set_write_timeout(Some(WRITE_TIMEOUT)).ok();
         let hub = Arc::clone(&hub);
         let tls_config = Arc::clone(&tls_config);
-        let mut writers = hub.writers.lock().unwrap();
+        let mut writers = hub.writers.write().unwrap();
         let idx = writers.len();
         let peer = Arc::new(Peer::new());
         writers.push(Arc::clone(&peer));
@@ -2009,7 +2013,7 @@ mod membership_relay_tests {
     use super::{Hub, Peer};
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, RwLock};
 
     // The fanout is what puts a nick in another client's list. Before B244 the
     // JOIN handler wrote only to the joining connection, so a client already in
@@ -2022,7 +2026,7 @@ mod membership_relay_tests {
             channels: Mutex::new(HashMap::new()),
             topics: Mutex::new(HashMap::new()),
             nicks: Mutex::new(HashMap::new()),
-            writers: Mutex::new(peers),
+            writers: RwLock::new(peers),
         }
     }
 
@@ -2249,7 +2253,7 @@ mod cap_negotiation_tests {
     use super::{negotiate_req, Hub, Peer, CAPABILITIES};
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, RwLock};
 
     fn hub_with(peers: Vec<Arc<Peer>>) -> Hub {
         Hub {
@@ -2258,7 +2262,7 @@ mod cap_negotiation_tests {
             channels: Mutex::new(HashMap::new()),
             topics: Mutex::new(HashMap::new()),
             nicks: Mutex::new(HashMap::new()),
-            writers: Mutex::new(peers),
+            writers: RwLock::new(peers),
         }
     }
 
@@ -2366,7 +2370,7 @@ mod cap_negotiation_tests {
 mod append_lock_tests {
     use super::Hub;
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::{Mutex, RwLock};
 
     fn hub_at(chan_dir: std::path::PathBuf) -> Hub {
         Hub {
@@ -2375,7 +2379,7 @@ mod append_lock_tests {
             channels: Mutex::new(HashMap::new()),
             topics: Mutex::new(HashMap::new()),
             nicks: Mutex::new(HashMap::new()),
-            writers: Mutex::new(Vec::new()),
+            writers: RwLock::new(Vec::new()),
         }
     }
 

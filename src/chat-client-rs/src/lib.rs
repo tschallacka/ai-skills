@@ -883,13 +883,25 @@ fn parse_opts(args: &[String]) -> Opts {
 
 /// Record a sent/received message id as the channel cursor in the session.
 pub fn save_cursor(state_dir: &std::path::Path, chan: &str, id: u64, no_session: bool) {
+    save_cursor_with_key(state_dir, &session_key().0, chan, id, no_session)
+}
+
+/// `save_cursor`, keyed explicitly rather than under this process's own
+/// resolved `session_key()` -- see `Session::save_with_key`.
+pub fn save_cursor_with_key(
+    state_dir: &std::path::Path,
+    key: &str,
+    chan: &str,
+    id: u64,
+    no_session: bool,
+) {
     if no_session {
         return;
     }
-    let mut s = Session::load(state_dir);
+    let mut s = Session::load_with_key(state_dir, key);
     if id > s.cursor(chan) {
         s.cursors.insert(chan.to_string(), id);
-        let _ = s.save(state_dir);
+        let _ = s.save_with_key(state_dir, key);
     }
 }
 

@@ -79,9 +79,15 @@ impl Harness {
             .arg(port.to_string())
             .env("AI_CHAT_HOME", &home)
             .env("AI_CHAT_BIND", "127.0.0.1")
-            // Announce nowhere anything listens: this server must not be
-            // discovered by the agents using this machine's real beacon.
-            .env("AI_CHAT_BEACON_PORT", (port + 1).to_string())
+            // The server reads `CHAT_BEACON_PORT` (no `AI_` prefix); the
+            // client reads `AI_CHAT_BEACON_PORT` -- deliberately different
+            // names, not a typo (see chat/tests/test-chat-resolution.sh's own
+            // comment on this exact pairing). Setting only the client-side
+            // name here left this test's own server announcing on the real
+            // machine's default beacon port (7780) instead of nowhere: latent
+            // until a call needed real discovery rather than the pre-seeded
+            // session (T143's session/agent-override tests were the first).
+            .env("CHAT_BEACON_PORT", (port + 1).to_string())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
