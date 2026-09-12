@@ -4968,9 +4968,9 @@
       "fix": "planning/MAINTAINER.md and .gitignore now correctly state plan-crypt has no shipped binaries.tsv row -- CI builds and tests it against the NIST vector, but delivers it to no installed skill, unlike plan-overview/rjq.",
       "verification": "Merged in PR #145, commit bf23f755. test-duplication-ratchet.sh and test-stale-sweep.sh pass; full CI green.",
       "found_by": "wiki fact-check, maintainer session 2026-09-01",
-      "notes": null,
+      "notes": "Reversed by T72 (feat/rust-installer 053c9bb0, 2026-09-12): plan-crypt now HAS a shipped row in planning/binaries.tsv (five targets, alongside plan-overview and rjq), the opposite direction from this bug's own fix (which made the docs correctly say it did NOT ship). planning/MAINTAINER.md's plan-crypt bullet and .gitignore's matching comment were updated to describe the new state; nothing here reopens this bug, since both prior and current states were each internally consistent when they were true -- this is a later, deliberate decision superseding the earlier one, not a regression of it.",
       "created_at": "2026-09-01T15:15:18Z",
-      "updated_at": "2026-09-10T19:39:21Z"
+      "updated_at": "2026-09-12T12:53:54Z"
     },
     {
       "id": "B102",

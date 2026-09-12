@@ -23,24 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T72",
-      "title": "Move installed binaries to the shared XDG bin and retire the per-skill bin/",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Second half of the shared-binary work. The repo side is done (one bin/<triple> at the root, plan_bin_dir resolving it). What remains is the installed side and everything that declares the old layout. The installer must place binaries in ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin -- the directory custom-locations and the project-specificies notes already use -- and record it as AI_SKILLS_BIN_ROOT in the global .env, which plan_bin_dir already reads first. That is a schema 2->3 bump: plan-env.sh validates a CLOSED key set in three places (write_global, the check_manifests allow-list, and the version gate), values may not contain a tilde so the path must be expanded before writing, and planning/SKILL.md pins the version too. Then: drop the tracked planning/bin/<triple>/rjq and the per-skill bin from binaries.tsv semantics; declare plan-crypt, which is built and resolved but appears in no binaries.tsv and no manifest row, which rust-development-guidelines.md:199 calls illegal and test-shipped-binaries misses because it validates directory names rather than filenames; fix B94 by collapsing the remaining copies of the uname->triple table onto one resolver. Tests to rework: test-shipped-binaries.sh:104 hard-wires the artifact to the registry's own directory and is the assumption the move breaks, plus test-skill-files-manifest, test-persona-drift, test-installer-manifest, test-platform-selection and test-release-package. Packaging: package.json files[], the generated .npmignore, installer/build-release.sh, and the ten rows each in PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv. Docs stating the old rule: rust-development-guidelines.md section 6 (the authority), CODE-STYLE.md 117-121 and 200-207, planning/MAINTAINER.md 2.15 and 181-184, and chat/SKILL.md:84 which already names a path that does not exist.",
-      "blocked_on": null,
-      "refs": [
-        "installer/src/60-install.sh",
-        "planning/scripts/plan-env.sh",
-        "tests/test-shipped-binaries.sh",
-        "rust-development-guidelines.md"
-      ],
-      "note": "NEEDS DISCUSSION before implementation: this is a config-schema bump (plan-env.sh 2->3) plus a change to where install.sh places binaries system-wide, touching ~10 tests and ~5 docs. Before starting I need a decision on migration: an existing install already has binaries under the per-skill bin/ path and a .env at schema 2. Should install.sh (a) auto-migrate on next run (move the files, rewrite .env, no user action), (b) leave old installs working via a documented fallback read-path in plan_bin_dir indefinitely, or (c) just document it as a breaking change users fix by re-running the installer? That choice drives whether plan_bin_dir needs to keep reading the old location at all, which changes the shape of the fix. Separately, the plan-crypt-not-in-binaries.tsv problem this TODO also names looks like a small, independent, low-risk fix (just add the missing manifest row) -- I can peel that off as its own bug/todo without waiting on the migration decision, if useful. Moving to the next item; this one is parked pending your call on (a)/(b)/(c). DECIDED 2026-09-10 (Tschallacka): no backwards compatibility -- option (c). install.sh moving binaries to the shared XDG bin is a breaking change for an existing per-skill-bin install; users fix it by re-running the installer. plan_bin_dir does not need to keep reading the old per-skill location at all. Ready to implement; the plan-crypt-not-in-binaries.tsv gap this TODO also names is still a small, independent, low-risk fix that can be peeled off separately if useful.",
-      "created_at": "2026-08-31T13:27:55Z",
-      "updated_at": "2026-09-10T12:42:40Z"
-    },
-    {
       "id": "T104",
       "title": "the chat MCP wakes on declared trigger phrases, not only on a nick mention",
       "status": "open",
@@ -637,6 +619,24 @@
       "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
       "created_at": "2026-08-24T12:17:47Z",
       "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
+      "id": "T72",
+      "title": "Move installed binaries to the shared XDG bin and retire the per-skill bin/",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Second half of the shared-binary work. The repo side is done (one bin/<triple> at the root, plan_bin_dir resolving it). What remains is the installed side and everything that declares the old layout. The installer must place binaries in ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin -- the directory custom-locations and the project-specificies notes already use -- and record it as AI_SKILLS_BIN_ROOT in the global .env, which plan_bin_dir already reads first. That is a schema 2->3 bump: plan-env.sh validates a CLOSED key set in three places (write_global, the check_manifests allow-list, and the version gate), values may not contain a tilde so the path must be expanded before writing, and planning/SKILL.md pins the version too. Then: drop the tracked planning/bin/<triple>/rjq and the per-skill bin from binaries.tsv semantics; declare plan-crypt, which is built and resolved but appears in no binaries.tsv and no manifest row, which rust-development-guidelines.md:199 calls illegal and test-shipped-binaries misses because it validates directory names rather than filenames; fix B94 by collapsing the remaining copies of the uname->triple table onto one resolver. Tests to rework: test-shipped-binaries.sh:104 hard-wires the artifact to the registry's own directory and is the assumption the move breaks, plus test-skill-files-manifest, test-persona-drift, test-installer-manifest, test-platform-selection and test-release-package. Packaging: package.json files[], the generated .npmignore, installer/build-release.sh, and the ten rows each in PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv. Docs stating the old rule: rust-development-guidelines.md section 6 (the authority), CODE-STYLE.md 117-121 and 200-207, planning/MAINTAINER.md 2.15 and 181-184, and chat/SKILL.md:84 which already names a path that does not exist.",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/60-install.sh",
+        "planning/scripts/plan-env.sh",
+        "tests/test-shipped-binaries.sh",
+        "rust-development-guidelines.md"
+      ],
+      "note": "Closed 2026-09-12 on feat/rust-installer (053c9bb0). Every skill's compiled binaries now land in one shared location (${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin, flat), matching the location plan_bin_dir already resolved for rjq; the per-skill bin/<triple>/ install destination is retired for bug-report, todo, interactive-shell, chat and ai-text-editor. No back-compat, as decided 2026-09-10: an existing per-skill-bin install is fixed by re-running the installer. Two install code paths both needed the fix (install.rs's install_skill and cli_mode.rs's install_skill_cli, planning's own self-update path). Integration mode (skill vs mcp) is no longer inferred by scanning which binary sits on disk -- a new .integration-mode marker file records it directly, since the shared bin is deliberately never swept on a mode switch or reinstall (another skill or agent root installing the same binary may still need it). Accepted, not fixed: nothing garbage-collects an orphaned shared binary on uninstall, since there is no uninstall command at all today -- queued as its own task, T142. Also fixed the small independent gap T72's own text named: plan-crypt now has a binaries.tsv row (five targets), which reverses B101's prior resolution (that bug was closed by documenting plan-crypt as NOT shipping, rather than making it ship -- noted on B101 itself). Verified: 187 installer unit tests (cargo fmt/clippy/test clean across ai-text-editor-mcp/installer/installer-platform/installer-release), a real scratch-HOME install confirming the binary lands in the shared bin with no bin/ under the installed skill, MCP registration writing the shared path, and a mode switch correctly unregistering via the marker while leaving both binaries in place. tests/test-release-package.sh's real install-from-tarball check updated and isolated to a scratch HOME (it had been writing into this machine's real ~/.config/tsch-ai-skills/bin on every run before this fix). Full pre-push-check.sh and ./run-tests.sh (235/237, the same two pre-existing unrelated failures: test-mode-markers, test-rjq-active-references) both clean.",
+      "created_at": "2026-08-31T13:27:55Z",
+      "updated_at": "2026-09-12T12:53:54Z"
     },
     {
       "id": "T81",
