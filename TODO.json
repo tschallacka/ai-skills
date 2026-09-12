@@ -23,19 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T89",
-      "title": "a question skill: numbered questions with lettered options, never an unordered list",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Questions put to the human carry an increasing numeric id within the session -- Q1, Q2, Q3 -- and never restart at 1 for a new batch, so an answer of 'Q1' is unambiguous. One question per number. A multipart question is sub-numbered (Q20a, Q20b), never bulleted. When a question offers options or suggested answers they are lettered a, b, c, d, e, so the human can answer 'Q7b' rather than quoting text back. There is ALWAYS a final letter meaning 'none of these, I will say it myself' -- a closed set of options is a leading question. Never an unordered list for either the questions or the options: a bullet cannot be referenced, so an answer covering three of four parts leaves no way to say which one was missed. Repeat the number when following up, say which number an answer resolved, and carry an unanswered number forward unrenumbered rather than dropping it. Requested by Tschallacka on 2026-09-04; the same rules are already in his global CLAUDE.md, and this task is to make them a shipped skill so every agent follows them, not only this one.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T08:01:38Z",
-      "updated_at": "2026-09-04T08:01:38Z"
-    },
-    {
       "id": "T91b",
       "title": "retire read/tail --local, the log-file path that bypasses the server",
       "status": "open",
@@ -1055,6 +1042,19 @@
       "note": "Merged PR #126 (a335d74d). planning/scripts/register-resolve.sh and its test retired; bugs resolve/todo resolve are the one way to do the job now.",
       "created_at": "2026-09-01T15:57:41Z",
       "updated_at": "2026-09-09T22:21:40Z"
+    },
+    {
+      "id": "T89",
+      "title": "a question skill: numbered questions with lettered options, never an unordered list",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Questions put to the human carry an increasing numeric id within the session -- Q1, Q2, Q3 -- and never restart at 1 for a new batch, so an answer of 'Q1' is unambiguous. One question per number. A multipart question is sub-numbered (Q20a, Q20b), never bulleted. When a question offers options or suggested answers they are lettered a, b, c, d, e, so the human can answer 'Q7b' rather than quoting text back. There is ALWAYS a final letter meaning 'none of these, I will say it myself' -- a closed set of options is a leading question. Never an unordered list for either the questions or the options: a bullet cannot be referenced, so an answer covering three of four parts leaves no way to say which one was missed. Repeat the number when following up, say which number an answer resolved, and carry an unanswered number forward unrenumbered rather than dropping it. Requested by Tschallacka on 2026-09-04; the same rules are already in his global CLAUDE.md, and this task is to make them a shipped skill so every agent follows them, not only this one.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Shipped as the question-etiquette skill: SKILL.md states the numbered-question (Q1, Q2, session-wide, never restarts, sub-numbered Q20a/Q20b for multipart, carried forward unrenumbered when unanswered) and lettered-option (a, b, c... always ending in an explicit escape letter) rules, with a worked example, mirroring text-etiquette's shape (prose only, requires.tsv header-only, docs/README.md summary). Registered in src/installer/src/manifest.rs's SKILLS list, installer/src/05-config.sh's SKILL_NAMES, installer/src/50-manifest.sh's skill_files() case arm, package.json's files array, and README.md's skill table.\n\nVerified: a real install into a scratch HOME (installer install --agent claude --skill question-etiquette) landed exactly SKILL.md/requires.tsv/docs/README.md, same as text-etiquette. planning/tests/test-npm-package.sh and tests/test-release-package.sh both pass against the refreshed npm-package-baseline.tsv. cargo fmt/clippy clean (installer's SKILLS list is the only Rust touched). Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer c39b61cf.",
+      "created_at": "2026-09-04T08:01:38Z",
+      "updated_at": "2026-09-12T17:55:04Z"
     },
     {
       "id": "T92",
