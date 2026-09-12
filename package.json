@@ -19,7 +19,7 @@
   "files": [
     "installer/bootstrap.sh",
     "planning",
-    "project-specificies",
+    "project-specifics",
     "resource-limited-testing",
     "brainstorm",
     "todo",
@@ -55,7 +55,7 @@
     "!.agents/skill-loading-experiment/**",
     "!.agents/skill-loading-findings.md",
     "!**/.ci-bin",
-    "!project-specificies/*-deviations.md"
+    "!project-specifics/*-deviations.md"
   ],
   "engines": {
     "node": ">=14"

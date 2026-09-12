@@ -211,7 +211,7 @@ collect() {
             [ -n "$path" ] || continue
             declares_prod "$path" && printf '%s\n' "$path"
         done < <(cd "$repo_root" && git ls-files \
-            planning project-specificies resource-limited-testing brainstorm \
+            planning project-specifics resource-limited-testing brainstorm \
             post-implementation-review todo bug-report)
         listed_by_installer
     } | while IFS= read -r path; do

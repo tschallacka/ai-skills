@@ -127,7 +127,7 @@ compiler_input() { # <path>
 }
 
 in_scope="$(cd "$repo_root" && git ls-files \
-    planning project-specificies resource-limited-testing brainstorm \
+    planning project-specifics resource-limited-testing brainstorm \
     post-implementation-review todo bug-report installer tests src .agents \
     run-tests.sh blast-radius.sh generate-portability.sh verify-both-shells.sh \
     setup-dev-env.sh)"
@@ -161,7 +161,7 @@ while IFS= read -r path; do
     # Only files inside a skill directory are subject to skill_files(); the
     # installer sources and the repo-level suite are not delivered by it at all.
     case "$path" in
-        planning/* | project-specificies/* | resource-limited-testing/* | brainstorm/* \
+        planning/* | project-specifics/* | resource-limited-testing/* | brainstorm/* \
             | post-implementation-review/* | todo/* | bug-report/*)
             if grep -qx "$path" "$work/listed"; then
                 [ "$mode" = PROD ] || disagree="$disagree $path(marked-DEV-but-shipped)"

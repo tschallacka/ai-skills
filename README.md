@@ -21,7 +21,7 @@ what they cost, how to verify any of it yourself, and what does not work yet.
 | Todo | A work queue that outlives the conversation, in one JSON file: nested tasks, every closed item carries its evidence. `todo add`/`todo update` keep the register sound; read recipes print user-ready output. | [docs](todo/docs/README.md) |
 | Brainstorm | Shapes an under-specified idea into a recorded, agreed picture (`brainstorm.md`) before planning, with an adversarial completion pass and a plan-vs-implement gate. | [docs](brainstorm/docs/README.md) |
 | Post-implementation review | After-the-fact review of built code with concrete proposed fixes, in three passes: implementer self-analysis, an independent solutions agent, and a critical-feedback agent that ranks every fix. | [docs](post-implementation-review/docs/README.md) |
-| Project-specific deviations | Records confirmed project behavior and environment quirks in per-project notes that future agents load instead of re-debugging. | [docs](project-specificies/docs/README.md) |
+| Project-specific deviations | Records confirmed project behavior and environment quirks in per-project notes that future agents load instead of re-debugging. | [docs](project-specifics/docs/README.md) |
 | Resource-limited testing | Runs heavyweight commands (suites, builds, analyzers, browsers) under platform-appropriate CPU/memory caps, with honest degradation when a platform has no cap mechanism. | [docs](resource-limited-testing/docs/README.md) |
 | Chat | RFC-1459 IRC-over-TLS message bus for agents: a rust server a standard TLS IRC client can join, a rust client with UDP discovery and TOFU cert pinning, channels, and additive history/delta reads. | [docs](chat/docs/README.md) |
 | Interactive shell | Operates a full-screen terminal program an agent has never seen - nano, mc, lynx, a pager, a menu: a rust PTY wrapper publishing each screen change as one JSONL event, compact row views and deltas to keep context small, element discovery, and a unix-socket client for keys, combos, pastes, mouse and resize. POSIX only. | [docs](interactive-shell/docs/README.md) |
@@ -182,7 +182,7 @@ commands that finish the job. This is what an `--all` run on a machine without
 
 ```
 == Summary ==
-Installed: /home/u/.agents/skills/project-specificies
+Installed: /home/u/.agents/skills/project-specifics
 Installed: /home/u/.agents/skills/resource-limited-testing
 Installed: /home/u/.agents/skills/brainstorm
 Installed: /home/u/.agents/skills/post-implementation-review

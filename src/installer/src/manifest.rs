@@ -17,7 +17,7 @@ pub struct Skill {
 
 pub const SKILLS: &[Skill] = &[
     Skill { name: "planning", description: "Durable, resumable plans with steps and verification." },
-    Skill { name: "project-specificies", description: "Records project conventions, quirks, and deviations." },
+    Skill { name: "project-specifics", description: "Records project conventions, quirks, and deviations." },
     Skill { name: "resource-limited-testing", description: "Caps CPU and memory for demanding tool runs." },
     Skill { name: "brainstorm", description: "Shapes an idea into a recorded, agreed picture before planning." },
     Skill { name: "post-implementation-review", description: "After-the-fact review and proposed fixes for built code." },

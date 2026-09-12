@@ -8,7 +8,7 @@ here without rediscovering conventions.
 ## What this repo is
 
 A portable collection of coding-agent skills (`planning/`, `brainstorm/`,
-`post-implementation-review/`, `project-specificies/`,
+`post-implementation-review/`, `project-specifics/`,
 `resource-limited-testing/`) plus a benchmark harness (`benchmark/planning/`)
 and a compiled Rust installer (`src/installer/`, fetched via the small
 curl-piped `installer/bootstrap.sh`). The skills are plain Markdown meant to
@@ -51,7 +51,7 @@ Key skills and when they apply:
 - `brainstorm` — an idea is under-specified and should be shaped before planning.
 - `post-implementation-review` — after real implementation work, offer a
   code-grounded review with fresh reviewer agents.
-- `project-specificies` — repo/behavior quirks affect implementation or debugging.
+- `project-specifics` — repo/behavior quirks affect implementation or debugging.
 - `resource-limited-testing` — about to run a test/build/analyzer that could
   consume substantial CPU/memory; run it under a resource cap.
 - `www` — the human types `www`, or you notice yourself thrashing (retrying

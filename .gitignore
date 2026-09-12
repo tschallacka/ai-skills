@@ -137,9 +137,9 @@ planning/scripts/plan-table-lib.sh
 # far end, so they are not ignored here.
 planning/REVIEWER.md
 
-# Workstation-only: the per-project deviation notes the project-specificies
+# Workstation-only: the per-project deviation notes the project-specifics
 # skill records. The skill ships; what it records about this machine does not.
-project-specificies/*-deviations.md
+project-specifics/*-deviations.md
 
 
 # CI builds plan-crypt here for the suite; never committed.

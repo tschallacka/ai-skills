@@ -527,7 +527,7 @@ tests/test-workspace-copy-excludes-build-trees.sh
 tests/test-worktree-id-collision-warning.sh
 EOF
             ;;
-        project-specificies)
+        project-specifics)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         resource-limited-testing)

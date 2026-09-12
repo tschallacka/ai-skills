@@ -7,7 +7,7 @@ directory.
 ## Repository layout
 
 - `planning/` — durable planning skill and helper scripts.
-- `project-specificies/` — project-deviation skill and example note files.
+- `project-specifics/` — project-deviation skill and example note files.
 - `resource-limited-testing/` — resource-limiting guidance and wrapper.
 - `src/installer/` — the compiled Rust installer: interactive picker,
   headless `install`/`install-skill` subcommands, MCP/permission registration.

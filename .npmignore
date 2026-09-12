@@ -3227,6 +3227,7 @@ src/verify-fix-keys/src/main.rs
 src/verify-target/Cargo.toml
 src/verify-target/src/main.rs
 tests/test-ai-text-editor.sh
+tests/test-bootstrap-default.sh
 tests/test-mode-markers.sh
 tests/test-register-branch-gate.sh
 tests/test-register-crate-parity.sh

@@ -109,7 +109,7 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
         [ -n "$path" ] || continue
         declares_prod "$path" && printf '%s\n' "$path"
     done < <(cd "$repo_root" && git ls-files \
-        planning project-specificies resource-limited-testing brainstorm \
+        planning project-specifics resource-limited-testing brainstorm \
         post-implementation-review todo bug-report)
     for skill in "${SKILL_NAMES[@]}"; do
         while IFS= read -r path; do

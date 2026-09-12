@@ -2,7 +2,7 @@ package_path	byte_size
 package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	11904
 package/LICENSE	1068
-package/README.md	17967
+package/README.md	17963
 package/ai-text-editor/SKILL.md	20293
 package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	16672
@@ -127,7 +127,7 @@ package/interactive-shell/tests/test-interactive-shell.sh	7688
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
-package/package.json	2015
+package/package.json	2011
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	19826
 package/planning/REVIEWER.md	24342
@@ -243,9 +243,9 @@ package/planning/telemetry-schema.json	888
 package/post-implementation-review/SKILL.md	11079
 package/post-implementation-review/docs/README.md	1462
 package/post-implementation-review/requires.tsv	1162
-package/project-specificies/SKILL.md	4059
-package/project-specificies/docs/README.md	1472
-package/project-specificies/requires.tsv	1162
+package/project-specifics/SKILL.md	4057
+package/project-specifics/docs/README.md	1472
+package/project-specifics/requires.tsv	1162
 package/resource-limited-testing/SKILL.md	9515
 package/resource-limited-testing/docs/README.md	1115
 package/resource-limited-testing/requires.tsv	1407
