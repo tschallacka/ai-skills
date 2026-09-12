@@ -2,10 +2,12 @@
 # Shared tool registry — how to verify a tool, and how to install it, written
 # once per tool rather than once per skill that needs it.
 #
-# installer/build.sh generates install.sh's runtime_tool_verify() and
-# runtime_tool_install_hint() from this file. Each skill's own requires.tsv says
-# what it needs, under what condition, and how badly; this file says what to do
-# about a tool that is missing.
+# Embedded into the Rust installer binary at compile time
+# (src/installer/src/tools.rs's `include_str!`), which reads it the same way
+# the retired bash install.sh's generated runtime_tool_verify()/
+# runtime_tool_install_hint() once did (see git history). Each skill's own
+# requires.tsv says what it needs, under what condition, and how badly; this
+# file says what to do about a tool that is missing.
 #
 # Columns, tab-separated:
 #   kind       verify  the command that decides whether the tool is usable

@@ -10,8 +10,7 @@
 #
 # The markers are the manifest. Nothing is listed twice: a file ships because it
 # says it ships, and tests/test-mode-markers.sh has already cross-checked every
-# marker against skill_files(). install.sh is added on top because it is the
-# entry point and is generated rather than tracked as a skill file.
+# marker against skill_files().
 #
 # Usage:
 #   build-release.sh                  # write dist/ai-skills-<version>.tar.gz
@@ -23,6 +22,17 @@
 # npm publishing is the same question with a different mechanism: package.json's
 # files array ships whole directories, so .npmignore is generated from the same
 # marker set by --npmignore.
+#
+# installer/src/05-config.sh and installer/src/50-manifest.sh are the two
+# surviving fragments of the retired bash install.sh (see git history for the
+# rest, and .agents/MAINTAINER.md for the retirement writeup): this script is
+# now their only real consumer (a handful of tests source them too, for the
+# same skill_files()/manifest cross-checks). They are not trimmed down to
+# only what this script reads -- most of 05-config.sh is install.sh-picker
+# state nothing here touches -- because the safe, low-risk move was keeping
+# them intact and working rather than a from-scratch extraction under this
+# same change. A future cleanup can narrow them once nothing else depends on
+# the untouched parts either.
 
 set -euo pipefail
 export LC_ALL=C
@@ -32,9 +42,9 @@ out_dir="$repo_root/dist"
 mode=build
 
 # The release collector and its pipeline use the same logical-to-physical path
-# resolver as the generated installer. Load it in the parent shell as well as
-# in listed_by_installer(), because pipeline subshells do not inherit functions
-# defined by a sibling subshell.
+# resolver install.sh once generated from this same file. Load it in the
+# parent shell as well as in listed_by_installer(), because pipeline subshells
+# do not inherit functions defined by a sibling subshell.
 # shellcheck disable=SC1090
 source "$repo_root/installer/src/05-config.sh"
 # shellcheck disable=SC1090
@@ -159,22 +169,21 @@ EOF
     done
 }
 
-# The exact files installer/src/70-permissions.sh's tui_hint_plugin_claude_files/
-# editor_gate_plugin_files (bash) name, and src/installer/src/plugins.rs's
-# TUI_HINT_PLUGIN_CLAUDE_FILES/EDITOR_GATE_PLUGIN_FILES (Rust) already carry.
+# The exact files src/installer/src/plugins.rs's own
+# TUI_HINT_PLUGIN_CLAUDE_FILES/EDITOR_GATE_PLUGIN_FILES carry (the retired
+# bash install.sh had a matching pair, installer/src/70-permissions.sh's
+# tui_hint_plugin_claude_files/editor_gate_plugin_files, before it and
+# install.sh were removed -- see git history).
 #
 # Neither existing mechanism above covers these: they are not a skill (no
 # entry in skill_files()) and most of their files have no comment syntax a
-# MODE marker could sit in (.json, .js). Under `curl … | bash`, install.sh
-# never notices, because SOURCE_ROOT there is GitHub's own whole-repository
-# source archive (download_source(), 45-source.sh) -- every file in the repo,
-# markers or not. installer/build-release.sh's tarball is the opposite by
-# design (only what a marker or skill_files() actually lists), and
-# installer/bootstrap.sh downloads exactly that tarball, so leaving these two
-# plugin directories out of collect() silently degrades the Rust installer's
-# tui-hint-plugin/editor-gate-plugin steps to a no-op with no error --
-# caught by running a real install from a real packaged release and finding
-# neither plugin on disk despite "Installed: …" having printed.
+# MODE marker could sit in (.json, .js). installer/build-release.sh's
+# tarball is scoped to only what a marker or skill_files() actually lists,
+# and installer/bootstrap.sh downloads exactly that tarball, so leaving
+# these two plugin directories out of collect() silently degrades the Rust
+# installer's tui-hint-plugin/editor-gate-plugin steps to a no-op with no
+# error -- caught by running a real install from a real packaged release
+# and finding neither plugin on disk despite "Installed: …" having printed.
 tui_hint_plugin_files() {
     printf 'tui-hint-plugin/.claude-plugin/plugin.json\n'
     printf 'tui-hint-plugin/hooks/hooks.json\n'
@@ -194,7 +203,7 @@ editor_gate_plugin_files() {
 
 collect() {
     {
-        printf 'install.sh\ninstall-ui.sh\nREADME.md\nLICENSE\npackage.json\n'
+        printf 'README.md\nLICENSE\npackage.json\n'
         tui_hint_plugin_files
         editor_gate_plugin_files
         local path

@@ -87,7 +87,7 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
 [ -f "$tarball" ] || t_fail "the builder wrote no $tarball"
 
 {
-    printf 'install.sh\ninstall-ui.sh\nREADME.md\nLICENSE\npackage.json\n'
+    printf 'README.md\nLICENSE\npackage.json\n'
     # tui-hint-plugin/editor-gate-plugin: neither is a skill (no skill_files()
     # entry) and most of their files have no comment syntax a MODE marker
     # could sit in (.json, .js), so this list is a third, deliberate copy of
@@ -206,10 +206,26 @@ t_assert_eq 'two builds of one tree are byte-identical' \
 
 # ── the property that subsumes the rest: the package installs ───────────────
 # A tarball whose contents are correct but which cannot install is still broken.
-rc=0
-( cd "$extracted" && printf 'n\n' | "$BASH" ./install.sh --skill todo \
-    --target "$work/installed" --yes ) >/dev/null 2>&1 || rc=$?
-t_assert_eq 'the extracted package installs a skill' "$rc" '0'
+# This tarball itself carries no installer binary at all -- build-release.sh's
+# own output is the universal skill payload; installer/build-installer-release.sh
+# is what adds a target's compiled installer on top of it, per release asset.
+# So the installer under test is built fresh from source here, and pointed at
+# the extracted tarball via --source, same shape the old install.sh smoke test
+# had (an installer, and a source tree to install skills from), just with the
+# two no longer bundled together in one artifact.
+installer_bin="$work/installer"
+if command -v cargo >/dev/null 2>&1; then
+    ( cd "$repo_root" && cargo build --release -p installer ) >/dev/null 2>&1 \
+        && cp "$repo_root/target/release/installer" "$installer_bin" 2>/dev/null
+fi
+if [ -x "$installer_bin" ]; then
+    rc=0
+    "$installer_bin" install --skill todo --source "$extracted" \
+        --target "$work/installed" --yes >/dev/null 2>&1 || rc=$?
+    t_assert_eq 'the extracted package installs a skill' "$rc" '0'
+else
+    printf 'SKIP: no installer binary built and cargo unavailable to build one\n' >&2
+fi
 # bin and binaries.tsv are part of a complete install now: the queue's tools ship
 # as a prebuilt binary, so a skill installed without bin/ can read its own rules
 # and do nothing with them.

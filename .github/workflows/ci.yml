@@ -1361,22 +1361,6 @@ jobs:
       - name: Fail on warning-severity findings
         run: xargs shellcheck -s bash --severity=warning < /tmp/sh-files.txt
 
-  installer-build:
-    # Proves: the committed install.sh is exactly what installer/build.sh
-    # assembles from installer/src/ plus the generated dependency tables, so the
-    # shipped artifact cannot drift from its parts through a hand edit.
-    name: install.sh matches installer/build.sh output
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.1
-
-      - name: Rebuild and compare
-        run: ./installer/build.sh --check
-
-      - name: Parse every part and the artifact
-        run: bash -n install.sh installer/build.sh installer/src/*.sh
-
   mermaid-render:
     # Proves: every fenced mermaid block in the repo's markdown is SYNTACTICALLY
     # valid — mermaid-cli parses and renders it. It proves nothing about

@@ -116,7 +116,6 @@ marker_of() { # <path> <MODE|PACKAGE> → DEV, PROD, or nothing
 compiler_input() { # <path>
     case "$1" in
         planning/scripts/lib/*/*.sh) return 0 ;;
-        installer/src/[0-9][0-9]-*.sh) return 0 ;;
         # A crate under src/ is compiled into a shipped binary (CODE-STYLE 1b):
         # the file is never delivered, its content is.
         src/*/src/*.rs | src/*/Cargo.toml) return 0 ;;
@@ -131,7 +130,7 @@ in_scope="$(cd "$repo_root" && git ls-files \
     planning project-specificies resource-limited-testing brainstorm \
     post-implementation-review todo bug-report installer tests src .agents \
     run-tests.sh blast-radius.sh generate-portability.sh verify-both-shells.sh \
-    install.sh install-ui.sh setup-dev-env.sh)"
+    setup-dev-env.sh)"
 
 missing='' bad_mode='' bad_package='' stray_package='' input_mode='' disagree='' checked=0
 while IFS= read -r path; do
@@ -201,15 +200,10 @@ t_assert_eq 'a function file is a maintainer file' \
     "$(marker_of "$repo_root/planning/scripts/lib/core/plan_die.sh" MODE)" 'DEV'
 t_assert_eq 'and its content is compiled into the end-user library' \
     "$(marker_of "$repo_root/planning/scripts/lib/core/plan_die.sh" PACKAGE)" 'PROD'
-# install.sh is assembled from MODE: DEV parts and must not inherit their marker.
-t_assert_eq 'install.sh is what a user runs, so it goes to the end user' \
-    "$(marker_of "$repo_root/install.sh" MODE)" 'PROD'
-t_assert_eq 'and no source marker leaked into it' \
-    "$(grep -cE '^# (MODE|PACKAGE): ' "$repo_root/install.sh")" '1'
 t_assert_eq 'an installer part is a maintainer file' \
     "$(marker_of "$repo_root/installer/src/50-manifest.sh" MODE)" 'DEV'
-t_assert_eq 'whose content is compiled into install.sh' \
-    "$(marker_of "$repo_root/installer/src/50-manifest.sh" PACKAGE)" 'PROD'
+t_assert_eq 'and declares no PACKAGE -- build-release.sh runs it, nothing compiles it' \
+    "$(marker_of "$repo_root/installer/src/50-manifest.sh" PACKAGE)" ''
 t_assert_eq 'the compiler itself is a maintainer file' \
     "$(marker_of "$repo_root/planning/scripts/build-plan-libs.sh" MODE)" 'DEV'
 t_assert_eq 'and it is nothing else compiles, so it declares no PACKAGE' \

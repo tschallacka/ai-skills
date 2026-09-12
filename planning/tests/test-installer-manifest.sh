@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MODE: DEV
 # test-installer-manifest — the planning ship manifest, the package map, and
-# install.sh's install set must describe the same file list.
+# skill_files()'s own install set must describe the same file list.
 #
 # Usage: test-installer-manifest.sh
 #
@@ -16,10 +16,14 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 map_file="$repo_dir/planning/PACKAGE-MAP.tsv"
 manifest_file="$repo_dir/planning/PACKAGE-MANIFEST.tsv"
-# Load the generated installer helper so the platform-path contract is tested
-# at the same implementation boundary used by install.sh.
+# Load the manifest helper directly (retired install.sh's own CLI dispatch
+# used to be the only way in; source_file()/platform_relative_path() are the
+# same functions either way, just called in-process now).
+# shellcheck disable=SC1090
+source "$repo_dir/installer/src/05-config.sh"
 # shellcheck disable=SC1090
 source "$repo_dir/installer/src/50-manifest.sh"
+SOURCE_ROOT="$repo_dir"
 
 # Normalise a path without requiring GNU `realpath -m` (absent on macOS).
 # Both callers pass paths that exist, so resolving the parent is sufficient.
@@ -46,9 +50,10 @@ test_manifest_emission() {
     map_installable=$(mktemp)
     trap 'rm -f "$emitted" "$map_installable"' RETURN
 
-    # --print-skill-files cats PACKAGE-MANIFEST.tsv, so emitted-vs-manifest is a
-    # tautology; the real contract is manifest == the map's installable rows.
-    "$BASH" "$repo_dir/install.sh" --print-skill-files planning --format=tsv >"$emitted"
+    # install.sh's own --print-skill-files just cat'd PACKAGE-MANIFEST.tsv (see
+    # git history), so emitted-vs-manifest was always a tautology; the real
+    # contract is manifest == the map's installable rows.
+    cp "$manifest_file" "$emitted"
     awk -F '\t' 'NR == 1 { next } $6 == "false" { print }' "$map_file" >"$map_installable"
     cmp -s "$manifest_file" "$map_installable"
     # Derive the expected manifest row count from the map (it must equal the
@@ -67,7 +72,7 @@ test_manifest_emission() {
             }
             continue
         fi
-        resolved=$(abs_path "$("$BASH" "$repo_dir/install.sh" --resolve-source planning "$destination")")
+        resolved=$(abs_path "$(source_file planning "$destination")")
         [ "$resolved" = "$(abs_path "$repo_dir/$source")" ] || {
             printf 'source mismatch: %s -> %s (got %s)\n' "$source" "$destination" "$resolved" >&2
             return 1
@@ -87,8 +92,8 @@ test_skill_files_matches_manifest() {
     manifest_dests=$(mktemp)
     trap 'rm -f "$manifest_dests" "$skill_files"' RETURN
 
-    # Extract the planning skill_files() heredoc destinations from install.sh.
-    # State machine over the same landmarks the previous python regex matched:
+    # Extract the planning skill_files() heredoc destinations directly from
+    # its own source (installer/src/50-manifest.sh). State machine:
     # `skill_files()` -> `planning)` -> `cat <<'EOF'` -> lines -> `EOF`.
     awk '
         !in_func && /^[[:space:]]*skill_files\(\)/ { in_func = 1; next }
@@ -102,7 +107,7 @@ test_skill_files_matches_manifest() {
             found = 1
         }
         END { if (!found) exit 1 }
-    ' "$repo_dir/install.sh" > "$skill_files"
+    ' "$repo_dir/installer/src/50-manifest.sh" > "$skill_files"
     cat >> "$skill_files" <<'EOF'
 bin/x86_64-unknown-linux-musl/rjq
 bin/aarch64-unknown-linux-musl/rjq

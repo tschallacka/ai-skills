@@ -29,6 +29,15 @@ fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/register-schemas.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
+installer_bin="$repo_root/target/release/installer"
+if [ ! -x "$installer_bin" ] && command -v cargo >/dev/null 2>&1; then
+    ( cd "$repo_root" && cargo build --release -p installer ) >/dev/null 2>&1
+fi
+[ -x "$installer_bin" ] || {
+    printf 'installer binary not built and cargo unavailable; run cargo build --release -p installer\n' >&2
+    exit 1
+}
+
 package_version="$(rjq -r '.version' "$repo_root/package.json")"
 t_assert_eq 'package.json states a version' \
     "$(printf '%s' "$package_version" | grep -Ec '^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(\-[0-9A-Za-z][0-9A-Za-z.-]*)?$')" '1'
@@ -57,8 +66,12 @@ for skill in todo bug-report; do
     # The manifest derives the schema filename from package.json, so grepping the
     # generated installer for a literal proves nothing. Install the skill and look
     # at what arrived -- the only thing the agent reading the schema depends on.
+    # install-skill (not the interactive install subcommand) is the one that
+    # writes a .version marker, same shape install.sh's own cli_install_skill
+    # once did -- the assertion two lines down needs that marker.
     installed="$work/installed-$skill"
-    "$BASH" "$repo_root/install.sh" --skill "$skill" --target "$installed" --yes >/dev/null 2>&1 \
+    "$installer_bin" install-skill "$skill" --target "$installed" --approval yes \
+        --source "$repo_root" >/dev/null 2>&1 \
         || t_fail "$skill: the installer refused to install it"
     [ -f "$installed/$skill/schema.$package_version.json" ] \
         || t_fail "$skill: installing it did not deliver schema.$package_version.json (got: $(ls "$installed/$skill" | tr '\n' ' '))"

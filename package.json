@@ -9,16 +9,15 @@
   },
   "homepage": "https://github.com/tschallacka/ai-skills",
   "bin": {
-    "ai-skills-install": "install.sh"
+    "ai-skills-install": "installer/bootstrap.sh"
   },
   "scripts": {
-    "install-skills": "./install.sh",
+    "install-skills": "./installer/bootstrap.sh",
     "prepack": "installer/build-release.sh --prepare >/dev/null && planning/scripts/build-plan-libs.sh >/dev/null && planning/scripts/generate-reviewer.sh >/dev/null && { command -v rjq >/dev/null 2>&1 || { d=\"$(./bootstrap.sh rjq --path-only)\" || exit 69; PATH=\"$d:$PATH\"; export PATH; }; } && tests/test-skill-files-manifest.sh >/dev/null && tests/test-register-schemas.sh >/dev/null",
     "verify-manifest": "tests/test-skill-files-manifest.sh"
   },
   "files": [
-    "install.sh",
-    "install-ui.sh",
+    "installer/bootstrap.sh",
     "planning",
     "project-specificies",
     "resource-limited-testing",
@@ -42,6 +41,7 @@
     "README.md",
     "LICENSE",
     "!interactive-shell/TODO.json",
+    "!interactive-shell/MODE-MANIFEST.tsv",
     "!planning/tests/**",
     "!planning/scripts/lib/**",
     "!planning/scripts/build-plan-libs.sh",
@@ -49,6 +49,7 @@
     "!planning/MAINTAINER.md",
     "!planning/PACKAGE-MAP.tsv",
     "!planning/rust-migration.tsv",
+    "!planning/MODE-MANIFEST.tsv",
     "!.agents/knowledge/**",
     "!.agents/profiles/**",
     "!.agents/skill-loading-experiment/**",
