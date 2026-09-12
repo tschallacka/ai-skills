@@ -25,6 +25,13 @@
 # a release does (installer/build-release.sh) and what CI does per runner; a
 # development tree needs the one it can actually execute.
 #
+# A run leaves .setup-dev-env.started at the moment it begins building and
+# .setup-dev-env.finished, carrying the same run token, only if every crate
+# below built (B156: a run killed partway -- OOM, ^C, a crash -- otherwise
+# leaves an unlabelled partial tree indistinguishable from a finished one).
+# run-tests.sh and lib-test.sh's t_begin both refuse to run against a tree
+# where .started exists without a matching .finished.
+#
 # Exit codes: 64 = bad usage; 69 = nix is missing (see the message it prints);
 # 70 = a crate failed to build.
 
@@ -140,6 +147,18 @@ if [ -z "${SETUP_DEV_ENV_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ]; then
         SETUP_DEV_ENV_IN_NIX=1 "$repo_root/${0##*/}" "$@"
 fi
 
+# B156: a run killed partway (OOM, ^C, a crash) leaves some binaries built and
+# others not, and nothing said so -- a suite run afterwards saw whatever
+# partial state was left and could not tell it apart from a genuinely finished
+# tree. .started carries a token unique to this run; .finished carries the
+# same token only once every crate below built. run-tests.sh and lib-test.sh
+# (t_begin) both refuse when .started exists without a .finished naming this
+# exact run, rather than guessing the tree is fine.
+dev_env_token="$$.$(date -u +%s)"
+started_marker="$repo_root/.setup-dev-env.started"
+finished_marker="$repo_root/.setup-dev-env.finished"
+printf '%s\n' "$dev_env_token" > "$started_marker"
+
 printf 'setup-dev-env: building for %s\n\n' "$triple"
 built=0 failed=''
 while IFS="$(printf '\t')" read -r crate binary; do
@@ -239,6 +258,12 @@ if [ -n "$failed" ]; then
     printf 'failed:%s\n' "$failed" >&2
     exit 70
 fi
+
+# Reached only once every crate above built: the tree is complete, so record
+# this run's own token as finished. A crate failure exits above and never
+# reaches this line, so .finished then still names an OLDER run (or does not
+# exist at all) -- exactly the mismatch the dirty check is looking for.
+printf '%s\n' "$dev_env_token" > "$finished_marker"
 
 # plan_bin_dir finds this directory on its own, so nothing needs configuring for
 # the skills themselves. The export line is for a human's own shell.

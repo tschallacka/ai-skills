@@ -441,11 +441,38 @@ t_trap_assertions() {
     trap 't_assertion_failed "$LINENO" "$BASH_COMMAND"' ERR
 }
 
+# B156: setup-dev-env.sh leaves .setup-dev-env.started at the moment it begins
+# building and .setup-dev-env.finished, carrying the same run token, only once
+# every crate built. A run killed partway (OOM, ^C, a crash) leaves .started
+# with no matching .finished -- a partial, unlabelled build state that used to
+# be indistinguishable from a complete one, and is the leading suspect for why
+# this same gate once failed then passed on an identical tree. Refuse rather
+# than run against it. lib-test.sh's own location is fixed (planning/tests/),
+# so this does not need the caller to have set repo_root.
+_t_dev_env_dirty_reason() {
+    local repo_root started finished started_token finished_token
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    started="$repo_root/.setup-dev-env.started"
+    finished="$repo_root/.setup-dev-env.finished"
+    [ -f "$started" ] || return 0
+    started_token="$(cat "$started" 2>/dev/null)"
+    finished_token=""
+    [ -f "$finished" ] && finished_token="$(cat "$finished" 2>/dev/null)"
+    [ -n "$started_token" ] && [ "$started_token" = "$finished_token" ] && return 0
+    printf 'a setup-dev-env.sh run started and never finished (or finished a different run) -- the build tree is in an unknown, possibly partial state. Finish it, then re-run: ./setup-dev-env.sh\n'
+    return 1
+}
+
 # Findings live in a file because a helper called inside a command substitution
 # runs in a subshell, where an incremented counter is discarded. That is not
 # hypothetical: it made a test's exit-code assertions inert until a mutation
 # exposed it.
 t_begin() {
+    local dirty_reason
+    if ! dirty_reason="$(_t_dev_env_dirty_reason)"; then
+        printf '%s: %s\n' "${0##*/}" "$dirty_reason" >&2
+        exit 70
+    fi
     T_FINDINGS="$(mktemp "${TMPDIR:-/tmp}/t-findings.XXXXXX")"
     export T_FINDINGS
     # A setup command dying under set -e used to end a test in silence: the

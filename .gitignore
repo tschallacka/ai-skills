@@ -68,6 +68,14 @@ chat/runtime/chat-server-rs
 # own; an install gets them under $XDG_CONFIG_HOME/tsch-ai-skills/bin.
 /bin/
 
+# ./setup-dev-env.sh's own scratch and dirty-build markers. The log is removed
+# on a normal exit; a crash or kill leaves it behind. .started/.finished are
+# meant to persist between runs -- they are how run-tests.sh and lib-test.sh
+# tell a completed build from one interrupted partway (B156).
+/.setup-dev-env.log
+/.setup-dev-env.started
+/.setup-dev-env.finished
+
 # Built chat rust binaries. installer/build-release.sh and CI still place them
 # per-skill; T72 moves that to the shared directory above, and this rule goes
 # with it.

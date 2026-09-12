@@ -349,6 +349,29 @@ trap cleanup EXIT
 # clean checkout has none of them. Build-if-missing here; staleness detection
 # stays with the tests, so the bootstrap cannot mask drift. A missing rjq is
 # fatal with the fix named: the register tests cannot run without it.
+# B156: refuse the WHOLE suite fast, with one clear message, rather than
+# every test failing individually with the same complaint. lib-test.sh's
+# t_begin carries the same check (repo_root-independent, since not every test
+# sources this script's variables) for a test run standalone outside the
+# suite runner; see setup-dev-env.sh's header for what writes the markers.
+refuse_if_dev_env_dirty() {
+    local started="$repo_root/.setup-dev-env.started"
+    local finished="$repo_root/.setup-dev-env.finished"
+    local started_token finished_token
+    [ -f "$started" ] || return 0
+    started_token="$(cat "$started" 2>/dev/null)"
+    finished_token=""
+    [ -f "$finished" ] && finished_token="$(cat "$finished" 2>/dev/null)"
+    [ -n "$started_token" ] && [ "$started_token" = "$finished_token" ] && return 0
+    printf '%s: a setup-dev-env.sh run started and never finished (or finished a\n' "${0##*/}" >&2
+    printf '  different run) -- the build tree is in an unknown, possibly partial\n' >&2
+    printf '  state, which is the leading suspect behind this suite failing then\n' >&2
+    printf '  passing on an identical tree (B156). Finish it, then re-run:\n' >&2
+    printf '    ./setup-dev-env.sh\n' >&2
+    exit 70
+}
+refuse_if_dev_env_dirty
+
 bootstrap_generated() {
     local lib missing=0 dir
     for lib in plan-core-lib.sh plan-crypt-lib.sh plan-document-lib.sh plan-progress-lib.sh plan-table-lib.sh; do
