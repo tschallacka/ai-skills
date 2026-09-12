@@ -177,12 +177,18 @@ t_assert_eq 'and every expected file was actually compared' "$compared" "$expect
 
 # ── property 3: nothing marked MODE: DEV is inside it ──────────────────────
 # Read the header only: a heredoc lower down mentions the marker strings.
+# grep -I skips a binary compiled artifact (rjq, ai-text-editor, ...) rather
+# than reading it: piping head's bytes straight into grep -- never through a
+# `$( )` capture -- means a binary's null bytes never reach a bash string,
+# which used to trigger "command substitution: ignored null byte in input"
+# on every one of the release's own compiled binaries.
 leaked=''
 while IFS= read -r path; do
     [ -n "$path" ] || continue
-    case "$(sed -n '1,25p' "$extracted/$path" 2>/dev/null)" in
-        *'# MODE: DEV'*|*'<!-- MODE: DEV -->'*) leaked="$leaked $path" ;;
-    esac
+    if head -25 "$extracted/$path" 2>/dev/null \
+        | grep -Iq -e '# MODE: DEV' -e '<!-- MODE: DEV -->'; then
+        leaked="$leaked $path"
+    fi
 done < "$work/expected"
 t_assert_eq 'no maintainer file reached the release' "${leaked# }" ''
 # The categories that motivated the split, named so a regression says which.
