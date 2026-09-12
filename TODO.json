@@ -309,25 +309,6 @@
       "updated_at": "2026-09-09T14:08:33Z"
     },
     {
-      "id": "T143",
-      "title": "chat-mcp needs a per-call identity override, multiplexing Held connections keyed by resolved session",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "T122's agent-identity-plugin injects each subagent its own AGENT_ID/AGENT_TYPE at SubagentStart and instructs it to declare that id to ai-text-editor (agent/session argument) and interactive-shell (--agent/AGENT_ID). chat-mcp cannot honor the same instruction: held() (src/chat-mcp/src/lib.rs) is a single process-wide OnceLock<Mutex<Option<Held>>>, opened once via resolve()/session_key() and never re-resolved per call -- one connection, one nick, for the adapter's whole process lifetime. A subagent sharing a Claude Code session with its parent therefore still shares the parent's chat nick even after T122, since chat-mcp has no model-facing session/agent argument at all (unlike ai-text-editor-mcp's ADAPTER_ARGUMENTS, which already has one).\n\nSHAPE: give chat-mcp an optional per-call session/agent override (new TOOL_ARGUMENTS entry, mirroring ai-text-editor-mcp's 'agent'/'session'), and change held() from a single Option<Held> to a map of Held connections keyed by the resolved session (chat_client_rs already keys ALL persistent state -- nick, cursors -- by session_key(), via Session::path_for(state_dir, key), so the underlying per-session state model already supports this; only the connection-holding side is single-tenant today). Each distinct resolved session gets its own nick/connection, opened lazily on first use, same lazy-open-and-retry-on-dead-connection behavior with_connection already has, just keyed rather than singular.\n\nDepends on nothing; makes T122's chat instruction true rather than aspirational once done.",
-      "blocked_on": null,
-      "refs": [
-        "src/chat-mcp/src/lib.rs",
-        "src/chat-mcp/src/conn.rs",
-        "src/agent-session-key/src/lib.rs",
-        "T122",
-        "agent-identity-plugin/README.md"
-      ],
-      "note": "Filed alongside T122/T123's closure: T122 was deliberately scoped to the plugin only (chat-mcp multiplexing needs a real connection-holding redesign, not a one-line addition), per an explicit scoping decision made while implementing T122. See T122's own closing note.",
-      "created_at": "2026-09-12T14:28:40Z",
-      "updated_at": "2026-09-12T14:28:40Z"
-    },
-    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
@@ -1248,6 +1229,25 @@
       "note": "Fixed and verified live 2026-09-12. Angle (1) was the real cause: src/ai-text-editor-mcp/src/lib.rs's tool_definitions() declared zero MCP tool annotations on any tool, so a client had no signal that open/read/search/etc. never write. Added an 'annotations' object per tool ({readOnlyHint, openWorldHint: false}), computed from a new READ_ONLY_TOOLS const covering the tools that never change a file's bytes or delete anything (open, capabilities, resources, read, history, page, search, cursor, job_poll); everything else (including index, save_as, close, resolve, and the 9 revision-guarded mutating tools) keeps the default. Two new unit tests pin the const against the wire output and pin specific mutating tools to readOnlyHint:false. Verified live by driving a real Codex session (v0.154.0, gpt-5.5) through the interactive-shell skill: asked it to read a file via the MCP tool, then to insert into it. 'read' ran with NO approval prompt at all; 'insert' immediately showed 'Allow the ai-text-editor MCP server to run tool insert? (1 Allow / 2 Allow for session / 3 Always allow / 4 Cancel)' in the same session -- exactly the intended split. Also drove OpenCode (Big Pickle) and a fresh Claude Code session the same way for comparison: neither showed a distinguishing prompt for read vs insert even before this fix (OpenCode's own permission config already allows the MCP broadly; the Claude Code session had auto mode on), so they were never where T127's symptom lived -- Codex was, and Codex is now fixed. Angle (2) (idle_timeout_seconds scaling with confirmation latency) is untouched: with angle (1) fixed, the read-heavy calls that used to each cost an approval-round-trip now cost none, which should itself much reduce how often the timeout window is exceeded; revisit angle (2) only if tab_unknown recurs in practice. Landed in feat/rust-installer at f56c43ab.",
       "created_at": "2026-09-09T12:30:19Z",
       "updated_at": "2026-09-12T10:34:48Z"
+    },
+    {
+      "id": "T143",
+      "title": "chat-mcp needs a per-call identity override, multiplexing Held connections keyed by resolved session",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "T122's agent-identity-plugin injects each subagent its own AGENT_ID/AGENT_TYPE at SubagentStart and instructs it to declare that id to ai-text-editor (agent/session argument) and interactive-shell (--agent/AGENT_ID). chat-mcp cannot honor the same instruction: held() (src/chat-mcp/src/lib.rs) is a single process-wide OnceLock<Mutex<Option<Held>>>, opened once via resolve()/session_key() and never re-resolved per call -- one connection, one nick, for the adapter's whole process lifetime. A subagent sharing a Claude Code session with its parent therefore still shares the parent's chat nick even after T122, since chat-mcp has no model-facing session/agent argument at all (unlike ai-text-editor-mcp's ADAPTER_ARGUMENTS, which already has one).\n\nSHAPE: give chat-mcp an optional per-call session/agent override (new TOOL_ARGUMENTS entry, mirroring ai-text-editor-mcp's 'agent'/'session'), and change held() from a single Option<Held> to a map of Held connections keyed by the resolved session (chat_client_rs already keys ALL persistent state -- nick, cursors -- by session_key(), via Session::path_for(state_dir, key), so the underlying per-session state model already supports this; only the connection-holding side is single-tenant today). Each distinct resolved session gets its own nick/connection, opened lazily on first use, same lazy-open-and-retry-on-dead-connection behavior with_connection already has, just keyed rather than singular.\n\nDepends on nothing; makes T122's chat instruction true rather than aspirational once done.",
+      "blocked_on": null,
+      "refs": [
+        "src/chat-mcp/src/lib.rs",
+        "src/chat-mcp/src/conn.rs",
+        "src/agent-session-key/src/lib.rs",
+        "T122",
+        "agent-identity-plugin/README.md"
+      ],
+      "note": "Shipped: chat-mcp accepts an optional session/agent argument (mirroring ai-text-editor-mcp's ADAPTER_ARGUMENTS) on every connected tool (join/leave/send/read/wait/who/trigger_add/trigger_remove/trigger_toggle/triggers). held() (src/chat-mcp/src/lib.rs) is now a Mutex<HashMap<String, Held>> keyed by the resolved session, opened lazily per key with the same retry-on-dead-connection behavior the single-connection version had, just scoped per entry. resolved_session_key() resolves an explicit session/agent argument via chat_client_rs::resolve_session_key's own Explicit rung (session wins if both given), falling back to the process's existing session_key() static when neither is given -- so a caller that never declares an identity keeps today's exact behavior unchanged.\n\nchat-client-rs grew the keyed counterparts underneath: Session::load_with_key/save_with_key (src/chat-client-rs/src/lib.rs), apply_session_with_key, save_session_with_key. Session::load/save/apply_session/save_session now delegate to these under session_key().0, so every existing call site (the chat CLI itself) is unaffected.\n\nVerified: cargo test -p chat-client-rs -p chat-mcp (64 + 19 + 12 = 95 total, incl. 2 new chat-client-rs tests proving two keys keep separate sessions in one state dir, and 3 new chat-mcp end-to-end integration tests against a real chat-server-rs: distinct session overrides get distinct minted nicks and hold separate connections verified via a real 'who' and a message read back under the sender's own nick; the 'agent' argument is confirmed an alias for 'session'; an empty override falls back to the default identity rather than minting a nick from nothing). cargo fmt/clippy clean across both crates. Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer 9ab984e3.\n\nMakes T122's chat instruction ('declare your id to chat') true rather than aspirational.",
+      "created_at": "2026-09-12T14:28:40Z",
+      "updated_at": "2026-09-12T16:41:52Z"
     },
     {
       "id": "T140",
