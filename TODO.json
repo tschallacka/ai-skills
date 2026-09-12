@@ -23,19 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T91b",
-      "title": "retire read/tail --local, the log-file path that bypasses the server",
-      "status": "open",
-      "priority": "normal",
-      "parent": "T91",
-      "detail": "read --local and tail --local walk $AI_CHAT_HOME/channels/<chan>.log with no server. Remove them, or keep them only as a maintenance escape hatch that is documented as such and never recommended in an agent instruction or skill doc. Sweep SKILL.md, the client's own usage text and .agents docs for anywhere --local is offered as the way to read a channel, since that is what teaches every future agent to bypass the socket. Depends on T91a: nothing may lose the ability to read a channel before the push path replaces it.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T08:29:54Z",
-      "updated_at": "2026-09-04T08:29:54Z"
-    },
-    {
       "id": "T91c",
       "title": "make the server's fan-out structurally lock-safe: a real channel per peer, and a read-write registry",
       "status": "open",
@@ -1055,6 +1042,19 @@
       "note": "Shipped as the question-etiquette skill: SKILL.md states the numbered-question (Q1, Q2, session-wide, never restarts, sub-numbered Q20a/Q20b for multipart, carried forward unrenumbered when unanswered) and lettered-option (a, b, c... always ending in an explicit escape letter) rules, with a worked example, mirroring text-etiquette's shape (prose only, requires.tsv header-only, docs/README.md summary). Registered in src/installer/src/manifest.rs's SKILLS list, installer/src/05-config.sh's SKILL_NAMES, installer/src/50-manifest.sh's skill_files() case arm, package.json's files array, and README.md's skill table.\n\nVerified: a real install into a scratch HOME (installer install --agent claude --skill question-etiquette) landed exactly SKILL.md/requires.tsv/docs/README.md, same as text-etiquette. planning/tests/test-npm-package.sh and tests/test-release-package.sh both pass against the refreshed npm-package-baseline.tsv. cargo fmt/clippy clean (installer's SKILLS list is the only Rust touched). Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer c39b61cf.",
       "created_at": "2026-09-04T08:01:38Z",
       "updated_at": "2026-09-12T17:55:04Z"
+    },
+    {
+      "id": "T91b",
+      "title": "retire read/tail --local, the log-file path that bypasses the server",
+      "status": "done",
+      "priority": "normal",
+      "parent": "T91",
+      "detail": "read --local and tail --local walk $AI_CHAT_HOME/channels/<chan>.log with no server. Remove them, or keep them only as a maintenance escape hatch that is documented as such and never recommended in an agent instruction or skill doc. Sweep SKILL.md, the client's own usage text and .agents docs for anywhere --local is offered as the way to read a channel, since that is what teaches every future agent to bypass the socket. Depends on T91a: nothing may lose the ability to read a channel before the push path replaces it.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Already done, folded into T91/T91a's own closure (both closed 2026-09-09): --local survives only as an explicitly-labelled maintenance escape hatch, never recommended for agent use. Verified directly (2026-09-12): src/chat-client-rs/src/lib.rs's usage text labels it '--local  maintenance escape hatch: read/tail the shared log, with no server'; chat/SKILL.md's own prose states plainly 'Agents must use the socket path so the server remains the only interface to the chat bus. Use it instead of opening the log by hand' -- steering AWAY from --local as the normal path, not toward it. Swept chat/docs/README.md and .agents/ for any other --local recommendation: none found. T91b was simply never closed when T91/T91a resolved the same ground.",
+      "created_at": "2026-09-04T08:29:54Z",
+      "updated_at": "2026-09-12T17:56:32Z"
     },
     {
       "id": "T92",
