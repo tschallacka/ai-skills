@@ -141,16 +141,20 @@ installer install --integration chat=mcp --skill chat --target DIR --yes     # c
 `chat-server-rs` installs in both modes. The adapter finds a server; it does
 not start one, so step 2 of *Connecting to a channel* is still yours.
 
-Register it with your harness pointing at the per-triple binary, e.g.
+Register it with your harness pointing at the shared bin every skill's
+compiled binaries live in, e.g.
 
 ```bash
-claude mcp add chat -- "$HOME/.claude/skills/chat/bin/x86_64-unknown-linux-musl/chat-mcp"
+claude mcp add chat -- "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-mcp"
 ```
 
-That path is inside the skill root, and switching the skill back to `skill`
-mode deletes the binary it names: the registration survives the switch and
-stops working, in every config that holds it. Re-register after a switch back
-to `mcp`, and remove the entry when you leave the mode (`BUGS.json` B285).
+The installer registers and unregisters this automatically for `claude`,
+`codex` and `opencode` when you switch `chat`'s mode. A manual registration
+like the one above does not: it survives a later switch away from `mcp` as a
+stale entry, still pointing at a file that still exists (the shared bin is
+never swept on a mode switch) but is no longer the mode `chat` is actually
+in. Re-register after switching back to `mcp`, and remove the entry when you
+leave the mode by hand (`BUGS.json` B285).
 
 | tool | takes | answers |
 |---|---|---|
@@ -189,14 +193,14 @@ with no server at all. That is a maintenance path, and it has no tool.
 
 ## The rust server
 
-Start it with the prebuilt binary, which lives under a **per-triple**
-directory — `bin/<target-triple>/chat-server-rs`, at the skill root when
-installed and at the repository root in a development tree, e.g.
-`bin/x86_64-unknown-linux-musl/chat-server-rs`. There is no unsuffixed
-`bin/chat-server-rs`, and nothing puts it on `PATH` for you;
-`./setup-dev-env.sh` prints the `export PATH=` line for this host. Failing
-that, build it with
-`cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`.
+Start it with the prebuilt binary, which lives in the one shared location
+every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-server-rs`.
+Nothing puts it on `PATH` for you. In a development tree that has run
+`./setup-dev-env.sh`, the same binary is also at
+`bin/<target-triple>/chat-server-rs` under the repository root, and that
+script prints the `export PATH=` line for this host. Failing both, build it
+with `cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`.
 
 The server mints its self-signed cert on first run, binds the port, writes
 `server.port`, and broadcasts a UDP beacon so clients can discover it —
@@ -692,7 +696,7 @@ in one shot. `tail` has no `--since`; after JOIN it waits for pushed messages.
 ### 2. If nothing answers, start the server yourself
 
 ```bash
-chat/bin/chat-server-rs &
+"${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-server-rs" &
 ```
 
 That is the whole command. **Set no environment variables.** The defaults are

@@ -181,16 +181,17 @@ library, and `test-plan-libs-build.sh` runs it.
   opportunistically-built `plan-crypt` binary first, then the GNU tool, then
   the BSD one, refusing with 69 only when none exists. `openssl` was the last
   rung and is gone from the chain and from `requires.tsv`. The binary is
-  found the way the chat skill's own binary lookup works — `PLAN_CRYPT_BIN`,
-  then `PATH`, then `planning/bin/<target triple>/plan-crypt` and
-  `planning/bin/plan-crypt`. **Unlike `plan-overview` and `rjq`
-  (`planning/binaries.tsv`), plan-crypt has no shipped row** (B101): CI builds
-  and tests it against the NIST vector, but delivers it to no installed
-  skill, so an installed planning skill runs the shell fallback chain only,
-  and a `planning/bin/<triple>` path exists only after a local
-  `setup-dev-env.sh` build. A pin naming a file that does not exist is a
-  refusal rather than a fall-through, which is how a test takes the compiled
-  rung out of the picture.
+  resolved through `plan_bin_dir` (`planning/scripts/lib/crypt/plan_bin_dir.sh`):
+  `PLAN_CRYPT_BIN` pinned explicitly, then a bare `plan-crypt` already on
+  `PATH`, then `plan_bin_dir`'s own answer joined with `plan-crypt` -- the
+  shared install-time location every skill's compiled binaries live in
+  (T72), falling back to a dev checkout's own root `bin/<triple>` when
+  neither exists yet. `plan-crypt` now has a shipped row in
+  `planning/binaries.tsv`, same as `plan-overview` and `rjq` (T72 also fixed
+  the B101 gap this bullet used to describe: it was built and tested but
+  declared nowhere). A pin naming a file that does not exist is a refusal
+  rather than a fall-through, which is how a test takes the compiled rung
+  out of the picture.
 - Two implementations of one algorithm can disagree, so they are pinned to each
   other rather than trusted: `tests/test-plan-crypt.sh` asserts the compiled and
   shell rungs produce identical hex across the empty string, the 55/56/64-byte

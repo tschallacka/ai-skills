@@ -6,6 +6,11 @@
 //! here goes through it unconditionally, so there is no separate "existing
 //! file" branch to get wrong.
 //!
+//! T72: the one exception to "into `target/<skill>`" is a `bin/<triple>/`
+//! entry, which goes to `shared_bin::shared_bin_dir` instead -- one location
+//! for every skill's compiled binaries, not a copy per skill per agent root.
+//! See that module's doc comment.
+//!
 //! A re-install does not silently clobber a user's edits: before overwriting
 //! an existing file that differs from the source, this checks whether the
 //! file is unchanged since the LAST install (digest.rs) and backs it up
@@ -42,6 +47,7 @@
 use crate::backup;
 use crate::digest;
 use crate::integration;
+use crate::shared_bin;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -66,6 +72,7 @@ pub fn install_skill(
     source_root: &Path,
     skill: &str,
     target_root: &Path,
+    home: &Path,
     integration_choice: Option<&str>,
     package_dev: bool,
 ) -> io::Result<()> {
@@ -112,6 +119,27 @@ pub fn install_skill(
 
     let mut installed_paths = Vec::with_capacity(relative_paths.len());
     for relative in &relative_paths {
+        // T72: a `bin/<triple>/<file>` entry never lands under this skill's
+        // own directory at all -- it goes to the one shared location every
+        // skill's binaries now live in. Never deleted from here on a mode
+        // switch (unlike an ordinary per-skill file just below): another
+        // agent root, or another skill, may still be depending on the exact
+        // same shared file, and this install has no way to know.
+        if let Some(filename) = shared_bin::shared_binary_filename(relative) {
+            if !integration::file_allowed(source_root, skill, relative, &mode) {
+                continue;
+            }
+            let source_file = source_dir.join(relative);
+            let shared_dir = shared_bin::shared_bin_dir(home);
+            fs::create_dir_all(&shared_dir)?;
+            let dest_file = shared_dir.join(filename);
+            if !dest_file.is_file() || !files_equal(&source_file, &dest_file)? {
+                copy_file_atomic(&source_file, &dest_file)?;
+                #[cfg(unix)]
+                preserve_executable_bit(&source_file, &dest_file)?;
+            }
+            continue;
+        }
         if !integration::file_allowed(source_root, skill, relative, &mode) {
             let dest_file = dest_dir.join(relative);
             if dest_file.is_file() {
@@ -136,6 +164,15 @@ pub fn install_skill(
         installed_paths.push(relative.clone());
     }
     digest::record_digests(&dest_dir, &installed_paths)?;
+    // T72: the mode a skill is installed in used to be detected by which
+    // mode's binary sat under this destination's own `bin/<triple>/` --
+    // binaries no longer live there (shared across every skill and agent
+    // root instead), so an unattended reinstall carrying the mode forward
+    // (T109) needs it recorded directly instead of inferred from a file's
+    // presence.
+    if !integration::modes(source_root, skill).is_empty() {
+        fs::write(integration::mode_marker_path(&dest_dir), &mode)?;
+    }
     Ok(())
 }
 
@@ -369,7 +406,15 @@ mod tests {
         );
 
         let target_root = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
 
         assert_eq!(
             fs::read_to_string(target_root.path().join("todo/SKILL.md")).unwrap(),
@@ -385,8 +430,15 @@ mod tests {
     fn missing_skill_directory_is_refused_not_silently_skipped() {
         let source_root = tempfile::tempdir().unwrap();
         let target_root = tempfile::tempdir().unwrap();
-        let err =
-            install_skill(source_root.path(), "nope", target_root.path(), None, false).unwrap_err();
+        let err = install_skill(
+            source_root.path(),
+            "nope",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
     }
 
@@ -396,7 +448,15 @@ mod tests {
         write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
         let target_root = tempfile::tempdir().unwrap();
 
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
 
         let leftovers: Vec<_> = fs::read_dir(target_root.path().join("todo"))
             .unwrap()
@@ -416,7 +476,15 @@ mod tests {
         fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
 
         let target_root = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
 
         let mode = fs::metadata(target_root.path().join("todo/scripts/run.sh"))
             .unwrap()
@@ -430,10 +498,26 @@ mod tests {
         let source_root = tempfile::tempdir().unwrap();
         write(&source_root.path().join("todo/SKILL.md"), "v1\n");
         let target_root = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
 
         write(&source_root.path().join("todo/SKILL.md"), "v2\n");
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
 
         assert_eq!(
             fs::read_to_string(target_root.path().join("todo/SKILL.md")).unwrap(),
@@ -455,7 +539,15 @@ mod tests {
         let source_root = tempfile::tempdir().unwrap();
         write(&source_root.path().join("todo/SKILL.md"), "v1\n");
         let target_root = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
 
         // The user edits the installed copy directly.
         fs::write(
@@ -465,7 +557,15 @@ mod tests {
         .unwrap();
 
         write(&source_root.path().join("todo/SKILL.md"), "v2\n");
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
 
         assert_eq!(
             fs::read_to_string(target_root.path().join("todo/SKILL.md")).unwrap(),
@@ -507,28 +607,34 @@ mod tests {
             "mcp binary",
         );
         let target_root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
 
         install_skill(
             source_root.path(),
             "ai-text-editor",
             target_root.path(),
+            home.path(),
             Some("skill"),
             false,
         )
         .unwrap();
 
-        assert!(target_root
-            .path()
-            .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor")
-            .is_file());
-        assert!(!target_root
-            .path()
-            .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor-mcp")
-            .is_file());
+        let shared = shared_bin::shared_bin_dir(home.path());
+        assert!(shared.join("ai-text-editor").is_file());
+        assert!(!shared.join("ai-text-editor-mcp").is_file());
+        assert!(!target_root.path().join("ai-text-editor/bin").exists());
     }
 
     #[test]
-    fn switching_mode_removes_the_previous_modes_stale_binary() {
+    fn switching_mode_never_deletes_the_previous_modes_shared_binary() {
+        // T72: the old per-skill bin/ made "switch mode, stale binary
+        // disappears" free -- the binary lived only under this one
+        // destination. The shared bin does not: another agent root, or
+        // another skill, might still need the exact same file, and one
+        // `install_skill` call over one destination has no way to know.
+        // The trade this test now pins: switching leaves both binaries in
+        // the shared bin, harmless unswept space, same trade the module
+        // doc comment and T72 itself accept for an uninstall.
         let source_root = tempfile::tempdir().unwrap();
         write_integration_tsv(source_root.path(), "ai-text-editor");
         write(
@@ -544,37 +650,32 @@ mod tests {
             "mcp binary",
         );
         let target_root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
 
         install_skill(
             source_root.path(),
             "ai-text-editor",
             target_root.path(),
+            home.path(),
             Some("skill"),
             false,
         )
         .unwrap();
-        assert!(target_root
-            .path()
-            .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor")
-            .is_file());
+        let shared = shared_bin::shared_bin_dir(home.path());
+        assert!(shared.join("ai-text-editor").is_file());
 
         install_skill(
             source_root.path(),
             "ai-text-editor",
             target_root.path(),
+            home.path(),
             Some("mcp"),
             false,
         )
         .unwrap();
 
-        assert!(!target_root
-            .path()
-            .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor")
-            .is_file());
-        assert!(target_root
-            .path()
-            .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor-mcp")
-            .is_file());
+        assert!(shared.join("ai-text-editor").is_file());
+        assert!(shared.join("ai-text-editor-mcp").is_file());
     }
 
     #[test]
@@ -594,11 +695,13 @@ mod tests {
             "mcp binary",
         );
         let target_root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
 
         install_skill(
             source_root.path(),
             "ai-text-editor",
             target_root.path(),
+            home.path(),
             Some("mcp"),
             false,
         )
@@ -610,19 +713,23 @@ mod tests {
             source_root.path(),
             "ai-text-editor",
             target_root.path(),
+            home.path(),
             None,
             false,
         )
         .unwrap();
 
-        assert!(target_root
-            .path()
-            .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor-mcp")
-            .is_file());
-        assert!(!target_root
-            .path()
-            .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor")
-            .is_file());
+        // T72: mode carry-forward is no longer visible in which binary
+        // exists (the shared bin never deletes either one) -- it is read
+        // from the marker `install_skill` itself records.
+        assert_eq!(
+            integration::installed_mode(
+                source_root.path(),
+                "ai-text-editor",
+                &target_root.path().join("ai-text-editor")
+            ),
+            Some("mcp".to_string())
+        );
     }
 
     #[test]
@@ -635,7 +742,15 @@ mod tests {
         );
         let target_root = tempfile::tempdir().unwrap();
 
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
         assert!(target_root.path().join("todo/SKILL.md").is_file());
         assert!(!target_root
             .path()
@@ -643,7 +758,15 @@ mod tests {
             .is_file());
 
         let dev_target = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            dev_target.path(),
+            dev_target.path(),
+            None,
+            true,
+        )
+        .unwrap();
         assert!(dev_target.path().join("todo/maintainer-notes.md").is_file());
     }
 
@@ -657,11 +780,27 @@ mod tests {
         );
         let target_root = tempfile::tempdir().unwrap();
 
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
         assert!(!target_root.path().join("todo/tests").exists());
 
         let dev_target = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            dev_target.path(),
+            dev_target.path(),
+            None,
+            true,
+        )
+        .unwrap();
         assert!(dev_target.path().join("todo/tests/test-todo.sh").is_file());
     }
 
@@ -675,7 +814,15 @@ mod tests {
         );
         let target_root = tempfile::tempdir().unwrap();
 
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
         assert!(target_root.path().join("todo/schema.json").is_file());
     }
 
@@ -689,7 +836,15 @@ mod tests {
         );
         let target_root = tempfile::tempdir().unwrap();
 
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
         assert!(target_root.path().join("todo/scripts/run.sh").is_file());
     }
 
@@ -708,12 +863,19 @@ mod tests {
         );
         let target_root = tempfile::tempdir().unwrap();
 
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
-        assert!(target_root
-            .path()
-            .join(format!("todo/bin/{target}/todo"))
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
+        assert!(shared_bin::shared_bin_dir(target_root.path())
+            .join("todo")
             .is_file());
-        assert!(!target_root.path().join("todo/bin/plan9-riscv64").exists());
+        assert!(!target_root.path().join("todo/bin").exists());
     }
 
     #[test]
@@ -727,7 +889,15 @@ mod tests {
         );
         let target_root = tempfile::tempdir().unwrap();
 
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
         assert!(!target_root.path().join("todo/.gitignore").exists());
         assert!(
             !target_root.path().join("todo/MODE-MANIFEST.tsv").exists(),
@@ -735,7 +905,15 @@ mod tests {
         );
 
         let dev_target = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            dev_target.path(),
+            dev_target.path(),
+            None,
+            true,
+        )
+        .unwrap();
         assert!(dev_target.path().join("todo/.gitignore").is_file());
     }
 
@@ -752,11 +930,27 @@ mod tests {
             "# MODE: DEV\nmigration-notes.tsv\tNEVER\n",
         );
         let target_root = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
         assert!(!target_root.path().join("todo/migration-notes.tsv").exists());
 
         let dev_target = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            dev_target.path(),
+            dev_target.path(),
+            None,
+            true,
+        )
+        .unwrap();
         assert!(
             !dev_target.path().join("todo/migration-notes.tsv").exists(),
             "NEVER must survive package_dev's usual ship-everything default, not just should_ship's marker scan"
@@ -781,7 +975,15 @@ mod tests {
             "# MODE: DEV\nscripts/lib/\tNEVER\n",
         );
         let dev_target = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            dev_target.path(),
+            dev_target.path(),
+            None,
+            true,
+        )
+        .unwrap();
         assert!(!dev_target.path().join("todo/scripts/lib").exists());
         assert!(dev_target.path().join("todo/scripts/run.sh").is_file());
     }
@@ -795,8 +997,15 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(elsewhere.path(), target_root.path().join("todo")).unwrap();
 
-        let err =
-            install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap_err();
+        let err = install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("symlink"));
         assert!(target_root.path().join("todo").is_symlink());
         assert!(!elsewhere.path().join("SKILL.md").is_file());
@@ -815,8 +1024,15 @@ mod tests {
         std::os::unix::fs::symlink(&bogus_target, target_root.path().join("todo/SKILL.md"))
             .unwrap();
 
-        let err =
-            install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap_err();
+        let err = install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("symlink"));
         assert!(target_root.path().join("todo/SKILL.md").is_symlink());
     }

@@ -205,6 +205,14 @@ the host's platform. The rules:
   built-but-undeclared binary is not.
 - Every target's binary ships in the npm package, because we do not know who or
   what pulls it.
+- `<skill>/bin/<target triple>/<binary>` names where the artifact ships FROM
+  (the source tree, a release tarball, the npm package) -- not where the
+  installer puts it. T72 retired the per-skill install destination: every
+  skill's binaries now land in one shared location on the target machine,
+  `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/`, flat (no triple
+  subdirectory -- an install only ever writes its own host's binaries there).
+  See `src/installer/src/shared_bin.rs`'s doc comment for the mechanism, and
+  a skill's own `SKILL.md` for the path an agent actually invokes.
 - The installer itself is a compiled Rust binary (`src/installer/`), not a
   generated file; change its behavior in `src/installer/src/*.rs` and rebuild
   (`cargo build --release -p installer`), same as any other crate here.

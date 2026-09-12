@@ -70,70 +70,55 @@ pub fn modes(source_root: &Path, skill: &str) -> Vec<String> {
     out
 }
 
-/// Which mode's binaries are already on disk at `destination`, or `None`
-/// when there are none (a first install). `Some(None)` is not a case this
-/// returns: finding binaries for two different modes -- a half-finished
-/// earlier switch -- is reported on stderr and treated the same as finding
-/// none, matching install.sh's `integration_installed_mode` refusing to
-/// guess rather than picking one.
-pub fn installed_mode(source_root: &Path, skill: &str, destination: &Path) -> Option<String> {
-    let bin_dir = destination.join("bin");
-    let Ok(triples) = fs::read_dir(&bin_dir) else {
-        return None;
-    };
-    let mut found: Option<String> = None;
-    for triple in triples.filter_map(|e| e.ok()) {
-        let Ok(files) = fs::read_dir(triple.path()) else {
-            continue;
-        };
-        for file in files.filter_map(|e| e.ok()) {
-            if !file.path().is_file() {
-                continue;
-            }
-            let filename = file.file_name();
-            let Some(mode) = binary_mode(source_root, skill, &filename.to_string_lossy()) else {
-                continue;
-            };
-            match &found {
-                Some(existing) if *existing != mode => {
-                    eprintln!(
-                        "installer: {} has binaries for both {existing} and {mode} modes; \
-                         a previous switch may be unfinished. Pass --integration to say which \
-                         mode to keep.",
-                        destination.display()
-                    );
-                    return None;
-                }
-                _ => found = Some(mode),
-            }
-        }
-    }
-    found
+/// Where an installed skill's chosen integration mode is recorded --
+/// `destination/.integration-mode`, plain text, no trailing structure.
+///
+/// T72: this used to be a live directory, not a marker: `installed_mode`
+/// scanned `destination/bin/<triple>/` and inferred the mode from which
+/// binary happened to be sitting there. Binaries no longer live under any
+/// one skill's own destination at all (every skill's binaries now share one
+/// location across every skill and agent root -- see `shared_bin`), so
+/// there is nothing left there to infer from, and the choice is recorded
+/// directly instead.
+pub fn mode_marker_path(destination: &Path) -> PathBuf {
+    destination.join(".integration-mode")
+}
+
+/// The mode recorded the last time `skill` was installed at `destination`,
+/// or `None` on a first install (no marker yet). `source_root`/`skill` are
+/// unused now that the answer comes from `destination`'s own marker rather
+/// than from scanning binaries against `integration.tsv`, but kept on the
+/// signature so every caller (`resolve_mode`, `mode_source`) stays
+/// unchanged.
+pub fn installed_mode(_source_root: &Path, _skill: &str, destination: &Path) -> Option<String> {
+    let content = fs::read_to_string(mode_marker_path(destination)).ok()?;
+    let trimmed = content.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 /// The adapter binary an mcp-mode install of `skill` left in place under
-/// `installed_dir` (`installed_dir/bin/<triple>/<file>`), or `None` when
+/// the shared bin directory (`shared_bin::shared_bin_dir`), or `None` when
 /// this skill is not in mcp mode there -- read from what the mode gate
 /// already decided to leave on disk, not by asking `integration.tsv` a
 /// second time.
-pub fn mcp_adapter_path(source_root: &Path, skill: &str, installed_dir: &Path) -> Option<PathBuf> {
-    let bin_dir = installed_dir.join("bin");
-    let triples = fs::read_dir(&bin_dir).ok()?;
-    for triple in triples.filter_map(|e| e.ok()) {
-        let Ok(files) = fs::read_dir(triple.path()) else {
+///
+/// T72: reads the one shared, flat bin directory every skill's binaries
+/// live in now, not `installed_dir`'s own (retired) `bin/<triple>/`. That
+/// directory holds every OTHER installed skill's binaries too; a filename
+/// `binary_mode` does not recognise as belonging to `skill` is simply
+/// skipped, so scanning it is still correct, just not skill-scoped the way
+/// the old per-skill directory was for free.
+pub fn mcp_adapter_path(source_root: &Path, skill: &str, home: &Path) -> Option<PathBuf> {
+    let bin_dir = crate::shared_bin::shared_bin_dir(home);
+    let files = fs::read_dir(&bin_dir).ok()?;
+    for file in files.filter_map(|e| e.ok()) {
+        let path = file.path();
+        if !path.is_file() {
             continue;
-        };
-        for file in files.filter_map(|e| e.ok()) {
-            let path = file.path();
-            if !path.is_file() {
-                continue;
-            }
-            let filename = file.file_name();
-            if binary_mode(source_root, skill, &filename.to_string_lossy()).as_deref()
-                == Some("mcp")
-            {
-                return Some(path);
-            }
+        }
+        let filename = file.file_name();
+        if binary_mode(source_root, skill, &filename.to_string_lossy()).as_deref() == Some("mcp") {
+            return Some(path);
         }
     }
     None
@@ -299,24 +284,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
         let dest = tempfile::tempdir().unwrap();
-        let bin = dest.path().join("bin/x86_64-unknown-linux-musl");
-        fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("ai-text-editor-mcp"), "").unwrap();
+        fs::create_dir_all(dest.path()).unwrap();
+        fs::write(mode_marker_path(dest.path()), "mcp").unwrap();
         assert_eq!(
             installed_mode(dir.path(), "ai-text-editor", dest.path()),
             Some("mcp".to_string())
         );
     }
 
+    // T72: "refuses to guess between two modes present at once" had no
+    // replacement -- it tested a disagreement that scanning two binaries
+    // under one destination could produce. A marker holds exactly one
+    // value, so that disagreement is now structurally impossible rather
+    // than detected and refused; there is nothing left here to test.
+
     #[test]
     fn mcp_adapter_path_finds_the_installed_mcp_binary() {
         let dir = tempfile::tempdir().unwrap();
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
-        let dest = tempfile::tempdir().unwrap();
-        let bin = dest.path().join("bin/x86_64-unknown-linux-musl");
+        let home = tempfile::tempdir().unwrap();
+        let bin = crate::shared_bin::shared_bin_dir(home.path());
         fs::create_dir_all(&bin).unwrap();
         fs::write(bin.join("ai-text-editor-mcp"), "").unwrap();
-        let found = mcp_adapter_path(dir.path(), "ai-text-editor", dest.path()).unwrap();
+        let found = mcp_adapter_path(dir.path(), "ai-text-editor", home.path()).unwrap();
         assert_eq!(found, bin.join("ai-text-editor-mcp"));
     }
 
@@ -324,26 +314,11 @@ mod tests {
     fn mcp_adapter_path_is_none_when_only_the_skill_binary_is_installed() {
         let dir = tempfile::tempdir().unwrap();
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
-        let dest = tempfile::tempdir().unwrap();
-        let bin = dest.path().join("bin/x86_64-unknown-linux-musl");
+        let home = tempfile::tempdir().unwrap();
+        let bin = crate::shared_bin::shared_bin_dir(home.path());
         fs::create_dir_all(&bin).unwrap();
         fs::write(bin.join("ai-text-editor"), "").unwrap();
-        assert!(mcp_adapter_path(dir.path(), "ai-text-editor", dest.path()).is_none());
-    }
-
-    #[test]
-    fn installed_mode_refuses_to_guess_between_two_modes_present_at_once() {
-        let dir = tempfile::tempdir().unwrap();
-        write_integration(dir.path(), "ai-text-editor", SAMPLE);
-        let dest = tempfile::tempdir().unwrap();
-        let bin = dest.path().join("bin/x86_64-unknown-linux-musl");
-        fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("ai-text-editor-mcp"), "").unwrap();
-        fs::write(bin.join("ai-text-editor"), "").unwrap();
-        assert_eq!(
-            installed_mode(dir.path(), "ai-text-editor", dest.path()),
-            None
-        );
+        assert!(mcp_adapter_path(dir.path(), "ai-text-editor", home.path()).is_none());
     }
 
     #[test]
@@ -351,9 +326,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
         let dest = tempfile::tempdir().unwrap();
-        let bin = dest.path().join("bin/x86_64-unknown-linux-musl");
-        fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("ai-text-editor-mcp"), "").unwrap();
+        fs::create_dir_all(dest.path()).unwrap();
+        fs::write(mode_marker_path(dest.path()), "mcp").unwrap();
 
         assert_eq!(
             resolve_mode(
@@ -395,9 +369,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
         let dest = tempfile::tempdir().unwrap();
-        let bin = dest.path().join("bin/x86_64-unknown-linux-musl");
-        fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("ai-text-editor-mcp"), "").unwrap();
+        fs::create_dir_all(dest.path()).unwrap();
+        fs::write(mode_marker_path(dest.path()), "mcp").unwrap();
         assert_eq!(
             mode_source(dir.path(), "ai-text-editor", "mcp", Some(dest.path()), None),
             "detected"

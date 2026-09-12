@@ -25,6 +25,13 @@ replays on the next call, so nothing is lost:
 ai-text-editor search -f /path/to/file --mode exact_text --query needle
 ```
 
+In `skill` mode, `ai-text-editor`/`ai-text-editor-server` live in the one
+shared location every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/`. Nothing puts it on
+`PATH` for you. In `mcp` mode there is no CLI to resolve at all: the harness
+launches `ai-text-editor-mcp` itself from the same shared location, and
+every verb above is a typed tool call instead of a command line.
+
 The exception is the seven verbs that carry a revision guard — `insert`,
 `replace`, `large_edit`, `restore`, `undo`, `redo`, `save`. On a file with no
 tab they are refused, because the revision they carry cannot have come from a

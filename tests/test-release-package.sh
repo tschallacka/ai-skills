@@ -226,19 +226,27 @@ if command -v cargo >/dev/null 2>&1; then
     ( cd "$repo_root" && cargo build --release -p installer ) >/dev/null 2>&1 \
         && cp "$repo_root/target/release/installer" "$installer_bin" 2>/dev/null
 fi
+# T72: every skill's compiled binaries share one location keyed off $HOME,
+# not this install's own --target -- isolated here so the real run never
+# touches this machine's actual ~/.config/tsch-ai-skills/bin.
+scratch_home="$work/home"
+mkdir -p "$scratch_home"
 if [ -x "$installer_bin" ]; then
     rc=0
-    "$installer_bin" install --skill todo --source "$extracted" \
-        --target "$work/installed" --yes >/dev/null 2>&1 || rc=$?
+    HOME="$scratch_home" XDG_CONFIG_HOME="" "$installer_bin" install --skill todo \
+        --source "$extracted" --target "$work/installed" --yes >/dev/null 2>&1 || rc=$?
     t_assert_eq 'the extracted package installs a skill' "$rc" '0'
 else
     printf 'SKIP: no installer binary built and cargo unavailable to build one\n' >&2
 fi
-# bin and binaries.tsv are part of a complete install now: the queue's tools ship
-# as a prebuilt binary, so a skill installed without bin/ can read its own rules
-# and do nothing with them.
+# bin/ no longer appears under an installed skill at all -- todo's binary
+# lands in the shared location above instead. binaries.tsv itself still
+# ships, since it is the packaging-side declaration, not the installed
+# artifact.
 t_assert_eq 'and the installed skill is complete' \
     "$(ls "$work/installed/todo" 2>/dev/null | sort | tr '\n' ' ')" \
-     "SKILL.md bin binaries.tsv docs requires.tsv schema.1.4.2.json schema.$version.json "
+     "SKILL.md binaries.tsv docs requires.tsv schema.1.4.2.json schema.$version.json "
+t_assert_eq 'and its binary reached the shared bin' \
+    "$([ -x "$scratch_home/.config/tsch-ai-skills/bin/todo" ] && printf present)" 'present'
 
 t_end

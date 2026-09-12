@@ -25,6 +25,7 @@ mod permissions;
 mod plan_migration;
 mod plugins;
 mod requirements;
+mod shared_bin;
 mod tools;
 mod ui;
 
@@ -727,6 +728,7 @@ impl Summary {
 fn install_selected_skills(
     source: &Path,
     target: &Path,
+    home: &Path,
     skills: &[String],
     integration_selection: &IntegrationSelection,
     package_dev: bool,
@@ -780,6 +782,7 @@ fn install_selected_skills(
             source,
             skill,
             target,
+            home,
             integration_selection.choice_for(skill),
             package_dev,
         )
@@ -861,26 +864,44 @@ fn run_mcp_registration_step(
                 announced = true;
             }
             let dir = target.join(skill);
-            match integration::mcp_adapter_path(source, skill, &dir) {
-                Some(path) => {
-                    let path_str = path.to_string_lossy().to_string();
-                    match mcp::register_for_kind(kind, skill, &path_str, &home) {
-                        Ok(mcp::RegisterOutcome::Registered) => {
-                            println!("  {kind}: registered MCP server {skill}")
-                        }
-                        Ok(mcp::RegisterOutcome::Manual) => {
-                            for line in mcp::manual_instructions(kind, skill, &path_str) {
-                                println!("  {line}");
+            // T72: the disk-based signal this used to switch on --
+            // whether an mcp-mode binary happened to sit under this
+            // skill's own (retired) bin/<triple>/ -- no longer means "mcp
+            // mode is current": every skill's binaries now share one
+            // location that is never swept on a mode switch (another
+            // agent root may still need the old mode's binary), so a
+            // stale leftover would keep this re-registering mcp forever.
+            // The authoritative signal is the mode marker `install_skill`
+            // itself just wrote.
+            let is_mcp = integration::installed_mode(source, skill, &dir).as_deref() == Some("mcp");
+            let shared_dir = shared_bin::shared_bin_dir(&home);
+            if is_mcp {
+                match integration::mcp_adapter_path(source, skill, &home) {
+                    Some(path) => {
+                        let path_str = path.to_string_lossy().to_string();
+                        match mcp::register_for_kind(kind, skill, &path_str, &home) {
+                            Ok(mcp::RegisterOutcome::Registered) => {
+                                println!("  {kind}: registered MCP server {skill}")
                             }
+                            Ok(mcp::RegisterOutcome::Manual) => {
+                                for line in mcp::manual_instructions(kind, skill, &path_str) {
+                                    println!("  {line}");
+                                }
+                            }
+                            Err(e) => println!("  {kind}: {e}"),
                         }
-                        Err(e) => println!("  {kind}: {e}"),
                     }
+                    None => println!(
+                        "  {kind}: {skill} is in mcp mode but its adapter binary is missing from {}",
+                        shared_dir.display()
+                    ),
                 }
-                None => match mcp::unregister_for_kind(kind, skill, &dir, &home) {
+            } else {
+                match mcp::unregister_for_kind(kind, skill, &shared_dir, &home) {
                     Ok(true) => println!("  {kind}: removed MCP server {skill}"),
                     Ok(false) => {}
                     Err(e) => println!("  {kind}: {e}"),
-                },
+                }
             }
         }
     }
@@ -1223,6 +1244,10 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     }
 
     let integration_selection = build_integration_selection(&source, &args.integration)?;
+    // T72: every skill's compiled binaries land in one shared location under
+    // $HOME, not under any one target root -- required regardless of which
+    // (possibly several) target roots this run installs into.
+    let home = home_dir_opt().ok_or("install: HOME is not set")?;
     // One shared Confirms across every root, matching install.sh's single
     // run-wide YES/YES_ALL: an "a" (all) answer for the first root's prompt
     // must still auto-answer every later root's prompts too.
@@ -1233,6 +1258,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
         let installed = install_selected_skills(
             &source,
             target,
+            &home,
             &skills,
             &integration_selection,
             args.package_dev,
@@ -1861,7 +1887,8 @@ fn run_install_skill_cli(argv: &[String]) -> Result<ExitCode, String> {
         _ => return Err("--approval must be yes or no".to_string()),
     };
     let source = resolve_source(source)?;
-    match cli_mode::install_skill_cli(&source, &skill, &target, approval_yes, package_dev)? {
+    let home = home_dir_opt().ok_or("install-skill: HOME is not set")?;
+    match cli_mode::install_skill_cli(&source, &skill, &target, &home, approval_yes, package_dev)? {
         cli_mode::CliInstallOutcome::Installed(dest) => {
             println!("Installed: {}", dest.display());
             Ok(ExitCode::SUCCESS)
@@ -1982,6 +2009,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             for (name, mode) in &selected {
                 picked.per_skill.insert(name.clone(), mode.clone());
             }
+            let home = home_dir_opt().ok_or("interactive: HOME is not set")?;
             let mut summary = Summary::default();
             let mut confirms = Confirms::new(yes);
             let mut installed_skills: Vec<String> = Vec::new();
@@ -1989,6 +2017,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 let installed = install_selected_skills(
                     &source,
                     root,
+                    &home,
                     &names,
                     &picked,
                     package_dev,

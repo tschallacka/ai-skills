@@ -24,7 +24,10 @@ allocates. Prefer this over a headless probe whenever the interactive path is
 the one that matters.
 
 Read [docs/README.md](docs/README.md) for the command reference and an end-to-end
-workflow. Start
+workflow. `interactive-shell` and `interactive-shell-input` live in the one
+shared location every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/`. Nothing puts it on
+`PATH` for you. Start
 `interactive-shell --session <ID> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
 or `interactive-shell --socket <SOCKET> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
 and observe its JSONL stdout. Use the smallest practical `--cols` and `--rows`

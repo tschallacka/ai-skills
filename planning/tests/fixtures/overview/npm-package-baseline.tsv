@@ -3,7 +3,7 @@ package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	11904
 package/LICENSE	1068
 package/README.md	17963
-package/ai-text-editor/SKILL.md	20293
+package/ai-text-editor/SKILL.md	20715
 package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	16672
 package/ai-text-editor/binaries.tsv	500
@@ -16,15 +16,15 @@ package/ai-text-editor/schemas/protocol.v1.json	764
 package/brainstorm/SKILL.md	11440
 package/brainstorm/docs/README.md	1387
 package/brainstorm/requires.tsv	1162
-package/bug-report/SKILL.md	18181
+package/bug-report/SKILL.md	17702
 package/bug-report/binaries.tsv	945
 package/bug-report/docs/README.md	1318
 package/bug-report/requires.tsv	1628
 package/bug-report/schema.1.4.2.json	2754
 package/bug-report/schema.2.0.0-alpha.1.json	2499
-package/chat/SKILL.md	48211
+package/chat/SKILL.md	48501
 package/chat/binaries.tsv	1876
-package/chat/docs/README.md	1890
+package/chat/docs/README.md	1927
 package/chat/integration.tsv	1652
 package/chat/requires.tsv	467
 package/chat/tests/test-chat-broadcast-stall.sh	13620
@@ -54,7 +54,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/installer/bootstrap.sh	15664
-package/interactive-shell/SKILL.md	14192
+package/interactive-shell/SKILL.md	14407
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/appprofiles/FORMAT.md	3629
 package/interactive-shell/appprofiles/alsamixer.md	1289
@@ -135,7 +135,7 @@ package/planning/ROLES.md	4355
 package/planning/RUST-ARTIFACT-MANIFEST.md	716
 package/planning/SKILL.md	1831
 package/planning/artifact-comparisons.json	1779
-package/planning/binaries.tsv	1158
+package/planning/binaries.tsv	1735
 package/planning/context/brainstorm-limiting-context-benchmark.json	4080
 package/planning/context/brainstorm-limiting-context-contract.json	11532
 package/planning/context/brainstorm-limiting-context-oracle.json	6761
@@ -253,7 +253,7 @@ package/resource-limited-testing/scripts/limited-run.sh	4459
 package/text-etiquette/SKILL.md	3897
 package/text-etiquette/docs/README.md	1083
 package/text-etiquette/requires.tsv	1187
-package/todo/SKILL.md	18040
+package/todo/SKILL.md	17561
 package/todo/binaries.tsv	1127
 package/todo/docs/README.md	1637
 package/todo/requires.tsv	1625

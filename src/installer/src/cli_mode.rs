@@ -18,6 +18,7 @@
 use crate::install;
 use crate::integration;
 use crate::manifest;
+use crate::shared_bin;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -154,6 +155,7 @@ pub fn install_skill_cli(
     source_root: &Path,
     skill: &str,
     target: &Path,
+    home: &Path,
     approval_yes: bool,
     package_dev: bool,
 ) -> Result<CliInstallOutcome, String> {
@@ -225,11 +227,24 @@ pub fn install_skill_cli(
             continue;
         }
         let source_file = source_root.join(skill).join(relative);
+        // T72: a `bin/<triple>/<file>` entry goes to the shared bin every
+        // skill's binaries now live in, never under this skill's own
+        // destination -- see install.rs's own copy loop, which this
+        // mirrors, and shared_bin's doc comment.
+        if let Some(filename) = shared_bin::shared_binary_filename(relative) {
+            let shared_dir = shared_bin::shared_bin_dir(home);
+            fs::create_dir_all(&shared_dir).map_err(|e| e.to_string())?;
+            fs::copy(&source_file, shared_dir.join(filename)).map_err(|e| e.to_string())?;
+            continue;
+        }
         let dest_file = dest_dir.join(relative);
         if let Some(parent) = dest_file.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         fs::copy(&source_file, &dest_file).map_err(|e| e.to_string())?;
+    }
+    if !integration::modes(source_root, skill).is_empty() {
+        fs::write(integration::mode_marker_path(&dest_dir), &mode).map_err(|e| e.to_string())?;
     }
     fs::write(&version_path, version_marker_content(source_root)).map_err(|e| e.to_string())?;
     Ok(CliInstallOutcome::Installed(dest_dir))
@@ -291,8 +306,15 @@ mod tests {
     fn install_skill_cli_refuses_an_unknown_skill() {
         let dir = tempfile::tempdir().unwrap();
         let target = tempfile::tempdir().unwrap();
-        let err = install_skill_cli(dir.path(), "not-a-real-skill", target.path(), true, false)
-            .unwrap_err();
+        let err = install_skill_cli(
+            dir.path(),
+            "not-a-real-skill",
+            target.path(),
+            target.path(),
+            true,
+            false,
+        )
+        .unwrap_err();
         assert!(err.contains("unsupported CLI skill"));
     }
 
@@ -302,7 +324,15 @@ mod tests {
         write(&dir.path().join("todo/SKILL.md"), "# todo\n");
         let target = tempfile::tempdir().unwrap();
 
-        let outcome = install_skill_cli(dir.path(), "todo", target.path(), true, false).unwrap();
+        let outcome = install_skill_cli(
+            dir.path(),
+            "todo",
+            target.path(),
+            target.path(),
+            true,
+            false,
+        )
+        .unwrap();
         assert!(matches!(outcome, CliInstallOutcome::Installed(_)));
         assert!(target.path().join("todo/SKILL.md").is_file());
         assert!(target.path().join("todo/.version").is_file());
@@ -314,7 +344,15 @@ mod tests {
         write(&dir.path().join("todo/SKILL.md"), "# todo\n");
         let target = tempfile::tempdir().unwrap();
 
-        let outcome = install_skill_cli(dir.path(), "todo", target.path(), false, false).unwrap();
+        let outcome = install_skill_cli(
+            dir.path(),
+            "todo",
+            target.path(),
+            target.path(),
+            false,
+            false,
+        )
+        .unwrap();
         assert!(matches!(outcome, CliInstallOutcome::ApprovalDeclined));
         assert!(!target.path().join("todo/SKILL.md").exists());
     }
@@ -329,7 +367,15 @@ mod tests {
             "someone else's file\n",
         );
 
-        let outcome = install_skill_cli(dir.path(), "todo", target.path(), true, false).unwrap();
+        let outcome = install_skill_cli(
+            dir.path(),
+            "todo",
+            target.path(),
+            target.path(),
+            true,
+            false,
+        )
+        .unwrap();
         assert!(matches!(outcome, CliInstallOutcome::Collision));
         assert_eq!(
             fs::read_to_string(target.path().join("todo/SKILL.md")).unwrap(),
@@ -347,10 +393,26 @@ mod tests {
         write(&dir.path().join("todo/SKILL.md"), "# todo v1\n");
         let target = tempfile::tempdir().unwrap();
 
-        let first = install_skill_cli(dir.path(), "todo", target.path(), true, false).unwrap();
+        let first = install_skill_cli(
+            dir.path(),
+            "todo",
+            target.path(),
+            target.path(),
+            true,
+            false,
+        )
+        .unwrap();
         assert!(matches!(first, CliInstallOutcome::Installed(_)));
 
-        let second = install_skill_cli(dir.path(), "todo", target.path(), true, false).unwrap();
+        let second = install_skill_cli(
+            dir.path(),
+            "todo",
+            target.path(),
+            target.path(),
+            true,
+            false,
+        )
+        .unwrap();
         assert!(matches!(second, CliInstallOutcome::Collision));
     }
 
@@ -369,7 +431,15 @@ mod tests {
             "format=ai-skills-version-1\nold marker\n",
         );
 
-        let outcome = install_skill_cli(dir.path(), "todo", target.path(), true, false).unwrap();
+        let outcome = install_skill_cli(
+            dir.path(),
+            "todo",
+            target.path(),
+            target.path(),
+            true,
+            false,
+        )
+        .unwrap();
         assert!(matches!(outcome, CliInstallOutcome::Installed(_)));
         assert_eq!(
             fs::read_to_string(target.path().join("todo/SKILL.md")).unwrap(),
@@ -395,7 +465,15 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = install_skill_cli(dir.path(), "todo", target.path(), true, false).unwrap();
+        let outcome = install_skill_cli(
+            dir.path(),
+            "todo",
+            target.path(),
+            target.path(),
+            true,
+            false,
+        )
+        .unwrap();
         assert!(matches!(outcome, CliInstallOutcome::Collision));
         assert!(target.path().join("todo/SKILL.md").is_symlink());
     }

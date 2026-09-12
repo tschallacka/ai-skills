@@ -92,12 +92,13 @@ ai-text-editor/bin/*/
 interactive-shell/bin/*/
 
 # A local `cargo build` drop of the plan-crypt helper, the same developer
-# convenience as chat/runtime/chat-server-rs above. Unlike plan-overview and
-# rjq (planning/binaries.tsv), plan-crypt has no shipped row: CI builds and
-# tests it against the NIST vector (B101), but delivers it to no installed
-# skill, so this file is never tracked -- a local build drops its binary
-# here, and bootstrap.sh's no-nix fallback builds rjq into the shared root
-# bin path too.
+# convenience as chat/runtime/chat-server-rs above. plan-crypt now has a
+# shipped row in planning/binaries.tsv alongside plan-overview and rjq (T72
+# fixed the B101 gap this comment used to describe), but unlike rjq it is
+# not git-tracked here: a release attaches it as a built CI artifact, the
+# same way plan-overview and every other skill's compiled binaries do. A
+# local build just drops its binary here; bootstrap.sh's no-nix fallback
+# builds rjq into the shared root bin path too.
 planning/bin/plan-crypt
 planning/bin/plan-crypt.exe
 planning/bin/*/
