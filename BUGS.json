@@ -6521,6 +6521,28 @@
       "updated_at": "2026-09-10T01:36:22Z"
     },
     {
+      "id": "B321",
+      "title": "T72's shared XDG bin migration silently broke interactive-shell's own Bash-execute permission grant",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Install interactive-shell on a Claude Code root with an existing settings.json (installer install --agent claude --skill interactive-shell), answer yes to the 'Allow the selected agents to execute the interactive-shell binaries' prompt, then inspect the granted permissions.allow entries against where the binaries actually installed.",
+      "observed": "The grant was Bash(<target_root>/interactive-shell/bin/**:*) -- target.join(\"interactive-shell\").join(\"bin\"), in both main.rs's run_interactive_shell_post_install and the standalone grant-permissions --bins CLI path. Since T72 (this session, commit 053c9bb0) moved every skill's compiled binary to one shared XDG bin directory keyed only by $HOME, that per-target bin/ directory is never created at all -- it does not exist post-T72. The grant matched nothing real, so every interactive-shell invocation kept prompting despite the user having said yes.",
+      "expected": "The grant should target wherever the binaries actually are, so answering yes really does remove the per-call prompt.",
+      "mechanism": "collect_relative_files/install_skill's shared-bin branch (install.rs) redirects any bin/<triple>/<file> entry straight to shared_bin::shared_bin_dir(home) and never creates target_root/<skill>/bin/ at all -- confirmed empirically (installed interactive-shell into a scratch HOME, target_root/interactive-shell/bin does not exist; the shared bin dir holds interactive-shell and interactive-shell-input directly). The permission-grant code path was never updated when T72 landed.",
+      "surfaces": [
+        "src/installer/src/main.rs",
+        "src/installer/src/permissions.rs"
+      ],
+      "fix": "claude_interactive_shell_permissions/_remove (permissions.rs) now grant/revoke two exact Bash(<dir>/<binary-name>:*) entries (interactive-shell, interactive-shell-input -- INTERACTIVE_SHELL_BINARIES) instead of a Bash(<dir>/**:*) directory glob, since the shared bin dir holds every OTHER skill's binaries too and a directory-scoped grant there would have silently authorized executing all of them, not just these two. The two auto-wired call sites (main.rs's run_interactive_shell_post_install, uninstall.rs's revoke_skill_permissions) now resolve shared_bin::shared_bin_dir(home) instead of target.join(\"interactive-shell\").join(\"bin\"); the manual grant-permissions/revoke-permissions --bins CLI keeps taking an explicit directory, now scoped to the same two named files within it.",
+      "verification": "cargo test -p installer (211/211, incl. the existing uninstalling_interactive_shell_revokes_its_own_bin_execute_grant test corrected to expect 2 removed entries, seeded against the real shared bin dir instead of the stale path). A real install into a scratch HOME with a seeded settings.json confirmed the grant now lands as Bash(<shared-bin-dir>/interactive-shell:*) and Bash(<shared-bin-dir>/interactive-shell-input:*) -- the two real binary paths -- and that installer uninstall correctly revokes exactly those two entries, leaving the unrelated worktree grant untouched. The manual grant-permissions/revoke-permissions --bins CLI smoke-tested the same way. cargo fmt/clippy clean.",
+      "found_by": "reviewing T144 (permission-grant reversal): revoke_skill_permissions's own removal path used the same stale target-rooted directory, and checking what it would actually remove led to the discovery",
+      "notes": null,
+      "created_at": "2026-09-12T17:19:37Z",
+      "updated_at": "2026-09-12T17:19:37Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
