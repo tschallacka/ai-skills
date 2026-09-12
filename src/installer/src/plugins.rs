@@ -164,6 +164,54 @@ fn register_plugin_entry(cfg: &Path, entry: &str) -> io::Result<bool> {
     Ok(true)
 }
 
+/// The exact inverse of `register_plugin_entry`: removes `entry` from the
+/// config's `plugin` array only if present verbatim, leaving every other
+/// entry untouched. Returns whether anything was removed.
+fn unregister_plugin_entry(cfg: &Path, entry: &str) -> io::Result<bool> {
+    if !cfg.is_file() {
+        return Ok(false);
+    }
+    let raw = fs::read_to_string(cfg)?;
+    let mut doc = permissions::as_object(serde_json::from_str(&raw).ok());
+    let Some(Value::Array(items)) = doc.get("plugin").cloned() else {
+        return Ok(false);
+    };
+    if !items.iter().any(|v| v.as_str() == Some(entry)) {
+        return Ok(false);
+    }
+    let updated: Vec<Value> = items
+        .into_iter()
+        .filter(|v| v.as_str() != Some(entry))
+        .collect();
+    doc.insert("plugin".to_string(), Value::Array(updated));
+    permissions::write_preserving_mode(cfg, &serde_json::to_string_pretty(&Value::Object(doc))?)?;
+    Ok(true)
+}
+
+/// The shared, `$HOME`-keyed path `install_tui_hint_plugin_opencode` copies
+/// `tui-hint-plugin.js` to -- exposed so `uninstall.rs` can find and remove
+/// the same file it installed, without recomputing the layout itself.
+pub fn tui_hint_plugin_opencode_path(home: &Path) -> PathBuf {
+    xdg_config_home(home)
+        .join("tsch-ai-skills")
+        .join("tui-hint-plugin")
+        .join("tui-hint-plugin.js")
+}
+
+/// Removes the opencode tui-hint-plugin's registration and, when nothing
+/// else references it, the shared `tui-hint-plugin.js` file itself. Callers
+/// (uninstall.rs) decide whether anything else still needs the file; this
+/// only performs the removal once that decision is made.
+pub fn uninstall_tui_hint_plugin_opencode(home: &Path) -> io::Result<bool> {
+    let path = tui_hint_plugin_opencode_path(home);
+    let cfg = permissions::opencode_configfile(home);
+    let unregistered = unregister_plugin_entry(&cfg, &path.to_string_lossy())?;
+    if path.is_file() {
+        fs::remove_file(&path)?;
+    }
+    Ok(unregistered)
+}
+
 pub fn install_tui_hint_plugin_opencode(
     source_root: &Path,
     home: &Path,
@@ -175,10 +223,7 @@ pub fn install_tui_hint_plugin_opencode(
     if !source.is_file() {
         return Ok(OpencodePluginOutcome::NotShipped);
     }
-    let destination = xdg_config_home(home)
-        .join("tsch-ai-skills")
-        .join("tui-hint-plugin")
-        .join("tui-hint-plugin.js");
+    let destination = tui_hint_plugin_opencode_path(home);
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -340,5 +385,33 @@ mod tests {
         let cfg = permissions::opencode_configfile(home.path());
         let doc: Value = serde_json::from_str(&fs::read_to_string(cfg).unwrap()).unwrap();
         assert_eq!(doc["plugin"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn uninstalling_the_opencode_variant_removes_the_entry_and_the_file() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(
+            &source_root
+                .path()
+                .join("tui-hint-plugin/opencode/tui-hint-plugin.js"),
+            "module.exports = {}\n",
+        );
+        let home = tempfile::tempdir().unwrap();
+        install_tui_hint_plugin_opencode(source_root.path(), home.path()).unwrap();
+
+        let removed = uninstall_tui_hint_plugin_opencode(home.path()).unwrap();
+
+        assert!(removed);
+        assert!(!tui_hint_plugin_opencode_path(home.path()).is_file());
+        let cfg = permissions::opencode_configfile(home.path());
+        let doc: Value = serde_json::from_str(&fs::read_to_string(cfg).unwrap()).unwrap();
+        assert!(doc["plugin"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn uninstalling_when_nothing_was_ever_registered_reports_false() {
+        let home = tempfile::tempdir().unwrap();
+        let removed = uninstall_tui_hint_plugin_opencode(home.path()).unwrap();
+        assert!(!removed);
     }
 }

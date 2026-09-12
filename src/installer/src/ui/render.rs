@@ -18,7 +18,7 @@ use super::layout::Layout;
 use super::model::{Focus, PickerState};
 use crate::requirements::SkillState;
 
-fn pad(text: &str, width: usize) -> String {
+pub(crate) fn pad(text: &str, width: usize) -> String {
     if text.len() > width {
         return if width == 0 {
             String::new()

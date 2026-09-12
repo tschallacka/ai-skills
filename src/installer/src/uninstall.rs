@@ -29,6 +29,7 @@ use crate::install;
 use crate::integration;
 use crate::manifest;
 use crate::mcp;
+use crate::permissions;
 use crate::shared_bin;
 use std::collections::HashSet;
 use std::fs;
@@ -141,6 +142,111 @@ pub struct UninstallReport {
     pub removed_plugins: Vec<String>,
     pub mcp_entry_removed: bool,
     pub modified_files: Vec<String>,
+    pub permissions_removed: Vec<String>,
+    pub opencode_tui_hint_plugin_removed: bool,
+}
+
+/// Reverses `skill`'s own per-skill permission grant on `target_root`, if it
+/// has one. Only interactive-shell's Bash-execute grant is per-skill today;
+/// the planning and worktree grants are run-wide (added once for the whole
+/// run, not tied to any one skill's install), so they are deliberately left
+/// untouched here and remain a future whole-run "deprovision" command's job.
+fn revoke_skill_permissions(
+    skill: &str,
+    target_root: &Path,
+    kind: &str,
+    home: &Path,
+) -> Vec<String> {
+    if skill != "interactive-shell" {
+        return Vec::new();
+    }
+    let bins = target_root.join("interactive-shell").join("bin");
+    let bins = bins.to_string_lossy();
+    let removed = match kind {
+        "claude" => permissions::claude_interactive_shell_permissions_remove(&bins, home).ok(),
+        _ => None,
+    };
+    match removed {
+        Some(permissions::PermissionRemovalOutcome::Removed(entries)) => entries,
+        _ => Vec::new(),
+    }
+}
+
+pub struct UninstallPreview {
+    pub would_remove_shared_binaries: Vec<String>,
+    pub would_keep_shared_binaries: Vec<String>,
+    pub would_remove_plugins: Vec<String>,
+    pub has_mcp_entry: bool,
+    pub modified_files: Vec<String>,
+}
+
+/// The read-only counterpart to `uninstall_skill`: computes what it WOULD
+/// do without deleting or writing anything, so a UI can show a preview
+/// before the user confirms. Reuses the same "does anything else still
+/// need this" helpers `uninstall_skill` itself calls; permission-grant and
+/// MCP-registration removal are not previewed in detail here (both are
+/// reversible config edits, not data loss, so the skill/binary/plugin
+/// preview is what actually matters before confirming).
+pub fn preview_uninstall(
+    source_root: &Path,
+    skill: &str,
+    target_root: &Path,
+    home: &Path,
+    kind: Option<&str>,
+) -> UninstallPreview {
+    let dest_dir = target_root.join(skill);
+    if !dest_dir.is_dir() {
+        return UninstallPreview {
+            would_remove_shared_binaries: Vec::new(),
+            would_keep_shared_binaries: Vec::new(),
+            would_remove_plugins: Vec::new(),
+            has_mcp_entry: false,
+            modified_files: Vec::new(),
+        };
+    }
+
+    let needed = shared_binaries_needed_by(source_root, skill, &dest_dir);
+    let mut would_remove_shared_binaries = Vec::new();
+    let mut would_keep_shared_binaries = Vec::new();
+    for filename in &needed {
+        if other_skill_needs_binary(source_root, home, filename, &dest_dir) {
+            would_keep_shared_binaries.push(filename.clone());
+        } else {
+            would_remove_shared_binaries.push(filename.clone());
+        }
+    }
+    would_remove_shared_binaries.sort();
+    would_keep_shared_binaries.sort();
+
+    let mut would_remove_plugins = Vec::new();
+    if kind == Some("claude") {
+        for (plugin_name, companions) in CLAUDE_PLUGINS {
+            if companions.contains(&skill)
+                && !other_skill_on_root_needs_plugin(target_root, plugin_name, skill)
+                && target_root.join(plugin_name).is_dir()
+            {
+                would_remove_plugins.push((*plugin_name).to_string());
+            }
+        }
+    }
+
+    let has_mcp_entry =
+        integration::installed_mode(source_root, skill, &dest_dir).as_deref() == Some("mcp");
+
+    let modified_files = digest::recorded_relative_paths(&dest_dir)
+        .into_iter()
+        .filter(|relative| {
+            !digest::unmodified_since_install(&dest_dir, relative, &dest_dir.join(relative))
+        })
+        .collect();
+
+    UninstallPreview {
+        would_remove_shared_binaries,
+        would_keep_shared_binaries,
+        would_remove_plugins,
+        has_mcp_entry,
+        modified_files,
+    }
 }
 
 /// Removes `skill` from `target_root`. `kind` is the agent kind this root
@@ -164,6 +270,8 @@ pub fn uninstall_skill(
             removed_plugins: Vec::new(),
             mcp_entry_removed: false,
             modified_files: Vec::new(),
+            permissions_removed: Vec::new(),
+            opencode_tui_hint_plugin_removed: false,
         });
     }
 
@@ -219,6 +327,16 @@ pub fn uninstall_skill(
         }
     }
 
+    let permissions_removed = match kind {
+        Some(kind) => revoke_skill_permissions(skill, target_root, kind, home),
+        None => Vec::new(),
+    };
+
+    let opencode_tui_hint_plugin_removed = kind == Some("opencode")
+        && skill == "interactive-shell"
+        && !other_root_has_interactive_shell(home, target_root)
+        && crate::plugins::uninstall_tui_hint_plugin_opencode(home)?;
+
     Ok(UninstallReport {
         was_installed: true,
         removed_shared_binaries,
@@ -226,7 +344,21 @@ pub fn uninstall_skill(
         removed_plugins,
         mcp_entry_removed,
         modified_files,
+        permissions_removed,
+        opencode_tui_hint_plugin_removed,
     })
+}
+
+/// Does some OTHER root this installer can discover under `home` still have
+/// interactive-shell installed? Scoped the same way `other_skill_needs_binary`
+/// already is (every known root, not just opencode ones) since a custom
+/// location's agent kind is not recorded -- erring toward keeping the shared
+/// plugin file when uncertain, never toward a false-positive deletion.
+fn other_root_has_interactive_shell(home: &Path, exclude_root: &Path) -> bool {
+    known_roots(home)
+        .iter()
+        .filter(|root| *root != exclude_root)
+        .any(|root| root.join("interactive-shell").is_dir())
 }
 
 #[cfg(test)]
@@ -418,5 +550,155 @@ mod tests {
         .unwrap();
 
         assert_eq!(report.modified_files, vec!["SKILL.md".to_string()]);
+    }
+
+    #[test]
+    fn uninstalling_interactive_shell_revokes_its_own_bin_execute_grant() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(
+            &source_root
+                .path()
+                .join("interactive-shell")
+                .join("SKILL.md"),
+            "content",
+        );
+        let home = tempfile::tempdir().unwrap();
+        let claude_root = home.path().join(".claude/skills");
+        install_into(
+            source_root.path(),
+            "interactive-shell",
+            &claude_root,
+            home.path(),
+        );
+        let settings = home.path().join(".claude").join("settings.json");
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        fs::write(&settings, "{}").unwrap();
+        let bins = claude_root.join("interactive-shell").join("bin");
+        crate::permissions::claude_interactive_shell_permissions(
+            &bins.to_string_lossy(),
+            home.path(),
+        )
+        .unwrap();
+
+        let report = uninstall_skill(
+            source_root.path(),
+            "interactive-shell",
+            &claude_root,
+            home.path(),
+            Some("claude"),
+        )
+        .unwrap();
+
+        assert_eq!(report.permissions_removed.len(), 1);
+        let settings = home.path().join(".claude").join("settings.json");
+        let doc: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(settings).unwrap()).unwrap();
+        assert!(doc["permissions"]["allow"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn uninstalling_a_skill_with_no_per_skill_grant_reports_no_permissions_removed() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo").join("SKILL.md"), "content");
+        let target_root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        install_into(source_root.path(), "todo", target_root.path(), home.path());
+
+        let report = uninstall_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            home.path(),
+            Some("claude"),
+        )
+        .unwrap();
+
+        assert!(report.permissions_removed.is_empty());
+    }
+
+    #[test]
+    fn the_last_opencode_interactive_shell_removes_the_shared_tui_hint_plugin() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(
+            &source_root
+                .path()
+                .join("interactive-shell")
+                .join("SKILL.md"),
+            "content",
+        );
+        write(
+            &source_root
+                .path()
+                .join("tui-hint-plugin/opencode/tui-hint-plugin.js"),
+            "module.exports = {}\n",
+        );
+        let home = tempfile::tempdir().unwrap();
+        let opencode_root = home.path().join(".config/opencode/skills");
+        install_into(
+            source_root.path(),
+            "interactive-shell",
+            &opencode_root,
+            home.path(),
+        );
+        crate::plugins::install_tui_hint_plugin_opencode(source_root.path(), home.path()).unwrap();
+
+        let report = uninstall_skill(
+            source_root.path(),
+            "interactive-shell",
+            &opencode_root,
+            home.path(),
+            Some("opencode"),
+        )
+        .unwrap();
+
+        assert!(report.opencode_tui_hint_plugin_removed);
+        assert!(!crate::plugins::tui_hint_plugin_opencode_path(home.path()).is_file());
+    }
+
+    #[test]
+    fn a_sibling_opencode_root_keeps_the_shared_tui_hint_plugin() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(
+            &source_root
+                .path()
+                .join("interactive-shell")
+                .join("SKILL.md"),
+            "content",
+        );
+        write(
+            &source_root
+                .path()
+                .join("tui-hint-plugin/opencode/tui-hint-plugin.js"),
+            "module.exports = {}\n",
+        );
+        let home = tempfile::tempdir().unwrap();
+        let opencode_root = home.path().join(".config/opencode/skills");
+        let custom_root = home.path().join("custom-opencode-root");
+        install_into(
+            source_root.path(),
+            "interactive-shell",
+            &opencode_root,
+            home.path(),
+        );
+        install_into(
+            source_root.path(),
+            "interactive-shell",
+            &custom_root,
+            home.path(),
+        );
+        crate::custom_locations::save(home.path(), &custom_root).unwrap();
+        crate::plugins::install_tui_hint_plugin_opencode(source_root.path(), home.path()).unwrap();
+
+        let report = uninstall_skill(
+            source_root.path(),
+            "interactive-shell",
+            &opencode_root,
+            home.path(),
+            Some("opencode"),
+        )
+        .unwrap();
+
+        assert!(!report.opencode_tui_hint_plugin_removed);
+        assert!(crate::plugins::tui_hint_plugin_opencode_path(home.path()).is_file());
     }
 }

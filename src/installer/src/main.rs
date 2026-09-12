@@ -62,6 +62,8 @@ Usage:
   installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR)
                      grant that agent read/write on the planning skill's own
                      scripts/plan-root/tmp directory, or on a worktree root
+  installer revoke-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR)
+                     the exact inverse of grant-permissions
   installer mcp-register --agent NAME --name NAME --path PATH
                      register PATH as an mcp-mode stdio server named NAME
   installer mcp-unregister --agent NAME --name NAME --dir DIR
@@ -127,6 +129,7 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         Some("uninstall") => run_uninstall(&argv[1..]),
         Some("interactive") => run_interactive(&argv[1..]),
         Some("grant-permissions") => run_grant_permissions(&argv[1..]),
+        Some("revoke-permissions") => run_revoke_permissions(&argv[1..]),
         Some("mcp-register") => run_mcp_register(&argv[1..]),
         Some("mcp-unregister") => run_mcp_unregister(&argv[1..]),
         Some("migrate-plans") => run_migrate_plans(&argv[1..]),
@@ -1452,6 +1455,12 @@ fn run_uninstall(argv: &[String]) -> Result<ExitCode, String> {
             for plugin in &report.removed_plugins {
                 println!("  removed companion plugin: {plugin}");
             }
+            for grant in &report.permissions_removed {
+                println!("  revoked permission grant: {grant}");
+            }
+            if report.opencode_tui_hint_plugin_removed {
+                println!("  removed shared plugin: tui-hint-plugin.js (opencode)");
+            }
             if !report.modified_files.is_empty() {
                 println!(
                     "  NOTE: these files differed from what the last install wrote, and were \
@@ -1598,6 +1607,113 @@ fn print_codex_outcome(label: &str, outcome: permissions::CodexOutcome) {
             println!("codex: writable_roots is not a single-line array; add these by hand");
         }
     }
+}
+
+/// The manual, standalone counterpart to `grant-permissions`: exercises the
+/// same `_remove` functions `uninstall_skill` calls for interactive-shell,
+/// plus the planning/worktrees removals that have no per-skill caller since
+/// those grants are run-wide rather than tied to any one skill's install.
+fn run_revoke_permissions(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_grant_args(argv)?;
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map_err(|_| "revoke-permissions: needs $HOME set".to_string())?;
+
+    let print_removed = |label: &str, removed: &[String]| {
+        if removed.is_empty() {
+            println!("{label}: nothing to remove");
+        } else {
+            println!("{label}: removed {}", removed.join(", "));
+        }
+    };
+
+    match (args.agent.as_str(), &args.target) {
+        (
+            "claude",
+            GrantTarget::Planning {
+                scripts,
+                plans,
+                tmp,
+            },
+        ) => {
+            let outcome =
+                permissions::claude_planning_permissions_remove(scripts, plans, tmp, &home)
+                    .map_err(|e| e.to_string())?;
+            match outcome {
+                permissions::PermissionRemovalOutcome::Removed(entries) => {
+                    print_removed("claude-code", &entries)
+                }
+                _ => println!("claude-code: nothing to remove"),
+            }
+        }
+        ("claude", GrantTarget::Worktrees { worktrees }) => {
+            let outcome = permissions::claude_worktrees_permissions_remove(worktrees, &home)
+                .map_err(|e| e.to_string())?;
+            match outcome {
+                permissions::PermissionRemovalOutcome::Removed(entries) => {
+                    print_removed("claude-code", &entries)
+                }
+                _ => println!("claude-code: nothing to remove"),
+            }
+        }
+        ("claude", GrantTarget::Bins { bins }) => {
+            let outcome = permissions::claude_interactive_shell_permissions_remove(bins, &home)
+                .map_err(|e| e.to_string())?;
+            match outcome {
+                permissions::PermissionRemovalOutcome::Removed(entries) => {
+                    print_removed("claude-code", &entries)
+                }
+                _ => println!("claude-code: nothing to remove"),
+            }
+        }
+        (_, GrantTarget::Bins { .. }) => {
+            return Err(
+                "revoke-permissions: --bins is only auto-editable for --agent claude".to_string(),
+            )
+        }
+        (
+            "opencode",
+            GrantTarget::Planning {
+                scripts,
+                plans,
+                tmp,
+            },
+        ) => {
+            let removed = permissions::opencode_planning_permissions_remove(
+                scripts, plans, tmp, &home,
+            )
+            .map_err(|e| e.to_string())?;
+            print_removed("opencode", &removed);
+        }
+        ("opencode", GrantTarget::Worktrees { worktrees }) => {
+            let removed = permissions::opencode_worktrees_permissions_remove(worktrees, &home)
+                .map_err(|e| e.to_string())?;
+            print_removed("opencode", &removed);
+        }
+        (
+            "codex",
+            GrantTarget::Planning {
+                scripts,
+                plans,
+                tmp,
+            },
+        ) => {
+            let removed = permissions::codex_planning_permissions_remove(scripts, plans, tmp, &home)
+                .map_err(|e| e.to_string())?;
+            print_removed("codex", &removed);
+        }
+        ("codex", GrantTarget::Worktrees { worktrees }) => {
+            let removed = permissions::codex_worktrees_permissions_remove(worktrees, &home)
+                .map_err(|e| e.to_string())?;
+            print_removed("codex", &removed);
+        }
+        (other, _) => {
+            return Err(format!(
+                "revoke-permissions: unknown --agent {other}; known agents are: claude, codex, opencode"
+            ))
+        }
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_grant_permissions(argv: &[String]) -> Result<ExitCode, String> {
@@ -2093,6 +2209,27 @@ fn run_install_skill_cli(argv: &[String]) -> Result<ExitCode, String> {
     }
 }
 
+/// Asked once, before the raw-mode install picker starts, so a user already
+/// inside `installer interactive` can reach the uninstall screen without
+/// leaving to `installer uninstall`'s CLI flags. Defaults to "install"
+/// (returns `false`) on a non-tty or a read error, the same fail-safe
+/// `Confirms::ask` already uses for an unattended run.
+fn terminal_wants_uninstall() -> Result<bool, String> {
+    if !ui::terminal::is_tty() {
+        return Ok(false);
+    }
+    eprint!("Install or uninstall a skill? [I/u] ");
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    match std::io::stdin().read_line(&mut line) {
+        Ok(0) | Err(_) => Ok(false),
+        Ok(_) => Ok(matches!(
+            line.trim().to_lowercase().as_str(),
+            "u" | "uninstall"
+        )),
+    }
+}
+
 fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
     let mut source: Option<PathBuf> = None;
     let mut target: Option<PathBuf> = None;
@@ -2159,6 +2296,21 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
     // the actual install loop iterates every resolved root, each with its
     // own kind.
     let target = roots[0].0.clone();
+    let (_, target_kind) = &roots[0];
+
+    if terminal_wants_uninstall()? {
+        let home = home_dir_opt().ok_or("interactive: HOME is not set")?;
+        let entries = uninstall::installed_skill_dirs(&target)
+            .into_iter()
+            .map(|(skill, _)| ui::uninstall_picker::Entry {
+                skill,
+                target_root: target.clone(),
+            })
+            .collect();
+        ui::uninstall_picker::run(entries, &source, &home, target_kind.as_deref());
+        return Ok(ExitCode::SUCCESS);
+    }
+
     let integration_selection = build_integration_selection(&source, &integration_args)?;
 
     let names = discover::discover_skills(&source).map_err(|e| e.to_string())?;

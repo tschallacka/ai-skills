@@ -189,6 +189,86 @@ fn merge_allow_entries(cfg: &Path, entries: &[String]) -> io::Result<PermissionO
     Ok(PermissionOutcome::Added(added))
 }
 
+pub enum PermissionRemovalOutcome {
+    NoConfigFile,
+    /// None of `entries` was present; nothing was touched.
+    NothingToRemove,
+    Removed(Vec<String>),
+}
+
+/// The exact inverse of `merge_allow_entries`: deletes `entries` from
+/// `permissions.allow`, leaving every other entry (including one a user
+/// added independently) untouched.
+fn remove_allow_entries(cfg: &Path, entries: &[String]) -> io::Result<PermissionRemovalOutcome> {
+    if !cfg.is_file() {
+        return Ok(PermissionRemovalOutcome::NoConfigFile);
+    }
+    backup::backup_file(cfg)?;
+
+    let raw = fs::read_to_string(cfg)?;
+    let mut doc = as_object(serde_json::from_str(&raw).ok());
+    let mut permissions = as_object(doc.get("permissions").cloned());
+    let allow = allow_array(&permissions);
+
+    let to_remove: Vec<Value> = entries.iter().cloned().map(Value::String).collect();
+    let removed: Vec<String> = entries
+        .iter()
+        .filter(|e| allow.contains(&Value::String((*e).clone())))
+        .cloned()
+        .collect();
+    if removed.is_empty() {
+        return Ok(PermissionRemovalOutcome::NothingToRemove);
+    }
+
+    let new_allow: Vec<Value> = allow
+        .into_iter()
+        .filter(|v| !to_remove.contains(v))
+        .collect();
+    permissions.insert("allow".to_string(), Value::Array(new_allow));
+    doc.insert("permissions".to_string(), Value::Object(permissions));
+
+    write_preserving_mode(cfg, &serde_json::to_string_pretty(&Value::Object(doc))?)?;
+    Ok(PermissionRemovalOutcome::Removed(removed))
+}
+
+pub fn claude_planning_permissions_remove(
+    scripts: &str,
+    plans: &str,
+    tmp: &str,
+    home: &Path,
+) -> io::Result<PermissionRemovalOutcome> {
+    let cfg = claude_settings_path(home);
+    let entries = planning_entries(
+        strip_trailing_slashes(scripts),
+        strip_trailing_slashes(plans),
+        strip_trailing_slashes(tmp),
+    );
+    remove_allow_entries(&cfg, &entries)
+}
+
+pub fn claude_worktrees_permissions_remove(
+    worktrees: &str,
+    home: &Path,
+) -> io::Result<PermissionRemovalOutcome> {
+    let cfg = claude_settings_path(home);
+    let worktrees = strip_trailing_slashes(worktrees);
+    let entries = vec![
+        format!("Read({worktrees}/**)"),
+        format!("Edit({worktrees}/**)"),
+        format!("Bash({worktrees}/**:*)"),
+    ];
+    remove_allow_entries(&cfg, &entries)
+}
+
+pub fn claude_interactive_shell_permissions_remove(
+    bins: &str,
+    home: &Path,
+) -> io::Result<PermissionRemovalOutcome> {
+    let cfg = claude_settings_path(home);
+    let bins = strip_trailing_slashes(bins);
+    remove_allow_entries(&cfg, &[format!("Bash({bins}/**:*)")])
+}
+
 /// `cp -p`'s effect, in the atomic-write shape the rest of this installer
 /// uses: the replacement file keeps the original's permission bits rather
 /// than whatever `fs::write` on a new file would default to.
@@ -408,6 +488,98 @@ pub fn opencode_worktrees_permissions(
     )
 }
 
+/// The exact inverse of `opencode_merge_permission`: for each (tool, pattern)
+/// in `wanted`, deletes the pattern key from that tool's rule map ONLY when
+/// its current value is still exactly `"allow"` -- a value the user changed
+/// to `"deny"`/`"ask"` after installation is left alone, the same ownership-
+/// safety principle `mcp::entry_is_ours` already applies to MCP entries.
+fn opencode_unmerge_permission(cfg: &Path, wanted: &[WantedRule]) -> io::Result<Vec<String>> {
+    if !cfg.is_file() {
+        return Ok(Vec::new());
+    }
+    let raw = fs::read_to_string(cfg)?;
+    let doc = as_object(serde_json::from_str(&raw).ok());
+    let tools: Vec<&str> = wanted.iter().map(|(tool, _)| *tool).collect();
+    let base = base_permission(doc.get("permission"), &tools);
+
+    let mut removed = Vec::new();
+    let mut perm = base.clone();
+    for (tool, patterns) in wanted {
+        let mut rule = rules_of(base.get(*tool));
+        for pattern in *patterns {
+            if rule.get(pattern).and_then(Value::as_str) == Some("allow") {
+                rule.remove(pattern);
+                removed.push(format!("{tool}: {pattern}"));
+            }
+        }
+        perm.insert(tool.to_string(), Value::Object(rule));
+    }
+    if removed.is_empty() {
+        return Ok(removed);
+    }
+
+    backup::backup_file(cfg)?;
+    let mut doc = doc;
+    doc.insert("permission".to_string(), Value::Object(perm));
+    write_preserving_mode(cfg, &serde_json::to_string_pretty(&Value::Object(doc))?)?;
+    Ok(removed)
+}
+
+pub fn opencode_planning_permissions_remove(
+    scripts: &str,
+    plans: &str,
+    tmp: &str,
+    home: &Path,
+) -> io::Result<Vec<String>> {
+    let cfg = opencode_configfile(home);
+    let plans = strip_trailing_slashes(plans).to_string();
+    let scripts = strip_trailing_slashes(scripts).to_string();
+    let tmp = strip_trailing_slashes(tmp).to_string();
+    let read = vec![
+        format!("{plans}/**"),
+        format!("{scripts}/**"),
+        format!("{tmp}/**"),
+    ];
+    let edit = vec![format!("{plans}/**"), format!("{tmp}/**")];
+    let bash = vec![
+        format!("{scripts}/**"),
+        format!("bash {scripts}/**"),
+        format!("{tmp}/**"),
+    ];
+    let external_directory = vec![
+        format!("{plans}/**"),
+        format!("{scripts}/**"),
+        format!("{tmp}/**"),
+    ];
+    opencode_unmerge_permission(
+        &cfg,
+        &[
+            ("read", &read),
+            ("edit", &edit),
+            ("bash", &bash),
+            ("external_directory", &external_directory),
+        ],
+    )
+}
+
+pub fn opencode_worktrees_permissions_remove(
+    worktrees: &str,
+    home: &Path,
+) -> io::Result<Vec<String>> {
+    let cfg = opencode_configfile(home);
+    let pattern = vec![format!("{}/**", strip_trailing_slashes(worktrees))];
+    opencode_unmerge_permission(
+        &cfg,
+        &[
+            ("read", &pattern),
+            ("edit", &pattern),
+            ("write", &pattern),
+            ("bash", &pattern),
+            ("external_directory", &pattern),
+        ],
+    )
+}
+
 // ---------------------------------------------------------------
 // codex
 // ---------------------------------------------------------------
@@ -527,6 +699,70 @@ pub fn codex_worktrees_permissions(worktrees: &str, home: &Path) -> io::Result<C
     let cfg = codex_configfile(home);
     let wanted = vec![strip_trailing_slashes(worktrees).to_string()];
     codex_merge_writable_roots(&cfg, &wanted)
+}
+
+/// The exact inverse of `codex_merge_writable_roots`: strips only the quoted
+/// paths in `unwanted` from the single-line bracketed array, leaving `[]`
+/// rather than deleting the line when nothing remains.
+fn codex_unmerge_writable_roots(cfg: &Path, unwanted: &[String]) -> io::Result<Vec<String>> {
+    if !cfg.is_file() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(cfg)?;
+    let Some(line_index) = writable_roots_line(&content) else {
+        return Ok(Vec::new());
+    };
+    let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
+    let line = lines[line_index].clone();
+    let Some((before, rest)) = line.split_once('[') else {
+        return Ok(Vec::new());
+    };
+    let Some((inside, after)) = rest.split_once(']') else {
+        return Ok(Vec::new());
+    };
+    let kept: Vec<&str> = inside
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    let removed: Vec<String> = unwanted
+        .iter()
+        .filter(|p| kept.contains(&format!("\"{p}\"").as_str()))
+        .cloned()
+        .collect();
+    if removed.is_empty() {
+        return Ok(removed);
+    }
+
+    backup::backup_file(cfg)?;
+    let remaining: Vec<&str> = kept
+        .into_iter()
+        .filter(|entry| !removed.iter().any(|p| *entry == format!("\"{p}\"")))
+        .collect();
+    lines[line_index] = format!("{before}[{}]{after}", remaining.join(", "));
+    write_preserving_mode(cfg, &rejoin_preserving_trailing_newline(&content, lines))?;
+    Ok(removed)
+}
+
+pub fn codex_planning_permissions_remove(
+    scripts: &str,
+    plans: &str,
+    tmp: &str,
+    home: &Path,
+) -> io::Result<Vec<String>> {
+    let cfg = codex_configfile(home);
+    let unwanted = vec![
+        strip_trailing_slashes(plans).to_string(),
+        strip_trailing_slashes(scripts).to_string(),
+        strip_trailing_slashes(tmp).to_string(),
+    ];
+    codex_unmerge_writable_roots(&cfg, &unwanted)
+}
+
+pub fn codex_worktrees_permissions_remove(worktrees: &str, home: &Path) -> io::Result<Vec<String>> {
+    let cfg = codex_configfile(home);
+    let unwanted = vec![strip_trailing_slashes(worktrees).to_string()];
+    codex_unmerge_writable_roots(&cfg, &unwanted)
 }
 
 #[cfg(test)]
@@ -861,5 +1097,95 @@ mod tests {
 
         let content = fs::read_to_string(&cfg).unwrap();
         assert!(!content.ends_with('\n'));
+    }
+
+    #[test]
+    fn claude_removal_deletes_only_the_added_entries() {
+        let home = tempfile::tempdir().unwrap();
+        settings_at(home.path(), r#"{"permissions":{"allow":["Bash(ls:*)"]}}"#);
+        claude_worktrees_permissions("/worktrees", home.path()).unwrap();
+
+        let outcome = claude_worktrees_permissions_remove("/worktrees", home.path()).unwrap();
+        let removed = match outcome {
+            PermissionRemovalOutcome::Removed(entries) => entries,
+            _ => panic!("expected Removed"),
+        };
+        assert_eq!(removed.len(), 3);
+
+        let doc: Value =
+            serde_json::from_str(&fs::read_to_string(claude_settings_path(home.path())).unwrap())
+                .unwrap();
+        let allow: Vec<&str> = doc["permissions"]["allow"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(allow, vec!["Bash(ls:*)"]);
+    }
+
+    #[test]
+    fn claude_removal_of_an_absent_grant_reports_nothing_to_remove() {
+        let home = tempfile::tempdir().unwrap();
+        settings_at(home.path(), "{}");
+        let outcome = claude_worktrees_permissions_remove("/worktrees", home.path()).unwrap();
+        assert!(matches!(outcome, PermissionRemovalOutcome::NothingToRemove));
+    }
+
+    #[test]
+    fn opencode_removal_deletes_only_a_pattern_still_set_to_allow() {
+        let home = tempfile::tempdir().unwrap();
+        opencode_worktrees_permissions("/worktrees", home.path()).unwrap();
+        let cfg = opencode_cfg(home.path());
+        let mut doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        doc["permission"]["bash"]["/worktrees/**"] = Value::String("deny".to_string());
+        fs::write(&cfg, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+
+        let removed = opencode_worktrees_permissions_remove("/worktrees", home.path()).unwrap();
+
+        assert!(!removed.contains(&"bash: /worktrees/**".to_string()));
+        assert!(removed.contains(&"read: /worktrees/**".to_string()));
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(doc["permission"]["bash"]["/worktrees/**"], "deny");
+        assert!(doc["permission"]["read"].get("/worktrees/**").is_none());
+    }
+
+    #[test]
+    fn opencode_removal_of_an_absent_grant_reports_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let removed = opencode_worktrees_permissions_remove("/worktrees", home.path()).unwrap();
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn codex_removal_strips_only_the_named_paths() {
+        let home = tempfile::tempdir().unwrap();
+        codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+
+        let removed = codex_worktrees_permissions_remove("/worktrees", home.path()).unwrap();
+        assert!(
+            removed.is_empty(),
+            "worktrees removal must not touch planning's own paths"
+        );
+
+        let removed =
+            codex_planning_permissions_remove("/scripts", "/plans", "/tmp", home.path()).unwrap();
+        assert_eq!(removed.len(), 3);
+
+        let content = fs::read_to_string(codex_cfg(home.path())).unwrap();
+        assert_eq!(content, "sandbox_workspace_write.writable_roots = []\n");
+    }
+
+    #[test]
+    fn codex_removal_leaves_an_untouched_path_in_place() {
+        let home = tempfile::tempdir().unwrap();
+        codex_worktrees_permissions("/worktrees", home.path()).unwrap();
+        codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+
+        codex_worktrees_permissions_remove("/worktrees", home.path()).unwrap();
+
+        let content = fs::read_to_string(codex_cfg(home.path())).unwrap();
+        assert!(!content.contains("\"/worktrees\""));
+        assert!(content.contains("\"/plans\""));
     }
 }

@@ -12,6 +12,7 @@ pub mod mascot;
 pub mod model;
 pub mod render;
 pub mod terminal;
+pub mod uninstall_picker;
 
 use input::Key;
 use mascot::{ColorMode, EyeAnimator};
