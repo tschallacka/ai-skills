@@ -23,42 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T122",
-      "title": "Ship a plugin that injects each subagent its own id at SubagentStart",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Tschallacka asked whether a plugin could expose the per-subagent id. It can, and the whole chain was measured on 2026-09-08 rather than reasoned about.\n\nWHAT WAS PROVEN, in order:\n\n1. A SubagentStart hook exists and fires per subagent. It took effect immediately on being written to settings.json, with no session restart.\n\n2. Its payload carries the identity nothing else does: agent_id, agent_type, plus session_id, prompt_id, cwd, scratchpad_dir and transcript_path. The agent_id matched, character for character, the id the Agent tool returned to the spawner -- a4631ac048e789cbb for the last probe.\n\n3. hookSpecificOutput.additionalContext reaches the subagent's own context. A subagent asked to report its injected identity answered AGENT_ID=a4631ac048e789cbb TYPE=code-researcher having called no tools, so it read it from context rather than deriving it.\n\nWHAT TO BUILD: a plugin shipping one SubagentStart hook that injects the agent's own id and type, and instructs it to pass that id as the session on every editor and chat call. The spawner needs to remember nothing and the subagent cannot be confused about who it is.\n\nTHE HONEST LIMIT: this is context injection, not an environment variable. The hook cannot set env for the subagent, because the subagent is not a new process -- so a CLI call from a subagent's bash still needs the id passed explicitly, and the subagent now knows it well enough to do that. Being context, it is also SOFT: the model has to use what it was told.\n\nWHICH IS WHY IT PAIRS WITH THE REFUSAL. Soft supply plus a hard requirement is what makes it reliable: the hook guarantees every subagent HAS an id, and an editor that refuses an undeclared caller guarantees every subagent USES it. Neither half is sufficient alone -- injection without refusal is advisory, refusal without injection is an obstacle.",
-      "blocked_on": null,
-      "refs": [
-        "ai-text-editor/SKILL.md",
-        "chat/SKILL.md",
-        "src/agent-session-key/src/lib.rs"
-      ],
-      "note": "DECIDED 2026-09-09, and these close the open design questions.\n\nQ11a -- STRIP THE MODEL-FACING SESSION ARGUMENT from the MCP tool schemas. Once\nthe adapter can determine the caller itself, a session the model passes is\nadvisory at best; one that disagrees with the resolved identity is a mismatch to\nrefuse, not a value to trust.\n\nQ12 -- GATE THE SKILL INSTALL PER HARNESS. A session-dependent tool installs as\nan MCP on every harness, and as a skill only on codex and opencode, where a\nplugin supplies the agent id for free. On Claude Code the identity would have to\ncome from the model on every call, which is a per-call token cost for something\nthe harness already knows, so the installer refuses the skill install there and\nstates the reason. Tschallacka's wording: the installer cannot offer the skill\ninstall where the session cannot be guaranteed without extra token usage from the\nagent on every single call.\n\nSTRUCTURE -- the resolution logic lives in the agent-session-key crate and is\ncalled at the adapter's ENTRY POINT to record this run's session values, rather\nthan being scattered through the server. Where a harness supplies a per-call\nidentity that wins; the ladder is what runs when it does not; and where a harness\nsupplies none, mint an id and persist it for that worker.\n\nMEASUREMENTS MOVED. The wire and hook findings for all three harnesses, both the\nMCP side and the skill side, now live in .agents/knowledge/agent-identity-across-harnesses.md,\nwith the ladder and the procedure for adding an unmeasured harness in\nsrc/agent-session-key/HARNESS-IDENTITY.md. Read those rather than this note; what\nfollows is only what they added on 2026-09-09.\n\nCODEX, both surfaces. The MCP wire carries the identity outright:\nparams._meta[\"x-codex-turn-metadata\"] holds session_id, thread_id, turn_id and\nthread_source, where session_id is the CLI process and thread_id is the AGENT --\na subagent gets its own, matching SubagentStart's agent_id and the id the TUI\nprints at spawn. No join needed. On the shell side codex DOES honour updatedInput,\ncontradicting the Claude Code result, but only alongside permissionDecision\n\"allow\": without it the run fails with \"PreToolUse hook returned updatedInput\nwithout permissionDecision:allow\". With both, a hook rewrote a command to carry\nthe agent id and the probe read it back.\n\nOPENCODE, both surfaces. Its MCP wire carries nothing joinable -- only\nprogressToken -- and the plugin's callID never reaches the server, so the Claude\nCode join is impossible there. Instead tool.execute.before can mutate output.args,\nand shell.env merges into the command environment; both were measured giving a\nparent and a subagent DISTINCT session ids while OPENCODE_PID was identical.\n\nCLAUDE CODE, the shell side, which was the open half. A subagent's environment is\nBYTE-IDENTICAL to its parent's: the only variable that differed was CLAUDE_EFFORT,\na model setting. CLAUDE_CODE_AGENT reads \"claude\" for a code-researcher subagent,\nso it names the harness rather than the agent. With updatedInput refused for\ncommand hooks, a Claude Code skill binary cannot learn who invoked it, and that is\nwhat Q12 is decided on.\n\nCORRECTION to the codex trust note recorded earlier: the trusted_hash covers the\nhook REGISTRATION, not the script's contents. Rewriting the hook script at the\nsame path did not re-prompt, while adding a second registered event did. So a\ntrusted registration keeps trusting whatever that path later contains. Tool\napproval is separate and per tool: the parent's \"always allow\" did not cover a\nsubagent's first call.\n\nSTILL OPEN: whether the individual binaries remain a shipped, agent-facing\nsurface. They are needed either way as the MCP server's substrate and by the test\nsuite; what Q12 decides is only whether they stay advertised, which is a\nMODE/PACKAGE marker change rather than a code deletion.",
-      "created_at": "2026-09-08T20:56:13Z",
-      "updated_at": "2026-09-08T23:01:52Z"
-    },
-    {
-      "id": "T123",
-      "title": "The identity plugin installs with any session-dependent skill, as a hard requirement",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Tschallacka's ruling: the SubagentStart identity plugin (T122) is not optional\nwhere it is needed. A skill whose correctness depends on knowing WHICH agent is\ncalling must not install without it, because installing such a skill without it\nproduces the silent failure it exists to prevent -- two agents sharing one\nsession and neither able to tell.\n\nWHICH SKILLS. The fact belongs to the skill rather than to a list in the\ninstaller, matching how this repository registers everything else: the directory\nis the registration. requires.tsv already declares \"what this skill needs on the\ntarget machine at runtime, and how badly\", and a per-agent identity is exactly a\nruntime need -- so it is a row there, and the existing unmet-requirement\nmachinery reports it. \"MUST\" is then expressible in the vocabulary already\npresent: the requirement is hard, not soft.\n\nSession-dependent as measured today: chat (its session key decides the nick and\nthe per-channel cursors), ai-text-editor (session ownership of tabs, once T118\nlands), interactive-shell (the session id names the socket). Confirm each\nagainst its own code rather than inheriting this list.\n\nTHE STEP. Same shape as interactive_shell_permission_step and\neditor_steering_step in installer/src/70-permissions.sh, which already know how\nto touch settings.json safely: back the file up beside itself unless git tracks\nit, read defensively with rjq, write through a mktemp and rename. It installs\nthe hook script into the agent root and registers the SubagentStart entry,\nreports \"already in place\" on a second run rather than duplicating, and fires\nonly when a session-dependent skill is among those selected.\n\nDECLINING IT MUST SAY WHAT IT COSTS, the way the editor steering warning does:\nwithout the hook, every subagent shares its parent's session, so two agents will\nwrite one cursor and hold one set of tabs, and neither will be told. That is a\nsilent wrong answer rather than a visible failure, which is the whole reason\nthis is a hard requirement.\n\nNOT EVERY AGENT CAN HAVE IT. SubagentStart is Claude Code's hook. For an\nopencode or codex root the step prints the manual equivalent and says plainly\nthat the guarantee is absent there, exactly as print_manual_interactive_shell_permissions\ndoes -- rather than pretending the install is equivalent.\n\nORDER: T122 builds the plugin, this wires it into the installer. Doing this\nfirst would register a hook that does not exist.",
-      "blocked_on": null,
-      "refs": [
-        "installer/src/70-permissions.sh",
-        "installer/src/75-main.sh",
-        "chat/requires.tsv",
-        "ai-text-editor/requires.tsv",
-        "interactive-shell/requires.tsv"
-      ],
-      "note": "Blocked on T122: wiring the installer to register a hook that does not exist yet would place a broken entry in settings.json.",
-      "created_at": "2026-09-08T20:58:54Z",
-      "updated_at": "2026-09-08T20:58:54Z"
-    },
-    {
       "id": "T142",
       "title": "Add installer uninstall/deregister, with fine-grained hook removal via TUI or flags",
       "status": "open",
@@ -345,6 +309,25 @@
       "note": null,
       "created_at": "2026-09-09T14:08:33Z",
       "updated_at": "2026-09-09T14:08:33Z"
+    },
+    {
+      "id": "T143",
+      "title": "chat-mcp needs a per-call identity override, multiplexing Held connections keyed by resolved session",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "T122's agent-identity-plugin injects each subagent its own AGENT_ID/AGENT_TYPE at SubagentStart and instructs it to declare that id to ai-text-editor (agent/session argument) and interactive-shell (--agent/AGENT_ID). chat-mcp cannot honor the same instruction: held() (src/chat-mcp/src/lib.rs) is a single process-wide OnceLock<Mutex<Option<Held>>>, opened once via resolve()/session_key() and never re-resolved per call -- one connection, one nick, for the adapter's whole process lifetime. A subagent sharing a Claude Code session with its parent therefore still shares the parent's chat nick even after T122, since chat-mcp has no model-facing session/agent argument at all (unlike ai-text-editor-mcp's ADAPTER_ARGUMENTS, which already has one).\n\nSHAPE: give chat-mcp an optional per-call session/agent override (new TOOL_ARGUMENTS entry, mirroring ai-text-editor-mcp's 'agent'/'session'), and change held() from a single Option<Held> to a map of Held connections keyed by the resolved session (chat_client_rs already keys ALL persistent state -- nick, cursors -- by session_key(), via Session::path_for(state_dir, key), so the underlying per-session state model already supports this; only the connection-holding side is single-tenant today). Each distinct resolved session gets its own nick/connection, opened lazily on first use, same lazy-open-and-retry-on-dead-connection behavior with_connection already has, just keyed rather than singular.\n\nDepends on nothing; makes T122's chat instruction true rather than aspirational once done.",
+      "blocked_on": null,
+      "refs": [
+        "src/chat-mcp/src/lib.rs",
+        "src/chat-mcp/src/conn.rs",
+        "src/agent-session-key/src/lib.rs",
+        "T122",
+        "agent-identity-plugin/README.md"
+      ],
+      "note": "Filed alongside T122/T123's closure: T122 was deliberately scoped to the plugin only (chat-mcp multiplexing needs a real connection-holding redesign, not a one-line addition), per an explicit scoping decision made while implementing T122. See T122's own closing note.",
+      "created_at": "2026-09-12T14:28:40Z",
+      "updated_at": "2026-09-12T14:28:40Z"
     },
     {
       "id": "T69",
@@ -920,6 +903,42 @@
       "note": "Merged as PR #88 (46f33ef), squash-merged to master. All writable text fields on both todo and bugs now have a --<field>-file counterpart reading from a file or stdin (-); shared Args::resolve_file_flag kept byte-identical between the crates. 47+25 cargo tests, tests/test-register-file-flags.sh end-to-end through the built binaries (including the stdin path), full ./run-tests.sh green.",
       "created_at": "2026-09-08T20:24:39Z",
       "updated_at": "2026-09-09T07:02:31Z"
+    },
+    {
+      "id": "T122",
+      "title": "Ship a plugin that injects each subagent its own id at SubagentStart",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka asked whether a plugin could expose the per-subagent id. It can, and the whole chain was measured on 2026-09-08 rather than reasoned about.\n\nWHAT WAS PROVEN, in order:\n\n1. A SubagentStart hook exists and fires per subagent. It took effect immediately on being written to settings.json, with no session restart.\n\n2. Its payload carries the identity nothing else does: agent_id, agent_type, plus session_id, prompt_id, cwd, scratchpad_dir and transcript_path. The agent_id matched, character for character, the id the Agent tool returned to the spawner -- a4631ac048e789cbb for the last probe.\n\n3. hookSpecificOutput.additionalContext reaches the subagent's own context. A subagent asked to report its injected identity answered AGENT_ID=a4631ac048e789cbb TYPE=code-researcher having called no tools, so it read it from context rather than deriving it.\n\nWHAT TO BUILD: a plugin shipping one SubagentStart hook that injects the agent's own id and type, and instructs it to pass that id as the session on every editor and chat call. The spawner needs to remember nothing and the subagent cannot be confused about who it is.\n\nTHE HONEST LIMIT: this is context injection, not an environment variable. The hook cannot set env for the subagent, because the subagent is not a new process -- so a CLI call from a subagent's bash still needs the id passed explicitly, and the subagent now knows it well enough to do that. Being context, it is also SOFT: the model has to use what it was told.\n\nWHICH IS WHY IT PAIRS WITH THE REFUSAL. Soft supply plus a hard requirement is what makes it reliable: the hook guarantees every subagent HAS an id, and an editor that refuses an undeclared caller guarantees every subagent USES it. Neither half is sufficient alone -- injection without refusal is advisory, refusal without injection is an obstacle.",
+      "blocked_on": null,
+      "refs": [
+        "ai-text-editor/SKILL.md",
+        "chat/SKILL.md",
+        "src/agent-session-key/src/lib.rs"
+      ],
+      "note": "Shipped agent-identity-plugin/ (SubagentStart hook, no matcher): reads agent_id/agent_type from the hook payload and, when present, emits hookSpecificOutput.additionalContext instructing the subagent to declare that id on every ai-text-editor call (its existing agent/session argument) and interactive-shell call (--agent/AGENT_ID, already read as a fallback per its own doc). Scoped deliberately to the plugin only, per an explicit choice made mid-implementation this session: chat-mcp cannot honor the same instruction today (held() is a single process-wide connection, opened once, never re-resolved per call), so rather than bending T122 into a chat-mcp redesign, the injected context names that limitation honestly and T143 was filed to close it separately. Verified: cargo test -p installer (188/188 incl. 2 new plugin tests), agent-identity-plugin/tests/test-agent-identity-injection.sh under both the system bash and bash32, a real hook invocation piped through rjq end-to-end (both a real agent_id and an empty one), cargo fmt/clippy clean, full pre-push-check.sh PASS, full ./run-tests.sh 236/238 (same 2 pre-existing failures). Committed feat/rust-installer c707642e.",
+      "created_at": "2026-09-08T20:56:13Z",
+      "updated_at": "2026-09-12T14:29:01Z"
+    },
+    {
+      "id": "T123",
+      "title": "The identity plugin installs with any session-dependent skill, as a hard requirement",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka's ruling: the SubagentStart identity plugin (T122) is not optional\nwhere it is needed. A skill whose correctness depends on knowing WHICH agent is\ncalling must not install without it, because installing such a skill without it\nproduces the silent failure it exists to prevent -- two agents sharing one\nsession and neither able to tell.\n\nWHICH SKILLS. The fact belongs to the skill rather than to a list in the\ninstaller, matching how this repository registers everything else: the directory\nis the registration. requires.tsv already declares \"what this skill needs on the\ntarget machine at runtime, and how badly\", and a per-agent identity is exactly a\nruntime need -- so it is a row there, and the existing unmet-requirement\nmachinery reports it. \"MUST\" is then expressible in the vocabulary already\npresent: the requirement is hard, not soft.\n\nSession-dependent as measured today: chat (its session key decides the nick and\nthe per-channel cursors), ai-text-editor (session ownership of tabs, once T118\nlands), interactive-shell (the session id names the socket). Confirm each\nagainst its own code rather than inheriting this list.\n\nTHE STEP. Same shape as interactive_shell_permission_step and\neditor_steering_step in installer/src/70-permissions.sh, which already know how\nto touch settings.json safely: back the file up beside itself unless git tracks\nit, read defensively with rjq, write through a mktemp and rename. It installs\nthe hook script into the agent root and registers the SubagentStart entry,\nreports \"already in place\" on a second run rather than duplicating, and fires\nonly when a session-dependent skill is among those selected.\n\nDECLINING IT MUST SAY WHAT IT COSTS, the way the editor steering warning does:\nwithout the hook, every subagent shares its parent's session, so two agents will\nwrite one cursor and hold one set of tabs, and neither will be told. That is a\nsilent wrong answer rather than a visible failure, which is the whole reason\nthis is a hard requirement.\n\nNOT EVERY AGENT CAN HAVE IT. SubagentStart is Claude Code's hook. For an\nopencode or codex root the step prints the manual equivalent and says plainly\nthat the guarantee is absent there, exactly as print_manual_interactive_shell_permissions\ndoes -- rather than pretending the install is equivalent.\n\nORDER: T122 builds the plugin, this wires it into the installer. Doing this\nfirst would register a hook that does not exist.",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/70-permissions.sh",
+        "installer/src/75-main.sh",
+        "chat/requires.tsv",
+        "ai-text-editor/requires.tsv",
+        "interactive-shell/requires.tsv"
+      ],
+      "note": "Wired into src/installer/src/main.rs's run_post_install_steps as run_agent_identity_post_install: installs agent-identity-plugin unconditionally (no confirm prompt) onto every Claude Code root when chat/ai-text-editor/interactive-shell is selected -- same precedent as tui-hint-plugin/editor-gate-plugin, both already installed the same unconditional way for the same companion-plugin reason. One OR check so selecting more than one of the three still installs it exactly once. opencode/codex roots print a plain statement that the guarantee is absent there (SubagentStart is Claude-Code-only), rather than a silent no-op.\n\nDeliberately did NOT route this through requires.tsv's hard/soft machinery, despite this TODO's own note asking for it: requirements.rs's requirement_met/tool_available checks tool availability on PATH, which has no way to express 'this plugin must also be installed' -- an install-time action the installer itself performs, not a pre-existing host condition to probe before install even starts. This TODO's refs (installer/src/70-permissions.sh, installer/src/75-main.sh) are also both retired; src/installer/src/main.rs is the live implementation now. Verified with a real install into a scratch HOME (--agent claude: plugin lands with hooks executable; --agent codex: prints the absent-guarantee line; a skill outside the three: no plugin, no line). Also added a standalone install-agent-identity-plugin CLI subcommand for parity with the other two plugins' own standalone commands. Committed feat/rust-installer c707642e.",
+      "created_at": "2026-09-08T20:58:54Z",
+      "updated_at": "2026-09-12T14:29:01Z"
     },
     {
       "id": "T131",
