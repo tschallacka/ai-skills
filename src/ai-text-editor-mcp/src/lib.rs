@@ -202,7 +202,10 @@ type ToolSpec = (
 /// one class — the request builder forwarded a key the advertised schema did
 /// not offer. A fifth per-tool patch would not have stopped a sixth.
 ///
-/// `file` is not here: the server routes on it, so it stays in the payload.
+/// `file` itself is not here: the server routes on it, so it stays in the
+/// payload. `path` (B310/T124) IS here: it is a synonym a caller may send
+/// instead of `file`, coalesced into `file` before the strip loop below runs
+/// so the server only ever sees the one key it understands.
 /// `expected_revision` is not here either — it is declared on the mutating
 /// tools only, and `mutating_required` is what pins that.
 pub const ADAPTER_ARGUMENTS: &[&str] = &[
@@ -216,6 +219,7 @@ pub const ADAPTER_ARGUMENTS: &[&str] = &[
     "takeover_stale_endpoint",
     "auth_token",
     "session_token",
+    "path",
 ];
 
 /// The advertised schema for one `ADAPTER_ARGUMENTS` key. Exhaustive on
@@ -251,6 +255,9 @@ fn adapter_argument(key: &str) -> Value {
         "session_token" => string(
             "Server-issued tab token, supplied explicitly instead of the one discovery cached.",
         ),
+        "path" => string(
+            "Synonym for file (B310, T124): an agent's instinct is to say path, and this accepts it as-is. Coalesced into file before the call reaches the server; if both are given, file wins.",
+        ),
         other => panic!("ADAPTER_ARGUMENTS lists {other} with no advertised schema"),
     }
 }
@@ -271,14 +278,13 @@ fn tool_definitions() -> Vec<Value> {
     let routing = || {
         let mut properties: ToolProperties = Vec::from([
             (
-                // B310: the argument name IS "file" (not "path") -- the
-                // description leads with that spelling because a caller's
-                // instinct otherwise costs a round trip through
-                // unknown_argument before it reads the accepted_keys the
-                // refusal already lists.
+                // B310/T124: the argument's real name is "file", but "path"
+                // is accepted too (see ADAPTER_ARGUMENTS) so a caller's
+                // instinct no longer costs a round trip through
+                // unknown_argument first.
                 "file",
                 string(
-                    "The file path (this argument is named \"file\", not \"path\"); routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
+                    "The file path (aka \"path\" -- either name works); routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
                 ),
             ),
             // T96: declared on every tool, including the job verbs, because
@@ -737,6 +743,15 @@ fn call_tool(id: Value, params: Value) -> Value {
         .unwrap_or_else(|| json!({}));
     let method = server_method(name);
     let mut payload = arguments.as_object().cloned().unwrap_or_default();
+    // B310/T124: "path" is a synonym for "file", promoted before anything
+    // else reads either key. file wins if both are given; ADAPTER_ARGUMENTS'
+    // strip loop below removes the raw "path" key, so the server only ever
+    // sees "file".
+    if !payload.contains_key("file") {
+        if let Some(path_value) = payload.get("path").cloned() {
+            payload.insert("file".to_string(), path_value);
+        }
+    }
     let file = payload
         .get("file")
         .and_then(Value::as_str)

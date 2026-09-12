@@ -367,3 +367,42 @@ fn the_page_tool_advertises_and_honours_the_historical_escape() {
     );
     assert!(!Harness::refused(&closed), "close refused: {closed}");
 }
+
+/// T124/B310: "path" is the name an agent's instinct reaches for; it must
+/// open the file exactly as "file" would, not refuse as an unknown argument.
+#[test]
+fn the_path_argument_opens_a_file_exactly_like_the_file_argument() {
+    let Some(mut h) = Harness::new("patharg") else {
+        return;
+    };
+    let opened = h.call(1, "open", vec![("path", json!(h.file()))]);
+    assert!(!Harness::refused(&opened), "open refused: {opened}");
+    let frames = Harness::frames(&opened);
+    assert_eq!(
+        frames[0]["payload"]["path"],
+        json!(h.file()),
+        "the tab must report the real path, whichever argument named it: {frames:?}"
+    );
+}
+
+/// When a caller sends both, `file` is documented to win -- prove it rather
+/// than trusting the doc comment alone.
+#[test]
+fn file_wins_when_both_file_and_path_are_given() {
+    let Some(mut h) = Harness::new("patharg-conflict") else {
+        return;
+    };
+    let decoy = h.scratch.join("decoy-does-not-exist.txt");
+    let opened = h.call(
+        1,
+        "open",
+        vec![("file", json!(h.file())), ("path", json!(decoy))],
+    );
+    assert!(!Harness::refused(&opened), "open refused: {opened}");
+    let frames = Harness::frames(&opened);
+    assert_eq!(
+        frames[0]["payload"]["path"],
+        json!(h.file()),
+        "file must win over path when both are given: {frames:?}"
+    );
+}
