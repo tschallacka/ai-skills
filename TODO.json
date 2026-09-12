@@ -23,19 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T100",
-      "title": "jump points: on open, derive a file's outbound references from CodeGraph so a tab can be navigated, not just searched",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "SKIP",
-      "blocked_on": null,
-      "refs": [],
-      "note": "LIFECYCLE settled with Michael: derive the jump points at open, and RECOMPUTE THEM ON SAVE. Save is the right boundary because codegraph indexes DISK -- save is the moment disk changes -- so staleness is bounded to 'while the tab is dirty' rather than being open-ended. A set still carries the revision it was computed at, so a dirty tab's jump points are reported stale rather than followed silently.\n\nCOST: all of this is server-side, so the scanning, caching and re-derivation cost the agent NO TOKENS. The agent pays only for the jump points it asks for. That is what justifies doing the work eagerly at open and at every save, rather than lazily on request.\n\nINDEX FRESHNESS, worth handling explicitly: codegraph's watcher lags a write by about a second, so a recompute fired immediately on save can read the pre-save index. Run 'codegraph sync' first -- it is incremental and prints 'Already up to date' when there is nothing to do, so a needless run is free -- then re-derive. Useful side effect: editing through the editor would keep the codegraph index warm, which the repository already asks callers to do by hand after changing code.",
-      "created_at": "2026-09-07T19:39:33Z",
-      "updated_at": "2026-09-07T19:43:53Z"
-    },
-    {
       "id": "T101",
       "title": "split chat-client-rs/src/lib.rs into modules",
       "status": "open",
@@ -1141,6 +1128,19 @@
       "note": "Already done - same commit as T96 (cde4138). Verified live: a read with no --file, --tab-id, --tab-path or --endpoint at all is served by the most recently opened tab (the focus open sets), and the response still names the tab_id it answered.",
       "created_at": "2026-09-06T17:57:28Z",
       "updated_at": "2026-09-09T08:10:52Z"
+    },
+    {
+      "id": "T100",
+      "title": "jump points: on open, derive a file's outbound references from CodeGraph so a tab can be navigated, not just searched",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "SKIP",
+      "blocked_on": null,
+      "refs": [],
+      "note": "LIFECYCLE settled with Michael: derive the jump points at open, and RECOMPUTE THEM ON SAVE. Save is the right boundary because codegraph indexes DISK -- save is the moment disk changes -- so staleness is bounded to 'while the tab is dirty' rather than being open-ended. A set still carries the revision it was computed at, so a dirty tab's jump points are reported stale rather than followed silently.\n\nCOST: all of this is server-side, so the scanning, caching and re-derivation cost the agent NO TOKENS. The agent pays only for the jump points it asks for. That is what justifies doing the work eagerly at open and at every save, rather than lazily on request.\n\nINDEX FRESHNESS, worth handling explicitly: codegraph's watcher lags a write by about a second, so a recompute fired immediately on save can read the pre-save index. Run 'codegraph sync' first -- it is incremental and prints 'Already up to date' when there is nothing to do, so a needless run is free -- then re-derive. Useful side effect: editing through the editor would keep the codegraph index warm, which the repository already asks callers to do by hand after changing code.\n\nIMPLEMENTED: new src/ai-text-editor/src/jump_points.rs reads .codegraph/codegraph.db directly (rusqlite, read-only) rather than shelling out to codegraph per symbol -- its CLI has no bulk per-file JSON command. Grounded in codegraph's own source (~/git/codegraph, the colbymchenry/codegraph fork): nodes/edges schema, the getCallees outbound-edge-kind set (calls/references/imports/instantiates/navigates, excluding contains and the type-annotation kinds), and project-root-relative forward-slash file_path normalization. Version robustness (explicit requirement): derive() never branches on a schema version number -- migrations.ts shows every migration v2-v9 only adds columns/tables/indexes, never removing the ones read here -- instead it runtime-checks via PRAGMA table_info(nodes)/table_info(edges) that the specific columns it needs exist, returning JumpPointsError::UnsupportedSchema (not a panic or raw SQL error) when they don't, alongside NoIndex for no .codegraph/ at all. Tab gained jump_points/jump_points_revision; a refresh_jump_points helper (runs codegraph sync, swallowing a missing binary or non-zero exit the same soft way as NoIndex, then derive) is called at both tab-construction sites (server startup and open_additional_tab) and after a successful save. New read-only jump_points verb mirrors history/resources/capabilities exactly, wired through verbs.rs, ai-text-editor-server.rs, ai-text-editor-mcp (READ_ONLY_TOOLS + tool schema), the CLI (jump-points subcommand), the man page, and SKILL.md. Unit tests cover the real fixture, contains/null-line exclusion, NoIndex, and UnsupportedSchema; CLI integration tests cover the full open -> jump-points -> edit -> stale -> save -> recomputed path and the no-.codegraph null path. Full run-tests.sh: 236 passed, 2 failed (test-mode-markers, test-rjq-active-references -- both pre-existing/unrelated, matching the T91c baseline), 2 unconfigured (PLANNING_CONTEXT_CACHE, unrelated).",
+      "created_at": "2026-09-07T19:39:33Z",
+      "updated_at": "2026-09-12T19:43:18Z"
     },
     {
       "id": "T103",
