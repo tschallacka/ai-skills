@@ -90,6 +90,27 @@
       "updated_at": "2026-09-08T20:58:54Z"
     },
     {
+      "id": "T142",
+      "title": "Add installer uninstall/deregister, with fine-grained hook removal via TUI or flags",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "There is no `installer uninstall` today at all: 'uninstalling' means deleting a skill's directory by hand, and nothing cleans up what else that install touched. T72 (shared XDG bin) made this concretely worse in one place and explicitly accepted it as a limitation rather than solving it: a skill's compiled binary now lives in one location shared across every skill and agent root, and is never removed on uninstall or on an integration-mode switch, since one skill's install has no visibility into whether another skill or agent root still needs the exact same file. The same class of problem applies to everything else an install can register: MCP entries (src/installer/src/mcp.rs), permission grants (src/installer/src/permissions.rs), and especially 'reflexes' -- hooks and plugins co-installed alongside a skill rather than owned by exactly one: tui-hint-plugin, editor-gate-plugin, and (once T122/T123 land) the SubagentStart identity plugin. Deleting a skill by hand today leaves every one of these behind with no way to remove them short of hand-editing settings.json/.claude.json/opencode config files directly. Wanted: a real uninstall/deregister path (a new installer subcommand, e.g. `installer uninstall`) that (1) removes a skill's own installed files and its shared-bin binaries ONLY when no other still-installed skill or agent root needs them (a reference count or an equivalent scan across every known target root, not a guess), (2) deregisters MCP entries and permission grants this same mechanism added, and (3) for hooks/plugins specifically -- since more than one skill can depend on the same one, and a human may want to keep a hook active for one skill while removing it for another -- offers FINE-GRAINED control: an explicit list of what is currently registered and why, with the ability to remove one specific hook/registration/binary at a time, available both from the interactive TUI (a new action alongside install/select) and as explicit CLI flags for headless use. Uninstalling a skill's own files should probably remain the easy default case; the fine-grained control is specifically for the shared, cross-skill infrastructure a naive whole-skill delete cannot safely reason about.",
+      "blocked_on": null,
+      "refs": [
+        "src/installer/src/shared_bin.rs",
+        "src/installer/src/mcp.rs",
+        "src/installer/src/permissions.rs",
+        "src/installer/src/plugins.rs",
+        "T72",
+        "T122",
+        "T123"
+      ],
+      "note": null,
+      "created_at": "2026-09-12T12:27:57Z",
+      "updated_at": "2026-09-12T12:27:57Z"
+    },
+    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
