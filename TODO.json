@@ -23,22 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T111",
-      "title": "The session owner needs a Windows transport: loopback TCP with a token",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "T107 landed the owner on unix sockets. Windows has no unix socket, so control.rs carries a cfg(not(unix)) arm where serve() and ask() both return None -- every verb there keeps exactly the behaviour it had before T107, including the B283 suffix when a tail is running.\n\nThe shape it needs is the one ai-text-editor already uses: bind loopback TCP on an ephemeral port, put the port and a secret in the owner record, and prove the secret per connection rather than sending it in the request. The record already carries pid and started_at_ns for owner identity; what it gains is the endpoint form and the token. src/ai-text-editor/src/transport.rs is the reference, including why the token is not in the envelope.\n\nTwo things must hold that the unix path gets for free: the record file's permissions are the only guard on a loopback port (there is no 0700 directory doing it), and liveness is still decided by connecting, not by the pid. A port that nothing answers is a stale record, same as a socket that refuses.\n\nNot shipped with T107 deliberately: an untested socket transport on a platform nobody here can run is worse than an honest fallback, and the fallback is correct -- just without the fix.",
-      "blocked_on": null,
-      "refs": [
-        "src/chat-client-rs/src/control.rs",
-        "src/ai-text-editor/src/transport.rs"
-      ],
-      "note": "chat/binaries.tsv does ship chat-client-rs.exe for x86_64-pc-windows-msvc, so this is a real supported target and not a hypothetical one.",
-      "created_at": "2026-09-08T13:58:10Z",
-      "updated_at": "2026-09-08T13:58:10Z"
-    },
-    {
       "id": "T113",
       "title": "Relocating a block should not cost its content: a move (and copy) verb",
       "status": "open",
@@ -1184,6 +1168,22 @@
       "note": "Proposal, not law. Peer of T105: that one is a gap inside a rule, this is a gap in the contract's scope. RULED by Tschallacka, 2026-09-08: widen it. 'We started with bash only, so we evolved to rust focussed to get around system limitations etc... So widen it, so it applies to all languages. they are good rules, that should be held globally.'\n\nSo the shell-only scope was an artefact of shell being all there was when the rules were written, never a judgement that Rust deserved fewer. CODE-STYLE.md is now titled 'Code style and structure', opens 'The contract every source file in this repository conforms to, in every language', and section 11's table row reads 'This repository's own source, in every language'. Where a rule is inherently shell-specific -- set -euo pipefail, the bash 3.2 floor, local -- it simply has no counterpart in another language rather than exempting that language from the rest.\n\nSection 11 also now states that // /// and //! are all comments under it: rustdoc prose describing the API is what /// is for and is not why-prose, while an account of how the code came to look this way is, and belongs in the commit message.\n\nPrompted by a nitpicker citing the old scope line to rule a Rust file ungoverned, which is exactly the reading the entry predicted.",
       "created_at": "2026-09-08T10:48:24Z",
       "updated_at": "2026-09-08T20:00:10Z"
+    },
+    {
+      "id": "T111",
+      "title": "The session owner needs a Windows transport: loopback TCP with a token",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "T107 landed the owner on unix sockets. Windows has no unix socket, so control.rs carries a cfg(not(unix)) arm where serve() and ask() both return None -- every verb there keeps exactly the behaviour it had before T107, including the B283 suffix when a tail is running.\n\nThe shape it needs is the one ai-text-editor already uses: bind loopback TCP on an ephemeral port, put the port and a secret in the owner record, and prove the secret per connection rather than sending it in the request. The record already carries pid and started_at_ns for owner identity; what it gains is the endpoint form and the token. src/ai-text-editor/src/transport.rs is the reference, including why the token is not in the envelope.\n\nTwo things must hold that the unix path gets for free: the record file's permissions are the only guard on a loopback port (there is no 0700 directory doing it), and liveness is still decided by connecting, not by the pid. A port that nothing answers is a stale record, same as a socket that refuses.\n\nNot shipped with T107 deliberately: an untested socket transport on a platform nobody here can run is worse than an honest fallback, and the fallback is correct -- just without the fix.",
+      "blocked_on": null,
+      "refs": [
+        "src/chat-client-rs/src/control.rs",
+        "src/ai-text-editor/src/transport.rs"
+      ],
+      "note": "IMPLEMENTED: control.rs's non-unix mod imp now really implements serve/ask/stop via a loopback-TCP transport (bind 127.0.0.1:0, ephemeral port), instead of unconditionally answering None. Every connection proves a shared secret via an HMAC-SHA256 challenge/response (control_auth.rs, a small sibling of ai_text_editor::auth scoped to this file's flat Request/Reply wire, using OwnerRecord.started_at_ns as the \"generation\" ai-text-editor's own random server_generation string plays) rather than sending the token in the clear, per this ticket's own explicit requirement. The mechanism (tcp_serve/tcp_ask/tcp_stop/control_auth) is plain std::net + hmac/sha2/getrandom/base64, not itself cfg-gated -- only the *choice* of using it over the unix arm's UnixListener/UnixStream code is (the two `mod imp` blocks) -- so this file's own tests exercise the real mechanism directly on any machine (74 tests total, including new TCP-specific ones), not only prove it compiles for Windows.\n\nVERIFIED FOR REAL ON WINDOWS: opened feat/rust-installer's first-ever pull request (#154, against nextupdate) specifically to get this in front of ci.yml's real windows-latest leg -- chat-client-rs's full test suite (69/69, the 5 unix-only tests correctly excluded there via #[cfg(unix)]) passed there, meaning the loopback-TCP transport genuinely works on a real Windows runner, not just \"compiles for the target.\"\n\nGetting that CI run at all surfaced that feat/rust-installer had never had a real CI run before (ci.yml triggers only on push to master/nextupdate or on pull_request; this ~70-commit branch had done neither), which surfaced three unrelated, pre-existing gaps blocking every platform: ci.yml's sparse-checkout never listed installer/tools.tsv or .agents/profiles (B324), cli_mode.rs's symlink test had no cfg(unix) gate (B325), and plugins.rs's copy_plugin_files had a parameter unused outside cfg(unix) (B326) -- all three found, fixed, and confirmed via re-reading the actual CI job logs. Two further pre-existing issues were found and left open rather than expanding this ticket's scope further (explicit user direction): B327, a cross-module $HOME test-isolation race in installer's own test suite (integration.rs/install.rs/plan_migration.rs), and B328, install.rs's shared-binary tests hardcoding a binary name with no .exe suffix, which fails deterministically on every Windows run.\n\ncargo fmt/clippy -D warnings clean for chat-client-rs/chat-mcp throughout. Full local ./run-tests.sh: 237/239 passed, matching this session's established baseline (test-mode-markers, test-rjq-active-references pre-existing/unrelated). PR #154 left open with B327/B328 unresolved -- not merged.",
+      "created_at": "2026-09-08T13:58:10Z",
+      "updated_at": "2026-09-13T06:21:18Z"
     },
     {
       "id": "T124",

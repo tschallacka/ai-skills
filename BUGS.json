@@ -4426,6 +4426,113 @@
       "updated_at": "2026-09-12T18:28:43Z"
     },
     {
+      "id": "B324",
+      "title": "ci.yml's full-workspace test job sparse-checked out a tree missing files two crates read at build/test time",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Open a pull request from a branch touching src/installer or src/chat-client-rs against master/nextupdate (or push to one of those branches) and watch the \"X builds and runs every subject in scope\" job's \"Format, lint and test the whole workspace\" step, on any platform.",
+      "observed": "cargo build failed: error: couldn't read 'src/installer/src/../../../installer/tools.tsv': No such file or directory. Reproduced identically on x86_64-unknown-linux-musl, aarch64-unknown-linux-musl and x86_64-pc-windows-msvc -- not platform-specific. installer/tools.tsv exists and is tracked by git; it is simply not one of the paths actions/checkout's sparse-checkout list names, so the CI runner's working tree never has it. .agents/profiles/nitpicker.json (read at test-runtime by src/installer/src/profiles.rs's the_real_profile_json_parses test, via CARGO_MANIFEST_DIR) had the identical gap.",
+      "expected": "Every path a workspace crate's include_str! or a cargo-test-exercised runtime path needs is included in this job's sparse-checkout list, the same way ai-text-editor/ai-text-editor.1 and ai-text-editor/schemas already are for ai-text-editor-mcp's own include_str!s.",
+      "mechanism": ".github/workflows/ci.yml:735's sparse-checkout list predates src/installer/src/tools.rs's include_str!(\"../../../installer/tools.tsv\") (added 2026-09-11) and .agents/profiles/nitpicker.json (added this session, T102); neither was ever added to it. Nothing caught this because feat/rust-installer -- which carried both -- had never had a CI run at all: ci.yml triggers only on push to master/nextupdate or on pull_request, and this branch had done neither in the roughly 70 commits since it diverged from nextupdate.",
+      "surfaces": [
+        ".github/workflows/ci.yml"
+      ],
+      "fix": "Added installer/tools.tsv and .agents/profiles to the job's sparse-checkout list in .github/workflows/ci.yml (commit 15f6d648).",
+      "verification": "Re-pushed and re-ran the real CI legs; the \"couldn't read ...tools.tsv\" error no longer appears on any platform and the build proceeds past that step -- confirmed via poll-ci.sh and reading the job logs directly (gh api .../actions/jobs/<id>/logs) for x86_64-pc-windows-msvc and x86_64-unknown-linux-musl, both of which now reach and run cargo test successfully.",
+      "found_by": "Opening the first-ever pull request from feat/rust-installer (T111's own closing condition needed real CI signal for its new Windows loopback-TCP transport), which surfaced every workspace-wide CI gap this branch had accumulated with none of them ever having run.",
+      "notes": null,
+      "created_at": "2026-09-13T06:19:24Z",
+      "updated_at": "2026-09-13T06:19:24Z"
+    },
+    {
+      "id": "B325",
+      "title": "cli_mode.rs's symlink-refusal test does not compile on a non-unix target",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cargo build --target x86_64-pc-windows-msvc --all-targets -p installer (or any CI run of the \"Format, lint and test the whole workspace\" step on windows-latest).",
+      "observed": "error[E0433]: cannot find `unix` in `os` at src/installer/src/cli_mode.rs:462, inside install_skill_cli_refuses_even_a_managed_upgrade_over_a_symlink, which calls std::os::unix::fs::symlink unconditionally.",
+      "expected": "The test is gated to the platform whose API it actually exercises, the same way a Windows-only concern elsewhere in this workspace is scoped rather than left to break every other platform's build.",
+      "mechanism": "The test was written and locally verified only on unix (where std::os::unix exists), and never compiled for a non-unix target before this branch's first-ever CI run (ci.yml triggers only on push to master/nextupdate or on pull_request; feat/rust-installer had done neither since 2026-09-11 when this test was added).",
+      "surfaces": [
+        "src/installer/src/cli_mode.rs"
+      ],
+      "fix": "Added #[cfg(unix)] to the test, with a comment noting Windows symlinks need a different API and elevated privileges, so porting it is a separate decision from just not breaking the build.",
+      "verification": "Re-ran the real windows-latest CI leg; error[E0433] no longer appears and the installer crate now compiles there (confirmed via gh api .../actions/jobs/<id>/logs on the commit carrying the fix).",
+      "found_by": "T111's Windows CI verification pass (opening the first pull request this branch ever had).",
+      "notes": null,
+      "created_at": "2026-09-13T06:19:52Z",
+      "updated_at": "2026-09-13T06:19:52Z"
+    },
+    {
+      "id": "B326",
+      "title": "plugins.rs's copy_plugin_files takes an executables parameter that is unused on a non-unix compile",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cargo clippy --target x86_64-pc-windows-msvc --all-targets -p installer -- -D warnings (or any CI run of the \"Format, lint and test the whole workspace\" step on windows-latest).",
+      "observed": "error: unused variable: `executables` at src/installer/src/plugins.rs:60, denied by -D warnings.",
+      "expected": "The parameter is genuinely used (inside a #[cfg(unix)] block that sets executable permission bits, a unix-only concept) and the lint should not fire on a build that legitimately has no unix-specific use for it.",
+      "mechanism": "copy_plugin_files's executables parameter is read only inside a #[cfg(unix)] { ... } block (permission bits have no Windows equivalent this function models). On a non-unix compile that whole block disappears, leaving the parameter genuinely unread, which -D warnings promotes to a hard error. Never caught because feat/rust-installer had never had a CI run before this branch's first pull request.",
+      "surfaces": [
+        "src/installer/src/plugins.rs"
+      ],
+      "fix": "Added #[cfg_attr(not(unix), allow(unused_variables))] to the function.",
+      "verification": "Re-ran the real windows-latest CI leg; the unused_variables error no longer appears and clippy passes that step (confirmed via gh api .../actions/jobs/<id>/logs on the commit carrying the fix).",
+      "found_by": "T111's Windows CI verification pass.",
+      "notes": null,
+      "created_at": "2026-09-13T06:20:08Z",
+      "updated_at": "2026-09-13T06:20:08Z"
+    },
+    {
+      "id": "B327",
+      "title": "installer's tests race on process-wide $HOME/env state across modules under enough parallelism",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cargo test --workspace --all-targets on a runner with enough CPU cores/thread-scheduling pressure to interleave installer's integration.rs, install.rs and plan_migration.rs test threads (not reproduced locally on this machine; reproduced on GitHub's ubuntu-latest CI runner both times feat/rust-installer's first pull request ran the full suite).",
+      "observed": "integration::tests::mcp_adapter_path_is_none_when_only_the_skill_binary_is_installed and install::tests::switching_mode_never_deletes_the_previous_modes_shared_binary both fail real assertions (mcp_adapter_path(...).is_none(), outcome.blocked.is_empty()), and five plan_migration::tests::* tests fail with `called Result::unwrap() on an Err value: PoisonError` in the same run -- a poisoned-mutex cascade, not five independent defects.",
+      "expected": "Every test that reads or mutates process-wide environment state ($HOME and similar) is serialized against every OTHER such test in the crate, not only against tests in its own module.",
+      "mechanism": "plan_migration.rs (module-private, tests-only) declares its own static ENV_LOCK: Mutex<()> and every one of its own tests acquires it before touching $HOME -- but that lock is invisible to install.rs's and integration.rs's tests, which read $HOME too without acquiring anything. cargo test runs a crate's tests as parallel threads within one process by default, so under enough concurrency a plan_migration test can swap $HOME out from under an install.rs/integration.rs test running at the same moment; and once ANY thread panics while holding ENV_LOCK, every other plan_migration test's own `ENV_LOCK.lock().unwrap()` (not `.unwrap_or_else(|e| e.into_inner())`, the poison-recovery pattern this same codebase already uses elsewhere, e.g. chat-client-rs's control.rs) panics too on the now-poisoned lock, which is the cascade.",
+      "surfaces": [
+        "src/installer/src/plan_migration.rs",
+        "src/installer/src/install.rs",
+        "src/installer/src/integration.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T111's CI verification pass (opening feat/rust-installer's first-ever pull request, which ran the full workspace test suite on real CI hardware for the first time). Not fixed as part of that ticket -- explicitly deferred by the user rather than expanding T111's scope further.",
+      "notes": null,
+      "created_at": "2026-09-13T06:20:27Z",
+      "updated_at": "2026-09-13T06:20:27Z"
+    },
+    {
+      "id": "B328",
+      "title": "install.rs's shared-binary tests assert an exact filename that does not exist on Windows",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cargo test --target x86_64-pc-windows-msvc -p installer --all-targets on a real Windows runner (windows-latest in CI; not reproducible via cross-compilation from Linux since blake3's build script needs a real MSVC assembler).",
+      "observed": "install::tests::a_skill_mode_install_ships_only_the_skill_binary and install::tests::switching_mode_never_deletes_the_previous_modes_shared_binary both fail: assertion failed: shared.join(\\\"ai-text-editor\\\").is_file() at install.rs:623 and :665. Deterministic, not the B327 race -- both tests fail identically on every windows-latest run.",
+      "expected": "The assertion accounts for the platform's own binary suffix (.exe on Windows), the way shared_bin's own runtime resolution presumably already must, since the installed binary genuinely is named ai-text-editor.exe there.",
+      "mechanism": "Both tests hardcode the bare command name with no suffix. On unix that is the real filename; on Windows the compiled/installed binary is ai-text-editor.exe, so `shared.join(\"ai-text-editor\").is_file()` is correctly false there and the test fails every single time on that platform, not intermittently.",
+      "surfaces": [
+        "src/installer/src/install.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T111's CI verification pass (feat/rust-installer's first-ever pull request, first real Windows CI run of the installer crate's test suite). Not fixed as part of that ticket -- explicitly deferred by the user rather than expanding T111's scope further.",
+      "notes": null,
+      "created_at": "2026-09-13T06:20:42Z",
+      "updated_at": "2026-09-13T06:20:42Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
