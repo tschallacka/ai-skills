@@ -64,11 +64,15 @@ impl Drop for ServerHandle {
     }
 }
 
-pub fn serve(artifact: String, state: String) -> io::Result<ServerHandle> {
-    serve_on_port(artifact, state, 0)
+pub fn serve(artifact: String, state_stream: StateStream) -> io::Result<ServerHandle> {
+    serve_on_port(artifact, state_stream, 0)
 }
 
-pub fn serve_on_port(artifact: String, state: String, port: u16) -> io::Result<ServerHandle> {
+pub fn serve_on_port(
+    artifact: String,
+    state_stream: StateStream,
+    port: u16,
+) -> io::Result<ServerHandle> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     listener.set_nonblocking(true)?;
     let address = listener.local_addr()?.to_string();
@@ -80,7 +84,7 @@ pub fn serve_on_port(artifact: String, state: String, port: u16) -> io::Result<S
             break;
         }
         match listener.accept() {
-            Ok((stream, _)) => respond(stream, &artifact, &state),
+            Ok((stream, _)) => respond(stream, &artifact, &state_stream),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(std::time::Duration::from_millis(5))
             }
@@ -94,16 +98,24 @@ pub fn serve_on_port(artifact: String, state: String, port: u16) -> io::Result<S
     })
 }
 
-fn respond(mut stream: TcpStream, artifact: &str, state: &str) {
+// GET /state reads the stream's CURRENT value on every request rather than a
+// value captured at server start, so a --watch-driven publish() (see
+// main.rs's run()) is visible to the very next request with no server
+// restart. The served page itself (GET /) stays the snapshot rendered at
+// startup -- T130 only wires the JSON endpoint live, not the HTML shell.
+fn respond(mut stream: TcpStream, artifact: &str, state_stream: &StateStream) {
     let mut request = [0; 2048];
     let size = stream.read(&mut request).unwrap_or(0);
     let request = String::from_utf8_lossy(&request[..size]);
     let (content_type, body) = if request.starts_with("GET /state") {
-        ("application/json", state)
+        ("application/json", state_stream.current())
     } else if request.starts_with("GET /nav.js") {
-        ("application/javascript", include_str!("../assets/nav.js"))
+        (
+            "application/javascript",
+            include_str!("../assets/nav.js").to_string(),
+        )
     } else {
-        ("text/html; charset=utf-8", artifact)
+        ("text/html; charset=utf-8", artifact.to_string())
     };
     let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
     let _ = stream.write_all(response.as_bytes());
