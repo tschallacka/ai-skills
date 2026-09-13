@@ -245,6 +245,54 @@ pub fn derive(project_root: &Path, file_path: &Path) -> Result<Vec<JumpPoint>, J
     Ok(jump_points)
 }
 
+/// A symbol's own defining span, `start_line..=end_line`, 1-based inclusive
+/// -- the same coordinate `edit_span`'s own `range_start_line`/
+/// `range_end_line` addressing already uses, so `line_span` (the byte-span
+/// resolver every line-addressed edit already goes through) applies here
+/// unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SymbolExtent {
+    pub start_line: u32,
+    pub end_line: u32,
+}
+
+/// Resolves a symbol name to its own defining extent(s) in `file_path`'s
+/// CodeGraph nodes (T114): a caller names *what* it means to edit, and the
+/// server -- never the caller -- computes where that starts and ends, so an
+/// endpoint is never hand-inferred from "up to where the next function
+/// starts". More than one node sharing the name in this one file is
+/// returned as more than one extent rather than silently narrowed to the
+/// first; the caller (`resolve_symbol_span` in ai-text-editor-server.rs)
+/// refuses that as ambiguous, the same stance every other addressing
+/// refusal in this crate already takes on a first-match guess.
+pub fn symbol_extent(
+    project_root: &Path,
+    file_path: &Path,
+    name: &str,
+) -> Result<Vec<SymbolExtent>, JumpPointsError> {
+    let db_path = project_root.join(CODEGRAPH_DB_RELATIVE_PATH);
+    if !db_path.is_file() {
+        return Err(JumpPointsError::NoIndex);
+    }
+    let Some(relative) = relative_file_path(project_root, file_path) else {
+        return Ok(Vec::new());
+    };
+    let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    schema_supports(&conn)?;
+    check_columns(&conn, "nodes", &["end_line"])?;
+    let mut statement =
+        conn.prepare("SELECT start_line, end_line FROM nodes WHERE file_path = ?1 AND name = ?2")?;
+    let mut rows = statement.query(params![relative, name])?;
+    let mut extents = Vec::new();
+    while let Some(row) = rows.next()? {
+        extents.push(SymbolExtent {
+            start_line: row.get::<_, i64>(0)? as u32,
+            end_line: row.get::<_, i64>(1)? as u32,
+        });
+    }
+    Ok(extents)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,5 +425,67 @@ mod tests {
         assert_eq!(find_project_root(&file).as_deref(), Some(project.path()));
         let outside = tempfile::tempdir().unwrap();
         assert_eq!(find_project_root(outside.path()), None);
+    }
+
+    #[test]
+    fn symbol_extent_resolves_a_uniquely_named_symbol() {
+        let project = temp_project(seed_fixture);
+        let extents =
+            symbol_extent(project.path(), &project.path().join("src/a.rs"), "foo").unwrap();
+        assert_eq!(
+            extents,
+            vec![SymbolExtent {
+                start_line: 3,
+                end_line: 5
+            }]
+        );
+    }
+
+    #[test]
+    fn symbol_extent_reports_every_node_sharing_a_name_rather_than_picking_one() {
+        let project = temp_project(|conn| {
+            seed_fixture(conn);
+            // A second `foo` in the same file -- an overload, or two
+            // differently-scoped items CodeGraph happened to name alike.
+            // symbol_extent must hand back BOTH, not silently the first.
+            conn.execute(
+                "INSERT INTO nodes VALUES ('sym:foo2','function','foo','a::foo2','src/a.rs','rust',20,25,0,0,0)",
+                [],
+            )
+            .unwrap();
+        });
+        let mut extents =
+            symbol_extent(project.path(), &project.path().join("src/a.rs"), "foo").unwrap();
+        extents.sort_by_key(|extent| extent.start_line);
+        assert_eq!(
+            extents,
+            vec![
+                SymbolExtent {
+                    start_line: 3,
+                    end_line: 5
+                },
+                SymbolExtent {
+                    start_line: 20,
+                    end_line: 25
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn symbol_extent_is_empty_for_a_name_no_node_carries() {
+        let project = temp_project(seed_fixture);
+        let extents =
+            symbol_extent(project.path(), &project.path().join("src/a.rs"), "nope").unwrap();
+        assert!(extents.is_empty());
+    }
+
+    #[test]
+    fn symbol_extent_is_scoped_to_the_named_file_not_the_whole_index() {
+        let project = temp_project(seed_fixture);
+        // "bar" is a real node, but defined in src/b.rs, not src/a.rs.
+        let extents =
+            symbol_extent(project.path(), &project.path().join("src/a.rs"), "bar").unwrap();
+        assert!(extents.is_empty());
     }
 }

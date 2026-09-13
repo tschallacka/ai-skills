@@ -89,11 +89,29 @@ range. \fBsearch --preview-lines N\fR shrinks a large hit's shown contents to
 its first and last N lines; \fBbyte_start\fR/\fBbyte_end\fR, and so
 \fB--match-id\fR, stay exact regardless.
 .PP
+\fB--range-start-match TEXT --range-end-before-match TEXT\fR address a
+\fBreplace\fR span by the content at its boundaries instead of a position \(em
+the span runs from the start match's own beginning up to, but not including,
+the end match's beginning, resolved server-side so an endpoint that used to
+be inferred ("up to where the next function starts") never is. Add
+\fB--range-match-regex\fR to read both as Rust regexes instead of exact text.
+Either matching nowhere or more than once is refused by name
+(\fBrange_start_match_not_found\fR/\fBrange_start_match_ambiguous\fR and the
+\fBrange_end_before_match\fR equivalents) rather than silently resolved to
+the first occurrence. \fB--symbol NAME\fR resolves to that name's own
+defining extent in CodeGraph's index (\fB.codegraph/codegraph.db\fR) for
+this file \(em refused as \fBsymbol_unavailable\fR with no index,
+\fBsymbol_not_found\fR with no matching node, or \fBsymbol_ambiguous\fR if
+more than one node shares the name. Neither may be combined with a range,
+\fB--match-id\fR, or each other, and \fBinsert\fR refuses both the same way
+it refuses \fB--match-id\fR.
+.PP
 \fBmove\fR and \fBcopy\fR relocate or duplicate a span with no content in the
 request or response \(em the server already holds the bytes. The source is
-addressed exactly like \fBreplace\fR's own (a range or \fB--match-id\fR, never
-a bare \fB--offset\fR, which is refused as \fBmove_source_required\fR since a
-point has no length to relocate); the destination is a point,
+addressed exactly like \fBreplace\fR's own (a range, \fB--match-id\fR,
+\fB--range-start-match\fR/\fB--range-end-before-match\fR, or \fB--symbol\fR,
+never a bare \fB--offset\fR, which is refused as \fBmove_source_required\fR
+since a point has no length to relocate); the destination is a point,
 \fB--dest-offset N\fR or \fB--dest-line N\fR (one past the last line appends
 at end of file), exactly one of the two. Both are one atomic operation \(em
 one revision, one undo step \(em even though \fBmove\fR performs two splices

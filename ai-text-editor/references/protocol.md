@@ -305,6 +305,38 @@ already carries the guard `expected_text` would add. An `insert` refuses
 a match is a span and `insert` places bytes at a point. An id shaped wrong, or
 naming an index past the result set, is `match_id_invalid`.
 
+`replace` also takes two more addressing schemes (T114), for a span the
+caller has not necessarily read yet and would otherwise have to infer an
+endpoint for — "up to where the next function starts" computed by hand is
+both a correctness risk and unreadable in review:
+
+- `range_start_match` and `range_end_before_match`: text (or, with
+  `range_match_regex: true`, a Rust regex) whose own match marks the start
+  and the end of the span. The span runs from the start match's own
+  beginning (inclusive — the matched text is itself the beginning of what is
+  addressed) up to, but not including, the end match's own beginning. Both
+  are required together, refused as `edit_range_incomplete` if only one is
+  named. Either matching nowhere is `range_start_match_not_found` /
+  `range_end_before_match_not_found`; either matching more than once is
+  `range_start_match_ambiguous` / `range_end_before_match_ambiguous` —
+  refused by name for the anchor that is ambiguous, never silently resolved
+  to the first occurrence, the same stance the grep gate takes on an
+  ambiguous sweep. A pattern that does not parse as a regex under
+  `range_match_regex` is `range_match_invalid`.
+- `symbol`: a name CodeGraph's index (`.codegraph/codegraph.db`) has for
+  this file, resolved to that symbol's own defining line extent — the
+  caller says *what* to edit, the server computes *where* it starts and
+  ends. No `.codegraph` index for this project is `symbol_unavailable`; no
+  node by that name in the file is `symbol_not_found`; more than one node
+  sharing the name is `symbol_ambiguous` — never silently the first node
+  found.
+
+Both take no other addressing key alongside them (`edit_range_conflict`
+against any of `offset`/`delete_len`/`cursor_id`/a range/`match_id`/each
+other), and both are refused on `insert` the same way `match_id` is —
+`edit_range_unsupported`, since a match or a symbol names a span and
+`insert` places bytes at a point.
+
 ### move and copy
 
 `move` and `copy` relocate or duplicate a span within one tab **server-side,
@@ -313,7 +345,8 @@ bytes, so a pure rearrangement no longer pays output tokens for text that
 never actually changed.
 
 The source span is addressed exactly like `replace`'s own — `range_start_line`/
-`range_end_line`, `range_start_byte`/`range_end_byte`, or `match_id` — and
+`range_end_line`, `range_start_byte`/`range_end_byte`, `match_id`,
+`range_start_match`/`range_end_before_match`, or `symbol` — and
 `expected_text`/`expected_bytes_base64` verify it first, the same B230 guard
 `replace` already has. A bare `offset`, `delete_len`, or `cursor_id` naming the
 source is refused as `move_source_required`: a point has no length to

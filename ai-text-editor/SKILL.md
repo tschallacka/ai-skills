@@ -130,6 +130,17 @@ you never had to compute cannot be miscomputed. `--preview-lines` keeps this
 cheap even for a large hit — the boundaries usually confirm a block is the
 right one without paying to see its middle.
 
+**When a span has no `match_id` yet, name it by anchor or symbol rather than
+inferring an endpoint.** `--range-start-match TEXT --range-end-before-match
+TEXT` (add `--range-match-regex` for a Rust regex instead of exact text)
+resolve the span from the start match's own beginning up to, but not
+including, the end match's beginning — server-side, so "up to where the next
+function starts" is never a byte count you computed by hand. `--symbol NAME`
+resolves to that name's own defining extent via CodeGraph's index, when one
+is enabled for the project. Both are refused by name rather than guessed when
+absent or ambiguous (`range_start_match_ambiguous`, `symbol_ambiguous`, …) —
+never silently the first occurrence or the first matching node.
+
 **Guard by revision otherwise; add `--expected-text` only when the span's
 endpoints did not come from a read (or a search) at that revision.** A
 revision proves the document has not moved since the coordinates were read —

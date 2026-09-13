@@ -384,7 +384,7 @@ fn tool_definitions() -> Vec<Value> {
     ));
     tools.push((
         "replace",
-        "Replace a span with text or base64 bytes; preserve the revision guard. Address the span four ways: offset plus delete_len in bytes, range_start_line/range_end_line (inclusive 1-based whole lines, the last line's newline included, so replacing with no text deletes the lines outright), range_start_byte/range_end_byte (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across), or match_id (a search hit's own id — preferred when the span came from a search, since it carries its own content guard and needs no expected_text). Pass expected_text to have the server verify the bytes at the span before deleting them.",
+        "Replace a span with text or base64 bytes; preserve the revision guard. Address the span six ways: offset plus delete_len in bytes, range_start_line/range_end_line (inclusive 1-based whole lines, the last line's newline included, so replacing with no text deletes the lines outright), range_start_byte/range_end_byte (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across), match_id (a search hit's own id — preferred when the span came from a search, since it carries its own content guard and needs no expected_text), range_start_match/range_end_before_match (a pair of exact-text or regex anchors resolved server-side, so an endpoint is never hand-inferred — refused as ambiguous if either anchor matches more than once, or not-found if it matches nowhere), or symbol (a CodeGraph-indexed name resolved to its own defining extent — refused as ambiguous if more than one node in the file shares the name). Pass expected_text to have the server verify the bytes at the span before deleting them.",
         {
             let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
@@ -430,6 +430,22 @@ fn tool_definitions() -> Vec<Value> {
                     "match_id",
                     string("A search hit's own id (<result_id>#<index>). Resolves to that hit's exact span and its own content guard, refused as match_id_stale if the document moved under it since. Takes no range key, offset, cursor_id or expected_text alongside it."),
                 ),
+                (
+                    "range_start_match",
+                    string("Text (or, with range_match_regex, a Rust regex) whose match's own start is the beginning of the span. Needs range_end_before_match. Refused as range_start_match_not_found if it matches nowhere, or range_start_match_ambiguous if it matches more than once — never silently the first occurrence."),
+                ),
+                (
+                    "range_end_before_match",
+                    string("Text (or, with range_match_regex, a Rust regex) whose match marks where the span ends — up to but not including this match's own start, so an inferred endpoint is never hand-computed. Same not-found/ambiguous refusals as range_start_match, under their own names."),
+                ),
+                (
+                    "range_match_regex",
+                    boolean("When true, range_start_match/range_end_before_match are Rust regexes instead of exact text. Refused as range_match_invalid if either does not parse as one."),
+                ),
+                (
+                    "symbol",
+                    string("A name CodeGraph's index (.codegraph/codegraph.db) has for this file, resolved to that symbol's own defining line extent — the caller says what to edit, not where it starts and ends. Refused as symbol_unavailable with no index, symbol_not_found with no matching node, or symbol_ambiguous if more than one node in this file shares the name."),
+                ),
                 ("expected_revision", revision_guard()),
             ]));
             p
@@ -440,8 +456,8 @@ fn tool_definitions() -> Vec<Value> {
         tools.push((
             verb,
             match verb {
-                "move" => "Relocate a span to another point in the same tab, server-side, with no content in the request or response -- the server already holds the bytes. One atomic operation (one revision, one undo step) even though it performs two splices internally. Address the source exactly like replace's own: range_start_line/range_end_line, range_start_byte/range_end_byte, or match_id (never offset/delete_len/cursor_id -- refused by name, since a point has no length to relocate). The destination is a point: dest_offset (a byte position) or dest_line (1-based, insert immediately before that line, text tabs only; one past the last line appends at end of file) -- exactly one of the two. expected_text/expected_bytes_base64 verify the source span first, same as replace. A destination strictly inside the source span is refused as move_destination_inside_source.",
-                _ => "Duplicate a span to another point in the same tab, server-side, with no content in the request or response -- the server already holds the bytes. One atomic operation (one revision, one undo step). Address the source exactly like replace's own: range_start_line/range_end_line, range_start_byte/range_end_byte, or match_id (never offset/delete_len/cursor_id -- refused by name, since a point has no length to duplicate). The destination is a point: dest_offset (a byte position) or dest_line (1-based, insert immediately before that line, text tabs only; one past the last line appends at end of file) -- exactly one of the two. expected_text/expected_bytes_base64 verify the source span first, same as replace. A destination strictly inside the source span is refused as move_destination_inside_source.",
+                "move" => "Relocate a span to another point in the same tab, server-side, with no content in the request or response -- the server already holds the bytes. One atomic operation (one revision, one undo step) even though it performs two splices internally. Address the source exactly like replace's own: range_start_line/range_end_line, range_start_byte/range_end_byte, match_id, range_start_match/range_end_before_match, or symbol (never offset/delete_len/cursor_id -- refused by name, since a point has no length to relocate). The destination is a point: dest_offset (a byte position) or dest_line (1-based, insert immediately before that line, text tabs only; one past the last line appends at end of file) -- exactly one of the two. expected_text/expected_bytes_base64 verify the source span first, same as replace. A destination strictly inside the source span is refused as move_destination_inside_source.",
+                _ => "Duplicate a span to another point in the same tab, server-side, with no content in the request or response -- the server already holds the bytes. One atomic operation (one revision, one undo step). Address the source exactly like replace's own: range_start_line/range_end_line, range_start_byte/range_end_byte, match_id, range_start_match/range_end_before_match, or symbol (never offset/delete_len/cursor_id -- refused by name, since a point has no length to duplicate). The destination is a point: dest_offset (a byte position) or dest_line (1-based, insert immediately before that line, text tabs only; one past the last line appends at end of file) -- exactly one of the two. expected_text/expected_bytes_base64 verify the source span first, same as replace. A destination strictly inside the source span is refused as move_destination_inside_source.",
             },
             {
                 let mut p: ToolProperties = Vec::new();
@@ -465,6 +481,22 @@ fn tool_definitions() -> Vec<Value> {
                     (
                         "match_id",
                         string("A search hit's own id (<result_id>#<index>) naming the source span. Resolves to that hit's exact span and its own content guard, refused as match_id_stale if the document moved under it since."),
+                    ),
+                    (
+                        "range_start_match",
+                        string("Text (or, with range_match_regex, a Rust regex) whose match's own start is the beginning of the source span. Needs range_end_before_match. Refused as range_start_match_not_found if it matches nowhere, or range_start_match_ambiguous if it matches more than once."),
+                    ),
+                    (
+                        "range_end_before_match",
+                        string("Text (or, with range_match_regex, a Rust regex) whose match marks where the source span ends -- up to but not including this match's own start. Same not-found/ambiguous refusals as range_start_match, under their own names."),
+                    ),
+                    (
+                        "range_match_regex",
+                        boolean("When true, range_start_match/range_end_before_match are Rust regexes instead of exact text."),
+                    ),
+                    (
+                        "symbol",
+                        string("A name CodeGraph's index (.codegraph/codegraph.db) has for this file, resolved to that symbol's own defining line extent as the source span. Refused as symbol_unavailable with no index, symbol_not_found with no matching node, or symbol_ambiguous if more than one node in this file shares the name."),
                     ),
                     (
                         "expected_text",

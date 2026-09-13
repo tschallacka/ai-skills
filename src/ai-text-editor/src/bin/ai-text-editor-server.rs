@@ -20,6 +20,7 @@ use ai_text_editor::transport::{
     complete, endpoint_for_file, error, error_details, response, socket_for_file, validate_request,
     write_endpoint_metadata, Endpoint,
 };
+use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -2213,24 +2214,13 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             }
         },
         "replace" | "insert" => {
-            // A match_id resolves to the same (offset, delete_len), tried
-            // first.
-            let span = match resolve_match_id(&envelope, &tab) {
-                Ok(Some(span)) => Some(span),
-                Ok(None) => {
-                    // B226: a line range or a pair of search-hit byte
-                    // bounds resolves to the same (offset, delete_len) the
-                    // byte spelling names, so everything below — the
-                    // journal record, cursor adjustment, the undo entry —
-                    // is untouched by the addressing.
-                    match edit_span(&envelope, &tab) {
-                        Ok(span) => span,
-                        Err((code, message)) => {
-                            frames.push(error(&envelope.request_id, code, message));
-                            return frames;
-                        }
-                    }
-                }
+            // B226/T114: a match_id, an anchor pair, a symbol, a line range,
+            // or a pair of search-hit byte bounds all resolve to the same
+            // (offset, delete_len), so everything below — the journal
+            // record, cursor adjustment, the undo entry — is untouched by
+            // which addressing named the span.
+            let span = match resolve_span(&envelope, &tab) {
+                Ok(span) => span,
                 Err((code, message)) => {
                     frames.push(error(&envelope.request_id, code, message));
                     return frames;
@@ -2388,15 +2378,8 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         // same way replace/insert get theirs; this arm does not repeat either
         // check.
         "move" | "copy" => {
-            let span = match resolve_match_id(&envelope, &tab) {
-                Ok(Some(span)) => Some(span),
-                Ok(None) => match edit_span(&envelope, &tab) {
-                    Ok(span) => span,
-                    Err((code, message)) => {
-                        frames.push(error(&envelope.request_id, code, message));
-                        return frames;
-                    }
-                },
+            let span = match resolve_span(&envelope, &tab) {
+                Ok(span) => span,
                 Err((code, message)) => {
                     frames.push(error(&envelope.request_id, code, message));
                     return frames;
@@ -2420,7 +2403,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                     &envelope.request_id,
                     "move_source_required",
                     format!(
-                        "{} needs a source span: range_start_line/range_end_line, range_start_byte/range_end_byte, or match_id",
+                        "{} needs a source span: range_start_line/range_end_line, range_start_byte/range_end_byte, match_id, range_start_match/range_end_before_match, or symbol",
                         envelope.method
                     ),
                 ));
@@ -2906,6 +2889,10 @@ fn resolve_match_id(
         "range_end_byte",
         "expected_text",
         "expected_bytes_base64",
+        "range_start_match",
+        "range_end_before_match",
+        "range_match_regex",
+        "symbol",
     ] {
         if envelope.payload.get(name).is_some() {
             return Err((
@@ -3163,6 +3150,275 @@ fn splice_move(
         moved.len(),
     );
     Ok((working, shifted_dest))
+}
+
+/// T114: tries every span-addressing scheme in the order a request may name
+/// exactly one of them, the first one actually present winning. Shared by
+/// `replace`/`insert` and `move`/`copy` so a new scheme is wired into both
+/// call sites by adding one arm here, not by editing each of them.
+fn resolve_span(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &Tab,
+) -> Result<Option<(usize, usize)>, (&'static str, String)> {
+    if let Some(span) = resolve_match_id(envelope, tab)? {
+        return Ok(Some(span));
+    }
+    if let Some(span) = resolve_anchor_span(envelope, tab)? {
+        return Ok(Some(span));
+    }
+    if let Some(span) = resolve_symbol_span(envelope, tab)? {
+        return Ok(Some(span));
+    }
+    edit_span(envelope, tab)
+}
+
+/// Every non-empty match of `needle` in `text`, as byte offsets, so a caller
+/// can refuse "none" and "more than one" the same way for either mode. Exact
+/// matching is a plain substring scan; `regex` compiles `needle` as a Rust
+/// regex first, refusing `range_match_invalid` on a pattern that does not
+/// parse rather than reporting a confusing "not found".
+fn find_anchor_matches(
+    field: &str,
+    needle: &str,
+    regex: bool,
+    text: &str,
+) -> Result<Vec<usize>, (&'static str, String)> {
+    if regex {
+        let compiled = Regex::new(needle).map_err(|error| {
+            (
+                "range_match_invalid",
+                format!("{field} {needle:?} is not a valid regex: {error}"),
+            )
+        })?;
+        Ok(compiled.find_iter(text).map(|m| m.start()).collect())
+    } else {
+        Ok(text.match_indices(needle).map(|(start, _)| start).collect())
+    }
+}
+
+/// T114: `range_start_match`/`range_end_before_match` name a span by the text
+/// at its boundaries instead of by offsets a caller had to compute — the
+/// motivating case is an END that was previously only ever inferred ("up to
+/// where the next function starts"), which is both a correctness risk and
+/// unreadable in review. The span runs from the start anchor's own match
+/// (inclusive — the matched text is itself the beginning of what is
+/// addressed) up to, but not including, the end anchor's match (the whole
+/// point of "before"). Absent or ambiguous (more than one occurrence) is
+/// refused by name for EITHER anchor independently, never silently resolved
+/// to the first occurrence — the same reason the grep gate refuses an
+/// ambiguous sweep rather than picking one.
+fn resolve_anchor_span(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &Tab,
+) -> Result<Option<(usize, usize)>, (&'static str, String)> {
+    let start_pattern = envelope
+        .payload
+        .get("range_start_match")
+        .and_then(Value::as_str);
+    let end_pattern = envelope
+        .payload
+        .get("range_end_before_match")
+        .and_then(Value::as_str);
+    if start_pattern.is_none() && end_pattern.is_none() {
+        return Ok(None);
+    }
+    if !matches!(envelope.method.as_str(), "replace" | "move" | "copy") {
+        return Err((
+            "edit_range_unsupported",
+            format!(
+                "range_start_match/range_end_before_match address a span and {} places bytes at a point; `replace`, `move` and `copy` take it",
+                envelope.method
+            ),
+        ));
+    }
+    for key in [
+        "offset",
+        "delete_len",
+        "cursor_id",
+        "range_start_line",
+        "range_end_line",
+        "range_start_byte",
+        "range_end_byte",
+        "match_id",
+        "symbol",
+    ] {
+        if envelope.payload.get(key).is_some() {
+            return Err((
+                "edit_range_conflict",
+                format!(
+                    "range_start_match/range_end_before_match and {key} address the same span two ways; name one"
+                ),
+            ));
+        }
+    }
+    let (Some(start_pattern), Some(end_pattern)) = (start_pattern, end_pattern) else {
+        return Err((
+            "edit_range_incomplete",
+            "an anchor span needs both range_start_match and range_end_before_match".into(),
+        ));
+    };
+    if tab.document.mode != DocumentMode::TextUtf8 {
+        return Err((
+            "edit_range_unsupported",
+            "anchors match against text; use range_start_byte/range_end_byte on a raw or hex tab"
+                .into(),
+        ));
+    }
+    let regex = envelope
+        .payload
+        .get("range_match_regex")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let bytes = tab.document.bytes();
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        (
+            "invalid_utf8",
+            "anchor matching requires a UTF-8 document".to_string(),
+        )
+    })?;
+    let start =
+        match find_anchor_matches("range_start_match", start_pattern, regex, text)?.as_slice() {
+            [one] => *one,
+            [] => {
+                return Err((
+                    "range_start_match_not_found",
+                    format!("no match for range_start_match {start_pattern:?}"),
+                ))
+            }
+            many => {
+                return Err((
+                    "range_start_match_ambiguous",
+                    format!(
+                "{} matches for range_start_match {start_pattern:?}; name a more specific anchor",
+                many.len()
+            ),
+                ))
+            }
+        };
+    let end = match find_anchor_matches("range_end_before_match", end_pattern, regex, text)?
+        .as_slice()
+    {
+        [one] => *one,
+        [] => {
+            return Err((
+                "range_end_before_match_not_found",
+                format!("no match for range_end_before_match {end_pattern:?}"),
+            ))
+        }
+        many => {
+            return Err((
+                "range_end_before_match_ambiguous",
+                format!(
+                    "{} matches for range_end_before_match {end_pattern:?}; name a more specific anchor",
+                    many.len()
+                ),
+            ))
+        }
+    };
+    if end < start {
+        return Err((
+            "edit_range_invalid",
+            format!(
+                "range_end_before_match resolved at byte {end}, before range_start_match at byte {start}"
+            ),
+        ));
+    }
+    Ok(Some((start, end - start)))
+}
+
+/// T114: `symbol` names a span by what CodeGraph already knows about it
+/// rather than by any coordinate at all — the caller says *what*, the server
+/// computes *where*. More than one node sharing the name in this file is
+/// refused as ambiguous rather than silently narrowed to the first (see
+/// `jump_points::symbol_extent`'s own doc comment for why); no `.codegraph`
+/// index for this project, or no node by that name, are both named refusals
+/// rather than a fallback guess.
+fn resolve_symbol_span(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &Tab,
+) -> Result<Option<(usize, usize)>, (&'static str, String)> {
+    let Some(name) = envelope.payload.get("symbol").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    if !matches!(envelope.method.as_str(), "replace" | "move" | "copy") {
+        return Err((
+            "edit_range_unsupported",
+            format!(
+                "symbol addresses a span and {} places bytes at a point; `replace`, `move` and `copy` take it",
+                envelope.method
+            ),
+        ));
+    }
+    for key in [
+        "offset",
+        "delete_len",
+        "cursor_id",
+        "range_start_line",
+        "range_end_line",
+        "range_start_byte",
+        "range_end_byte",
+        "match_id",
+        "range_start_match",
+        "range_end_before_match",
+    ] {
+        if envelope.payload.get(key).is_some() {
+            return Err((
+                "edit_range_conflict",
+                format!("symbol and {key} address the same span two ways; name one"),
+            ));
+        }
+    }
+    if tab.document.mode != DocumentMode::TextUtf8 {
+        return Err((
+            "edit_range_unsupported",
+            "symbol addressing resolves to text lines; use range_start_byte/range_end_byte on a raw or hex tab".into(),
+        ));
+    }
+    let Some(project_root) = ai_text_editor::jump_points::find_project_root(&tab.path) else {
+        return Err((
+            "symbol_unavailable",
+            "codegraph is not enabled for this project (no .codegraph/codegraph.db); use a range, match_id, or anchor instead".into(),
+        ));
+    };
+    // Best-effort, same as refresh_jump_points: the watcher lags a write by
+    // about a second, and a missing `codegraph` binary or non-zero exit both
+    // fall through to whatever the index already has on disk.
+    let _ = std::process::Command::new("codegraph")
+        .arg("sync")
+        .current_dir(&project_root)
+        .output();
+    let extents = ai_text_editor::jump_points::symbol_extent(&project_root, &tab.path, name)
+        .map_err(|error| ("symbol_unavailable", error.to_string()))?;
+    match extents.as_slice() {
+        [] => Err((
+            "symbol_not_found",
+            format!("no symbol named {name:?} found in this file's codegraph index"),
+        )),
+        [one] => {
+            let span = line_span(
+                tab.document.bytes(),
+                one.start_line as u64,
+                one.end_line as u64,
+            )
+            .ok_or_else(|| {
+                (
+                    "symbol_not_found",
+                    format!(
+                        "symbol {name:?} resolved to lines {}-{}, past the tab's own line count -- the index may be stale; codegraph sync and try again",
+                        one.start_line, one.end_line
+                    ),
+                )
+            })?;
+            Ok(Some((span.0, span.1 - span.0)))
+        }
+        many => Err((
+            "symbol_ambiguous",
+            format!(
+                "{} symbols named {name:?} found in this file; name a range or anchor instead",
+                many.len()
+            ),
+        )),
+    }
 }
 
 /// Resolve how a `replace` addresses the bytes it changes, as
