@@ -118,21 +118,6 @@
       "updated_at": "2026-09-08T14:45:31Z"
     },
     {
-      "id": "T117",
-      "title": "Bump actions/checkout off the Node 20 deprecation, deliberately rather than blind",
-      "status": "open",
-      "priority": "low",
-      "parent": null,
-      "detail": "Every CI run now warns: \"Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4.\" The workflow pins @v4 in six places (ci.yml lines 41, 268, 451, 552, 1088, 1143, 1164).\n\nNothing is broken today -- the runner forces v4 onto Node 24 and it works -- so this is noise removal and future-proofing, not a fix. That is exactly why it should NOT ride along with an unrelated urgent change: the current release is v7.0.1, so the move is v4 -> v7 across three major versions, and a checkout behaviour change (fetch depth defaults, submodule handling, credential persistence) would surface as a confusing failure in whatever PR happened to carry it.\n\nDo it on its own branch: read the v5, v6 and v7 release notes for breaking changes, bump all six together, and watch a full matrix run. The register-branch and installer-build legs both depend on checkout behaviour, so a green run on one leg is not enough.",
-      "blocked_on": null,
-      "refs": [
-        ".github/workflows/ci.yml"
-      ],
-      "note": "Raised by Tschallacka pasting the runner warning during the CI hang investigation. Deliberately deferred rather than bundled: the hang fix needed to land without carrying an unrelated risk.",
-      "created_at": "2026-09-08T19:42:37Z",
-      "updated_at": "2026-09-08T19:42:37Z"
-    },
-    {
       "id": "T119",
       "title": "At verbosity 0 the framing costs more than the answer",
       "status": "open",
@@ -1235,6 +1220,21 @@
       "note": "Shipped: chat-mcp accepts an optional session/agent argument (mirroring ai-text-editor-mcp's ADAPTER_ARGUMENTS) on every connected tool (join/leave/send/read/wait/who/trigger_add/trigger_remove/trigger_toggle/triggers). held() (src/chat-mcp/src/lib.rs) is now a Mutex<HashMap<String, Held>> keyed by the resolved session, opened lazily per key with the same retry-on-dead-connection behavior the single-connection version had, just scoped per entry. resolved_session_key() resolves an explicit session/agent argument via chat_client_rs::resolve_session_key's own Explicit rung (session wins if both given), falling back to the process's existing session_key() static when neither is given -- so a caller that never declares an identity keeps today's exact behavior unchanged.\n\nchat-client-rs grew the keyed counterparts underneath: Session::load_with_key/save_with_key (src/chat-client-rs/src/lib.rs), apply_session_with_key, save_session_with_key. Session::load/save/apply_session/save_session now delegate to these under session_key().0, so every existing call site (the chat CLI itself) is unaffected.\n\nVerified: cargo test -p chat-client-rs -p chat-mcp (64 + 19 + 12 = 95 total, incl. 2 new chat-client-rs tests proving two keys keep separate sessions in one state dir, and 3 new chat-mcp end-to-end integration tests against a real chat-server-rs: distinct session overrides get distinct minted nicks and hold separate connections verified via a real 'who' and a message read back under the sender's own nick; the 'agent' argument is confirmed an alias for 'session'; an empty override falls back to the default identity rather than minting a nick from nothing). cargo fmt/clippy clean across both crates. Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer 9ab984e3.\n\nMakes T122's chat instruction ('declare your id to chat') true rather than aspirational. B322: found and fixed while verifying T91c -- Held::open/Owner never threaded the resolved session_key into conn.rs's own cursor bookkeeping (join/leave/send/read/deliver all called the unkeyed Session::load/save_cursor), so two distinct identities' cursors cross-contaminated through one shared file even though their nick and connection were already correctly separated. Fixed on feat/rust-installer 6be90b14.",
       "created_at": "2026-09-12T14:28:40Z",
       "updated_at": "2026-09-12T18:29:06Z"
+    },
+    {
+      "id": "T117",
+      "title": "Bump actions/checkout off the Node 20 deprecation, deliberately rather than blind",
+      "status": "done",
+      "priority": "low",
+      "parent": null,
+      "detail": "Every CI run now warns: \"Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4.\" The workflow pins @v4 in six places (ci.yml lines 41, 268, 451, 552, 1088, 1143, 1164).\n\nNothing is broken today -- the runner forces v4 onto Node 24 and it works -- so this is noise removal and future-proofing, not a fix. That is exactly why it should NOT ride along with an unrelated urgent change: the current release is v7.0.1, so the move is v4 -> v7 across three major versions, and a checkout behaviour change (fetch depth defaults, submodule handling, credential persistence) would surface as a confusing failure in whatever PR happened to carry it.\n\nDo it on its own branch: read the v5, v6 and v7 release notes for breaking changes, bump all six together, and watch a full matrix run. The register-branch and installer-build legs both depend on checkout behaviour, so a green run on one leg is not enough.",
+      "blocked_on": null,
+      "refs": [
+        ".github/workflows/ci.yml"
+      ],
+      "note": "Already resolved by T92 (PR #93, a464bcb7, merged before this ticket was filed against master), which bumped actions/checkout v4 -> v7.0.1 across every workflow file, plus upload-artifact v4->v7.0.1 and download-artifact v4->v8.0.1. Verified today: grep across .github/workflows/*.yml shows every checkout/upload-artifact/download-artifact call site already on the modern major (checkout@v7.0.1, upload-artifact@v7.0.1, download-artifact@v8.0.1), all node24. No remaining Node 20 deprecation warning to fix. Closing as a duplicate of already-completed work rather than re-doing it.",
+      "created_at": "2026-09-08T19:42:37Z",
+      "updated_at": "2026-09-13T16:38:46Z"
     },
     {
       "id": "T140",
