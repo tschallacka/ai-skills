@@ -1,0 +1,14 @@
+# MODE: DEV
+# PACKAGE: DEV
+[package]
+name = "prune-transcript"
+version = "0.1.0"
+edition = "2021"
+description = "Shrink provably-static or provably-superseded content in a Claude Code session transcript, in place"
+license = "MIT"
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+tempfile.workspace = true
