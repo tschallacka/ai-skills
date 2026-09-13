@@ -23,23 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T113",
-      "title": "Relocating a block should not cost its content: a move (and copy) verb",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Today the only way to relocate text is to write it at the destination and delete it at the source, so the block's full content is generated as an argument even though the server already holds it. On a large document a refactor is mostly REARRANGEMENT, which means paying output tokens for content that never changed.\n\nProposed: move --from-range-start/--from-range-end (or a span token, see T110) plus a destination, resolved and applied server-side with no content in the request. copy the same without the delete. Both are guarded the way replace is -- the source span is verified before anything is removed -- and both report what they moved, so the caller can verify from the answer as it can today.\n\nWhy it is worth its own entry rather than folding into T110: T110 removes the GUARD's cost, this removes the CONTENT's cost, and they are independent. A move with no guard is still a move; a guarded replace still pays for its text.\n\nUndo already file-backs large edits, so the snapshot machinery a move needs exists. The ordering question to settle: a move within one tab is one atomic operation, not an insert plus a delete that could half-apply -- begin_transaction/end_transaction is the existing shape to reuse or to say why it is not enough.",
-      "blocked_on": null,
-      "refs": [
-        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
-        "ai-text-editor/references/protocol.md",
-        "ai-text-editor/SKILL.md"
-      ],
-      "note": "Raised by Tschallacka asking whether the pasted content can be limited to buy back context: 'on a large document with a lot of edits that would suck badly.' Measured in this session: guards were mostly 1-4 lines, but one replacement was 185 lines, so the replacement is the dominant cost and a rearrangement pays it for nothing.",
-      "created_at": "2026-09-08T14:45:31Z",
-      "updated_at": "2026-09-08T14:45:31Z"
-    },
-    {
       "id": "T118",
       "title": "Abbreviate tab ids to the shortest unambiguous prefix, git-style",
       "status": "open",
@@ -1184,6 +1167,23 @@
       "note": "IMPLEMENTED: control.rs's non-unix mod imp now really implements serve/ask/stop via a loopback-TCP transport (bind 127.0.0.1:0, ephemeral port), instead of unconditionally answering None. Every connection proves a shared secret via an HMAC-SHA256 challenge/response (control_auth.rs, a small sibling of ai_text_editor::auth scoped to this file's flat Request/Reply wire, using OwnerRecord.started_at_ns as the \"generation\" ai-text-editor's own random server_generation string plays) rather than sending the token in the clear, per this ticket's own explicit requirement. The mechanism (tcp_serve/tcp_ask/tcp_stop/control_auth) is plain std::net + hmac/sha2/getrandom/base64, not itself cfg-gated -- only the *choice* of using it over the unix arm's UnixListener/UnixStream code is (the two `mod imp` blocks) -- so this file's own tests exercise the real mechanism directly on any machine (74 tests total, including new TCP-specific ones), not only prove it compiles for Windows.\n\nVERIFIED FOR REAL ON WINDOWS: opened feat/rust-installer's first-ever pull request (#154, against nextupdate) specifically to get this in front of ci.yml's real windows-latest leg -- chat-client-rs's full test suite (69/69, the 5 unix-only tests correctly excluded there via #[cfg(unix)]) passed there, meaning the loopback-TCP transport genuinely works on a real Windows runner, not just \"compiles for the target.\"\n\nGetting that CI run at all surfaced that feat/rust-installer had never had a real CI run before (ci.yml triggers only on push to master/nextupdate or on pull_request; this ~70-commit branch had done neither), which surfaced three unrelated, pre-existing gaps blocking every platform: ci.yml's sparse-checkout never listed installer/tools.tsv or .agents/profiles (B324), cli_mode.rs's symlink test had no cfg(unix) gate (B325), and plugins.rs's copy_plugin_files had a parameter unused outside cfg(unix) (B326) -- all three found, fixed, and confirmed via re-reading the actual CI job logs. Two further pre-existing issues were found and left open rather than expanding this ticket's scope further (explicit user direction): B327, a cross-module $HOME test-isolation race in installer's own test suite (integration.rs/install.rs/plan_migration.rs), and B328, install.rs's shared-binary tests hardcoding a binary name with no .exe suffix, which fails deterministically on every Windows run.\n\ncargo fmt/clippy -D warnings clean for chat-client-rs/chat-mcp throughout. Full local ./run-tests.sh: 237/239 passed, matching this session's established baseline (test-mode-markers, test-rjq-active-references pre-existing/unrelated). PR #154 left open with B327/B328 unresolved -- not merged.",
       "created_at": "2026-09-08T13:58:10Z",
       "updated_at": "2026-09-13T06:21:18Z"
+    },
+    {
+      "id": "T113",
+      "title": "Relocating a block should not cost its content: a move (and copy) verb",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Today the only way to relocate text is to write it at the destination and delete it at the source, so the block's full content is generated as an argument even though the server already holds it. On a large document a refactor is mostly REARRANGEMENT, which means paying output tokens for content that never changed.\n\nProposed: move --from-range-start/--from-range-end (or a span token, see T110) plus a destination, resolved and applied server-side with no content in the request. copy the same without the delete. Both are guarded the way replace is -- the source span is verified before anything is removed -- and both report what they moved, so the caller can verify from the answer as it can today.\n\nWhy it is worth its own entry rather than folding into T110: T110 removes the GUARD's cost, this removes the CONTENT's cost, and they are independent. A move with no guard is still a move; a guarded replace still pays for its text.\n\nUndo already file-backs large edits, so the snapshot machinery a move needs exists. The ordering question to settle: a move within one tab is one atomic operation, not an insert plus a delete that could half-apply -- begin_transaction/end_transaction is the existing shape to reuse or to say why it is not enough.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "ai-text-editor/references/protocol.md",
+        "ai-text-editor/SKILL.md"
+      ],
+      "note": "Raised by Tschallacka asking whether the pasted content can be limited to buy back context: 'on a large document with a lot of edits that would suck badly.' Measured in this session: guards were mostly 1-4 lines, but one replacement was 185 lines, so the replacement is the dominant cost and a rearrangement pays it for nothing. IMPLEMENTED: move/copy verbs added to ai-text-editor-server.rs -- source span reuses replace's own edit_span/resolve_match_id/expected_span_bytes helpers (relaxed to accept move/copy alongside replace), destination is a point via new resolve_dest_point (dest_offset or dest_line, mutually exclusive), the relocation itself is one splice_move computing before->after in memory (one or two Document::apply_bytes splices), folded into ONE journal record/revision/undo-step -- deliberately not relying on begin_transaction/end_transaction, since that only groups undo history and does not stop a crash between two separately-applied edits from leaving a real half-relocated document. Refuses a destination strictly inside the source span (move_destination_inside_source). Response never echoes moved content. verbs.rs, ai-text-editor-mcp/src/lib.rs, and the CLI (ai-text-editor.rs) all wired to the same METHODS/schema declarations. Also fixed a real bug the implementation's own tests caught: source_offset/source_len/dest_offset had no verbosity.rs tier classification, which tripped a debug_assert! panic (not just a warning) that silently killed the connection on every successful move/copy -- fixed by classifying them at tier 1. Verified: cargo test -p ai-text-editor (67 cli_flow incl. 10 new move/copy tests + 4 tcp_flow + 56 lib) and -p ai-text-editor-mcp (5 mcp_flow) all passing; cargo fmt --check and cargo clippy --all-targets -D warnings clean. Full nix develop . --command ./pre-push-check.sh: PASS. Full nix develop . --command ./run-tests.sh: 237 passed / 2 failed (test-mode-markers, test-rjq-active-references -- both pre-existing/unrelated) / 2 unconfigured (require PLANNING_CONTEXT_CACHE, unrelated). Docs updated: protocol.md, SKILL.md, ai-text-editor.1.",
+      "created_at": "2026-09-08T14:45:31Z",
+      "updated_at": "2026-09-13T07:04:52Z"
     },
     {
       "id": "T124",
