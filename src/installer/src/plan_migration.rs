@@ -24,17 +24,33 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub fn default_root(home: &Path) -> PathBuf {
-    if let Ok(root) = std::env::var("PLANS_ROOT") {
+    if let Some(root) = env_value("PLANS_ROOT") {
         if !root.is_empty() {
             return PathBuf::from(root.trim_end_matches('/').to_string());
         }
     }
-    let base = std::env::var("XDG_CONFIG_HOME")
-        .ok()
+    let base = env_value("XDG_CONFIG_HOME")
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config"));
     base.join("tsch-ai-skills").join("plans")
+}
+
+// B327: same fix as shared_bin::shared_bin_dir, and for the same reason --
+// `default_root` takes `home` explicitly so a test can pass an isolated
+// tempdir, but reading PLANS_ROOT/XDG_CONFIG_HOME first silently defeated
+// that whenever the ambient environment (or another test) had them set.
+// Reuses shared_bin's thread-local override rather than a second copy of the
+// same mechanism; see its own doc comment for why a thread-local needs no
+// lock here.
+#[cfg(test)]
+fn env_value(key: &'static str) -> Option<String> {
+    crate::shared_bin::test_env::resolve(key)
+}
+
+#[cfg(not(test))]
+fn env_value(key: &'static str) -> Option<String> {
+    std::env::var(key).ok()
 }
 
 /// Creates the plan root if missing and proves it is actually writable with
@@ -145,14 +161,7 @@ pub fn migrate_legacy_plans(target_roots: &[PathBuf], home: &Path) -> io::Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    // default_root reads process-global env vars (PLANS_ROOT,
-    // XDG_CONFIG_HOME); every test in this module that sets or clears them
-    // takes this lock first so cargo's parallel test threads cannot
-    // interleave one test's env mutation with another's read -- exactly the
-    // kind of shell-level flakiness this installer rewrite exists to avoid.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use crate::shared_bin::test_env;
 
     fn plan_dir(root: &Path, target: &str, plan_name: &str) -> PathBuf {
         let dir = root
@@ -167,20 +176,21 @@ mod tests {
 
     #[test]
     fn default_root_honors_plans_root_override() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        std::env::set_var("PLANS_ROOT", "/custom/root/");
+        // The one test that needs to opt in to simulating a real env var;
+        // no reset needed after (this test's own thread ends with it, and
+        // an override cannot reach any other test's thread).
+        test_env::set_override("PLANS_ROOT", Some("/custom/root/"));
         assert_eq!(
             default_root(Path::new("/home/x")),
             PathBuf::from("/custom/root")
         );
-        std::env::remove_var("PLANS_ROOT");
     }
 
     #[test]
     fn default_root_falls_back_to_home_config() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("PLANS_ROOT");
-        std::env::remove_var("XDG_CONFIG_HOME");
+        // No setup needed: PLANS_ROOT/XDG_CONFIG_HOME default to "unset" in
+        // a test build unless a test opts in via set_override, which is
+        // exactly the fallback this test demonstrates.
         assert_eq!(
             default_root(Path::new("/home/x")),
             PathBuf::from("/home/x/.config/tsch-ai-skills/plans")
@@ -189,8 +199,6 @@ mod tests {
 
     #[test]
     fn a_plan_under_a_targets_planning_directory_is_moved_to_the_shared_root() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("PLANS_ROOT");
         let workdir = tempfile::tempdir().unwrap();
         let home = workdir.path().join("home");
         let targets_root = workdir.path().join("targets");
@@ -209,8 +217,6 @@ mod tests {
 
     #[test]
     fn a_rerun_after_a_successful_migration_does_nothing_more() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("PLANS_ROOT");
         let workdir = tempfile::tempdir().unwrap();
         let home = workdir.path().join("home");
         let targets_root = workdir.path().join("targets");
@@ -227,8 +233,6 @@ mod tests {
 
     #[test]
     fn a_name_collision_at_the_destination_is_reported_and_left_in_place() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("PLANS_ROOT");
         let workdir = tempfile::tempdir().unwrap();
         let home = workdir.path().join("home");
         let targets_root = workdir.path().join("targets");
@@ -249,8 +253,6 @@ mod tests {
 
     #[test]
     fn two_targets_each_contribute_their_own_plans() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("PLANS_ROOT");
         let workdir = tempfile::tempdir().unwrap();
         let home = workdir.path().join("home");
         let targets_root = workdir.path().join("targets");
@@ -270,8 +272,6 @@ mod tests {
 
     #[test]
     fn a_target_with_no_planning_directory_is_skipped_without_error() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("PLANS_ROOT");
         let workdir = tempfile::tempdir().unwrap();
         let home = workdir.path().join("home");
         let outcome =
