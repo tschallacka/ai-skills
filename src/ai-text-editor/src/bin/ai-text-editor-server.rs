@@ -1,7 +1,7 @@
 // MODE: DEV
 // PACKAGE: PROD
 use ai_text_editor::auth;
-use ai_text_editor::document::{Document, DocumentMode};
+use ai_text_editor::document::{Document, DocumentError, DocumentMode};
 use ai_text_editor::history::History;
 use ai_text_editor::index::{LineIndex, DEFAULT_GRANULARITY};
 use ai_text_editor::jobs::JobRegistry;
@@ -52,6 +52,17 @@ struct Tab {
     auth_token: Option<String>,
     session_token: String,
     server_generation: String,
+    /// T118: `session::tab_uuid_for(&session_token, &server_generation)`,
+    /// computed once at construction rather than rehashed on every call --
+    /// `session_token`/`server_generation` are never reassigned after this,
+    /// so the value is invariant for the tab's whole lifetime.
+    tab_uuid: String,
+    /// T118: this tab's permanent, first-come-assigned short id (see
+    /// `session::register`'s own doc comment) -- read back once, right after
+    /// registration, from what `register` just persisted. Never recomputed
+    /// afterward: it must survive unchanged for as long as this tab lives,
+    /// regardless of what other tabs register later.
+    short_id: String,
     large_file: Option<LargeFile>,
     large_threshold_bytes: u64,
     jobs: JobRegistry,
@@ -66,6 +77,13 @@ struct Tab {
     /// Journal edits replayed when this tab opened; reported by `open` so a
     /// recovered revision is never mistaken for fresh work (B196).
     replayed_edits: usize,
+    /// This file's outbound CodeGraph references, recomputed at open and
+    /// after every save (T100). `None` means CodeGraph is not enabled for
+    /// this project, not that the file has no outbound references.
+    jump_points: Option<Vec<ai_text_editor::jump_points::JumpPoint>>,
+    /// The revision `jump_points` was computed at; a dirty tab whose
+    /// `revision` has since moved past this is reported `stale`.
+    jump_points_revision: Option<u64>,
 }
 
 struct ServerState {
@@ -303,6 +321,12 @@ fn main() {
         auth_token: configured_auth_token.clone(),
         session_token: session_token.clone(),
         server_generation: server_generation.clone(),
+        tab_uuid: session::tab_uuid_for(&session_token, &server_generation),
+        // `register_session` (below) hasn't run yet at this point -- the
+        // real, first-come-assigned value is read back and patched in right
+        // after each of its two call sites, once it has. The full id is a
+        // safe placeholder until then.
+        short_id: session::tab_uuid_for(&session_token, &server_generation),
         large_file,
         large_threshold_bytes: large_threshold,
         jobs: JobRegistry::default(),
@@ -312,6 +336,8 @@ fn main() {
         large_redo,
         saved_digest,
         replayed_edits,
+        jump_points: None,
+        jump_points_revision: None,
     };
     // B204 (both constructors): a tab recovered from the journal holds the
     // journal's buffer while `disk_digest` was stamped from the disk that
@@ -334,6 +360,7 @@ fn main() {
     if !loaded_index {
         persist_index(&mut tab);
     }
+    refresh_jump_points(&mut tab);
     let tab = Arc::new(Mutex::new(tab));
     let default_key = tab_key(&path);
     let state = Arc::new(Mutex::new(ServerState {
@@ -382,6 +409,7 @@ fn main() {
             &session_token,
             Some(&auth_token),
         );
+        backfill_short_id(&tab);
         announce(&path, &endpoint, &server_generation);
         let generation = server_generation;
         for stream in listener.incoming().flatten() {
@@ -479,6 +507,7 @@ fn main() {
             &session_token,
             configured_auth_token.as_deref(),
         );
+        backfill_short_id(&tab);
         announce(&path, &endpoint, &server_generation);
         for stream in listener.incoming().flatten() {
             let state = Arc::clone(&state);
@@ -565,6 +594,16 @@ fn register_session(
     }
 }
 
+/// T118: reads back the short id `register_session` (just called) actually
+/// persisted for this tab, and patches it into the `Tab` itself -- a plain
+/// read-after-write, since the real assignment already happened, under
+/// `session::register`'s own lock, the moment that call returned.
+fn backfill_short_id(tab: &Arc<Mutex<Tab>>) {
+    if let Ok(mut tab) = tab.lock() {
+        tab.short_id = session::short_id_for(&tab.tab_uuid).unwrap_or_else(|| tab.tab_uuid.clone());
+    }
+}
+
 fn persist_index(tab: &mut Tab) {
     let _ = tab.metadata.record_index(
         tab.index.granularity,
@@ -580,6 +619,35 @@ fn persist_index(tab: &mut Tab) {
         &tab.disk_digest,
         tab.revision,
     );
+}
+
+/// Recomputes `tab.jump_points` against CodeGraph's on-disk index (T100):
+/// runs `codegraph sync` first (the watcher lags a write by about a second)
+/// then derives this file's outbound references. A missing `codegraph`
+/// binary, a non-zero exit, or no `.codegraph/` project at all are all the
+/// same soft "not available for this project" outcome the sync step and
+/// `jump_points::derive` both already model as `None` -- never a hard
+/// failure of the open/save this is attached to.
+fn refresh_jump_points(tab: &mut Tab) {
+    let Some(project_root) = ai_text_editor::jump_points::find_project_root(&tab.path) else {
+        tab.jump_points = None;
+        tab.jump_points_revision = None;
+        return;
+    };
+    let _ = std::process::Command::new("codegraph")
+        .arg("sync")
+        .current_dir(&project_root)
+        .output();
+    match ai_text_editor::jump_points::derive(&project_root, &tab.path) {
+        Ok(points) => {
+            tab.jump_points = Some(points);
+            tab.jump_points_revision = Some(tab.revision);
+        }
+        Err(_) => {
+            tab.jump_points = None;
+            tab.jump_points_revision = None;
+        }
+    }
 }
 
 fn open_additional_tab(
@@ -724,6 +792,7 @@ fn open_additional_tab(
     let _ = metadata.record(&path, mode, recovered_revision, index.bytes);
     let session_token =
         auth::nonce().map_err(|error| format!("cannot create session token: {error}"))?;
+    let tab_uuid = session::tab_uuid_for(&session_token, &server_generation);
     let index_complete = index_loaded || large_file.is_none();
     let mut tab = Tab {
         path: path.clone(),
@@ -748,6 +817,11 @@ fn open_additional_tab(
         auth_token,
         session_token,
         server_generation,
+        tab_uuid: tab_uuid.clone(),
+        // Backfilled by the caller right after `register_session`, once it
+        // actually runs (below): the full id is a safe placeholder until
+        // then, matching `main`'s own two constructions of `Tab`.
+        short_id: tab_uuid,
         large_file,
         large_threshold_bytes,
         jobs: JobRegistry::default(),
@@ -757,6 +831,8 @@ fn open_additional_tab(
         large_redo,
         saved_digest,
         replayed_edits,
+        jump_points: None,
+        jump_points_revision: None,
     };
     // B204: a tab recovered from the journal holds the journal's buffer,
     // while `disk_digest` was stamped from the disk that exists now. When
@@ -778,6 +854,7 @@ fn open_additional_tab(
     if !index_loaded {
         persist_index(&mut tab);
     }
+    refresh_jump_points(&mut tab);
     Ok(tab)
 }
 
@@ -1303,8 +1380,22 @@ fn candidate_advice(state_guard: &ServerState) -> String {
     )
 }
 
+/// The tab's real, full 64-char id -- what routing and authorization
+/// checks compare against. Never itself sent in a response; `tab_id` below
+/// is the abbreviated form every response actually reports.
+fn full_tab_id(tab: &Tab) -> &str {
+    &tab.tab_uuid
+}
+
+/// T118: the shortest prefix of this tab's real id every response actually
+/// reports -- assigned once, first come first served, when the tab
+/// registered (`session::register`), and cached in `Tab.short_id` ever
+/// since. Never recomputed here: unlike a scheme that finds "the shortest
+/// prefix unambiguous right now" fresh on every call, a value already
+/// cached at registration time cannot be invalidated by whatever registers
+/// later.
 fn tab_id(tab: &Tab) -> String {
-    session::tab_uuid_for(&tab.session_token, &tab.server_generation)
+    tab.short_id.clone()
 }
 
 /// Every open tab as `{tab_id, path}`, newest addressing first. The candidate
@@ -1388,17 +1479,66 @@ fn select_tab(
     // happens to hold. It is not the weaker credential either - the id is a
     // blake3 of the session token and the server generation, so holding one is
     // holding the other.
+    //
+    // T118: `wanted` is a PREFIX, matched against each tab's real (full)
+    // id -- a full id still matches exactly as before, since it can only
+    // ever equal, never merely prefix, one real tab's id. Among 2+ raw
+    // matches, the one tab whose OWN officially assigned `short_id` (first
+    // come, see `session::register`) exactly equals `wanted` always wins
+    // outright: any other match only collides by coincidence of its real
+    // hash, since it was specifically given a LONGER id because this one
+    // registered first. Only when no candidate's own assignment matches
+    // that way is naming several tabs genuinely ambiguous, refused the same
+    // shape `tab_path`'s own ambiguity refusal just below already uses.
     if let Some(wanted) = envelope.payload.get("tab_id").and_then(Value::as_str) {
-        for tab in state_guard.tabs.values() {
-            if tab.lock().ok().is_some_and(|tab| tab_id(&tab) == wanted) {
-                ensure_tab_file(tab, requested.as_ref(), &envelope.method)?;
-                return Ok(tab.clone());
+        if wanted.is_empty() {
+            return Err(format!(
+                "tab_unknown: tab_id must not be empty; {}",
+                candidate_advice(&state_guard)
+            ));
+        }
+        let matched: Vec<Arc<Mutex<Tab>>> = state_guard
+            .tabs
+            .values()
+            .filter(|tab| {
+                tab.lock()
+                    .ok()
+                    .is_some_and(|tab| full_tab_id(&tab).starts_with(wanted))
+            })
+            .cloned()
+            .collect();
+        let owner = matched
+            .iter()
+            .find(|tab| tab.lock().is_ok_and(|tab| tab.short_id == wanted))
+            .cloned();
+        let resolved = owner.or_else(|| (matched.len() == 1).then(|| matched[0].clone()));
+        match resolved {
+            Some(tab) => {
+                ensure_tab_file(&tab, requested.as_ref(), &envelope.method)?;
+                return Ok(tab);
+            }
+            None if matched.is_empty() => {
+                return Err(format!(
+                    "tab_unknown: no tab on this server has tab_id {wanted}; {}",
+                    candidate_advice(&state_guard)
+                ))
+            }
+            None => {
+                let ambiguous: Vec<Value> = matched
+                    .iter()
+                    .filter_map(|tab| {
+                        tab.lock()
+                            .ok()
+                            .map(|tab| json!({"tab_id": tab_id(&tab), "path": tab.path}))
+                    })
+                    .collect();
+                return Err(format!(
+                    "tab_ambiguous: {wanted} names {} open tabs on this server; address one by a longer tab_id: {}",
+                    matched.len(),
+                    serde_json::to_string(&ambiguous).unwrap_or_default()
+                ));
             }
         }
-        return Err(format!(
-            "tab_unknown: no tab on this server has tab_id {wanted}; {}",
-            candidate_advice(&state_guard)
-        ));
     }
     // T97: the recovery for a caller that forgot the id. A filename, or a
     // trailing run of path components, resolves to the one tab it names -
@@ -1519,7 +1659,7 @@ fn select_tab(
                 threshold,
             )?;
             if let Some(endpoint) = endpoint {
-                let tab_guard = tab;
+                let mut tab_guard = tab;
                 let session_token = tab_guard.session_token.clone();
                 register_session(
                     &endpoint,
@@ -1527,6 +1667,8 @@ fn select_tab(
                     &session_token,
                     auth_token.as_deref(),
                 );
+                tab_guard.short_id = session::short_id_for(&tab_guard.tab_uuid)
+                    .unwrap_or_else(|| tab_guard.tab_uuid.clone());
                 let tab = Arc::new(Mutex::new(tab_guard));
                 let key = tab_key(path);
                 let mut state_guard = state.lock().unwrap();
@@ -1574,11 +1716,17 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
     // path and be handed a token. A tab id is not the weaker credential of the
     // two in any case: it is a blake3 of the session token and the server
     // generation.
+    //
+    // T118: `wanted` may be an abbreviated prefix rather than the full id --
+    // safe to accept here via the same `starts_with` check `select_tab` used
+    // to route to this exact tab in the first place, refusing `tab_ambiguous`
+    // instead of reaching `handle()` at all had `wanted` named more than one
+    // tab on this server.
     let addressed_by_handle = envelope
         .payload
         .get("tab_id")
         .and_then(Value::as_str)
-        .is_some_and(|wanted| wanted == tab_id(&tab))
+        .is_some_and(|wanted| !wanted.is_empty() && full_tab_id(&tab).starts_with(wanted))
         || envelope
             .payload
             .get("tab_path")
@@ -1687,6 +1835,8 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             envelope.method.as_str(),
             "insert"
                 | "replace"
+                | "move"
+                | "copy"
                 | "undo"
                 | "redo"
                 | "save"
@@ -1766,6 +1916,15 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         "history" => {
             let (undo_depth, redo_depth) = tab.history.depths();
             frames.push(response(&envelope.request_id, json!({"revision": tab.revision, "undo_depth": undo_depth + tab.large_undo.len(), "redo_depth": redo_depth + tab.large_redo.len(), "text_undo_depth": undo_depth, "text_redo_depth": redo_depth, "large_undo_depth": tab.large_undo.len(), "large_redo_depth": tab.large_redo.len(), "journal_sequence": tab.journal_seq})));
+        }
+        "jump_points" => {
+            let stale = tab.jump_points.is_some() && tab.jump_points_revision != Some(tab.revision);
+            let note = if tab.jump_points.is_none() {
+                Some("codegraph is not enabled for this project, or its index is not in a shape this reader supports -- no jump points were computed")
+            } else {
+                None
+            };
+            frames.push(response(&envelope.request_id, json!({"jump_points": tab.jump_points, "revision": tab.jump_points_revision, "stale": stale, "note": note})));
         }
         "begin_transaction" => {
             if tab.transaction_before.is_some() {
@@ -2070,27 +2229,9 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                     return frames;
                 }
             };
-            let offset = span.map(|(offset, _)| offset).unwrap_or_else(|| {
-                envelope
-                    .payload
-                    .get("offset")
-                    .and_then(Value::as_u64)
-                    .map(|value| value as usize)
-                    .unwrap_or_else(|| {
-                        let cursor_id = envelope
-                            .payload
-                            .get("cursor_id")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0);
-                        position_offset(
-                            &tab.document,
-                            tab.cursors
-                                .get(&cursor_id)
-                                .copied()
-                                .unwrap_or(Position { line: 1, column: 0 }),
-                        )
-                    })
-            });
+            let offset = span
+                .map(|(offset, _)| offset)
+                .unwrap_or_else(|| resolve_point(&envelope, &tab));
             // B230: the content guard. `expected_text` says which bytes the
             // caller believes are at `offset`; when it is the only thing
             // naming a length, it IS the length, so the arithmetic that got
@@ -2230,6 +2371,179 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                         error_value.to_string()
                     };
                     frames.push(error(&envelope.request_id, "edit_refused", message));
+                }
+            }
+        }
+        // T113: relocate/duplicate a span server-side with no content in the
+        // request or response — the server already holds the bytes. Large-tab
+        // and revision-guard refusal both come from the generic
+        // is_revision_guarded() gate above (move/copy are listed there), the
+        // same way replace/insert get theirs; this arm does not repeat either
+        // check.
+        "move" | "copy" => {
+            let span = match resolve_match_id(&envelope, &tab) {
+                Ok(Some(span)) => Some(span),
+                Ok(None) => match edit_span(&envelope, &tab) {
+                    Ok(span) => span,
+                    Err((code, message)) => {
+                        frames.push(error(&envelope.request_id, code, message));
+                        return frames;
+                    }
+                },
+                Err((code, message)) => {
+                    frames.push(error(&envelope.request_id, code, message));
+                    return frames;
+                }
+            };
+            let Some((source_offset, source_len)) = span else {
+                for name in ["offset", "delete_len", "cursor_id"] {
+                    if envelope.payload.get(name).is_some() {
+                        frames.push(error(
+                            &envelope.request_id,
+                            "move_source_required",
+                            format!(
+                                "{} addresses its source with a range or match_id, not {name} — a point has no length to relocate",
+                                envelope.method
+                            ),
+                        ));
+                        return frames;
+                    }
+                }
+                frames.push(error(
+                    &envelope.request_id,
+                    "move_source_required",
+                    format!(
+                        "{} needs a source span: range_start_line/range_end_line, range_start_byte/range_end_byte, or match_id",
+                        envelope.method
+                    ),
+                ));
+                return frames;
+            };
+            let expected = match expected_span_bytes(&envelope) {
+                Ok(expected) => expected,
+                Err((code, message)) => {
+                    frames.push(error(&envelope.request_id, code, message));
+                    return frames;
+                }
+            };
+            if let Some(expected) = &expected {
+                let bytes = tab.document.bytes();
+                let end = source_offset.saturating_add(source_len);
+                let actual: &[u8] = bytes.get(source_offset..end).unwrap_or_default();
+                if actual != expected.as_slice() {
+                    frames.push(error_details(
+                        &envelope.request_id,
+                        "expected_text_mismatch",
+                        format!(
+                            "the bytes at offset {source_offset} are not what expected_text names, so the {} was not applied; read the range and retry against what is actually there (a previous edit of your own may have changed its length)",
+                            envelope.method
+                        ),
+                        json!({
+                            "offset": source_offset,
+                            "delete_len": source_len,
+                            "expected": byte_preview(expected),
+                            "actual": byte_preview(actual),
+                            "actual_bytes_available": bytes.len().saturating_sub(source_offset),
+                        }),
+                    ));
+                    return frames;
+                }
+            }
+            let dest_offset = match resolve_dest_point(&envelope, &tab) {
+                Ok(offset) => offset,
+                Err((code, message)) => {
+                    frames.push(error(&envelope.request_id, code, message));
+                    return frames;
+                }
+            };
+            let doc_len = tab.document.bytes().len();
+            if dest_offset > doc_len {
+                frames.push(error(
+                    &envelope.request_id,
+                    "edit_range_invalid",
+                    format!("dest_offset {dest_offset} is past the tab's {doc_len} bytes"),
+                ));
+                return frames;
+            }
+            if dest_offset > source_offset && dest_offset < source_offset + source_len {
+                frames.push(error(
+                    &envelope.request_id,
+                    "move_destination_inside_source",
+                    format!(
+                        "the destination ({dest_offset}) is inside the source span [{source_offset}, {}); relocating a block to a point inside itself has no sensible meaning",
+                        source_offset + source_len
+                    ),
+                ));
+                return frames;
+            }
+            let before = tab.document.clone();
+            let mut cursors = tab.cursors.clone();
+            let delete_source = envelope.method == "move";
+            match splice_move(
+                &before,
+                source_offset,
+                source_len,
+                dest_offset,
+                delete_source,
+                &mut cursors,
+            ) {
+                Ok((after, landed_at)) => {
+                    let revision = tab.revision.saturating_add(1);
+                    // Replay only ever needs before/after; the extra fields
+                    // are for a human reading the journal, same spirit as
+                    // replace/insert's own record.
+                    let record = json!({
+                        "verb": envelope.method,
+                        "source_offset": source_offset,
+                        "source_len": source_len,
+                        "dest_offset": dest_offset,
+                        "revision": revision,
+                        "before": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, before.bytes()),
+                        "after": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, after.bytes()),
+                    });
+                    match journal_append_result(&mut tab, "edit", record) {
+                        Ok(()) => {
+                            tab.cursors = cursors;
+                            tab.document = after.clone();
+                            if tab.transaction_before.is_none() {
+                                tab.history.record(&before, &after);
+                            }
+                            tab.revision = revision;
+                            tab.results.clear();
+                            tab.index =
+                                LineIndex::build(tab.document.bytes(), tab.index.granularity);
+                            tab.index_complete = true;
+                            persist_index(&mut tab);
+                            let _ = tab.metadata.record(
+                                &tab.path,
+                                tab.document.mode,
+                                tab.revision,
+                                tab.document.bytes().len(),
+                            );
+                            let payload = json!({
+                                "revision": tab.revision,
+                                "cursors": tab.cursors,
+                                "dirty": tab_dirty(&tab),
+                                "disk_diverged": tab_disk_diverged(&tab),
+                                "source_offset": source_offset,
+                                "source_len": source_len,
+                                "dest_offset": landed_at,
+                            });
+                            frames.push(response(&envelope.request_id, payload));
+                        }
+                        Err(error_value) => frames.push(error(
+                            &envelope.request_id,
+                            "journal_write_failed",
+                            error_value.to_string(),
+                        )),
+                    }
+                }
+                Err(error_value) => {
+                    frames.push(error(
+                        &envelope.request_id,
+                        "edit_refused",
+                        error_value.to_string(),
+                    ));
                 }
             }
         }
@@ -2483,11 +2797,12 @@ fn expected_span_bytes(
         // An `insert` deletes nothing, so its span is empty and any
         // expected_text could only ever mismatch. An argument that can only
         // fail is refused by name rather than left to fail confusingly —
-        // the same rule B180 and B224 are about.
-        _ if envelope.method != "replace" => Err((
+        // the same rule B180 and B224 are about. `move`/`copy` DO have a
+        // source span to verify (T113), so they are not refused here.
+        _ if !matches!(envelope.method.as_str(), "replace" | "move" | "copy") => Err((
             "expected_text_unsupported",
             format!(
-                "expected_text verifies the bytes a span replaces and {} deletes nothing; use `replace` (with no text, it deletes the span)",
+                "expected_text verifies the bytes a span replaces and {} deletes nothing; use `replace`, `move` or `copy` (for `replace`, no text deletes the span)",
                 envelope.method
             ),
         )),
@@ -2518,11 +2833,11 @@ fn resolve_match_id(
     let Some(match_id) = envelope.payload.get("match_id").and_then(Value::as_str) else {
         return Ok(None);
     };
-    if envelope.method != "replace" {
+    if !matches!(envelope.method.as_str(), "replace" | "move" | "copy") {
         return Err((
             "edit_range_unsupported",
             format!(
-                "match_id addresses a span from a prior search hit and {} places bytes at a point; `replace` takes it (with no text, it deletes the span)",
+                "match_id addresses a span from a prior search hit and {} places bytes at a point; `replace`, `move` and `copy` take it (for `replace`, no text deletes the span)",
                 envelope.method
             ),
         ));
@@ -2646,6 +2961,156 @@ fn line_span(bytes: &[u8], start: u64, end: u64) -> Option<(usize, usize)> {
     None
 }
 
+/// Resolve `insert`/`move`/`copy`'s destination POINT: an explicit `offset`,
+/// or a cursor's position when none is given (`cursor_id`, defaulting to
+/// cursor 0). Factored out of the `"replace" | "insert"` arm's own former
+/// inline resolution (T113) so `move`/`copy`'s own destination point can
+/// read the same way without a second copy of it.
+fn resolve_point(envelope: &ai_text_editor::protocol::Envelope, tab: &Tab) -> usize {
+    envelope
+        .payload
+        .get("offset")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or_else(|| {
+            let cursor_id = envelope
+                .payload
+                .get("cursor_id")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            position_offset(
+                &tab.document,
+                tab.cursors
+                    .get(&cursor_id)
+                    .copied()
+                    .unwrap_or(Position { line: 1, column: 0 }),
+            )
+        })
+}
+
+/// The number of lines `bytes` has, in `line_span`'s own convention: a final
+/// unterminated line still counts. A fully-terminated buffer has exactly as
+/// many lines as newlines; one with a trailing partial line has one more.
+/// An empty buffer is one (empty) line, matching how position (1, 0) already
+/// addresses it elsewhere in this file.
+fn line_count(bytes: &[u8]) -> u64 {
+    if bytes.is_empty() {
+        return 1;
+    }
+    let newlines = bytes.iter().filter(|byte| **byte == b'\n').count() as u64;
+    if bytes.last() == Some(&b'\n') {
+        newlines
+    } else {
+        newlines + 1
+    }
+}
+
+/// Resolve `move`/`copy`'s destination as a byte offset in the tab's CURRENT
+/// (pre-splice) coordinates — `splice_move` is what adjusts it for the
+/// source's own removal, not the caller. Exactly one of `dest_offset`/
+/// `dest_line` must be named, the same lines-XOR-bytes pairing rule
+/// [`edit_span`] already enforces for the source span.
+fn resolve_dest_point(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &Tab,
+) -> Result<usize, (&'static str, String)> {
+    let dest_offset = envelope.payload.get("dest_offset").and_then(Value::as_u64);
+    let dest_line = envelope.payload.get("dest_line").and_then(Value::as_u64);
+    match (dest_offset, dest_line) {
+        (Some(_), Some(_)) => Err((
+            "move_destination_conflict",
+            "dest_offset and dest_line address the same destination two ways; name one".into(),
+        )),
+        (None, None) => Err((
+            "move_destination_required",
+            "a destination is required: dest_offset (a byte position) or dest_line (a 1-based line, text tabs only)".into(),
+        )),
+        (Some(offset), None) => Ok(offset as usize),
+        (None, Some(line)) => {
+            if tab.document.mode != DocumentMode::TextUtf8 {
+                return Err((
+                    "edit_range_unsupported",
+                    "dest_line is not the coordinate on a raw or hex tab; use dest_offset".into(),
+                ));
+            }
+            if line == 0 {
+                return Err((
+                    "edit_range_invalid",
+                    "lines are 1-based; dest_line 0 addresses nothing".into(),
+                ));
+            }
+            let bytes = tab.document.bytes();
+            let count = line_count(bytes);
+            if line == count + 1 {
+                // One past the last line: append at end of file.
+                return Ok(bytes.len());
+            }
+            let Some(span) = line_span(bytes, line, line) else {
+                return Err((
+                    "edit_range_invalid",
+                    format!(
+                        "the tab has no line {line}; it has {count} ({} addresses the end of the file)",
+                        count + 1
+                    ),
+                ));
+            };
+            Ok(span.0)
+        }
+    }
+}
+
+/// Build the moved/copied document as ONE splice-pair from `before`, never
+/// two separately applied/journaled edits (T113: this is what makes a move
+/// atomic in a way `begin_transaction`/`end_transaction` alone is not — that
+/// only groups undo history, it does not stop a crash between two applied
+/// edits from leaving a real, journaled, half-relocated document). Returns
+/// the resulting document and the byte offset the moved content actually
+/// starts at in it (equal to `dest_offset` for a `copy`, and to `dest_offset`
+/// shifted back by `source_len` for a `move` landing after its own former
+/// position).
+///
+/// `dest_offset` is in `before`'s own coordinates; the caller never has to
+/// do the post-deletion arithmetic itself.
+fn splice_move(
+    before: &Document,
+    source_offset: usize,
+    source_len: usize,
+    dest_offset: usize,
+    delete_source: bool,
+    cursors: &mut BTreeMap<u64, Position>,
+) -> Result<(Document, usize), DocumentError> {
+    let moved = before.bytes()[source_offset..source_offset + source_len].to_vec();
+    if !delete_source {
+        let mut working = before.clone();
+        working.apply_bytes(dest_offset, 0, &moved)?;
+        adjust_cursors(before, &working, cursors, dest_offset, 0, moved.len());
+        return Ok((working, dest_offset));
+    }
+    let mut working = before.clone();
+    working.apply_bytes(source_offset, source_len, &[])?;
+    adjust_cursors(before, &working, cursors, source_offset, source_len, 0);
+    // dest_offset >= source end: the source's own removal shifted everything
+    // from there on back by source_len. dest_offset <= source start (the
+    // only other case left once the strictly-inside destination has already
+    // been refused by the caller): nothing before it moved.
+    let shifted_dest = if dest_offset >= source_offset + source_len {
+        dest_offset - source_len
+    } else {
+        dest_offset
+    };
+    let after_delete = working.clone();
+    working.apply_bytes(shifted_dest, 0, &moved)?;
+    adjust_cursors(
+        &after_delete,
+        &working,
+        cursors,
+        shifted_dest,
+        0,
+        moved.len(),
+    );
+    Ok((working, shifted_dest))
+}
+
 /// Resolve how a `replace` addresses the bytes it changes, as
 /// `(offset, delete_len)`, or `Ok(None)` when the request names no range and
 /// the `offset`/`cursor_id` path applies.
@@ -2696,11 +3161,11 @@ fn edit_span(
             ));
         }
     }
-    if envelope.method != "replace" {
+    if !matches!(envelope.method.as_str(), "replace" | "move" | "copy") {
         return Err((
             "edit_range_unsupported",
             format!(
-                "a range is a span and {} places bytes at a point; `replace` takes the range (with no text, it deletes it)",
+                "a range is a span and {} places bytes at a point; `replace`, `move` and `copy` take the range (for `replace`, no text deletes it)",
                 envelope.method
             ),
         ));
@@ -3226,6 +3691,7 @@ fn save(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &m
     tab.saved_digest = digest(tab.document.bytes());
     tab.base_bytes = tab.document.bytes().to_vec();
     journal_append(tab, "save", json!({"revision": tab.revision}));
+    refresh_jump_points(tab);
     frames.push(response(
         &envelope.request_id,
         json!({"saved": true, "dirty": false, "revision": tab.revision, "bytes": tab.document.bytes().len()}),

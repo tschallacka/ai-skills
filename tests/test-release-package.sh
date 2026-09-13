@@ -87,12 +87,44 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
 [ -f "$tarball" ] || t_fail "the builder wrote no $tarball"
 
 {
-    printf 'install.sh\ninstall-ui.sh\nREADME.md\nLICENSE\npackage.json\n'
+    printf 'README.md\nLICENSE\npackage.json\n'
+    # tui-hint-plugin/editor-gate-plugin: neither is a skill (no skill_files()
+    # entry) and most of their files have no comment syntax a MODE marker
+    # could sit in (.json, .js), so this list is a third, deliberate copy of
+    # the same file set installer/build-release.sh's own
+    # tui_hint_plugin_files/editor_gate_plugin_files hardcode -- same
+    # reasoning as the five names on the line above.
+    printf 'tui-hint-plugin/.claude-plugin/plugin.json\n'
+    printf 'tui-hint-plugin/hooks/hooks.json\n'
+    printf 'tui-hint-plugin/hooks/lib.sh\n'
+    printf 'tui-hint-plugin/hooks/pre-tool-use.sh\n'
+    printf 'tui-hint-plugin/opencode/tui-hint-plugin.js\n'
+    printf 'editor-gate-plugin/.claude-plugin/plugin.json\n'
+    printf 'editor-gate-plugin/hooks/hooks.json\n'
+    printf 'editor-gate-plugin/hooks/lib.sh\n'
+    printf 'editor-gate-plugin/hooks/editor-token\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-bash.sh\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-edit-write.sh\n'
+    printf 'agent-identity-plugin/.claude-plugin/plugin.json\n'
+    printf 'agent-identity-plugin/hooks/hooks.json\n'
+    printf 'agent-identity-plugin/hooks/lib.sh\n'
+    printf 'agent-identity-plugin/hooks/subagent-start.sh\n'
+    # T102: agent profiles are not a skill (no skill_files() entry) and their
+    # canonical source is JSON, a format with no comment syntax a MODE marker
+    # could sit in -- same reasoning as the three plugin lists above. Derived
+    # from PROFILE_NAMES/profile_files() (already sourced above), not a
+    # fourth hand-typed copy of the one filename.
+    for profile in "${PROFILE_NAMES[@]}"; do
+        while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            printf '.agents/profiles/%s\n' "$path"
+        done < <(profile_files "$profile")
+    done
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         declares_prod "$path" && printf '%s\n' "$path"
     done < <(cd "$repo_root" && git ls-files \
-        planning project-specificies resource-limited-testing brainstorm \
+        planning project-specifics resource-limited-testing brainstorm \
         post-implementation-review todo bug-report)
     for skill in "${SKILL_NAMES[@]}"; do
         while IFS= read -r path; do
@@ -160,12 +192,20 @@ t_assert_eq 'and every expected file was actually compared' "$compared" "$expect
 
 # ── property 3: nothing marked MODE: DEV is inside it ──────────────────────
 # Read the header only: a heredoc lower down mentions the marker strings.
+# grep -I skips a binary compiled artifact (rjq, ai-text-editor, ...) rather
+# than reading it, so its bytes are never searched for the marker text at
+# all. -c, not -q: PORTABILITY(pipefail-grep-q) -- grep -q exits on the
+# first match and closes the pipe, so under set -o pipefail the writer
+# (head) dies of SIGPIPE and the pipeline's own status is 141, not grep's;
+# -c reads to completion, so no writer ever sees a closed pipe, and its
+# output is a small decimal count rather than the matched (possibly
+# binary) content, which is what keeps a capture safe here.
 leaked=''
 while IFS= read -r path; do
     [ -n "$path" ] || continue
-    case "$(sed -n '1,25p' "$extracted/$path" 2>/dev/null)" in
-        *'# MODE: DEV'*|*'<!-- MODE: DEV -->'*) leaked="$leaked $path" ;;
-    esac
+    hits="$(head -25 "$extracted/$path" 2>/dev/null \
+        | grep -Ic -e '# MODE: DEV' -e '<!-- MODE: DEV -->' || true)"
+    [ "${hits:-0}" -gt 0 ] && leaked="$leaked $path"
 done < "$work/expected"
 t_assert_eq 'no maintainer file reached the release' "${leaked# }" ''
 # The categories that motivated the split, named so a regression says which.
@@ -189,15 +229,39 @@ t_assert_eq 'two builds of one tree are byte-identical' \
 
 # ── the property that subsumes the rest: the package installs ───────────────
 # A tarball whose contents are correct but which cannot install is still broken.
-rc=0
-( cd "$extracted" && printf 'n\n' | "$BASH" ./install.sh --skill todo \
-    --target "$work/installed" --yes ) >/dev/null 2>&1 || rc=$?
-t_assert_eq 'the extracted package installs a skill' "$rc" '0'
-# bin and binaries.tsv are part of a complete install now: the queue's tools ship
-# as a prebuilt binary, so a skill installed without bin/ can read its own rules
-# and do nothing with them.
+# This tarball itself carries no installer binary at all -- build-release.sh's
+# own output is the universal skill payload; installer/build-installer-release.sh
+# is what adds a target's compiled installer on top of it, per release asset.
+# So the installer under test is built fresh from source here, and pointed at
+# the extracted tarball via --source, same shape the old install.sh smoke test
+# had (an installer, and a source tree to install skills from), just with the
+# two no longer bundled together in one artifact.
+installer_bin="$work/installer"
+if command -v cargo >/dev/null 2>&1; then
+    ( cd "$repo_root" && cargo build --release -p installer ) >/dev/null 2>&1 \
+        && cp "$repo_root/target/release/installer" "$installer_bin" 2>/dev/null
+fi
+# T72: every skill's compiled binaries share one location keyed off $HOME,
+# not this install's own --target -- isolated here so the real run never
+# touches this machine's actual ~/.config/tsch-ai-skills/bin.
+scratch_home="$work/home"
+mkdir -p "$scratch_home"
+if [ -x "$installer_bin" ]; then
+    rc=0
+    HOME="$scratch_home" XDG_CONFIG_HOME="" "$installer_bin" install --skill todo \
+        --source "$extracted" --target "$work/installed" --yes >/dev/null 2>&1 || rc=$?
+    t_assert_eq 'the extracted package installs a skill' "$rc" '0'
+else
+    printf 'SKIP: no installer binary built and cargo unavailable to build one\n' >&2
+fi
+# bin/ no longer appears under an installed skill at all -- todo's binary
+# lands in the shared location above instead. binaries.tsv itself still
+# ships, since it is the packaging-side declaration, not the installed
+# artifact.
 t_assert_eq 'and the installed skill is complete' \
     "$(ls "$work/installed/todo" 2>/dev/null | sort | tr '\n' ' ')" \
-     "SKILL.md bin binaries.tsv docs requires.tsv schema.1.4.2.json schema.$version.json "
+     "SKILL.md binaries.tsv docs requires.tsv schema.1.4.2.json schema.$version.json "
+t_assert_eq 'and its binary reached the shared bin' \
+    "$([ -x "$scratch_home/.config/tsch-ai-skills/bin/todo" ] && printf present)" 'present'
 
 t_end

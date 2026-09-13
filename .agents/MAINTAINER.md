@@ -13,8 +13,8 @@ this file holds what applies to the repository as a whole.
 - A changed command/format is a **clean break**. No aliases, legacy modes, or
   inferred defaults. Old forms fail loudly.
 - Coordinated migration: update producer, parser/validator, fixtures, tests,
-  manifest/map, `install.sh skill_files`, and the hash test in the **same**
-  change.
+  manifest/map, `installer/src/50-manifest.sh`'s `skill_files()`, and the hash
+  test in the **same** change.
 
 ### 1.2 Small, scoped, single-source docs
 - A skill's `SKILL.md` stays a lean index and shared contract. Never let it
@@ -109,12 +109,20 @@ this file holds what applies to the repository as a whole.
   npm pack, test harnesses, `blast-radius.sh`'s freshness checks — must be
   reconciled to fetch the artifact from the release or publish pipeline in the
   same change that untracks the file.
-- **`install.sh` is the one standing exception, and it stays committed.** It is
-  fetched and run standalone (`curl … | bash`) and is the npm `bin`, so at
-  runtime it has no siblings to source and no pipeline to fetch it from — the
-  artifact *is* the entry point. Read "nothing machine-produced is committed"
-  as "except the one artifact whose whole purpose is to be downloaded on its
-  own".
+- **The installer used to be this section's one standing exception —
+  `install.sh`, machine-assembled from `installer/src/*.sh` yet still
+  committed, because it was fetched and run standalone (`curl … | bash`) and
+  had no pipeline to fetch it from.** It is retired (see git history); the
+  exception retired with it. The installer is now a compiled Rust binary
+  (`src/installer/`), built at release time and shipped as a GitHub release
+  asset, never committed — the ordinary "nothing machine-produced is
+  committed" rule already covers it without carve-out.
+  `installer/bootstrap.sh`, the small curl-piped entry point that downloads
+  that asset and hands off to it, stays committed too, but for the ordinary
+  reason every other tracked file is: it is hand-written source, not
+  generated — its own header explains why it copies a few lines from
+  `installer/src/05-config.sh`/`30-render.sh` verbatim rather than sourcing
+  them (nothing else exists on disk yet when it runs).
 
 ### 1.11 CI runs: a push cancels the run it supersedes
 - The workflow's concurrency group is keyed by ref
@@ -157,7 +165,7 @@ this file holds what applies to the repository as a whole.
 ## 2. Change checklist (minimum, per change)
 
 1. Identify every consumer (parser/validator, other helpers, tests, manifest/map,
-   `install.sh skill_files`, capsule copy, hash test).
+   `installer/src/50-manifest.sh`'s `skill_files()`, capsule copy, hash test).
 2. Update shared logic in the library, keep the helper thin.
 3. Add/update a regression fixture + test for the new behavior, including the
    actionable-error path.
@@ -168,8 +176,8 @@ this file holds what applies to the repository as a whole.
    and their references, regenerate any generated artifact (e.g. `REVIEWER.md`),
    and keep role/voice registries aligned; re-run the drift tests.
 6. Register new files in `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv`, and
-   `install.sh skill_files`; reflect benchmark-capsule dependencies in the
-   capsule copy.
+   `installer/src/50-manifest.sh`'s `skill_files()`; reflect benchmark-capsule
+   dependencies in the capsule copy.
 7. Run `bash -n`, `git diff --check`, and the bounded test suite (when one
    fails, `docs/DEBUGGING-TESTS.md` covers the evidence dump and breakpoints); run
    skill-specific drift/shape tests for any registry, voice, or generated-format

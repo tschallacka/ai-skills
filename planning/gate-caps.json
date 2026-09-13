@@ -1,8 +1,8 @@
 {
-  "function_length_cap": 31,
+  "function_length_cap": 17,
   "duplication_caps": {
     "hand-rolled .tmp.$$ temp sites": 42,
-    "tests not sourcing lib-test.sh": 7,
+    "tests not sourcing lib-test.sh": 6,
     "inline awk -F'|' parsers": 11,
     "seed progress-bar literal copies": 3,
     "percent/bar/icon derivation copies": 3

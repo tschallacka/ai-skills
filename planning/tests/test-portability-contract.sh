@@ -69,10 +69,6 @@ in_allowlist() {
         ./planning/scripts/role-context.sh:sha256-tool) return 0 ;;
         # This test forces each branch of the chain, so it has to name all three.
         ./planning/tests/test-sha256-fallbacks.sh:sha256-tool) return 0 ;;
-        # The T48b gate's known-runtime universe is a word LIST the build
-        # compares declarations against; naming a tool is not requiring it.
-        ./installer/build.sh:python3-shipped) return 0 ;;
-        ./installer/build.sh:sha256-tool) return 0 ;;
         # There is now one probe in the skill, and this is it: plan_sha256_hex
         # chooses between the compiled plan-crypt binary, the GNU form and the
         # BSD form, so it must name all three. It lives in one function file and
@@ -89,12 +85,7 @@ in_allowlist() {
         ./planning/tests/test-plan-crypt.sh:sha256-tool) return 0 ;;
         ./planning/tests/test-fix-keys.sh:sha256-tool) return 0 ;;
         ./planning/tests/test-add-fix-claim.sh:sha256-tool) return 0 ;;
-        # The generated dependency tables name every optional runtime they may
-        # verify or hint (chat's any-of group, T39). Naming is not requiring:
-        # strength still decides, and chat's members are soft.
-        ./install.sh:python3-shipped) return 0 ;;
         ./planning/tests/test-register-helpers.sh:bash-by-path-lookup) return 0 ;;
-        ./planning/tests/test-installer-noninteractive.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-plan-dir-synonym.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-overview-state.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-runtime-dependencies.sh:sha256-tool) return 0 ;;

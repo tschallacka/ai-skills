@@ -167,14 +167,16 @@ file_count="$(printf '%s\n' "$changed" | awk 'NF' | wc -l | tr -d ' ')"
 # and the flake fix the compiler; the workflows are the thing being trusted, so
 # a change to them must be exercised in full.
 #
-# install.sh, package.json and installer/* are deliberately NOT global inputs
-# (B300). None of them are Rust source, so none of them can change what a
-# crate compiles to — their own correctness (install.sh matching
-# installer/build.sh's output, every shipped file declared, the npm baseline
-# matching the tree) is proved by dedicated jobs that already run
+# package.json and installer/* are deliberately NOT global inputs (B300).
+# None of them are Rust source, so none of them can change what a crate
+# compiles to — their own correctness (every shipped file declared, the npm
+# baseline matching the tree) is proved by dedicated jobs that already run
 # unconditionally, not by this selector. Before this fix, registering one new
 # filename in installer/src/50-manifest.sh forced scope=full on the ordinary
-# act of shipping a new file — which is most commits.
+# act of shipping a new file — which is most commits. (install.sh itself,
+# the bash installer this selector used to also carve out, was retired once
+# the Rust installer under src/installer/ superseded it -- see git history
+# and .agents/MAINTAINER.md.)
 #
 # `.github/*` covers the whole CI surface, not just the workflows, BECAUSE THE
 # SELECTOR MUST NOT EXEMPT ITSELF. This script and ci-subjects.sh decide how

@@ -25,6 +25,13 @@ replays on the next call, so nothing is lost:
 ai-text-editor search -f /path/to/file --mode exact_text --query needle
 ```
 
+In `skill` mode, `ai-text-editor`/`ai-text-editor-server` live in the one
+shared location every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/`. Nothing puts it on
+`PATH` for you. In `mcp` mode there is no CLI to resolve at all: the harness
+launches `ai-text-editor-mcp` itself from the same shared location, and
+every verb above is a typed tool call instead of a command line.
+
 The exception is the seven verbs that carry a revision guard — `insert`,
 `replace`, `large_edit`, `restore`, `undo`, `redo`, `save`. On a file with no
 tab they are refused, because the revision they carry cannot have come from a
@@ -42,7 +49,13 @@ tree out of a typo.
 ## Addressing a tab
 
 Every response reports a `tab_id`, and that id is addressing enough on its own
-for every verb — no path, no endpoint:
+for every verb — no path, no endpoint. It is the shortest prefix unambiguous
+among the currently open tabs when it was first assigned, git-style, not
+always the full id — one tab alone gets a single character, fixed for that
+tab's whole life; a later tab whose id would collide with one already claimed
+gets a longer one instead, never the other way around (a query too short to
+mean just one tab is refused as `tab_ambiguous`, naming candidates, rather
+than guessed):
 
 ```text
 ai-text-editor read --tab-id 4f2a...      # no -f needed
@@ -266,6 +279,27 @@ default gives you.
    `job-progress`, `job-complete`, `job-cancel`, `job-transfer`, and
     `job-release`; detached jobs can outlive a client connection. Use the
     acknowledged `large-edit` operation for streaming large-file rewrites.
+16. Query the read-only `jump-points` command for a file's outbound CodeGraph
+    references (calls, imports, instantiations, and similar), recomputed
+    server-side at `open` and after every `save` by reading CodeGraph's own
+    SQLite index directly -- no tokens spent unless you ask for it. Each
+    entry names the referring line/column, the edge kind, and the target
+    file/line/name/kind. `stale: true` means the tab was edited since the
+    last computation; `save` recomputes them. A `null` result means
+    CodeGraph is not enabled for this project (no `.codegraph/` index) or
+    its index is not in a shape this reader supports, not that the file has
+    no references.
+17. `move`/`copy` relocate or duplicate a span server-side, with no content
+    in the request or response -- a rearrangement no longer pays for text
+    that never changed. The source is addressed exactly like `replace`'s
+    own (a range or `--match-id`, never a bare offset -- refused by name,
+    since a point has no length to relocate); the destination is a point,
+    `--dest-offset` or `--dest-line` (one past the last line appends at end
+    of file). Both are one atomic operation -- one revision, one undo step
+    -- even though `move` performs two splices internally, which is why
+    `begin-transaction`/`end-transaction` (undo-grouping only) is not the
+    same guarantee. A destination strictly inside the source span is
+    refused as `move_destination_inside_source`.
 
 ## Agent responsibilities
 
@@ -280,9 +314,10 @@ default gives you.
 3. Acknowledge recovery, large-file work, force-save, and other safety prompts.
 4. Decide whether external bytes need a `.back` copy and whether a closing tab's
    journal is preserved or explicitly cleaned. Backup failure blocks the action.
-5. Every mutating request (`insert`, `replace`, `large_edit`, `restore`, `undo`,
-   `redo`, and `save`) must include the revision most recently returned by
-   `open`, `history`, or a completed mutation. Missing revisions are refused;
+5. Every mutating request (`insert`, `replace`, `move`, `copy`, `large_edit`,
+   `restore`, `undo`, `redo`, and `save`) must include the revision most
+   recently returned by `open`, `history`, or a completed mutation. Missing
+   revisions are refused;
    stale revisions are never merged implicitly.
 6. A request that names a file is only served by the tab holding that file;
    a request routed to a different tab is refused with `file_mismatch` and

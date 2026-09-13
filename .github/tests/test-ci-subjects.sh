@@ -13,7 +13,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 subjects="$here/../ci-subjects.sh"
 failures=0
 
-# flags <scope> <crates> -> "rjq chat plan_crypt planning_commands editor"
+# flags <scope> <crates> -> "rjq chat plan_crypt planning_commands editor installer"
 flags() {
     "$subjects" --scope "$1" --crates "${2:-}" \
         | awk -F= '{ printf "%s%s", sep, $2; sep = " " } END { print "" }'
@@ -31,24 +31,27 @@ check() { # <label> <want> <scope> [crates]
 }
 
 echo "ci-subjects: the safe default"
-check "full builds everything"            "true true true true true"      full
-check "an unknown scope builds everything" "true true true true true"     wat
-check "an empty scope builds everything"   "true true true true true"     ""
-check "none builds nothing"                "false false false false false" none
+check "full builds everything"            "true true true true true true"      full
+check "an unknown scope builds everything" "true true true true true true"     wat
+check "an empty scope builds everything"   "true true true true true true"     ""
+check "none builds nothing"                "false false false false false false" none
 
 echo "ci-subjects: selective picks the right subject"
-check "rjq alone"          "true false false false false"  selective "rjq"
-check "plan-crypt alone"   "false false true false false"  selective "plan-crypt"
-check "a chat crate"       "false true false false false"  selective "chat-proto"
-check "every chat crate"   "false true false false false"  selective "chat-proto chat-server-rs chat-client-rs"
-check "an editor crate"    "false false false false true"  selective "ai-text-editor-mcp"
-check "a planning crate"   "false false false true false"  selective "planning-core"
+check "rjq alone"          "true false false false false false"  selective "rjq"
+check "plan-crypt alone"   "false false true false false false"  selective "plan-crypt"
+check "a chat crate"       "false true false false false false"  selective "chat-proto"
+check "every chat crate"   "false true false false false false"  selective "chat-proto chat-server-rs chat-client-rs"
+check "an editor crate"    "false false false false true false"  selective "ai-text-editor-mcp"
+check "an installer crate" "false false false false false true"  selective "installer"
+check "every installer crate" \
+                           "false false false false false true"  selective "installer installer-platform installer-release"
+check "a planning crate"   "false false false true false false"  selective "planning-core"
 check "an unknown crate falls to planning commands" \
-                           "false false false true false"  selective "some-new-crate"
+                           "false false false true false false"  selective "some-new-crate"
 check "several subjects at once" \
-                           "true true false true false"    selective "rjq chat-proto plan-overview"
+                           "true true false true false true"    selective "rjq chat-proto plan-overview installer"
 check "selective with no crates builds nothing" \
-                           "false false false false false" selective ""
+                           "false false false false false false" selective ""
 
 echo "ci-subjects: usage"
 exit_code() { # <args...> -> the exit status, never the output

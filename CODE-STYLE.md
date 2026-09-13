@@ -106,14 +106,16 @@ fi
 The dependency budget differs between what we ship to a user's machine and what
 only a contributor runs. Know which side of the line your file is on.
 
-**Shipped runtime** — `install.sh`, `planning/scripts/**`, anything registered
-in `planning/PACKAGE-MANIFEST.tsv`, and the other skill directories:
+**Shipped runtime** — `installer/bootstrap.sh`, `planning/scripts/**`,
+anything registered in `planning/PACKAGE-MANIFEST.tsv`, and the other skill
+directories (the compiled installer itself, `src/installer/`, is Rust, not
+shell, and is covered by its own dependency rules — see section 1b):
 
 | Tool | Status |
 |---|---|
 | `bash`, POSIX `coreutils`, `awk`, `sed`, `grep`, `git` | assumed present |
 | `rjq` | allowed — the furthest a runtime dependency may go. Declared `hard` in `planning/requires.tsv`, so the installer refuses to install *that skill* up front with a per-platform hint rather than failing halfway |
-| `openssl` | **no longer used, and no longer declared**. It was the last rung of the planning skill's SHA-256 chain and its only source of random bytes. Both are now the shipped `plan-crypt` binary (section 1b), so the `soft` row left `planning/requires.tsv`: a static binary asks the target machine for nothing. A new `openssl` call needs the row back, and `installer/build.sh` fails the build if one appears without it |
+| `openssl` | **no longer used, and no longer declared**. It was the last rung of the planning skill's SHA-256 chain and its only source of random bytes. Both are now the shipped `plan-crypt` binary (section 1b), so the `soft` row left `planning/requires.tsv`: a static binary asks the target machine for nothing. A new `openssl` call needs the row back, and `planning/tests/test-runtime-dependencies.sh` fails if one appears without it |
 | `memlimit` | allowed for `resource-limited-testing` on Apple Silicon macOS only — the documented exception to the `rjq` ceiling, because macOS offers no other way to cap memory at all. Declared `soft` in `resource-limited-testing/requires.tsv`, so the skill installs with a warning and degrades to `nice` + `cpulimit`; never vendored |
 | **`python3`** | **not allowed, in any form — not even guarded-optional** |
 
@@ -148,9 +150,11 @@ that reason — `validate-plan.sh` exits 69 without it.
 `python3` is banned here rather than merely guarded because a guard turns a
 documented feature into one that silently does not exist on a machine without
 the interpreter. Text and line processing goes to `awk`; JSON goes to `rjq`.
-Neither of the two former python sites needed it: `install.sh`'s permission
-editors became `rjq` (already guaranteed present — the permission step only runs
-when `planning` was selected, and `planning` requires `rjq`), and
+Neither of the two former python sites needed it: the bash installer's
+permission editors became `rjq` (already guaranteed present — the permission
+step only runs when `planning` was selected, and `planning` requires `rjq`;
+the compiled installer's own permission editing in `src/installer/src/permissions.rs`
+carries the same guarantee, in Rust rather than `rjq`), and
 `plan-content.sh diff` became `awk`, which is its natural home since it is
 parsing `git diff -U0` hunk headers line by line.
 
@@ -306,27 +310,30 @@ together or `planning/tests/test-installer-manifest.sh` fails:
 
 1. `planning/PACKAGE-MANIFEST.tsv`
 2. `planning/PACKAGE-MAP.tsv`
-3. `installer/src/50-manifest.sh` → `skill_files()`, then `installer/build.sh`
+3. `installer/src/50-manifest.sh` → `skill_files()`
 4. `package.json` `files` (directory level only — no change for a new sibling)
 
-`install.sh` is the one file that must ship as a single artifact — it is fetched
-and run standalone (`curl … | bash`) and is the npm `bin`, so it has no siblings
-to source. It is no longer hand-maintained as one file: it is **assembled from
-parts** by `installer/build.sh` out of `installer/src/NN-<concern>.sh`, plus the
-dependency tables generated from `installer/tools.tsv` and each skill's
-`requires.tsv`. Edit a part and run the build; never edit `install.sh` itself.
-`planning/tests/test-installer-build.sh` and the `installer-build` CI job fail on
-a hand edit.
+`installer/bootstrap.sh` is the one shell file that must ship as a single
+artifact — it is fetched and run standalone (`curl … | bash`) and is the npm
+`bin`, so at the moment it runs nothing else from this repository is on disk
+yet to source. It stays self-contained by design, not by generation: its own
+header explains why the mascot/palette pixels are copied in verbatim rather
+than sourced from `installer/src/05-config.sh`/`30-render.sh`.
 
-Long section banners inside a part, so the assembled artifact stays navigable:
+The actual installer — the skill picker, headless install, permission and
+MCP registration — is the compiled Rust binary under `src/installer/`, not a
+shell file at all; its own size and decomposition rules are Rust's, not this
+section's. `installer/src/05-config.sh` and `installer/src/50-manifest.sh` are
+the two bash files that still matter here: the last surviving fragments of the
+retired bash installer, sourced directly by `installer/build-release.sh` for
+the skill list and file manifest above. Long section banners in either one,
+same as any other file past the size limits in this section:
 
 ```bash
 # ─────────────────────────────────────────────────────────────────────────────
 # Skill registry — the single list every other section derives from.
 # ─────────────────────────────────────────────────────────────────────────────
 ```
-
-and a table of contents in the docblock listing the banners in order.
 
 ---
 

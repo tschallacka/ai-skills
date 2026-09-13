@@ -19,10 +19,13 @@ fn main() {
         "open" => "open",
         "capabilities" => "capabilities",
         "history" => "history",
+        "jump-points" => "jump_points",
         "resources" => "resources",
         "read" => "read",
         "insert" => "insert",
         "replace" => "replace",
+        "move" => "move",
+        "copy" => "copy",
         "large-edit" => "large_edit",
         "begin-transaction" => "begin_transaction",
         "end-transaction" => "end_transaction",
@@ -144,6 +147,8 @@ fn main() {
         ("--range-end-line", "range_end_line"),
         ("--range-start-byte", "range_start_byte"),
         ("--range-end-byte", "range_end_byte"),
+        ("--dest-offset", "dest_offset"),
+        ("--dest-line", "dest_line"),
     ] {
         if let Some(value) = option(&args, &[argument]) {
             payload.insert(field.into(), json!(parse_number(&value, argument)));
@@ -480,12 +485,12 @@ fn help() {
     println!("New files: open on a path that does not exist yet is not an error — the tab starts empty and the file is created on disk by the first successful save.");
     println!("Recovery: if the server died, open again (a stale endpoint whose owning process is gone is reclaimed automatically); reads report dirty/external_change_pending state, and every server refusal is named on stderr in every presentation.");
     println!("Stale endpoints: when the recorded owner is still alive or cannot be ruled out, the start is refused with that pid and generation named. Verify the process is gone, then repeat the command with --takeover-stale-endpoint; the old record is kept under a stale- suffix rather than overwritten.");
-    println!("Commands: open capabilities history resources read insert replace large-edit begin-transaction end-transaction restore undo redo save save-as close resolve index cursor page search");
+    println!("Commands: open capabilities history jump-points resources read insert replace move copy large-edit begin-transaction end-transaction restore undo redo save save-as close resolve index cursor page search");
     println!(
         "         job-start job-poll job-progress job-complete job-cancel job-transfer job-release"
     );
     println!("Response size: --verbosity 0|1|2|3 (default 1). 0 is the answer and the tab that gave it, nothing else. 1 adds what verification and the next step need - revision, dirty, the tab mode, the resolved edit span, completeness, and a searchs pager key and count. 2 adds navigation - cursors, byte windows, block paging, undo depths. 3 is everything. capabilities and resources are exempt (their payload IS metadata), and a refusal always carries its full code, message and choices whatever the level.");
-    println!("Addressing a tab: every response reports a tab_id, and -T/--tab-id ID addresses that tab for any command with no --file and no --endpoint. --tab-path FRAGMENT names a tab by filename or by a trailing run of path components (component boundaries, not substrings) and is the recovery when the id is lost; several matches are refused with tab_ambiguous AND the candidates with their ids, none with tab_unmatched and the open tabs. A command naming nothing runs on the focused tab - the tab the last successful call was served by, which open sets and a refusal never moves.");
+    println!("Addressing a tab: every response reports a tab_id, and -T/--tab-id ID addresses that tab for any command with no --file and no --endpoint. The reported id is the shortest prefix unambiguous among currently open tabs, git-style, not always the full id; a shorter one you supply that now names more than one tab is refused with tab_ambiguous AND the candidates with their ids, the same as an ambiguous --tab-path. --tab-path FRAGMENT names a tab by filename or by a trailing run of path components (component boundaries, not substrings) and is the recovery when the id is lost; several matches are refused with tab_ambiguous AND the candidates with their ids, none with tab_unmatched and the open tabs. A command naming nothing runs on the focused tab - the tab the last successful call was served by, which open sets and a refusal never moves.");
     println!("Common flags (long / short): --file -f, --tab-id -T, --tab-path, --endpoint -e, --line -l, --column -c, --action -a, --text -t, --query -q, --mode -m (search only), --expected-revision -r, --offset -o, --length -L, --delete-len -d, --limit -n, --cursor-id -C (edit anchor), --id (which numbered cursor a navigation command moves; default 0), --job-id -j, --presentation -p, --before -b, --after -B, --gradient -g, --wrap-width -w, --session -s, --agent -A.");
     println!("Navigation: --id N routes a cursor command to numbered cursor N (every cursor is created by its first move); home and end move to the first and last column of the CURRENT line, not the document's start or end; next_word/previous_word step words; page_up/page_down move --page-lines N lines (default 40).");
     println!("Exit codes: 0 success; 64 usage, including any option the command does not read; 66 no such tab, file, or reachable server (run open first); 1 when the server itself refused, with the refusal code printed.");
@@ -495,6 +500,7 @@ fn help() {
     println!("Coordinates: text lines are 1-based and Unicode-scalar columns are 0-based; raw/hex coordinates are byte offsets. Refetch after every revision.");
     println!("Wrapped navigation: -w/--wrap-width N adds visual coordinates; -V/--visual interprets -l/-c as wrapped coordinates. Stored cursors remain logical.");
     println!("Edits: -o/--offset N (a BYTE offset into the document) or -C/--cursor-id N, plus -d/--delete-len N (bytes to delete from the offset; it may cross line ends and is reported back as spans_lines when it does) and -t/--text TEXT or --bytes-base64 B64; omitting -o inserts/replaces at that cursor. For replace, a whole span can be addressed directly instead of by arithmetic: --range-start-line N --range-end-line N (inclusive, 1-based, the last line's newline included, so replacing with no text deletes the lines outright) or --range-start-byte N --range-end-byte N (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across). A range may not be combined with -o, -d or -C, and insert takes no range - it places bytes at a point. -r/--expected-revision N is required for safe concurrent edits. Edits are journal-and-buffer only: they return a new revision but nothing reaches the file until save succeeds; mutating responses carry a dirty flag. Use begin-transaction/end-transaction to group edits into one undo step.");
+    println!("move/copy relocate or duplicate a span server-side with no content in the request or response -- the server already holds the bytes. The source is a span, addressed exactly like replace's own (--range-start-line/--range-end-line, --range-start-byte/--range-end-byte, or --match-id; a bare -o/-d/-C is refused by name, not silently ignored). The destination is a point: --dest-offset N (a byte position) or --dest-line N (1-based, insert immediately before that line, text tabs only; one past the last line appends at end of file) -- exactly one of the two. --expected-text/--expected-bytes-base64 verify the source span first, same as replace. Both are one atomic operation (one revision, one undo step) even though move performs two splices internally; a destination strictly inside the source span is refused as move_destination_inside_source.");
     println!("Reading: -b/--before N -B/--after N (line window around the cursor), -o/--offset N -L/--length N (a BYTE window of the text, snapped to UTF-8 boundaries), --range-start-line N --range-end-line N (an inclusive line window on text tabs), --range-start-byte N --range-end-byte N (a half-open byte window on raw and hex tabs).");
     println!("Paging search results: -n/--limit N, --pager-key KEY, --historical, and the page command's -o/--offset N; --order forward|reverse applies to search responses. A search command itself refuses -o/--offset: the offset pages an existing result set, it never trims a fresh scan.");
     println!("Presentation: -p/--presentation structured|text|paging|stream; paging/stream readers must restart after the FILE EDITED delimiter.");

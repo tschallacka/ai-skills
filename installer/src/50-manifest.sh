@@ -1,5 +1,4 @@
 # MODE: DEV
-# PACKAGE: PROD
 # ---------------------------------------------------------------
 # 9. Per-skill file manifest
 # ---------------------------------------------------------------
@@ -259,6 +258,7 @@ scripts/plan-root
 scripts/rebuild-plan-progress
 scripts/register-command
 scripts/register-read
+scripts/register-rebuild
 scripts/remove-coverage
 scripts/remove-plan
 scripts/remove-work-unit
@@ -506,7 +506,6 @@ tests/test-platform-selection.sh
 tests/test-npm-package.sh
 tests/test-overview-fixtures.sh
 scripts/register-lib.sh
-scripts/register-rebuild.sh
 tests/test-plan-crypt.sh
 tests/test-plan-freshness.sh
 tests/test-roster-cross-reference.sh
@@ -528,7 +527,7 @@ tests/test-workspace-copy-excludes-build-trees.sh
 tests/test-worktree-id-collision-warning.sh
 EOF
             ;;
-        project-specificies)
+        project-specifics)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         resource-limited-testing)
@@ -551,6 +550,9 @@ EOF
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         text-etiquette)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
+        question-etiquette)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         www)
@@ -775,6 +777,21 @@ ISHEOF
             for file in "$SOURCE_ROOT/ci-failures/scripts/"*.sh; do
                 [ -f "$file" ] && printf '%s\n' "scripts/$(basename "$file")"
             done
+            ;;
+    esac
+}
+
+# profile_files <profile> -- T102's own declaration, parallel to skill_files()
+# but keyed by profile name rather than skill name: a profile lives under
+# .agents/profiles/, not under any skill directory, and installer/src/main.rs
+# reads its JSON directly rather than copying a directory tree. A hand list
+# for the same reason skill_files() is one -- tests/test-profile-files-manifest.sh
+# is what notices a tracked profile file nobody declared, or a declared file
+# that does not exist.
+profile_files() {
+    case "$1" in
+        nitpicker)
+            printf '%s\n' nitpicker.json
             ;;
     esac
 }

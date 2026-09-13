@@ -79,9 +79,15 @@ impl Harness {
             .arg(port.to_string())
             .env("AI_CHAT_HOME", &home)
             .env("AI_CHAT_BIND", "127.0.0.1")
-            // Announce nowhere anything listens: this server must not be
-            // discovered by the agents using this machine's real beacon.
-            .env("AI_CHAT_BEACON_PORT", (port + 1).to_string())
+            // The server reads `CHAT_BEACON_PORT` (no `AI_` prefix); the
+            // client reads `AI_CHAT_BEACON_PORT` -- deliberately different
+            // names, not a typo (see chat/tests/test-chat-resolution.sh's own
+            // comment on this exact pairing). Setting only the client-side
+            // name here left this test's own server announcing on the real
+            // machine's default beacon port (7780) instead of nowhere: latent
+            // until a call needed real discovery rather than the pre-seeded
+            // session (T143's session/agent-override tests were the first).
+            .env("CHAT_BEACON_PORT", (port + 1).to_string())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -337,6 +343,129 @@ fn wait_returns_when_a_message_lands_not_on_the_next_poll() {
     );
 }
 
+/// T104: a registered trigger wakes `wait` on a message that mentions
+/// nobody at all -- the actual case that cost the most (an instruction
+/// addressed to nobody in particular). Same threaded shape as
+/// `wait_returns_when_a_message_lands_not_on_the_next_poll`, but the message
+/// carries no `@nick` -- only the trigger phrase.
+#[test]
+fn a_registered_trigger_wakes_wait_on_a_message_with_no_mention_at_all() {
+    let Some(mut harness) = Harness::new("trigger") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t104"}));
+    let added = harness.call("trigger_add", json!({"pattern":"install"}));
+    let trigger_id = added["trigger_id"].clone();
+    assert_ne!(
+        trigger_id,
+        Value::Null,
+        "trigger_add did not return an id: {added}"
+    );
+
+    let home = harness.home.clone();
+    let port = harness.port;
+    let bin = bin_dir().join("chat-client-rs");
+    let sender = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(1));
+        let status = Command::new(bin)
+            .args([
+                "send",
+                "--server",
+                &format!("127.0.0.1:{port}"),
+                "--nick",
+                "other",
+                "--chan",
+                "#t104",
+                "--text",
+                "q6 write all configs, cleanup too, and install the new build",
+                "--no-session",
+            ])
+            .env("AI_CHAT_HOME", &home)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("chat-client-rs runs");
+        assert!(status.success());
+    });
+    let started = Instant::now();
+    let woke = harness.call(
+        "wait",
+        json!({"channel":"#t104","timeout_seconds":30,"mentions":true}),
+    );
+    let elapsed = started.elapsed();
+    sender.join().expect("the other agent finished");
+    assert!(
+        woke["timed_out"] != json!(true),
+        "wait timed out instead of waking on the trigger: {woke}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(20),
+        "wait took {elapsed:?}, which is a poll rather than a push"
+    );
+    let messages = woke["messages"].as_array().expect("messages");
+    assert!(
+        messages
+            .iter()
+            .any(|row| row["text"].as_str().unwrap_or_default().contains("install")),
+        "the pushed message is missing: {woke}"
+    );
+
+    // A disabled trigger stops firing without losing its definition.
+    harness.call(
+        "trigger_toggle",
+        json!({"trigger_id": trigger_id, "enabled": false}),
+    );
+    harness.other_sends("#t104", "install again, still nobody mentioned");
+    let after_disable = harness.call(
+        "wait",
+        json!({"channel":"#t104","timeout_seconds":1,"mentions":true}),
+    );
+    assert_eq!(
+        after_disable["timed_out"],
+        json!(true),
+        "a disabled trigger still woke wait: {after_disable}"
+    );
+
+    let listed = harness.call("triggers", json!({}));
+    let entries = listed["triggers"].as_array().expect("triggers");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["trigger_id"], trigger_id);
+    assert_eq!(entries[0]["enabled"], json!(false));
+
+    harness.call("trigger_remove", json!({"trigger_id": trigger_id}));
+    let after_remove = harness.call("triggers", json!({}));
+    assert_eq!(
+        after_remove["triggers"].as_array().map(Vec::len),
+        Some(0),
+        "trigger_remove left a stale entry: {after_remove}"
+    );
+}
+
+/// A sender-scoped trigger only fires from that exact nick -- proven end to
+/// end, not just at the pure-function level `conn::tests` already covers.
+#[test]
+fn a_sender_scoped_trigger_ignores_a_matching_message_from_someone_else() {
+    let Some(mut harness) = Harness::new("triggerscope") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t104b"}));
+    harness.call(
+        "trigger_add",
+        json!({"pattern":"install","sender":"michael"}),
+    );
+    // "other", not "michael": the pattern matches but the sender does not.
+    harness.other_sends("#t104b", "please install this");
+    let unmatched = harness.call(
+        "wait",
+        json!({"channel":"#t104b","timeout_seconds":1,"mentions":true}),
+    );
+    assert_eq!(
+        unmatched["timed_out"],
+        json!(true),
+        "a trigger scoped to a different sender fired anyway: {unmatched}"
+    );
+}
+
 /// Presence: who is on the channel right now.
 #[test]
 fn who_reports_the_members_the_server_knows() {
@@ -388,4 +517,82 @@ fn a_bad_argument_is_refused_by_name() {
         .as_str()
         .unwrap_or_default();
     assert!(text.contains("text"), "unexpected refusal: {text}");
+}
+
+/// T143: a subagent that declares its own identity gets its own nick and
+/// connection, separate from its parent's -- proven by a real `who` on a
+/// channel every identity joined, and by a message one identity sent
+/// carrying that identity's nick when another connection reads it back.
+#[test]
+fn distinct_session_overrides_get_their_own_nick_and_hold_separate_connections() {
+    let Some(mut harness) = Harness::new("multiplex") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t143"}));
+    harness.call("join", json!({"channel":"#t143","session":"sub-a"}));
+    harness.call("join", json!({"channel":"#t143","session":"sub-b"}));
+
+    let who = harness.call("who", json!({"channel":"#t143"}));
+    let members: Vec<String> = who["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .map(|m| m.as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(members.contains(&"tester".to_string()), "{who}");
+    assert!(members.contains(&"agent-suba".to_string()), "{who}");
+    assert!(members.contains(&"agent-subb".to_string()), "{who}");
+
+    harness.call(
+        "send",
+        json!({"channel":"#t143","text":"hi from a","session":"sub-a"}),
+    );
+    let read = harness.call("read", json!({"channel":"#t143"}));
+    let senders: Vec<String> = read["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .map(|m| m["nick"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(
+        senders.contains(&"agent-suba".to_string()),
+        "the message must be attributed to the sub-a identity's own nick, not the default \
+         connection's: {read}"
+    );
+}
+
+/// `agent` is documented as an alias for `session`; prove it resolves to the
+/// exact same identity rather than a second, silently different one.
+#[test]
+fn the_agent_argument_is_an_alias_for_session() {
+    let Some(mut harness) = Harness::new("agent-alias") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t143b","agent":"sub-a"}));
+    let who = harness.call("who", json!({"channel":"#t143b"}));
+    let members: Vec<String> = who["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .map(|m| m.as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(members.contains(&"agent-suba".to_string()), "{who}");
+}
+
+/// An empty override is not a declared identity: it must fall back to the
+/// adapter's own default connection rather than minting a nick from nothing.
+#[test]
+fn an_empty_session_argument_falls_back_to_the_default_identity() {
+    let Some(mut harness) = Harness::new("empty-session") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t143c","session":""}));
+    let who = harness.call("who", json!({"channel":"#t143c"}));
+    let members: Vec<String> = who["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .map(|m| m.as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(members.contains(&"tester".to_string()), "{who}");
 }

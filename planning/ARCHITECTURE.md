@@ -16,7 +16,7 @@ It complements the other three internal documents and duplicates none of them:
 
 `SKILL.md` remains the only agent-facing instruction. This file is **not** in
 `PACKAGE-MANIFEST.tsv`, not in `PACKAGE-MAP.tsv`, and not in
-`install.sh skill_files()` — it is never installed, never copied into a
+`installer/src/50-manifest.sh`'s `skill_files()` — it is never installed, never copied into a
 benchmark capsule, and never loaded by the skill, exactly like `MAINTAINER.md`.
 
 Every diagram below is drawn at the level `CODE-STYLE.md` §11 requires: node

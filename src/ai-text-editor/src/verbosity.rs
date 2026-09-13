@@ -88,6 +88,10 @@ fn declared_tier(key: &str) -> Option<u8> {
         "tab_id" => 0,
         // The content of a read, a search, an index inspection, a page.
         "text" | "bytes_base64" | "matches" | "blocks" | "lines" => 0,
+        // `jump_points`'s own result: a `read` returns its text at every
+        // level, and this is the same rule for the verb whose whole point is
+        // the outbound-reference list.
+        "jump_points" => 0,
         // Terminal facts of a verb that has no other content: without these
         // the answer is empty rather than terse.
         "saved" | "closed" | "restored" | "resolved" | "transaction" | "job" | "id" => 0,
@@ -114,6 +118,11 @@ fn declared_tier(key: &str) -> Option<u8> {
         // not decoration — the verify-read after every edit existed because
         // these were missing.
         "offset" | "delete_len" | "bytes_written" | "deleted" => 1,
+        // T113: move/copy's own resolved span, the same verification-grade
+        // reasoning as offset/delete_len just above — the answer says what
+        // actually relocated, so the caller need not send or re-read the
+        // content to confirm it.
+        "source_offset" | "source_len" | "dest_offset" => 1,
         // A delete that crossed a line end changed more than the caller may
         // have meant; that belongs with the span it applies to.
         "spans_lines" => 1,
@@ -274,7 +283,14 @@ mod tests {
 
     #[test]
     fn a_verbs_own_result_survives_the_lowest_level() {
-        for key in ["text", "bytes_base64", "matches", "blocks", "saved"] {
+        for key in [
+            "text",
+            "bytes_base64",
+            "matches",
+            "blocks",
+            "saved",
+            "jump_points",
+        ] {
             assert_eq!(tier(key), 0, "{key} is an answer, not metadata");
         }
     }
