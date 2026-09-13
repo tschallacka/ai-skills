@@ -76,6 +76,16 @@ jobs:
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-msvc
           components: rustfmt,clippy
 
+      # test-release-package.sh's build-release.sh cross-compiles the whole
+      # workspace for x86_64-unknown-linux-musl (chat-server-rs's own
+      # dependency on `ring` needs a real C compiler for that target, not
+      # just the Rust target's stdlib) -- the same musl-tools package the
+      # "builds and runs every subject in scope" jobs already install below,
+      # needed here too since this job never runs inside that one's shell.
+      - name: Install the musl C toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y -qq musl-tools
+
       - name: Refuse an unconfigured plan-overview crate leg
         env:
           REFUSE_UNCONFIGURED_CARGO: 1
