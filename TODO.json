@@ -23,246 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T72",
-      "title": "Move installed binaries to the shared XDG bin and retire the per-skill bin/",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Second half of the shared-binary work. The repo side is done (one bin/<triple> at the root, plan_bin_dir resolving it). What remains is the installed side and everything that declares the old layout. The installer must place binaries in ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin -- the directory custom-locations and the project-specificies notes already use -- and record it as AI_SKILLS_BIN_ROOT in the global .env, which plan_bin_dir already reads first. That is a schema 2->3 bump: plan-env.sh validates a CLOSED key set in three places (write_global, the check_manifests allow-list, and the version gate), values may not contain a tilde so the path must be expanded before writing, and planning/SKILL.md pins the version too. Then: drop the tracked planning/bin/<triple>/rjq and the per-skill bin from binaries.tsv semantics; declare plan-crypt, which is built and resolved but appears in no binaries.tsv and no manifest row, which rust-development-guidelines.md:199 calls illegal and test-shipped-binaries misses because it validates directory names rather than filenames; fix B94 by collapsing the remaining copies of the uname->triple table onto one resolver. Tests to rework: test-shipped-binaries.sh:104 hard-wires the artifact to the registry's own directory and is the assumption the move breaks, plus test-skill-files-manifest, test-persona-drift, test-installer-manifest, test-platform-selection and test-release-package. Packaging: package.json files[], the generated .npmignore, installer/build-release.sh, and the ten rows each in PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv. Docs stating the old rule: rust-development-guidelines.md section 6 (the authority), CODE-STYLE.md 117-121 and 200-207, planning/MAINTAINER.md 2.15 and 181-184, and chat/SKILL.md:84 which already names a path that does not exist.",
-      "blocked_on": null,
-      "refs": [
-        "installer/src/60-install.sh",
-        "planning/scripts/plan-env.sh",
-        "tests/test-shipped-binaries.sh",
-        "rust-development-guidelines.md"
-      ],
-      "note": "NEEDS DISCUSSION before implementation: this is a config-schema bump (plan-env.sh 2->3) plus a change to where install.sh places binaries system-wide, touching ~10 tests and ~5 docs. Before starting I need a decision on migration: an existing install already has binaries under the per-skill bin/ path and a .env at schema 2. Should install.sh (a) auto-migrate on next run (move the files, rewrite .env, no user action), (b) leave old installs working via a documented fallback read-path in plan_bin_dir indefinitely, or (c) just document it as a breaking change users fix by re-running the installer? That choice drives whether plan_bin_dir needs to keep reading the old location at all, which changes the shape of the fix. Separately, the plan-crypt-not-in-binaries.tsv problem this TODO also names looks like a small, independent, low-risk fix (just add the missing manifest row) -- I can peel that off as its own bug/todo without waiting on the migration decision, if useful. Moving to the next item; this one is parked pending your call on (a)/(b)/(c). DECIDED 2026-09-10 (Tschallacka): no backwards compatibility -- option (c). install.sh moving binaries to the shared XDG bin is a breaking change for an existing per-skill-bin install; users fix it by re-running the installer. plan_bin_dir does not need to keep reading the old per-skill location at all. Ready to implement; the plan-crypt-not-in-binaries.tsv gap this TODO also names is still a small, independent, low-risk fix that can be peeled off separately if useful.",
-      "created_at": "2026-08-31T13:27:55Z",
-      "updated_at": "2026-09-10T12:42:40Z"
-    },
-    {
-      "id": "T104",
-      "title": "the chat MCP wakes on declared trigger phrases, not only on a nick mention",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Michael: 'The mcp should have something baked in, that it actively triggers a wake on made trigger sentences.'\n\nToday an agent wakes only when its nick appears. That misses the case that has cost the most here: an instruction addressed to nobody in particular. Measured twice in one session -- Michael wrote 'q6 write all configs, cleanup too' with no mention and it reached no agent, and B254 meant it could never be read afterwards either.\n\nSHAPE. The adapter's wait tool takes a set of trigger phrases alongside the nick, declared once when the session registers rather than passed per call, and returns when any of them appears. The nick stays a trigger; it stops being the only one.\n\nPoints that decide the design, from what the shell version got wrong:\n- Match the message TEXT, not the whole stored line. A stored line begins with its sender, so a naive pattern matches what an agent SAID and wakes it on its own messages -- t90 found exactly that in the shell example.\n- Substring, not regex, unless a caller asks for a regex: a phrase is what a human types, and a regex metacharacter in it is a surprise.\n- Case-insensitive by default for phrases, since an instruction is prose.\n- The set belongs to the agent, not the channel: a nitpicker wants 'style' and 'comment', an installer agent wants 'install' and 'registration'.\n\nThe shell client should grow the same thing so the two front ends do not disagree, but the MCP is where it belongs first: it already holds a live connection, so it can match on arrival rather than polling a log.\n\nDepends on nothing; B254 makes it more valuable but does not block it.",
-      "blocked_on": null,
-      "refs": [],
-      "note": "BLOCKED, needs a design call: 'declared once when the session registers' presumes a registration step, but chat-mcp has no explicit register/configure tool today -- session state is established implicitly on first connect (Held::open), and the only tools are status/discover/join/leave/send/read/wait/who. Three ways to give triggers a home, none obviously right without a decision: (a) an env var read once at process startup (precedent: AI_CHAT_BEACON_PORT), simple but means changing triggers mid-session needs a restart; (b) a new 'configure' tool call made once before 'wait' honors triggers, matching the prose exactly but adding a tool; (c) an optional argument on 'join', since join is the closest thing to an explicit per-agent setup step today. Also needs the wire schema for sender-scoped pairs settled (array of {sender?, phrase?} objects, wildcards as the absent field) since that is new schema surface TOOL_ARGUMENTS/tool_argument()/routing() all have to agree on. B283 and B254, which this TODO's own note leaned on, are both already fixed, so the nick-suffix workaround the note describes may no longer be needed -- worth confirming with a fresh repro rather than assumed away. Parking this; picking up other high-priority items. DECIDED 2026-09-10 (Tschallacka): option (b) -- a dedicated tool surface, not an env var (cannot change mid-session) or a join argument (one-shot setup, no natural deregister/disable path). Requirements stated: any agent can DEFINE its own triggers (mIRC-style pattern syntax -- wildcards like * and ?, not just literal substrings), and can DEREGISTER a trigger or TEMPORARILY DISABLE one without fully removing it (so it can be re-enabled later without re-defining it). This implies at least three tool-level operations: register/define a trigger (pattern, optional sender-scope), deregister (remove permanently), and enable/disable (toggle without losing the definition) -- a single configure-once call is not enough. Wire schema still needs settling: how a trigger is identified for deregister/toggle (an id the register call returns? the pattern text itself as the key?) and how sender-scoping composes with mIRC-style wildcards in the pattern. Ready to move from design question to a concrete tool-shape proposal.",
-      "created_at": "2026-09-07T22:20:26Z",
-      "updated_at": "2026-09-10T12:43:09Z"
-    },
-    {
-      "id": "T122",
-      "title": "Ship a plugin that injects each subagent its own id at SubagentStart",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Tschallacka asked whether a plugin could expose the per-subagent id. It can, and the whole chain was measured on 2026-09-08 rather than reasoned about.\n\nWHAT WAS PROVEN, in order:\n\n1. A SubagentStart hook exists and fires per subagent. It took effect immediately on being written to settings.json, with no session restart.\n\n2. Its payload carries the identity nothing else does: agent_id, agent_type, plus session_id, prompt_id, cwd, scratchpad_dir and transcript_path. The agent_id matched, character for character, the id the Agent tool returned to the spawner -- a4631ac048e789cbb for the last probe.\n\n3. hookSpecificOutput.additionalContext reaches the subagent's own context. A subagent asked to report its injected identity answered AGENT_ID=a4631ac048e789cbb TYPE=code-researcher having called no tools, so it read it from context rather than deriving it.\n\nWHAT TO BUILD: a plugin shipping one SubagentStart hook that injects the agent's own id and type, and instructs it to pass that id as the session on every editor and chat call. The spawner needs to remember nothing and the subagent cannot be confused about who it is.\n\nTHE HONEST LIMIT: this is context injection, not an environment variable. The hook cannot set env for the subagent, because the subagent is not a new process -- so a CLI call from a subagent's bash still needs the id passed explicitly, and the subagent now knows it well enough to do that. Being context, it is also SOFT: the model has to use what it was told.\n\nWHICH IS WHY IT PAIRS WITH THE REFUSAL. Soft supply plus a hard requirement is what makes it reliable: the hook guarantees every subagent HAS an id, and an editor that refuses an undeclared caller guarantees every subagent USES it. Neither half is sufficient alone -- injection without refusal is advisory, refusal without injection is an obstacle.",
-      "blocked_on": null,
-      "refs": [
-        "ai-text-editor/SKILL.md",
-        "chat/SKILL.md",
-        "src/agent-session-key/src/lib.rs"
-      ],
-      "note": "DECIDED 2026-09-09, and these close the open design questions.\n\nQ11a -- STRIP THE MODEL-FACING SESSION ARGUMENT from the MCP tool schemas. Once\nthe adapter can determine the caller itself, a session the model passes is\nadvisory at best; one that disagrees with the resolved identity is a mismatch to\nrefuse, not a value to trust.\n\nQ12 -- GATE THE SKILL INSTALL PER HARNESS. A session-dependent tool installs as\nan MCP on every harness, and as a skill only on codex and opencode, where a\nplugin supplies the agent id for free. On Claude Code the identity would have to\ncome from the model on every call, which is a per-call token cost for something\nthe harness already knows, so the installer refuses the skill install there and\nstates the reason. Tschallacka's wording: the installer cannot offer the skill\ninstall where the session cannot be guaranteed without extra token usage from the\nagent on every single call.\n\nSTRUCTURE -- the resolution logic lives in the agent-session-key crate and is\ncalled at the adapter's ENTRY POINT to record this run's session values, rather\nthan being scattered through the server. Where a harness supplies a per-call\nidentity that wins; the ladder is what runs when it does not; and where a harness\nsupplies none, mint an id and persist it for that worker.\n\nMEASUREMENTS MOVED. The wire and hook findings for all three harnesses, both the\nMCP side and the skill side, now live in .agents/knowledge/agent-identity-across-harnesses.md,\nwith the ladder and the procedure for adding an unmeasured harness in\nsrc/agent-session-key/HARNESS-IDENTITY.md. Read those rather than this note; what\nfollows is only what they added on 2026-09-09.\n\nCODEX, both surfaces. The MCP wire carries the identity outright:\nparams._meta[\"x-codex-turn-metadata\"] holds session_id, thread_id, turn_id and\nthread_source, where session_id is the CLI process and thread_id is the AGENT --\na subagent gets its own, matching SubagentStart's agent_id and the id the TUI\nprints at spawn. No join needed. On the shell side codex DOES honour updatedInput,\ncontradicting the Claude Code result, but only alongside permissionDecision\n\"allow\": without it the run fails with \"PreToolUse hook returned updatedInput\nwithout permissionDecision:allow\". With both, a hook rewrote a command to carry\nthe agent id and the probe read it back.\n\nOPENCODE, both surfaces. Its MCP wire carries nothing joinable -- only\nprogressToken -- and the plugin's callID never reaches the server, so the Claude\nCode join is impossible there. Instead tool.execute.before can mutate output.args,\nand shell.env merges into the command environment; both were measured giving a\nparent and a subagent DISTINCT session ids while OPENCODE_PID was identical.\n\nCLAUDE CODE, the shell side, which was the open half. A subagent's environment is\nBYTE-IDENTICAL to its parent's: the only variable that differed was CLAUDE_EFFORT,\na model setting. CLAUDE_CODE_AGENT reads \"claude\" for a code-researcher subagent,\nso it names the harness rather than the agent. With updatedInput refused for\ncommand hooks, a Claude Code skill binary cannot learn who invoked it, and that is\nwhat Q12 is decided on.\n\nCORRECTION to the codex trust note recorded earlier: the trusted_hash covers the\nhook REGISTRATION, not the script's contents. Rewriting the hook script at the\nsame path did not re-prompt, while adding a second registered event did. So a\ntrusted registration keeps trusting whatever that path later contains. Tool\napproval is separate and per tool: the parent's \"always allow\" did not cover a\nsubagent's first call.\n\nSTILL OPEN: whether the individual binaries remain a shipped, agent-facing\nsurface. They are needed either way as the MCP server's substrate and by the test\nsuite; what Q12 decides is only whether they stay advertised, which is a\nMODE/PACKAGE marker change rather than a code deletion.",
-      "created_at": "2026-09-08T20:56:13Z",
-      "updated_at": "2026-09-08T23:01:52Z"
-    },
-    {
-      "id": "T123",
-      "title": "The identity plugin installs with any session-dependent skill, as a hard requirement",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Tschallacka's ruling: the SubagentStart identity plugin (T122) is not optional\nwhere it is needed. A skill whose correctness depends on knowing WHICH agent is\ncalling must not install without it, because installing such a skill without it\nproduces the silent failure it exists to prevent -- two agents sharing one\nsession and neither able to tell.\n\nWHICH SKILLS. The fact belongs to the skill rather than to a list in the\ninstaller, matching how this repository registers everything else: the directory\nis the registration. requires.tsv already declares \"what this skill needs on the\ntarget machine at runtime, and how badly\", and a per-agent identity is exactly a\nruntime need -- so it is a row there, and the existing unmet-requirement\nmachinery reports it. \"MUST\" is then expressible in the vocabulary already\npresent: the requirement is hard, not soft.\n\nSession-dependent as measured today: chat (its session key decides the nick and\nthe per-channel cursors), ai-text-editor (session ownership of tabs, once T118\nlands), interactive-shell (the session id names the socket). Confirm each\nagainst its own code rather than inheriting this list.\n\nTHE STEP. Same shape as interactive_shell_permission_step and\neditor_steering_step in installer/src/70-permissions.sh, which already know how\nto touch settings.json safely: back the file up beside itself unless git tracks\nit, read defensively with rjq, write through a mktemp and rename. It installs\nthe hook script into the agent root and registers the SubagentStart entry,\nreports \"already in place\" on a second run rather than duplicating, and fires\nonly when a session-dependent skill is among those selected.\n\nDECLINING IT MUST SAY WHAT IT COSTS, the way the editor steering warning does:\nwithout the hook, every subagent shares its parent's session, so two agents will\nwrite one cursor and hold one set of tabs, and neither will be told. That is a\nsilent wrong answer rather than a visible failure, which is the whole reason\nthis is a hard requirement.\n\nNOT EVERY AGENT CAN HAVE IT. SubagentStart is Claude Code's hook. For an\nopencode or codex root the step prints the manual equivalent and says plainly\nthat the guarantee is absent there, exactly as print_manual_interactive_shell_permissions\ndoes -- rather than pretending the install is equivalent.\n\nORDER: T122 builds the plugin, this wires it into the installer. Doing this\nfirst would register a hook that does not exist.",
-      "blocked_on": null,
-      "refs": [
-        "installer/src/70-permissions.sh",
-        "installer/src/75-main.sh",
-        "chat/requires.tsv",
-        "ai-text-editor/requires.tsv",
-        "interactive-shell/requires.tsv"
-      ],
-      "note": "Blocked on T122: wiring the installer to register a hook that does not exist yet would place a broken entry in settings.json.",
-      "created_at": "2026-09-08T20:58:54Z",
-      "updated_at": "2026-09-08T20:58:54Z"
-    },
-    {
-      "id": "T71",
-      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
-      "blocked_on": null,
-      "refs": [
-        "planning/SKILL.md",
-        "planning/MAINTAINER.md",
-        "planning/docs/README.md"
-      ],
-      "note": null,
-      "created_at": "2026-08-30T21:50:27Z",
-      "updated_at": "2026-08-30T21:50:27Z"
-    },
-    {
-      "id": "T83",
-      "title": "Tools available for register work, and where they came from (PR #15)",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "PR #15 adds two things any agent touching BUGS.json or TODO.json should know about. (1) planning/scripts/register-resolve.sh resolves an id collision in a conflicted register. Usage: '--check <register>' exits 1 when conflicted and 0 when clean, so it fits a hook; '<register>' with no decisions lists every collision with BOTH sides' titles plus a suggested free id and exits 65; '<register> side:old:new side:old:new ...' takes every decision in ONE run, applies them, and prints the resolved register to stdout with a confirmation on stderr; re-running the SAME command prefixed with CONFIRM=<that hash> writes it in place. side is ours|theirs or either branch name. It reads git index stages (:1 base, :2 ours, :3 theirs) so it needs no checkout, refuses a divergence (both sides editing one base entry differently) as something a rename cannot fix, refuses to resolve into a register whose own side is already unsound, follows a rename into parent and into an id-valued blocked_on, and REPORTS prose mentions rather than rewriting them. (2) tests/test-register-soundness.sh runs the rules over the committed registers, which nothing did before: a finding there means the entry did not come from the writers, because bug-add.sh and todo-update.sh refuse exactly those. Run it after any hand edit. Both are MODE: DEV and repository-side only - shipping equivalents to the two skills is T81.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T16:12:10Z",
-      "updated_at": "2026-09-01T16:12:10Z"
-    },
-    {
-      "id": "T89",
-      "title": "a question skill: numbered questions with lettered options, never an unordered list",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Questions put to the human carry an increasing numeric id within the session -- Q1, Q2, Q3 -- and never restart at 1 for a new batch, so an answer of 'Q1' is unambiguous. One question per number. A multipart question is sub-numbered (Q20a, Q20b), never bulleted. When a question offers options or suggested answers they are lettered a, b, c, d, e, so the human can answer 'Q7b' rather than quoting text back. There is ALWAYS a final letter meaning 'none of these, I will say it myself' -- a closed set of options is a leading question. Never an unordered list for either the questions or the options: a bullet cannot be referenced, so an answer covering three of four parts leaves no way to say which one was missed. Repeat the number when following up, say which number an answer resolved, and carry an unanswered number forward unrenumbered rather than dropping it. Requested by Tschallacka on 2026-09-04; the same rules are already in his global CLAUDE.md, and this task is to make them a shipped skill so every agent follows them, not only this one.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T08:01:38Z",
-      "updated_at": "2026-09-04T08:01:38Z"
-    },
-    {
-      "id": "T91b",
-      "title": "retire read/tail --local, the log-file path that bypasses the server",
-      "status": "open",
-      "priority": "normal",
-      "parent": "T91",
-      "detail": "read --local and tail --local walk $AI_CHAT_HOME/channels/<chan>.log with no server. Remove them, or keep them only as a maintenance escape hatch that is documented as such and never recommended in an agent instruction or skill doc. Sweep SKILL.md, the client's own usage text and .agents docs for anywhere --local is offered as the way to read a channel, since that is what teaches every future agent to bypass the socket. Depends on T91a: nothing may lose the ability to read a channel before the push path replaces it.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T08:29:54Z",
-      "updated_at": "2026-09-04T08:29:54Z"
-    },
-    {
-      "id": "T91c",
-      "title": "make the server's fan-out structurally lock-safe: a real channel per peer, and a read-write registry",
-      "status": "open",
-      "priority": "normal",
-      "parent": "T91",
-      "detail": "PR #43 fixed the acute wedge by giving each connection an outbox that its own thread drains, so a broadcaster never writes another peer's socket. That is the right shape, hand-rolled. Finish it properly:\n\n(1) The outbox is a Mutex<Vec<String>> plus drain. The idiomatic form is one std::sync::mpsc::Sender per connection: the message is MOVED to the owner, the channel's lock is a true leaf that is never held across I/O, and no code can accidentally reach a peer's connection state again. A hand-rolled queue invites someone to add 'just one' extra field guarded by the same mutex.\n\n(2) The registry is 'writers: Mutex<Vec<Arc<Mutex<Option<ConnState>>>>>' -- a mutex holding a vector of mutexes. It is READ on every broadcast and WRITTEN only on connect and disconnect, so it wants an RwLock. This matters beyond speed: the accept loop needs that same lock to register an arrival, which is why a stalled broadcast stopped new clients being served at all.\n\n(3) While in there, the connection state's own mutex is held across a 200ms read and immediately retaken, which is what starved broadcasters (measured by chat-b122). Whatever survives after (1), that pattern should not.\n\nCONSIDERED AND REJECTED, recorded so it is not re-proposed: dropping server-side fan-out entirely and letting our clients read the log, or poll FETCH, because they largely do that already. Tschallacka's rule on 2026-09-04 forecloses it -- nothing outside the server may touch the log, and steady-state delivery is a push over the socket, not a poll. Fan-out is therefore load-bearing and gets fixed, not deleted. See T91a.\n\nNot urgent: the acute bug is fixed. This is the cleanup that stops it recurring by construction rather than by care.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T08:36:28Z",
-      "updated_at": "2026-09-04T08:36:28Z"
-    },
-    {
-      "id": "T95",
-      "title": "Interactive installer TUI has no way to choose a skill's integration mode (mcp vs skill)",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "install.sh's --integration flag lets an automation caller pick ai-text-editor's mcp bridge vs its skill client, but the interactive terminal UI (iui_info_actions and the rest of the iui_ pane rendering) only offers 'install dependencies' / 'reverify dependencies' as actions -- there is no toggle or prompt anywhere in the TUI for integration mode. A human running the plain interactive installer cannot choose mcp mode at all; only a scripted --integration flag can. Add an action (or a per-skill toggle in the info pane) that lets an interactive user pick among the modes integration_modes() declares for the skill under the cursor, for skills that offer more than one.",
-      "blocked_on": null,
-      "refs": [],
-      "note": "Implemented on fix/worktrees-tmpdir-chat-relay at eb076758; closes on merge. The info pane gains an m action for a skill declaring more than one mode, naming the mode in force and cycling it. Two things the implementation had to move: integration_mode_for() to 05-config.sh (install-ui.sh does not source 50-manifest.sh, so a ui function calling it would repeat B49), and the generated INTEGRATION block into iui_dev_load_tables (the mode tables live only in the artifact, so the standalone picker had an empty integration_modes and would have rendered no line).",
-      "created_at": "2026-09-04T20:52:21Z",
-      "updated_at": "2026-09-07T20:00:00Z"
-    },
-    {
-      "id": "T100",
-      "title": "jump points: on open, derive a file's outbound references from CodeGraph so a tab can be navigated, not just searched",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "SKIP",
-      "blocked_on": null,
-      "refs": [],
-      "note": "LIFECYCLE settled with Michael: derive the jump points at open, and RECOMPUTE THEM ON SAVE. Save is the right boundary because codegraph indexes DISK -- save is the moment disk changes -- so staleness is bounded to 'while the tab is dirty' rather than being open-ended. A set still carries the revision it was computed at, so a dirty tab's jump points are reported stale rather than followed silently.\n\nCOST: all of this is server-side, so the scanning, caching and re-derivation cost the agent NO TOKENS. The agent pays only for the jump points it asks for. That is what justifies doing the work eagerly at open and at every save, rather than lazily on request.\n\nINDEX FRESHNESS, worth handling explicitly: codegraph's watcher lags a write by about a second, so a recompute fired immediately on save can read the pre-save index. Run 'codegraph sync' first -- it is incremental and prints 'Already up to date' when there is nothing to do, so a needless run is free -- then re-derive. Useful side effect: editing through the editor would keep the codegraph index warm, which the repository already asks callers to do by hand after changing code.",
-      "created_at": "2026-09-07T19:39:33Z",
-      "updated_at": "2026-09-07T19:43:53Z"
-    },
-    {
-      "id": "T101",
-      "title": "split chat-client-rs/src/lib.rs into modules",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "lib.rs is 2776 lines: the CLI entry point, the CLI verbs, the resolution ladder, the TLS connect and TOFU pin, the session, the local log reader and an in-file test module, in one file. It reached that size as one file because it was main.rs; T90 made it a library without splitting it, deliberately, so an in-flight B266 change on another branch would merge as a rename rather than fight a mass code move. Once feat/t90-chat-mcp and fix/worktrees-tmpdir-chat-relay are both merged that reason is spent. Split by concern, one docblock each: net (resolve, connect, client_config, the TOFU pin, line I/O, wait_for_welcome), discovery (the beacon, the cache, resolve_server), session (the key ladder, Session, cursors), wire (wire_segments, split_at_budget, msg_line_id), local (the channel log reader), and the CLI verbs behind run(). The public surface is already the split: what the MCP adapter imports is exactly the first four groups.",
-      "blocked_on": null,
-      "refs": [
-        "T90"
-      ],
-      "note": null,
-      "created_at": "2026-09-07T20:07:58Z",
-      "updated_at": "2026-09-07T20:07:58Z"
-    },
-    {
-      "id": "T102",
-      "title": "installable agent profiles: ship .agents/profiles/ the way skills are shipped",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "The nitpicker profile lives at .agents/profiles/nitpicker.md and is installed by hand: copy it to ~/.claude/agents/ and restart the session. Nothing declares it, nothing installs it, and nothing checks the copy has not drifted from the repository's.\n\nSkills already solve this: a manifest declares the files, install.sh writes them into each agent root, and a test refuses a tracked file nobody declared. Profiles need the same treatment, with two differences that decide the shape:\n\n- The destination differs per harness. Claude Code reads ~/.claude/agents/, and codex and opencode place agent definitions elsewhere; the installer already resolves per-agent roots for skills, so this is the same resolution, not a new one.\n- A profile is only picked up at session start. The registry is read once, so an install has to say plainly that a restart is required before the profile can be used, the way the skill install already tells the reader to restart the agent CLI.\n\nConsumers: installer/src/50-manifest.sh (skill_files or a profiles equivalent), PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv, installer/build.sh, and a declarations test so a new profile cannot be added without being declared.\n\nFiled at Michael's request while adding the first profile to the repository.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-07T20:30:56Z",
-      "updated_at": "2026-09-07T20:30:56Z"
-    },
-    {
-      "id": "T111",
-      "title": "The session owner needs a Windows transport: loopback TCP with a token",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "T107 landed the owner on unix sockets. Windows has no unix socket, so control.rs carries a cfg(not(unix)) arm where serve() and ask() both return None -- every verb there keeps exactly the behaviour it had before T107, including the B283 suffix when a tail is running.\n\nThe shape it needs is the one ai-text-editor already uses: bind loopback TCP on an ephemeral port, put the port and a secret in the owner record, and prove the secret per connection rather than sending it in the request. The record already carries pid and started_at_ns for owner identity; what it gains is the endpoint form and the token. src/ai-text-editor/src/transport.rs is the reference, including why the token is not in the envelope.\n\nTwo things must hold that the unix path gets for free: the record file's permissions are the only guard on a loopback port (there is no 0700 directory doing it), and liveness is still decided by connecting, not by the pid. A port that nothing answers is a stale record, same as a socket that refuses.\n\nNot shipped with T107 deliberately: an untested socket transport on a platform nobody here can run is worse than an honest fallback, and the fallback is correct -- just without the fix.",
-      "blocked_on": null,
-      "refs": [
-        "src/chat-client-rs/src/control.rs",
-        "src/ai-text-editor/src/transport.rs"
-      ],
-      "note": "chat/binaries.tsv does ship chat-client-rs.exe for x86_64-pc-windows-msvc, so this is a real supported target and not a hypothetical one.",
-      "created_at": "2026-09-08T13:58:10Z",
-      "updated_at": "2026-09-08T13:58:10Z"
-    },
-    {
-      "id": "T113",
-      "title": "Relocating a block should not cost its content: a move (and copy) verb",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Today the only way to relocate text is to write it at the destination and delete it at the source, so the block's full content is generated as an argument even though the server already holds it. On a large document a refactor is mostly REARRANGEMENT, which means paying output tokens for content that never changed.\n\nProposed: move --from-range-start/--from-range-end (or a span token, see T110) plus a destination, resolved and applied server-side with no content in the request. copy the same without the delete. Both are guarded the way replace is -- the source span is verified before anything is removed -- and both report what they moved, so the caller can verify from the answer as it can today.\n\nWhy it is worth its own entry rather than folding into T110: T110 removes the GUARD's cost, this removes the CONTENT's cost, and they are independent. A move with no guard is still a move; a guarded replace still pays for its text.\n\nUndo already file-backs large edits, so the snapshot machinery a move needs exists. The ordering question to settle: a move within one tab is one atomic operation, not an insert plus a delete that could half-apply -- begin_transaction/end_transaction is the existing shape to reuse or to say why it is not enough.",
-      "blocked_on": null,
-      "refs": [
-        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
-        "ai-text-editor/references/protocol.md",
-        "ai-text-editor/SKILL.md"
-      ],
-      "note": "Raised by Tschallacka asking whether the pasted content can be limited to buy back context: 'on a large document with a lot of edits that would suck badly.' Measured in this session: guards were mostly 1-4 lines, but one replacement was 185 lines, so the replacement is the dominant cost and a rearrangement pays it for nothing.",
-      "created_at": "2026-09-08T14:45:31Z",
-      "updated_at": "2026-09-08T14:45:31Z"
-    },
-    {
-      "id": "T118",
-      "title": "Abbreviate tab ids to the shortest unambiguous prefix, git-style",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "A tab id is a 64-character hex uuid and it is repeated in every response. Measured 2026-09-08 on a two-line read at verbosity 0: the payload is 121 bytes and 76 of them -- 62 percent -- are the tab id. The file content being read was 32 bytes.\n\nTschallackas design: return the shortest prefix that is unambiguous among the live tabs, and let it grow as tabs are added. One tab starting cd0 with nothing else starting c is returned as c; open a second c tab and both lengthen to the first distinguishing character.\n\nWhere it goes. session::resolve_tab already reads every record and already filters by tab_uuid equality, so it is the natural home: match by PREFIX instead, group the matches by tab_uuid first, and refuse when two DISTINCT uuids share the prefix -- naming the candidates, which is the doctrine the rest of that module already follows for stale or ambiguous identities. Several records for ONE uuid stay as they are, newest-by-start_time wins. A full 64-character id must keep resolving exactly as today, so nothing that stored one breaks.\n\nThe emitting side is the other half: whatever writes tab_id into a response (T98 put it on every response at every verbosity) has to write the abbreviated form.\n\nThe one honest hazard, which git has too: a short id an agent is holding can become ambiguous when a new tab opens. That is recoverable and must be made so -- the refusal names the candidates, and the agent re-resolves. It must never silently pick one.",
-      "blocked_on": null,
-      "refs": [
-        "src/ai-text-editor/src/session.rs",
-        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
-        "src/ai-text-editor-mcp/src/lib.rs"
-      ],
-      "note": "Raised by Tschallacka on seeing a verbosity-0 response: 'why are the tab ids so large'. A 2-character id takes that same wire frame from 303 to 241 bytes, and the payload from 121 to 58. RE-KEYING IS AN EVENT, NOT A FIELD (Tschallacka). If ids are not echoed on every response (T119), then the only moment a caller needs to be told an id is when it CHANGED -- a new tab opened, the shortest unambiguous prefix grew, and the handle the caller is holding is now too short. The server says that ONCE, naming which tabs were re-keyed and to what, rather than paying for the id on every answer against the chance it moved.\n\nThat also disposes of the ambiguity hazard this entry worried about. A held short id does not silently rot: the caller is told at the moment it stopped being unique, so a refusal for ambiguity becomes the fallback rather than the mechanism. Q9 RULED (Tschallacka): the Worktree rung is not trusted to OWN tabs. Identity\ncomes from the plugin, and where no plugin can supply one -- codex, opencode,\na bare CLI -- the client mints its own and persists it for that worker, so the\nbehaviour is the same everywhere rather than degrading on the agents that\ncannot be told who they are.\n\nSo the ladder splits by purpose, which it never did before. Worktree stays a\nfine way to FIND a live server; it stops being a way to SAY WHO YOU ARE. Only\na declared or minted id owns tabs.\n\nThe carrier already exists and does not need inventing: the editor has\n--save-session-token PATH to write one and --session-token PATH to reuse it,\nwhich is mint-and-persist under another name. Minting an id and saving it\nthrough that path gives the second call the identity the first one created.\n\nTHE LIMIT, which must be stated rather than discovered later. Persistence needs\nsomewhere to persist TO, and for a worker made of many short-lived CLI\nprocesses the only anchors available are the filesystem and the environment.\nBoth are per-LOCATION, not per-worker. So a minted id is stable and exclusive\nagainst everything except a second worker starting in the same place with the\nsame anchor, which is exactly the collision the Worktree rung had. Minting does\nnot remove that case; it narrows it to agents that have no plugin AND share a\nlocation AND run at once.\n\nThat residue is acceptable on its own terms, and worth naming for what it is: on\nClaude Code the hook removes it entirely, because every subagent arrives with an\nexplicit id whatever its worktree. Elsewhere it is a smaller version of the\nproblem rather than a solved one, and an agent in that position can always pass\n--session and be certain.\n\nWHAT MINTING MUST NOT DO: silently mint a fresh id per invocation. That never\ncollides and is therefore tempting, but it loses every tab between calls, so the\nsession it names is empty each time. Persisting is the whole substance of the\nruling; the minting is the easy half.\n\n\nWHY THE ALTERNATIVES ARE OUT, in Tschallackas words: they are \"too iffy and conflict hungry\". That is the operative objection rather than mere imprecision -- an identity derived from a worktree, a pid or a harness variable does not simply identify less well, it actively puts two workers on one identity and neither is told. A minted id is exclusive by construction, which is the property being bought.",
-      "created_at": "2026-09-08T20:20:57Z",
-      "updated_at": "2026-09-08T21:11:54Z"
-    },
-    {
       "id": "T121",
       "title": "Make a mangled shell argument suggest the editor, the way in-place writes already do",
       "status": "open",
@@ -276,22 +36,6 @@
       "note": "The hook lives outside this repository, in the user hooks directory, so this entry is the design and the argument rather than the patch. Pairs with T120: the nudge is only honest once there is somewhere to nudge towards. Also strengthens the prose false positive already reported under B297.",
       "created_at": "2026-09-08T20:25:16Z",
       "updated_at": "2026-09-08T20:25:16Z"
-    },
-    {
-      "id": "T124",
-      "title": "ai-text-editor MCP: accept 'path' as an alias for 'file' on every tool that takes it",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Every tool's real parameter is 'file' (open, insert, replace, ...), but 'path' is the far more natural/common name an agent reaches for -- it is what open() and most file APIs call it, and it is what this session actually typed on the first two open calls today. Since the schema has additionalProperties: false, a caller who says 'path' gets no error and no file at all: the request silently proceeds with file=None, falls through to identity-based resolution, and can surface an unrelated, confusing failure (in this case session_stale, which had nothing to do with the real mistake). Wanted: accept 'path' as a synonym for 'file' in the MCP adapter's payload parsing (src/ai-text-editor-mcp/src/lib.rs's call_tool, where 'file' is read out of the arguments object), and/or have request construction refuse an unrecognized top-level key near 'file' rather than silently proceeding with none. Consider whether the tool schema's 'file' description should also say '(aka path)' so this is documented at the point of use.",
-      "blocked_on": null,
-      "refs": [
-        "src/ai-text-editor-mcp/src/lib.rs",
-        "ai-text-editor/SKILL.md"
-      ],
-      "note": null,
-      "created_at": "2026-09-09T07:00:47Z",
-      "updated_at": "2026-09-09T07:00:47Z"
     },
     {
       "id": "T125",
@@ -324,22 +68,6 @@
       "note": "Reported by Michael, relayed via bridge:session_0114UV8CPfYa9xkB93JbKSDx (relay-ai-skills) after searching TODO.json and interactive-shell/SKILL.md and finding no existing match for the trigger sentence.",
       "created_at": "2026-09-09T09:51:03Z",
       "updated_at": "2026-09-09T09:51:03Z"
-    },
-    {
-      "id": "T127",
-      "title": "ai-text-editor MCP: codex prompts for permission on every call, and the resulting delay routinely expires the servers idle timeout mid-task",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Michael, driving ai-text-editor via codex: codex asks for approval on every single ai-text-editor.open/read/search call, unlike a normal read-only tool. Each approval adds real wall-clock delay between calls, and the autostarted ai-text-editor-server has its own idle_timeout_seconds (open calls in the transcript pass 120, then 300). When the approval delay across several calls exceeds that window, the server exits and every open tab_id in flight goes tab_unknown - \"no session record has tab_id X; the tab may belong to a server that has since exited - open the file again for a current id (the journal replays)\". Codex then has to reopen the same file and retry, compounding the prompt fatigue. Two angles worth investigating together, since fixing either alone only helps half the symptom: (1) why codex prompts per-call at all for a local read-only-by-default MCP server - check whether ai-text-editor tools/list declares read-only tool annotations (e.g. an MCP readOnlyHint-style hint) that a conforming client could use to skip confirmation, and what codexs own MCP trust/allowlist config supports; (2) whether the servers idle_timeout_seconds should scale with, or be immune to, the callers own confirmation latency - a tab dying because a HUMAN was slow to click approve is a different failure than a tab dying because the agent went idle, and only the second is what the timeout is meant to catch.",
-      "blocked_on": null,
-      "refs": [
-        "src/ai-text-editor-mcp/src/lib.rs",
-        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
-      ],
-      "note": "Reported by Michael 2026-09-09, relayed via bridge:session_0114UV8CPfYa9xkB93JbKSDx (relay-ai-skills) from a codex transcript driving ai-text-editor directly - real tab_unknown errors and re-opens shown in the transcript, not hypothesized.",
-      "created_at": "2026-09-09T12:30:19Z",
-      "updated_at": "2026-09-09T12:30:19Z"
     },
     {
       "id": "T128",
@@ -647,6 +375,24 @@
       "updated_at": "2026-08-24T12:17:47Z"
     },
     {
+      "id": "T72",
+      "title": "Move installed binaries to the shared XDG bin and retire the per-skill bin/",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Second half of the shared-binary work. The repo side is done (one bin/<triple> at the root, plan_bin_dir resolving it). What remains is the installed side and everything that declares the old layout. The installer must place binaries in ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin -- the directory custom-locations and the project-specificies notes already use -- and record it as AI_SKILLS_BIN_ROOT in the global .env, which plan_bin_dir already reads first. That is a schema 2->3 bump: plan-env.sh validates a CLOSED key set in three places (write_global, the check_manifests allow-list, and the version gate), values may not contain a tilde so the path must be expanded before writing, and planning/SKILL.md pins the version too. Then: drop the tracked planning/bin/<triple>/rjq and the per-skill bin from binaries.tsv semantics; declare plan-crypt, which is built and resolved but appears in no binaries.tsv and no manifest row, which rust-development-guidelines.md:199 calls illegal and test-shipped-binaries misses because it validates directory names rather than filenames; fix B94 by collapsing the remaining copies of the uname->triple table onto one resolver. Tests to rework: test-shipped-binaries.sh:104 hard-wires the artifact to the registry's own directory and is the assumption the move breaks, plus test-skill-files-manifest, test-persona-drift, test-installer-manifest, test-platform-selection and test-release-package. Packaging: package.json files[], the generated .npmignore, installer/build-release.sh, and the ten rows each in PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv. Docs stating the old rule: rust-development-guidelines.md section 6 (the authority), CODE-STYLE.md 117-121 and 200-207, planning/MAINTAINER.md 2.15 and 181-184, and chat/SKILL.md:84 which already names a path that does not exist.",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/60-install.sh",
+        "planning/scripts/plan-env.sh",
+        "tests/test-shipped-binaries.sh",
+        "rust-development-guidelines.md"
+      ],
+      "note": "Closed 2026-09-12 on feat/rust-installer (053c9bb0). Every skill's compiled binaries now land in one shared location (${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin, flat), matching the location plan_bin_dir already resolved for rjq; the per-skill bin/<triple>/ install destination is retired for bug-report, todo, interactive-shell, chat and ai-text-editor. No back-compat, as decided 2026-09-10: an existing per-skill-bin install is fixed by re-running the installer. Two install code paths both needed the fix (install.rs's install_skill and cli_mode.rs's install_skill_cli, planning's own self-update path). Integration mode (skill vs mcp) is no longer inferred by scanning which binary sits on disk -- a new .integration-mode marker file records it directly, since the shared bin is deliberately never swept on a mode switch or reinstall (another skill or agent root installing the same binary may still need it). Accepted, not fixed: nothing garbage-collects an orphaned shared binary on uninstall, since there is no uninstall command at all today -- queued as its own task, T142. Also fixed the small independent gap T72's own text named: plan-crypt now has a binaries.tsv row (five targets), which reverses B101's prior resolution (that bug was closed by documenting plan-crypt as NOT shipping, rather than making it ship -- noted on B101 itself). Verified: 187 installer unit tests (cargo fmt/clippy/test clean across ai-text-editor-mcp/installer/installer-platform/installer-release), a real scratch-HOME install confirming the binary lands in the shared bin with no bin/ under the installed skill, MCP registration writing the shared path, and a mode switch correctly unregistering via the marker while leaving both binaries in place. tests/test-release-package.sh's real install-from-tarball check updated and isolated to a scratch HOME (it had been writing into this machine's real ~/.config/tsch-ai-skills/bin on every run before this fix). Full pre-push-check.sh and ./run-tests.sh (235/237, the same two pre-existing unrelated failures: test-mode-markers, test-rjq-active-references) both clean.",
+      "created_at": "2026-08-31T13:27:55Z",
+      "updated_at": "2026-09-12T12:53:54Z"
+    },
+    {
       "id": "T81",
       "title": "The bug-report and todo skills ship no readers or writers, so an installed skill has rules as prose only",
       "status": "done",
@@ -794,6 +540,19 @@
       "updated_at": "2026-09-08T20:17:39Z"
     },
     {
+      "id": "T104",
+      "title": "the chat MCP wakes on declared trigger phrases, not only on a nick mention",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Michael: 'The mcp should have something baked in, that it actively triggers a wake on made trigger sentences.'\n\nToday an agent wakes only when its nick appears. That misses the case that has cost the most here: an instruction addressed to nobody in particular. Measured twice in one session -- Michael wrote 'q6 write all configs, cleanup too' with no mention and it reached no agent, and B254 meant it could never be read afterwards either.\n\nSHAPE. The adapter's wait tool takes a set of trigger phrases alongside the nick, declared once when the session registers rather than passed per call, and returns when any of them appears. The nick stays a trigger; it stops being the only one.\n\nPoints that decide the design, from what the shell version got wrong:\n- Match the message TEXT, not the whole stored line. A stored line begins with its sender, so a naive pattern matches what an agent SAID and wakes it on its own messages -- t90 found exactly that in the shell example.\n- Substring, not regex, unless a caller asks for a regex: a phrase is what a human types, and a regex metacharacter in it is a surprise.\n- Case-insensitive by default for phrases, since an instruction is prose.\n- The set belongs to the agent, not the channel: a nitpicker wants 'style' and 'comment', an installer agent wants 'install' and 'registration'.\n\nThe shell client should grow the same thing so the two front ends do not disagree, but the MCP is where it belongs first: it already holds a live connection, so it can match on arrival rather than polling a log.\n\nDepends on nothing; B254 makes it more valuable but does not block it.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Implemented in src/chat-mcp: Trigger/TriggerInfo structs, 4 new Op variants (TriggerAdd/TriggerRemove/TriggerToggle/Triggers), 4 new MCP tools (trigger_add/trigger_remove/trigger_toggle/triggers) wired through TOOL_ARGUMENTS/tool_argument()/routing()/connected_tool/answer_value. Design settled per the 2026-09-10 DECIDED note: option (b), a dedicated tool surface. Triggers are in-memory per connection (like mention_seen), auto-incrementing numeric ids returned by trigger_add and used to deregister/toggle. Patterns use mIRC-style */? wildcards via an implicit *pattern* wrap (substring-by-default), case-insensitive, with optional exact sender-scoping. Composes with the existing mentions:bool filter as an additional OR-condition, never active when mentions=false. Matches on Push.text (message text only, sender already excluded at push time) -- both design lessons the note called out were already satisfied by the existing Push/take_push shape, needing no further change. Verification: cargo test -p chat-mcp (28/28: 19 lib + 9 tests/mcp_flow.rs integration, including two new end-to-end tests proving trigger wake, toggle-disable, sender-scoping, and triggers listing/removal against a real chat-server-rs), cargo fmt, cargo clippy -p chat-mcp --all-targets -D warnings clean, full pre-push-check.sh PASS, full ./run-tests.sh 235/237 (same 2 pre-existing failures as T72's own verification, unrelated to this change). Committed feat/rust-installer 07bc8fa. B323: found and fixed while verifying T91c -- trigger-wake fetched the woken message through the server's own literal-@mention-only filter (fetch_mentions), which could (and did) exclude the very message that woke it. Present since this ticket's own original commit, not a later regression. Fixed on feat/rust-installer 6be90b14.",
+      "created_at": "2026-09-07T22:20:26Z",
+      "updated_at": "2026-09-12T18:29:06Z"
+    },
+    {
       "id": "T107",
       "title": "One client session owns the connection: the tail serves send/read over a control socket",
       "status": "done",
@@ -930,6 +689,42 @@
       "updated_at": "2026-09-09T07:02:31Z"
     },
     {
+      "id": "T122",
+      "title": "Ship a plugin that injects each subagent its own id at SubagentStart",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka asked whether a plugin could expose the per-subagent id. It can, and the whole chain was measured on 2026-09-08 rather than reasoned about.\n\nWHAT WAS PROVEN, in order:\n\n1. A SubagentStart hook exists and fires per subagent. It took effect immediately on being written to settings.json, with no session restart.\n\n2. Its payload carries the identity nothing else does: agent_id, agent_type, plus session_id, prompt_id, cwd, scratchpad_dir and transcript_path. The agent_id matched, character for character, the id the Agent tool returned to the spawner -- a4631ac048e789cbb for the last probe.\n\n3. hookSpecificOutput.additionalContext reaches the subagent's own context. A subagent asked to report its injected identity answered AGENT_ID=a4631ac048e789cbb TYPE=code-researcher having called no tools, so it read it from context rather than deriving it.\n\nWHAT TO BUILD: a plugin shipping one SubagentStart hook that injects the agent's own id and type, and instructs it to pass that id as the session on every editor and chat call. The spawner needs to remember nothing and the subagent cannot be confused about who it is.\n\nTHE HONEST LIMIT: this is context injection, not an environment variable. The hook cannot set env for the subagent, because the subagent is not a new process -- so a CLI call from a subagent's bash still needs the id passed explicitly, and the subagent now knows it well enough to do that. Being context, it is also SOFT: the model has to use what it was told.\n\nWHICH IS WHY IT PAIRS WITH THE REFUSAL. Soft supply plus a hard requirement is what makes it reliable: the hook guarantees every subagent HAS an id, and an editor that refuses an undeclared caller guarantees every subagent USES it. Neither half is sufficient alone -- injection without refusal is advisory, refusal without injection is an obstacle.",
+      "blocked_on": null,
+      "refs": [
+        "ai-text-editor/SKILL.md",
+        "chat/SKILL.md",
+        "src/agent-session-key/src/lib.rs"
+      ],
+      "note": "Shipped agent-identity-plugin/ (SubagentStart hook, no matcher): reads agent_id/agent_type from the hook payload and, when present, emits hookSpecificOutput.additionalContext instructing the subagent to declare that id on every ai-text-editor call (its existing agent/session argument) and interactive-shell call (--agent/AGENT_ID, already read as a fallback per its own doc). Scoped deliberately to the plugin only, per an explicit choice made mid-implementation this session: chat-mcp cannot honor the same instruction today (held() is a single process-wide connection, opened once, never re-resolved per call), so rather than bending T122 into a chat-mcp redesign, the injected context names that limitation honestly and T143 was filed to close it separately. Verified: cargo test -p installer (188/188 incl. 2 new plugin tests), agent-identity-plugin/tests/test-agent-identity-injection.sh under both the system bash and bash32, a real hook invocation piped through rjq end-to-end (both a real agent_id and an empty one), cargo fmt/clippy clean, full pre-push-check.sh PASS, full ./run-tests.sh 236/238 (same 2 pre-existing failures). Committed feat/rust-installer c707642e.",
+      "created_at": "2026-09-08T20:56:13Z",
+      "updated_at": "2026-09-12T14:29:01Z"
+    },
+    {
+      "id": "T123",
+      "title": "The identity plugin installs with any session-dependent skill, as a hard requirement",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka's ruling: the SubagentStart identity plugin (T122) is not optional\nwhere it is needed. A skill whose correctness depends on knowing WHICH agent is\ncalling must not install without it, because installing such a skill without it\nproduces the silent failure it exists to prevent -- two agents sharing one\nsession and neither able to tell.\n\nWHICH SKILLS. The fact belongs to the skill rather than to a list in the\ninstaller, matching how this repository registers everything else: the directory\nis the registration. requires.tsv already declares \"what this skill needs on the\ntarget machine at runtime, and how badly\", and a per-agent identity is exactly a\nruntime need -- so it is a row there, and the existing unmet-requirement\nmachinery reports it. \"MUST\" is then expressible in the vocabulary already\npresent: the requirement is hard, not soft.\n\nSession-dependent as measured today: chat (its session key decides the nick and\nthe per-channel cursors), ai-text-editor (session ownership of tabs, once T118\nlands), interactive-shell (the session id names the socket). Confirm each\nagainst its own code rather than inheriting this list.\n\nTHE STEP. Same shape as interactive_shell_permission_step and\neditor_steering_step in installer/src/70-permissions.sh, which already know how\nto touch settings.json safely: back the file up beside itself unless git tracks\nit, read defensively with rjq, write through a mktemp and rename. It installs\nthe hook script into the agent root and registers the SubagentStart entry,\nreports \"already in place\" on a second run rather than duplicating, and fires\nonly when a session-dependent skill is among those selected.\n\nDECLINING IT MUST SAY WHAT IT COSTS, the way the editor steering warning does:\nwithout the hook, every subagent shares its parent's session, so two agents will\nwrite one cursor and hold one set of tabs, and neither will be told. That is a\nsilent wrong answer rather than a visible failure, which is the whole reason\nthis is a hard requirement.\n\nNOT EVERY AGENT CAN HAVE IT. SubagentStart is Claude Code's hook. For an\nopencode or codex root the step prints the manual equivalent and says plainly\nthat the guarantee is absent there, exactly as print_manual_interactive_shell_permissions\ndoes -- rather than pretending the install is equivalent.\n\nORDER: T122 builds the plugin, this wires it into the installer. Doing this\nfirst would register a hook that does not exist.",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/70-permissions.sh",
+        "installer/src/75-main.sh",
+        "chat/requires.tsv",
+        "ai-text-editor/requires.tsv",
+        "interactive-shell/requires.tsv"
+      ],
+      "note": "Wired into src/installer/src/main.rs's run_post_install_steps as run_agent_identity_post_install: installs agent-identity-plugin unconditionally (no confirm prompt) onto every Claude Code root when chat/ai-text-editor/interactive-shell is selected -- same precedent as tui-hint-plugin/editor-gate-plugin, both already installed the same unconditional way for the same companion-plugin reason. One OR check so selecting more than one of the three still installs it exactly once. opencode/codex roots print a plain statement that the guarantee is absent there (SubagentStart is Claude-Code-only), rather than a silent no-op.\n\nDeliberately did NOT route this through requires.tsv's hard/soft machinery, despite this TODO's own note asking for it: requirements.rs's requirement_met/tool_available checks tool availability on PATH, which has no way to express 'this plugin must also be installed' -- an install-time action the installer itself performs, not a pre-existing host condition to probe before install even starts. This TODO's refs (installer/src/70-permissions.sh, installer/src/75-main.sh) are also both retired; src/installer/src/main.rs is the live implementation now. Verified with a real install into a scratch HOME (--agent claude: plugin lands with hooks executable; --agent codex: prints the absent-guarantee line; a skill outside the three: no plugin, no line). Also added a standalone install-agent-identity-plugin CLI subcommand for parity with the other two plugins' own standalone commands. Committed feat/rust-installer c707642e.",
+      "created_at": "2026-09-08T20:58:54Z",
+      "updated_at": "2026-09-12T14:29:01Z"
+    },
+    {
       "id": "T131",
       "title": "B157: give broadcast PRIVMSG a message id via real IRCv3 CAP negotiation",
       "status": "done",
@@ -1047,6 +842,46 @@
       "updated_at": "2026-09-10T04:30:47Z"
     },
     {
+      "id": "T142",
+      "title": "Add installer uninstall/deregister, with fine-grained hook removal via TUI or flags",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "There is no `installer uninstall` today at all: 'uninstalling' means deleting a skill's directory by hand, and nothing cleans up what else that install touched. T72 (shared XDG bin) made this concretely worse in one place and explicitly accepted it as a limitation rather than solving it: a skill's compiled binary now lives in one location shared across every skill and agent root, and is never removed on uninstall or on an integration-mode switch, since one skill's install has no visibility into whether another skill or agent root still needs the exact same file. The same class of problem applies to everything else an install can register: MCP entries (src/installer/src/mcp.rs), permission grants (src/installer/src/permissions.rs), and especially 'reflexes' -- hooks and plugins co-installed alongside a skill rather than owned by exactly one: tui-hint-plugin, editor-gate-plugin, and (once T122/T123 land) the SubagentStart identity plugin. Deleting a skill by hand today leaves every one of these behind with no way to remove them short of hand-editing settings.json/.claude.json/opencode config files directly. Wanted: a real uninstall/deregister path (a new installer subcommand, e.g. `installer uninstall`) that (1) removes a skill's own installed files and its shared-bin binaries ONLY when no other still-installed skill or agent root needs them (a reference count or an equivalent scan across every known target root, not a guess), (2) deregisters MCP entries and permission grants this same mechanism added, and (3) for hooks/plugins specifically -- since more than one skill can depend on the same one, and a human may want to keep a hook active for one skill while removing it for another -- offers FINE-GRAINED control: an explicit list of what is currently registered and why, with the ability to remove one specific hook/registration/binary at a time, available both from the interactive TUI (a new action alongside install/select) and as explicit CLI flags for headless use. Uninstalling a skill's own files should probably remain the easy default case; the fine-grained control is specifically for the shared, cross-skill infrastructure a naive whole-skill delete cannot safely reason about.",
+      "blocked_on": null,
+      "refs": [
+        "src/installer/src/shared_bin.rs",
+        "src/installer/src/mcp.rs",
+        "src/installer/src/permissions.rs",
+        "src/installer/src/plugins.rs",
+        "T72",
+        "T122",
+        "T123"
+      ],
+      "note": "First pass shipped: new src/installer/src/uninstall.rs + 'installer uninstall (--target/--agent) --skill NAME [--yes]' subcommand. Removes a skill's own installed directory; reference-counts its shared binary (T72's shared_bin_dir, keyed only by $HOME) across every root this installer can discover (manifest::AGENTS home dirs + custom_locations) before removing it, so a sibling agent root that still needs the same binary keeps it; removes a co-installed vendor plugin (tui-hint/editor-gate/agent-identity) only when no other still-installed skill on that SAME target root needs it; deregisters the MCP entry by reusing the already-built mcp::unregister_for_kind/entry_is_ours (previously only reached via a mode-switch path); warns (does not block) when a file differs from what the last install recorded, so a user's edit is never silently discarded unremarked.\n\nDeliberately scoped out per an explicit choice made mid-implementation (T144 filed for these): permission-grant reversal (permissions.rs has no revoke mechanism at all for claude/opencode/codex settings, a real feature on its own -- unlike MCP deregistration, which had existing infrastructure to reuse), the opencode variant of tui-hint-plugin (different sharing model: shared by $HOME + registered by path in one config file, not a per-target-root copy), and the interactive TUI action (CLI flags only this pass, headless).\n\nVerified: cargo test -p installer (195/195 incl. 5 new uninstall.rs tests + 2 new digest.rs tests), a real install-then-uninstall into a scratch HOME (chat+ai-text-editor installed together, both needing agent-identity-plugin; uninstalling chat alone confirmed agent-identity-plugin KEPT and chat's own binaries removed; uninstalling ai-text-editor afterward confirmed agent-identity-plugin AND editor-gate-plugin both now removed, and the shared bin dir left empty), an uninstall of an absent skill reporting cleanly rather than erroring, cargo fmt/clippy clean, full pre-push-check.sh PASS, full ./run-tests.sh 236/238 (same 2 pre-existing failures). Committed feat/rust-installer 32e3c308.",
+      "created_at": "2026-09-12T12:27:57Z",
+      "updated_at": "2026-09-12T15:14:53Z"
+    },
+    {
+      "id": "T144",
+      "title": "installer uninstall: permission-grant reversal, opencode tui-hint GC, and a fine-grained TUI action",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "T142's first pass (installer uninstall) shipped skill-directory removal, reference-counted shared-binary/plugin GC, and MCP deregistration, but deliberately left out three pieces its own original text also asked for:\n\n1. PERMISSION-GRANT REVERSAL. permissions.rs is add-only for claude/opencode/codex settings.json/config.toml/opencode.json -- worktree permissions, planning permissions, interactive-shell execute permission, editor steering env vars. No revoke function exists for any of the three agent kinds today. Building this means a distinct removal path per grant type per agent kind, undoing exactly what claude_worktrees_permissions/claude_planning_permissions/claude_interactive_shell_permissions/etc. each added, without touching anything the user or another tool added independently.\n\n2. OPENCODE'S tui-hint-plugin VARIANT. Unlike the Claude per-target-root plugin copy uninstall.rs's GC already handles, the opencode variant is shared by $HOME (one file under xdg_config_home(home)/tsch-ai-skills/tui-hint-plugin/) and registered by absolute path in one shared opencode config's plugin array (plugins.rs's register_plugin_entry). Removing it safely needs its own reference count (does ANY opencode-installed interactive-shell anywhere under this $HOME still need it) and an inverse of register_plugin_entry (remove the path from the plugin array, and delete the .js file only when nothing else references it).\n\n3. FINE-GRAINED TUI ACTION. T142's own text asked for interactive control (an explicit list of what is registered and why, remove one at a time) available from the installer's interactive TUI (ui/ module) as well as CLI flags. This pass shipped CLI flags only (installer uninstall --skill NAME), headless. The TUI action -- a new screen/mode alongside the existing install picker -- is unbuilt.",
+      "blocked_on": null,
+      "refs": [
+        "src/installer/src/permissions.rs",
+        "src/installer/src/plugins.rs",
+        "src/installer/src/uninstall.rs",
+        "src/installer/src/ui",
+        "T142"
+      ],
+      "note": "Full scope shipped, using this repository's own planning skill for real this time (plan: .plans/installer-uninstall-followup, 3 goals, 20 work units), since the user explicitly asked for the heavyweight path.\n\n1) PERMISSION-GRANT REVERSAL, all three agent kinds. permissions.rs: remove_allow_entries (claude, JSON allow array -- exact inverse of merge_allow_entries), opencode_unmerge_permission (removes a (tool,pattern) rule only when its value is still exactly 'allow', leaving a user's own 'deny'/'ask' alone -- same ownership-safety principle as mcp::entry_is_ours), codex_unmerge_writable_roots (single-line TOML array surgery, leaves [] rather than deleting the line). New standalone 'installer revoke-permissions' CLI subcommand (mirrors grant-permissions) gives every one of these removal functions a real caller -- without it, clippy -D warnings correctly flagged them as dead code, since only interactive-shell's own per-skill grant is wired into uninstall_skill (planning/worktrees grants are run-wide, not per-skill, and are this new subcommand's job instead).\n\n2) OPENCODE'S SHARED tui-hint-plugin GC. plugins.rs: unregister_plugin_entry (inverse of register_plugin_entry) plus uninstall_tui_hint_plugin_opencode, wired into uninstall_skill's own reference-counting (reuses known_roots/installed_skill_dirs, erring toward NOT deleting when a custom location's agent kind can't be determined -- same conservative posture as the existing shared-binary GC).\n\n3) TUI UNINSTALL SCREEN. New src/installer/src/ui/uninstall_picker.rs: list installed skills, preview via a new read-only uninstall::preview_uninstall/UninstallPreview (computes what WOULD be removed without mutating anything), confirm, execute. Reachable via a plain 'Install or uninstall?' prompt before run_interactive enters either picker (not an in-picker keybinding -- zero risk to the existing, tested install flow; recorded as a deliberate deviation from the plan's original approach-decision). Verified through this repository's own interactive-shell skill against a real running installer, substituting for the ui-user-story-validation reference's Browser-MCP assumption (recorded as plan-description assumption 11.1, since a terminal TUI has no browser). That real walkthrough (US-01) found and fixed a genuine bug before it shipped: main.rs built each picker Entry.target_root from the skill's own directory (already skill-joined) instead of the shared root uninstall_skill expects, so uninstall_skill silently computed a doubled non-existent path and reported was_installed=false, which the UI rendered as a false 'Removed.' without checking the flag. Fixed both the entry construction and the UI's success check.\n\nVERIFIED: cargo test -p installer 211/211, cargo fmt/clippy -D warnings clean, the real US-01 interactive-shell walkthrough (bug found, fixed, re-verified passing), full pre-push-check.sh, two full ./run-tests.sh runs at 236/238 (same 2 pre-existing failures; a third failure on one run was a transient collision with a concurrent session's own run-tests.sh execution on shared global plan state, confirmed non-reproducing on a clean rerun). Committed feat/rust-installer f80e6deb.\n\nPROCESS LIMITATIONS, recorded honestly rather than hidden: the plan's mandatory adversarial review (SKILL.md section 3) was not performed by an independent agent -- the executing session was a fork with no Agent-tool access, so it could not spawn the required fresh reviewer; review-status stays pending, not approved (plan-description assumption 11.3). Separately, validate-plan.sh --complete's mechanical atomicity re-check (comparing each work unit's declared target against its own isolated git diff) could not tick cleanly in retrospect, because the actual implementation was done by function across several work units at once rather than one committed diff per unit -- an execution-style mismatch with that gate's assumption, not a scope or correctness problem in the shipped code, and not something worth re-deriving after the fact. Both gaps are about the plan-process bookkeeping, not the code: cargo test, clippy, pre-push-check, run-tests.sh, and the real interactive-shell walkthrough all independently confirm the shipped code itself. A human or a capable agent may still want to run a genuine adversarial review (post-implementation-review skill) given these gaps.\n\nT142's original text also asked for permission-grant reversal for planning/worktrees (run-wide grants); those are now reachable via 'installer revoke-permissions' but not wired into any per-skill uninstall (correctly, since they aren't owned by one skill) -- no further follow-up needed for that; it was in scope and is done. Independent verification pass (2026-09-12, after the fork's own closing note): re-ran cargo test -p installer (211/211), fmt/clippy, full pre-push-check.sh and full ./run-tests.sh myself, and read the new permission-removal functions (claude/opencode/codex), the opencode tui-hint-plugin GC, and the TUI picker's target_root construction directly. Opencode's value-aware unmerge and the conservative all-roots scan for the shared tui-hint-plugin.js are both correct as described. The picker's target_root fix the fork reported is correct (passes the agent root, not the skill's own directory, matching uninstall_skill's own contract).\n\nFound one real, independent regression while reviewing the permission-removal code: filed and fixed as B321 (interactive-shell's own Bash-execute grant/revoke targeted target_root/interactive-shell/bin, which T72's shared-bin migration stopped populating entirely -- the grant matched nothing real since T72 shipped, so it silently never removed the per-call prompt it promised). Fixed alongside this ticket rather than as a separate follow-up, since it's the same function this ticket's own reversal work touches. Committed feat/rust-installer ef55b4b8.\n\nHonest gaps the fork itself flagged (not resolved by this review, and not blocking): the plan's mandatory adversarial-review step was not performed by a formally spawned independent reviewer -- this manual review pass is what stood in for it. validate-plan.sh --complete's atomicity re-check also was not run to a clean pass in retrospect.",
+      "created_at": "2026-09-12T15:05:03Z",
+      "updated_at": "2026-09-12T17:31:33Z"
+    },
+    {
       "id": "T1",
       "title": "One test reporter, not eighteen",
       "status": "done",
@@ -1062,6 +897,23 @@
       "updated_at": "2026-08-24T10:33:41Z"
     },
     {
+      "id": "T71",
+      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
+      "blocked_on": null,
+      "refs": [
+        "planning/SKILL.md",
+        "planning/MAINTAINER.md",
+        "planning/docs/README.md"
+      ],
+      "note": "Already done: T86/T87 (commit 22fd60de, PR #137) split planning/SKILL.md into a short dispatcher (now 34 lines) plus planning/parts/part-1.md through part-4.md, generated from a single skill-source.txt by planning/scripts/generate-skill-docs.sh, with a load-sanity check (verify-skill-load.sh) on every part. This ticket's own requested reconciliation is already in place: role-context.sh's role_docs() lists parts/part-1..4.md for every role, installer/src/50-manifest.sh's skill_files() declares them, planning/PACKAGE-MANIFEST.tsv/PACKAGE-MAP.tsv and planning/tests/fixtures/overview/npm-package-baseline.tsv all account for them, and the full test suite (236/238 all session, no planning-related failures) confirms nothing regressed. T71 was simply never cross-referenced and closed when T86/T87 shipped -- closing it now to match reality rather than re-doing already-completed work.",
+      "created_at": "2026-08-30T21:50:27Z",
+      "updated_at": "2026-09-12T17:35:26Z"
+    },
+    {
       "id": "T81e",
       "title": "Split the tests per skill and retire planning/scripts/register-resolve.sh in favour of the two shipped resolvers, so there is one way to do the job",
       "status": "done",
@@ -1073,6 +925,45 @@
       "note": "Merged PR #126 (a335d74d). planning/scripts/register-resolve.sh and its test retired; bugs resolve/todo resolve are the one way to do the job now.",
       "created_at": "2026-09-01T15:57:41Z",
       "updated_at": "2026-09-09T22:21:40Z"
+    },
+    {
+      "id": "T89",
+      "title": "a question skill: numbered questions with lettered options, never an unordered list",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Questions put to the human carry an increasing numeric id within the session -- Q1, Q2, Q3 -- and never restart at 1 for a new batch, so an answer of 'Q1' is unambiguous. One question per number. A multipart question is sub-numbered (Q20a, Q20b), never bulleted. When a question offers options or suggested answers they are lettered a, b, c, d, e, so the human can answer 'Q7b' rather than quoting text back. There is ALWAYS a final letter meaning 'none of these, I will say it myself' -- a closed set of options is a leading question. Never an unordered list for either the questions or the options: a bullet cannot be referenced, so an answer covering three of four parts leaves no way to say which one was missed. Repeat the number when following up, say which number an answer resolved, and carry an unanswered number forward unrenumbered rather than dropping it. Requested by Tschallacka on 2026-09-04; the same rules are already in his global CLAUDE.md, and this task is to make them a shipped skill so every agent follows them, not only this one.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Shipped as the question-etiquette skill: SKILL.md states the numbered-question (Q1, Q2, session-wide, never restarts, sub-numbered Q20a/Q20b for multipart, carried forward unrenumbered when unanswered) and lettered-option (a, b, c... always ending in an explicit escape letter) rules, with a worked example, mirroring text-etiquette's shape (prose only, requires.tsv header-only, docs/README.md summary). Registered in src/installer/src/manifest.rs's SKILLS list, installer/src/05-config.sh's SKILL_NAMES, installer/src/50-manifest.sh's skill_files() case arm, package.json's files array, and README.md's skill table.\n\nVerified: a real install into a scratch HOME (installer install --agent claude --skill question-etiquette) landed exactly SKILL.md/requires.tsv/docs/README.md, same as text-etiquette. planning/tests/test-npm-package.sh and tests/test-release-package.sh both pass against the refreshed npm-package-baseline.tsv. cargo fmt/clippy clean (installer's SKILLS list is the only Rust touched). Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer c39b61cf.",
+      "created_at": "2026-09-04T08:01:38Z",
+      "updated_at": "2026-09-12T17:55:04Z"
+    },
+    {
+      "id": "T91b",
+      "title": "retire read/tail --local, the log-file path that bypasses the server",
+      "status": "done",
+      "priority": "normal",
+      "parent": "T91",
+      "detail": "read --local and tail --local walk $AI_CHAT_HOME/channels/<chan>.log with no server. Remove them, or keep them only as a maintenance escape hatch that is documented as such and never recommended in an agent instruction or skill doc. Sweep SKILL.md, the client's own usage text and .agents docs for anywhere --local is offered as the way to read a channel, since that is what teaches every future agent to bypass the socket. Depends on T91a: nothing may lose the ability to read a channel before the push path replaces it.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Already done, folded into T91/T91a's own closure (both closed 2026-09-09): --local survives only as an explicitly-labelled maintenance escape hatch, never recommended for agent use. Verified directly (2026-09-12): src/chat-client-rs/src/lib.rs's usage text labels it '--local  maintenance escape hatch: read/tail the shared log, with no server'; chat/SKILL.md's own prose states plainly 'Agents must use the socket path so the server remains the only interface to the chat bus. Use it instead of opening the log by hand' -- steering AWAY from --local as the normal path, not toward it. Swept chat/docs/README.md and .agents/ for any other --local recommendation: none found. T91b was simply never closed when T91/T91a resolved the same ground.",
+      "created_at": "2026-09-04T08:29:54Z",
+      "updated_at": "2026-09-12T17:56:32Z"
+    },
+    {
+      "id": "T91c",
+      "title": "make the server's fan-out structurally lock-safe: a real channel per peer, and a read-write registry",
+      "status": "done",
+      "priority": "normal",
+      "parent": "T91",
+      "detail": "PR #43 fixed the acute wedge by giving each connection an outbox that its own thread drains, so a broadcaster never writes another peer's socket. That is the right shape, hand-rolled. Finish it properly:\n\n(1) The outbox is a Mutex<Vec<String>> plus drain. The idiomatic form is one std::sync::mpsc::Sender per connection: the message is MOVED to the owner, the channel's lock is a true leaf that is never held across I/O, and no code can accidentally reach a peer's connection state again. A hand-rolled queue invites someone to add 'just one' extra field guarded by the same mutex.\n\n(2) The registry is 'writers: Mutex<Vec<Arc<Mutex<Option<ConnState>>>>>' -- a mutex holding a vector of mutexes. It is READ on every broadcast and WRITTEN only on connect and disconnect, so it wants an RwLock. This matters beyond speed: the accept loop needs that same lock to register an arrival, which is why a stalled broadcast stopped new clients being served at all.\n\n(3) While in there, the connection state's own mutex is held across a 200ms read and immediately retaken, which is what starved broadcasters (measured by chat-b122). Whatever survives after (1), that pattern should not.\n\nCONSIDERED AND REJECTED, recorded so it is not re-proposed: dropping server-side fan-out entirely and letting our clients read the log, or poll FETCH, because they largely do that already. Tschallacka's rule on 2026-09-04 forecloses it -- nothing outside the server may touch the log, and steady-state delivery is a push over the socket, not a poll. Fan-out is therefore load-bearing and gets fixed, not deleted. See T91a.\n\nNot urgent: the acute bug is fixed. This is the cleanup that stops it recurring by construction rather than by care.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "writers: Mutex<Vec<Arc<Peer>>> -> RwLock<Vec<Arc<Peer>>> (src/chat-server-rs/src/main.rs): read on every peers_except (broadcast) and every deregister, written only by the accept loop. All 3 call sites and all 4 test-fixture constructions updated (.lock()->.read()/.write()).\n\nThe other two items: (1) peer.slot held across its own 200ms read -- investigated, already structurally harmless: the B122 outbox/Peer split (before this ticket) means nothing but a connection's OWN thread ever touches its own slot (confirmed: its only other access is a same-thread setup write at connect time, before serve() starts), so there is no contention to fix. (2) outbox Mutex<VecDeque<String>> -> mpsc -- investigated and not adopted: the outbox also tracks a byte budget, joined-channel membership and a dead flag, none of which mpsc expresses, so the conversion would leave a companion mutex for those anyway (more moving parts for a design that already satisfies every safety property this ticket cares about: a leaf lock, never held across I/O, never shared with anything that blocks).\n\nVerifying this surfaced two real, unrelated defects in EARLIER commits this same session, filed and fixed alongside it: B322 (T143's session override never keyed conn.rs's own cursor bookkeeping -- two identities' cursors cross-contaminated through one shared unkeyed file) and B323 (T104's trigger-wake fetched the woken message through the server's literal-@mention-only filter, which could exclude the very message that woke it -- present since T104's own original commit, not a new regression). Also fixed a chat-mcp test harness bug (AI_CHAT_BEACON_PORT set on the server, which reads CHAT_BEACON_PORT instead -- test-only, not filed separately).\n\nVerified: cargo test -p chat-server-rs -p chat-mcp -p chat-client-rs (125/125). cargo fmt/clippy clean. Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated), including all real chat/tests/*.sh integration tests (test-chat-broadcast-stall, test-chat-resolution, test-chat, etc.) passing against the RwLock'd server. Committed feat/rust-installer 6be90b14.",
+      "created_at": "2026-09-04T08:36:28Z",
+      "updated_at": "2026-09-12T18:28:58Z"
     },
     {
       "id": "T92",
@@ -1099,6 +990,19 @@
       "note": "Already built (registers.yml + registers-sync.yml, pre-existing before this session, confirmed via git log). B320 fixed a defect in the guard those workflows depend on (two-dot vs three-dot diff), which had blocked every landing since 2026-09-10T13:13Z; unstuck by rebasing and force-pushing the registers branch.",
       "created_at": "2026-09-04T12:13:25Z",
       "updated_at": "2026-09-11T08:43:53Z"
+    },
+    {
+      "id": "T95",
+      "title": "Interactive installer TUI has no way to choose a skill's integration mode (mcp vs skill)",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "install.sh's --integration flag lets an automation caller pick ai-text-editor's mcp bridge vs its skill client, but the interactive terminal UI (iui_info_actions and the rest of the iui_ pane rendering) only offers 'install dependencies' / 'reverify dependencies' as actions -- there is no toggle or prompt anywhere in the TUI for integration mode. A human running the plain interactive installer cannot choose mcp mode at all; only a scripted --integration flag can. Add an action (or a per-skill toggle in the info pane) that lets an interactive user pick among the modes integration_modes() declares for the skill under the cursor, for skills that offer more than one.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Verified live 2026-09-12 against the current Rust installer (src/installer/src/ui/mod.rs), not the bash install-ui.sh this note originally referenced (retired, see git history of 1549ccb2). Drove ./target/release/installer interactive via the interactive-shell skill: Tab to focus the info pane on a multi-mode skill (ai-text-editor) shows an 'm  integration mode: skill (cycles: skill mcp)' action; pressing m cycles skill -> mcp -> skill, confirmed round-trip. The capability this task asked for already exists in the Rust picker (cycle_integration_mode in ui/mod.rs); nothing further to build.",
+      "created_at": "2026-09-04T20:52:21Z",
+      "updated_at": "2026-09-12T10:34:48Z"
     },
     {
       "id": "T96",
@@ -1148,6 +1052,47 @@
       "updated_at": "2026-09-09T08:10:52Z"
     },
     {
+      "id": "T100",
+      "title": "jump points: on open, derive a file's outbound references from CodeGraph so a tab can be navigated, not just searched",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "SKIP",
+      "blocked_on": null,
+      "refs": [],
+      "note": "LIFECYCLE settled with Michael: derive the jump points at open, and RECOMPUTE THEM ON SAVE. Save is the right boundary because codegraph indexes DISK -- save is the moment disk changes -- so staleness is bounded to 'while the tab is dirty' rather than being open-ended. A set still carries the revision it was computed at, so a dirty tab's jump points are reported stale rather than followed silently.\n\nCOST: all of this is server-side, so the scanning, caching and re-derivation cost the agent NO TOKENS. The agent pays only for the jump points it asks for. That is what justifies doing the work eagerly at open and at every save, rather than lazily on request.\n\nINDEX FRESHNESS, worth handling explicitly: codegraph's watcher lags a write by about a second, so a recompute fired immediately on save can read the pre-save index. Run 'codegraph sync' first -- it is incremental and prints 'Already up to date' when there is nothing to do, so a needless run is free -- then re-derive. Useful side effect: editing through the editor would keep the codegraph index warm, which the repository already asks callers to do by hand after changing code.\n\nIMPLEMENTED: new src/ai-text-editor/src/jump_points.rs reads .codegraph/codegraph.db directly (rusqlite, read-only) rather than shelling out to codegraph per symbol -- its CLI has no bulk per-file JSON command. Grounded in codegraph's own source (~/git/codegraph, the colbymchenry/codegraph fork): nodes/edges schema, the getCallees outbound-edge-kind set (calls/references/imports/instantiates/navigates, excluding contains and the type-annotation kinds), and project-root-relative forward-slash file_path normalization. Version robustness (explicit requirement): derive() never branches on a schema version number -- migrations.ts shows every migration v2-v9 only adds columns/tables/indexes, never removing the ones read here -- instead it runtime-checks via PRAGMA table_info(nodes)/table_info(edges) that the specific columns it needs exist, returning JumpPointsError::UnsupportedSchema (not a panic or raw SQL error) when they don't, alongside NoIndex for no .codegraph/ at all. Tab gained jump_points/jump_points_revision; a refresh_jump_points helper (runs codegraph sync, swallowing a missing binary or non-zero exit the same soft way as NoIndex, then derive) is called at both tab-construction sites (server startup and open_additional_tab) and after a successful save. New read-only jump_points verb mirrors history/resources/capabilities exactly, wired through verbs.rs, ai-text-editor-server.rs, ai-text-editor-mcp (READ_ONLY_TOOLS + tool schema), the CLI (jump-points subcommand), the man page, and SKILL.md. Unit tests cover the real fixture, contains/null-line exclusion, NoIndex, and UnsupportedSchema; CLI integration tests cover the full open -> jump-points -> edit -> stale -> save -> recomputed path and the no-.codegraph null path. Full run-tests.sh: 236 passed, 2 failed (test-mode-markers, test-rjq-active-references -- both pre-existing/unrelated, matching the T91c baseline), 2 unconfigured (PLANNING_CONTEXT_CACHE, unrelated).",
+      "created_at": "2026-09-07T19:39:33Z",
+      "updated_at": "2026-09-12T19:43:18Z"
+    },
+    {
+      "id": "T101",
+      "title": "split chat-client-rs/src/lib.rs into modules",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "lib.rs is 2776 lines: the CLI entry point, the CLI verbs, the resolution ladder, the TLS connect and TOFU pin, the session, the local log reader and an in-file test module, in one file. It reached that size as one file because it was main.rs; T90 made it a library without splitting it, deliberately, so an in-flight B266 change on another branch would merge as a rename rather than fight a mass code move. Once feat/t90-chat-mcp and fix/worktrees-tmpdir-chat-relay are both merged that reason is spent. Split by concern, one docblock each: net (resolve, connect, client_config, the TOFU pin, line I/O, wait_for_welcome), discovery (the beacon, the cache, resolve_server), session (the key ladder, Session, cursors), wire (wire_segments, split_at_budget, msg_line_id), local (the channel log reader), and the CLI verbs behind run(). The public surface is already the split: what the MCP adapter imports is exactly the first four groups.",
+      "blocked_on": null,
+      "refs": [
+        "T90"
+      ],
+      "note": "Split done: lib.rs (was 3,669 lines) is now 897 lines (crate doc comment, mod declarations, the re-export blocks, and the relocated -- byte-for-byte identical, diffed to confirm -- 833-line test module). Six new sibling modules: net.rs (431, TLS connect/TOFU pin/line I/O/crypto helpers), discovery.rs (159, beacon/cache/resolution ladder), session.rs (515, key-resolution ladder + Session), wire.rs (149, wire-segment/JSON/mention helpers), local.rs (98, local channel-log reader), cli.rs (1,521, the CLI verbs plus the tail's control-socket serving for the other verbs -- T104's \"tail owns the connection\" design). control.rs (791) untouched.\n\nZero behavior change, zero public-API change: every symbol chat-mcp and the chat-client-rs binary depended on (valid_chan, client_state_dir, resolve_session_key, apply_session_with_key, resolve_server, DEFAULT_BEACON_PORT, save_session_with_key, session_key, Session, channels_home, discover_candidates, Client, connect, save_cursor_with_key, Session::load_with_key, wait_for_welcome, wire_segments, write_line) is re-exported from lib.rs at exactly its old chat_client_rs::<name> path. git diff --stat on src/chat-mcp/ shows zero changes, and the binary (bin/chat-client-rs.rs) needed none either.\n\nVerified independently (not just accepting the delegated fork's self-report): read every new file, confirmed the test module is byte-identical via diff (833/833 lines, zero differences), reran cargo test -p chat-client-rs (64/64) and -p chat-mcp (12/12... actually 31 across both test binaries) myself, reran cargo fmt --check and cargo clippy -p chat-client-rs -p chat-mcp --all-targets -- -D warnings myself (clean), and confirmed only the 7 intended files are new/changed under src/chat-client-rs/ with no stray scratch files left behind. Full pre-push-check.sh and ./run-tests.sh (both nix-wrapped): 236 passed, 2 failed (test-mode-markers, test-rjq-active-references -- both pre-existing/unrelated, matching this session's established baseline), 2 unconfigured (PLANNING_CONTEXT_CACHE, unrelated).",
+      "created_at": "2026-09-07T20:07:58Z",
+      "updated_at": "2026-09-12T20:41:41Z"
+    },
+    {
+      "id": "T102",
+      "title": "installable agent profiles: ship .agents/profiles/ the way skills are shipped",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "The nitpicker profile lives at .agents/profiles/nitpicker.md and is installed by hand: copy it to ~/.claude/agents/ and restart the session. Nothing declares it, nothing installs it, and nothing checks the copy has not drifted from the repository's.\n\nSkills already solve this: a manifest declares the files, install.sh writes them into each agent root, and a test refuses a tracked file nobody declared. Profiles need the same treatment, with two differences that decide the shape:\n\n- The destination differs per harness. Claude Code reads ~/.claude/agents/, and codex and opencode place agent definitions elsewhere; the installer already resolves per-agent roots for skills, so this is the same resolution, not a new one.\n- A profile is only picked up at session start. The registry is read once, so an install has to say plainly that a restart is required before the profile can be used, the way the skill install already tells the reader to restart the agent CLI.\n\nConsumers: installer/src/50-manifest.sh (skill_files or a profiles equivalent), PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv, installer/build.sh, and a declarations test so a new profile cannot be added without being declared.\n\nFiled at Michael's request while adding the first profile to the repository.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Explicit direction from the user changed the shape mid-plan: store profiles canonically as JSON (.agents/profiles/<name>.json), with a translator per agent kind that renders that harness's own native format, using known/trusted crates (toml, serde_yml -- serde_yaml's maintained fork) rather than hand-rolled string emission or Markdown-source parsing.\n\nResearched each harness's actual convention (opencode.ai/docs/agents/, learn.chatgpt.com/docs/agent-configuration/subagents, fetched live): Claude Code and opencode both read Markdown+YAML-frontmatter but different schemas (Claude: name+description; opencode: description only, filename supplies the name); codex reads TOML entirely (name/description/developer_instructions). All three genuinely differ, confirming the translator design was the right call.\n\nIMPLEMENTED: converted .agents/profiles/nitpicker.md to nitpicker.json (name/description/instructions; the stale \"installing this is manual, T102 covers this\" comment block dropped since it's no longer true). New src/installer/src/profiles.rs: ProfileSpec (serde_json), ProfileTranslator trait (kind/dest_suffix/filename/render) as the whole extensibility point, three translators (Claude, opencode, codex) each unit-tested against the real profile content including a round-trip check that opencode's output never carries a name key and codex's output re-parses as valid TOML via the toml crate itself. manifest.rs gained Profile/PROFILES. main.rs gained run_profiles_post_install (unconditional, wired into run_post_install_steps, mirrors run_agent_identity_post_install's report shape) and a standalone `installer install-profiles --agent KIND --source DIR --target DIR` subcommand. Manually verified end-to-end for all three kinds against a scratch $HOME: correct destination path, correct native format in each case.\n\nShell side: installer/src/05-config.sh gained PROFILE_NAMES; installer/src/50-manifest.sh gained profile_files() (own heredoc, mirroring skill_files()); new tests/test-profile-files-manifest.sh mirrors test-skill-files-manifest.sh's two-directional declared-vs-tracked check.\n\nPackaging fallout, found and fixed during verification (not part of the original plan, but real gaps this change exposed): package.json's files array had an explicit \"!.agents/profiles/**\" negation excluding the whole directory from the npm package -- removed, since profiles need to ship now. .npmignore (a generated file, \"Everything not marked MODE: PROD\") was stale from EARLIER work this session (T100's jump_points.rs, T101's chat-client-rs split, T144's uninstall.rs/uninstall_picker.rs/shared_bin.rs, T122/T123's agent-identity-plugin/ -- none of that had triggered a regen yet) -- regenerated via installer/build-release.sh --npmignore. installer/build-release.sh itself gained profile_files_for_release() (delegates to 50-manifest.sh's profile_files(), not a duplicate list) wired into collect(), the same shape as its existing tui_hint_plugin_files/editor_gate_plugin_files/agent_identity_plugin_files. tests/test-release-package.sh -- which independently re-derives the expected release tarball contents specifically so it does NOT just ask build-release.sh to grade its own homework -- needed its own profile_files()-sourced addition to that derivation; full run-tests.sh caught this real gap (a genuine new failure, not a pre-existing one) before the fix, and is clean after it.\n\nFull run-tests.sh (both attempts, second after the test-release-package.sh fix): 237 passed, 2 failed (test-mode-markers, test-rjq-active-references -- both pre-existing/unrelated, matching this session's established baseline), 2 unconfigured (PLANNING_CONTEXT_CACHE, unrelated). npm-package-baseline.tsv regenerated (nitpicker.json now ships, package.json's own byte size line shifted from the files-array edit). cargo fmt/clippy clean across installer.",
+      "created_at": "2026-09-07T20:30:56Z",
+      "updated_at": "2026-09-12T21:53:24Z"
+    },
+    {
       "id": "T103",
       "title": "CODE-STYLE 11: say that an item inserted after a comment must not adopt it",
       "status": "done",
@@ -1189,6 +1134,107 @@
       "note": "Proposal, not law. Peer of T105: that one is a gap inside a rule, this is a gap in the contract's scope. RULED by Tschallacka, 2026-09-08: widen it. 'We started with bash only, so we evolved to rust focussed to get around system limitations etc... So widen it, so it applies to all languages. they are good rules, that should be held globally.'\n\nSo the shell-only scope was an artefact of shell being all there was when the rules were written, never a judgement that Rust deserved fewer. CODE-STYLE.md is now titled 'Code style and structure', opens 'The contract every source file in this repository conforms to, in every language', and section 11's table row reads 'This repository's own source, in every language'. Where a rule is inherently shell-specific -- set -euo pipefail, the bash 3.2 floor, local -- it simply has no counterpart in another language rather than exempting that language from the rest.\n\nSection 11 also now states that // /// and //! are all comments under it: rustdoc prose describing the API is what /// is for and is not why-prose, while an account of how the code came to look this way is, and belongs in the commit message.\n\nPrompted by a nitpicker citing the old scope line to rule a Rust file ungoverned, which is exactly the reading the entry predicted.",
       "created_at": "2026-09-08T10:48:24Z",
       "updated_at": "2026-09-08T20:00:10Z"
+    },
+    {
+      "id": "T111",
+      "title": "The session owner needs a Windows transport: loopback TCP with a token",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "T107 landed the owner on unix sockets. Windows has no unix socket, so control.rs carries a cfg(not(unix)) arm where serve() and ask() both return None -- every verb there keeps exactly the behaviour it had before T107, including the B283 suffix when a tail is running.\n\nThe shape it needs is the one ai-text-editor already uses: bind loopback TCP on an ephemeral port, put the port and a secret in the owner record, and prove the secret per connection rather than sending it in the request. The record already carries pid and started_at_ns for owner identity; what it gains is the endpoint form and the token. src/ai-text-editor/src/transport.rs is the reference, including why the token is not in the envelope.\n\nTwo things must hold that the unix path gets for free: the record file's permissions are the only guard on a loopback port (there is no 0700 directory doing it), and liveness is still decided by connecting, not by the pid. A port that nothing answers is a stale record, same as a socket that refuses.\n\nNot shipped with T107 deliberately: an untested socket transport on a platform nobody here can run is worse than an honest fallback, and the fallback is correct -- just without the fix.",
+      "blocked_on": null,
+      "refs": [
+        "src/chat-client-rs/src/control.rs",
+        "src/ai-text-editor/src/transport.rs"
+      ],
+      "note": "IMPLEMENTED: control.rs's non-unix mod imp now really implements serve/ask/stop via a loopback-TCP transport (bind 127.0.0.1:0, ephemeral port), instead of unconditionally answering None. Every connection proves a shared secret via an HMAC-SHA256 challenge/response (control_auth.rs, a small sibling of ai_text_editor::auth scoped to this file's flat Request/Reply wire, using OwnerRecord.started_at_ns as the \"generation\" ai-text-editor's own random server_generation string plays) rather than sending the token in the clear, per this ticket's own explicit requirement. The mechanism (tcp_serve/tcp_ask/tcp_stop/control_auth) is plain std::net + hmac/sha2/getrandom/base64, not itself cfg-gated -- only the *choice* of using it over the unix arm's UnixListener/UnixStream code is (the two `mod imp` blocks) -- so this file's own tests exercise the real mechanism directly on any machine (74 tests total, including new TCP-specific ones), not only prove it compiles for Windows.\n\nVERIFIED FOR REAL ON WINDOWS: opened feat/rust-installer's first-ever pull request (#154, against nextupdate) specifically to get this in front of ci.yml's real windows-latest leg -- chat-client-rs's full test suite (69/69, the 5 unix-only tests correctly excluded there via #[cfg(unix)]) passed there, meaning the loopback-TCP transport genuinely works on a real Windows runner, not just \"compiles for the target.\"\n\nGetting that CI run at all surfaced that feat/rust-installer had never had a real CI run before (ci.yml triggers only on push to master/nextupdate or on pull_request; this ~70-commit branch had done neither), which surfaced three unrelated, pre-existing gaps blocking every platform: ci.yml's sparse-checkout never listed installer/tools.tsv or .agents/profiles (B324), cli_mode.rs's symlink test had no cfg(unix) gate (B325), and plugins.rs's copy_plugin_files had a parameter unused outside cfg(unix) (B326) -- all three found, fixed, and confirmed via re-reading the actual CI job logs. Two further pre-existing issues were found and left open rather than expanding this ticket's scope further (explicit user direction): B327, a cross-module $HOME test-isolation race in installer's own test suite (integration.rs/install.rs/plan_migration.rs), and B328, install.rs's shared-binary tests hardcoding a binary name with no .exe suffix, which fails deterministically on every Windows run.\n\ncargo fmt/clippy -D warnings clean for chat-client-rs/chat-mcp throughout. Full local ./run-tests.sh: 237/239 passed, matching this session's established baseline (test-mode-markers, test-rjq-active-references pre-existing/unrelated). PR #154 left open with B327/B328 unresolved -- not merged.",
+      "created_at": "2026-09-08T13:58:10Z",
+      "updated_at": "2026-09-13T06:21:18Z"
+    },
+    {
+      "id": "T113",
+      "title": "Relocating a block should not cost its content: a move (and copy) verb",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Today the only way to relocate text is to write it at the destination and delete it at the source, so the block's full content is generated as an argument even though the server already holds it. On a large document a refactor is mostly REARRANGEMENT, which means paying output tokens for content that never changed.\n\nProposed: move --from-range-start/--from-range-end (or a span token, see T110) plus a destination, resolved and applied server-side with no content in the request. copy the same without the delete. Both are guarded the way replace is -- the source span is verified before anything is removed -- and both report what they moved, so the caller can verify from the answer as it can today.\n\nWhy it is worth its own entry rather than folding into T110: T110 removes the GUARD's cost, this removes the CONTENT's cost, and they are independent. A move with no guard is still a move; a guarded replace still pays for its text.\n\nUndo already file-backs large edits, so the snapshot machinery a move needs exists. The ordering question to settle: a move within one tab is one atomic operation, not an insert plus a delete that could half-apply -- begin_transaction/end_transaction is the existing shape to reuse or to say why it is not enough.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "ai-text-editor/references/protocol.md",
+        "ai-text-editor/SKILL.md"
+      ],
+      "note": "Raised by Tschallacka asking whether the pasted content can be limited to buy back context: 'on a large document with a lot of edits that would suck badly.' Measured in this session: guards were mostly 1-4 lines, but one replacement was 185 lines, so the replacement is the dominant cost and a rearrangement pays it for nothing. IMPLEMENTED: move/copy verbs added to ai-text-editor-server.rs -- source span reuses replace's own edit_span/resolve_match_id/expected_span_bytes helpers (relaxed to accept move/copy alongside replace), destination is a point via new resolve_dest_point (dest_offset or dest_line, mutually exclusive), the relocation itself is one splice_move computing before->after in memory (one or two Document::apply_bytes splices), folded into ONE journal record/revision/undo-step -- deliberately not relying on begin_transaction/end_transaction, since that only groups undo history and does not stop a crash between two separately-applied edits from leaving a real half-relocated document. Refuses a destination strictly inside the source span (move_destination_inside_source). Response never echoes moved content. verbs.rs, ai-text-editor-mcp/src/lib.rs, and the CLI (ai-text-editor.rs) all wired to the same METHODS/schema declarations. Also fixed a real bug the implementation's own tests caught: source_offset/source_len/dest_offset had no verbosity.rs tier classification, which tripped a debug_assert! panic (not just a warning) that silently killed the connection on every successful move/copy -- fixed by classifying them at tier 1. Verified: cargo test -p ai-text-editor (67 cli_flow incl. 10 new move/copy tests + 4 tcp_flow + 56 lib) and -p ai-text-editor-mcp (5 mcp_flow) all passing; cargo fmt --check and cargo clippy --all-targets -D warnings clean. Full nix develop . --command ./pre-push-check.sh: PASS. Full nix develop . --command ./run-tests.sh: 237 passed / 2 failed (test-mode-markers, test-rjq-active-references -- both pre-existing/unrelated) / 2 unconfigured (require PLANNING_CONTEXT_CACHE, unrelated). Docs updated: protocol.md, SKILL.md, ai-text-editor.1.",
+      "created_at": "2026-09-08T14:45:31Z",
+      "updated_at": "2026-09-13T07:04:52Z"
+    },
+    {
+      "id": "T118",
+      "title": "Abbreviate tab ids to the shortest unambiguous prefix, git-style",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "A tab id is a 64-character hex uuid and it is repeated in every response. Measured 2026-09-08 on a two-line read at verbosity 0: the payload is 121 bytes and 76 of them -- 62 percent -- are the tab id. The file content being read was 32 bytes.\n\nTschallackas design: return the shortest prefix that is unambiguous among the live tabs, and let it grow as tabs are added. One tab starting cd0 with nothing else starting c is returned as c; open a second c tab and both lengthen to the first distinguishing character.\n\nWhere it goes. session::resolve_tab already reads every record and already filters by tab_uuid equality, so it is the natural home: match by PREFIX instead, group the matches by tab_uuid first, and refuse when two DISTINCT uuids share the prefix -- naming the candidates, which is the doctrine the rest of that module already follows for stale or ambiguous identities. Several records for ONE uuid stay as they are, newest-by-start_time wins. A full 64-character id must keep resolving exactly as today, so nothing that stored one breaks.\n\nThe emitting side is the other half: whatever writes tab_id into a response (T98 put it on every response at every verbosity) has to write the abbreviated form.\n\nThe one honest hazard, which git has too: a short id an agent is holding can become ambiguous when a new tab opens. That is recoverable and must be made so -- the refusal names the candidates, and the agent re-resolves. It must never silently pick one.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor/src/session.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
+      "note": "Raised by Tschallacka on seeing a verbosity-0 response: 'why are the tab ids so large'. A 2-character id takes that same wire frame from 303 to 241 bytes, and the payload from 121 to 58. RE-KEYING IS AN EVENT, NOT A FIELD (Tschallacka)... [T119/minting/Worktree-ownership discussion in this ticket's own notes is scoped to a LATER ticket, not implemented here]. IMPLEMENTED (T118 itself, scoped narrowly to its own detail field): tab ids are abbreviated to the shortest prefix unambiguous among registered tabs, git-style. Went through TWO designs in this session: (1) an initial 'recompute the shortest unambiguous prefix fresh on every response' scheme (symmetric: any two colliding tabs both grow together) -- this was fully implemented, unit-tested, and passing, but independent review caught that it made several EXISTING cli_flow.rs tests genuinely flaky (~1-in-16 chance per additional tab opened in a test): a tab's own already-issued short id could retroactively become ambiguous the moment some UNRELATED later tab happened to share its leading characters, since the abbreviation was recomputed from scratch against whatever was currently registered rather than fixed at issuance. (2) Per explicit user feedback ('The first tab to get the short one, holds it. The other one gets the longer id. Add a known ids map that links tab to id'), REDESIGNED to a stable, first-come-first-served allocation: SessionRecord (session.rs) gained a persisted short_id field, assigned ONCE by session::register() under its own lock (shortest_available_prefix against every OTHER already-registered tab's own assigned short_id -- exact-string avoidance only, not prefix-collision, since two assigned ids being prefix-related to each other, e.g. 'c' and 'c3', is fine: resolution treats an EXACT match against an assigned short_id as an outright, unambiguous win before ever falling back to raw full-hash prefix matching). A tab's own assigned id is therefore immutable for its whole life regardless of what registers afterward -- the exact flakiness class the first design had is structurally impossible under the second. session::resolve_tab/resolve_tab_at and server.rs's select_tab both check the exact-assigned-id match first (the 'first come' owner always wins over a later tab's raw-hash coincidence), falling back to the original full-uuid-prefix-with-ambiguity-refusal logic (grouped by distinct uuid) only when no assigned id matches -- which still correctly refuses genuine under-specified queries (e.g. querying something shorter than either colliding tab's own assigned form). ai-text-editor-server.rs's Tab struct gained a cached tab_uuid (the raw hash, computed once) and short_id (the assigned display form, backfilled via a new session::short_id_for(tab_uuid) read-after-write right after each of the three register_session call sites, since Tab construction happens before registration in this server's own flow). tab_id()/full_tab_id() became simple field reads, no per-response I/O needed for the common case. Docs (protocol.md, SKILL.md, ai-text-editor-mcp's tool description, ai-text-editor.rs's --help) updated to describe the STABLE, assign-once semantics -- an earlier doc draft under design (1) said a first tab's id 'lengthens' when a second tab collides, which is now false and was corrected before shipping. Verified: cargo test -p ai-text-editor (65 lib incl. 13 new session.rs tests + 68 cli_flow incl. new a_lone_tab_is_addressed_by_a_single_character + 4 tcp_flow) and -p ai-text-editor-mcp (5 mcp_flow) all passing; the specific previously-flaky test re-run 20x back-to-back with zero failures (vs. observed under design (1)); cargo fmt --check and cargo clippy --all-targets -D warnings clean. Full nix develop . --command ./pre-push-check.sh: PASS. Full nix develop . --command ./run-tests.sh: 239 passed / 0 failed / 2 unconfigured (PLANNING_CONTEXT_CACHE, unrelated) -- fully green, no baseline failures remaining at all this session.",
+      "created_at": "2026-09-08T20:20:57Z",
+      "updated_at": "2026-09-13T11:21:42Z"
+    },
+    {
+      "id": "T124",
+      "title": "ai-text-editor MCP: accept 'path' as an alias for 'file' on every tool that takes it",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Every tool's real parameter is 'file' (open, insert, replace, ...), but 'path' is the far more natural/common name an agent reaches for -- it is what open() and most file APIs call it, and it is what this session actually typed on the first two open calls today. Since the schema has additionalProperties: false, a caller who says 'path' gets no error and no file at all: the request silently proceeds with file=None, falls through to identity-based resolution, and can surface an unrelated, confusing failure (in this case session_stale, which had nothing to do with the real mistake). Wanted: accept 'path' as a synonym for 'file' in the MCP adapter's payload parsing (src/ai-text-editor-mcp/src/lib.rs's call_tool, where 'file' is read out of the arguments object), and/or have request construction refuse an unrecognized top-level key near 'file' rather than silently proceeding with none. Consider whether the tool schema's 'file' description should also say '(aka path)' so this is documented at the point of use.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor-mcp/src/lib.rs",
+        "ai-text-editor/SKILL.md"
+      ],
+      "note": "Shipped: call_tool (src/ai-text-editor-mcp/src/lib.rs) promotes a payload's 'path' value into 'file' before the ADAPTER_ARGUMENTS strip loop runs -- 'path' added to ADAPTER_ARGUMENTS itself (with its own schema description) so it is declared on every tool, accepted by the closed-world additionalProperties:false schema, and stripped from the outgoing payload once promoted (the server only ever sees 'file', unaffected). 'file' wins if both are given. 'file's own schema description now reads '(aka \"path\" -- either name works)' instead of B310's 'not path' warning.\n\nVerified: cargo test -p ai-text-editor-mcp (13 lib + 3 pre-existing + 2 new end-to-end integration tests against a real ai-text-editor-server: opening with 'path' alone succeeds and reports the real file path exactly as 'file' would; when both are given, 'file' wins). cargo fmt/clippy clean. Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer 968f31fb.",
+      "created_at": "2026-09-09T07:00:47Z",
+      "updated_at": "2026-09-12T17:01:30Z"
+    },
+    {
+      "id": "T127",
+      "title": "ai-text-editor MCP: codex prompts for permission on every call, and the resulting delay routinely expires the servers idle timeout mid-task",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Michael, driving ai-text-editor via codex: codex asks for approval on every single ai-text-editor.open/read/search call, unlike a normal read-only tool. Each approval adds real wall-clock delay between calls, and the autostarted ai-text-editor-server has its own idle_timeout_seconds (open calls in the transcript pass 120, then 300). When the approval delay across several calls exceeds that window, the server exits and every open tab_id in flight goes tab_unknown - \"no session record has tab_id X; the tab may belong to a server that has since exited - open the file again for a current id (the journal replays)\". Codex then has to reopen the same file and retry, compounding the prompt fatigue. Two angles worth investigating together, since fixing either alone only helps half the symptom: (1) why codex prompts per-call at all for a local read-only-by-default MCP server - check whether ai-text-editor tools/list declares read-only tool annotations (e.g. an MCP readOnlyHint-style hint) that a conforming client could use to skip confirmation, and what codexs own MCP trust/allowlist config supports; (2) whether the servers idle_timeout_seconds should scale with, or be immune to, the callers own confirmation latency - a tab dying because a HUMAN was slow to click approve is a different failure than a tab dying because the agent went idle, and only the second is what the timeout is meant to catch.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor-mcp/src/lib.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "note": "Fixed and verified live 2026-09-12. Angle (1) was the real cause: src/ai-text-editor-mcp/src/lib.rs's tool_definitions() declared zero MCP tool annotations on any tool, so a client had no signal that open/read/search/etc. never write. Added an 'annotations' object per tool ({readOnlyHint, openWorldHint: false}), computed from a new READ_ONLY_TOOLS const covering the tools that never change a file's bytes or delete anything (open, capabilities, resources, read, history, page, search, cursor, job_poll); everything else (including index, save_as, close, resolve, and the 9 revision-guarded mutating tools) keeps the default. Two new unit tests pin the const against the wire output and pin specific mutating tools to readOnlyHint:false. Verified live by driving a real Codex session (v0.154.0, gpt-5.5) through the interactive-shell skill: asked it to read a file via the MCP tool, then to insert into it. 'read' ran with NO approval prompt at all; 'insert' immediately showed 'Allow the ai-text-editor MCP server to run tool insert? (1 Allow / 2 Allow for session / 3 Always allow / 4 Cancel)' in the same session -- exactly the intended split. Also drove OpenCode (Big Pickle) and a fresh Claude Code session the same way for comparison: neither showed a distinguishing prompt for read vs insert even before this fix (OpenCode's own permission config already allows the MCP broadly; the Claude Code session had auto mode on), so they were never where T127's symptom lived -- Codex was, and Codex is now fixed. Angle (2) (idle_timeout_seconds scaling with confirmation latency) is untouched: with angle (1) fixed, the read-heavy calls that used to each cost an approval-round-trip now cost none, which should itself much reduce how often the timeout window is exceeded; revisit angle (2) only if tab_unknown recurs in practice. Landed in feat/rust-installer at f56c43ab.",
+      "created_at": "2026-09-09T12:30:19Z",
+      "updated_at": "2026-09-12T10:34:48Z"
+    },
+    {
+      "id": "T143",
+      "title": "chat-mcp needs a per-call identity override, multiplexing Held connections keyed by resolved session",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "T122's agent-identity-plugin injects each subagent its own AGENT_ID/AGENT_TYPE at SubagentStart and instructs it to declare that id to ai-text-editor (agent/session argument) and interactive-shell (--agent/AGENT_ID). chat-mcp cannot honor the same instruction: held() (src/chat-mcp/src/lib.rs) is a single process-wide OnceLock<Mutex<Option<Held>>>, opened once via resolve()/session_key() and never re-resolved per call -- one connection, one nick, for the adapter's whole process lifetime. A subagent sharing a Claude Code session with its parent therefore still shares the parent's chat nick even after T122, since chat-mcp has no model-facing session/agent argument at all (unlike ai-text-editor-mcp's ADAPTER_ARGUMENTS, which already has one).\n\nSHAPE: give chat-mcp an optional per-call session/agent override (new TOOL_ARGUMENTS entry, mirroring ai-text-editor-mcp's 'agent'/'session'), and change held() from a single Option<Held> to a map of Held connections keyed by the resolved session (chat_client_rs already keys ALL persistent state -- nick, cursors -- by session_key(), via Session::path_for(state_dir, key), so the underlying per-session state model already supports this; only the connection-holding side is single-tenant today). Each distinct resolved session gets its own nick/connection, opened lazily on first use, same lazy-open-and-retry-on-dead-connection behavior with_connection already has, just keyed rather than singular.\n\nDepends on nothing; makes T122's chat instruction true rather than aspirational once done.",
+      "blocked_on": null,
+      "refs": [
+        "src/chat-mcp/src/lib.rs",
+        "src/chat-mcp/src/conn.rs",
+        "src/agent-session-key/src/lib.rs",
+        "T122",
+        "agent-identity-plugin/README.md"
+      ],
+      "note": "Shipped: chat-mcp accepts an optional session/agent argument (mirroring ai-text-editor-mcp's ADAPTER_ARGUMENTS) on every connected tool (join/leave/send/read/wait/who/trigger_add/trigger_remove/trigger_toggle/triggers). held() (src/chat-mcp/src/lib.rs) is now a Mutex<HashMap<String, Held>> keyed by the resolved session, opened lazily per key with the same retry-on-dead-connection behavior the single-connection version had, just scoped per entry. resolved_session_key() resolves an explicit session/agent argument via chat_client_rs::resolve_session_key's own Explicit rung (session wins if both given), falling back to the process's existing session_key() static when neither is given -- so a caller that never declares an identity keeps today's exact behavior unchanged.\n\nchat-client-rs grew the keyed counterparts underneath: Session::load_with_key/save_with_key (src/chat-client-rs/src/lib.rs), apply_session_with_key, save_session_with_key. Session::load/save/apply_session/save_session now delegate to these under session_key().0, so every existing call site (the chat CLI itself) is unaffected.\n\nVerified: cargo test -p chat-client-rs -p chat-mcp (64 + 19 + 12 = 95 total, incl. 2 new chat-client-rs tests proving two keys keep separate sessions in one state dir, and 3 new chat-mcp end-to-end integration tests against a real chat-server-rs: distinct session overrides get distinct minted nicks and hold separate connections verified via a real 'who' and a message read back under the sender's own nick; the 'agent' argument is confirmed an alias for 'session'; an empty override falls back to the default identity rather than minting a nick from nothing). cargo fmt/clippy clean across both crates. Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer 9ab984e3.\n\nMakes T122's chat instruction ('declare your id to chat') true rather than aspirational. B322: found and fixed while verifying T91c -- Held::open/Owner never threaded the resolved session_key into conn.rs's own cursor bookkeeping (join/leave/send/read/deliver all called the unkeyed Session::load/save_cursor), so two distinct identities' cursors cross-contaminated through one shared file even though their nick and connection were already correctly separated. Fixed on feat/rust-installer 6be90b14.",
+      "created_at": "2026-09-12T14:28:40Z",
+      "updated_at": "2026-09-12T18:29:06Z"
     },
     {
       "id": "T140",
@@ -1295,6 +1341,19 @@
       "note": "Moot as a checklist for a port that never happened this way; its content is generic verification practice already followed as a matter of course (bash -n, shellcheck, targeted tests, full ./run-tests.sh, mutation-testing new assertions) rather than anything specific to unbuilt work.",
       "created_at": "2026-09-01T16:05:03Z",
       "updated_at": "2026-09-09T22:22:05Z"
+    },
+    {
+      "id": "T83",
+      "title": "Tools available for register work, and where they came from (PR #15)",
+      "status": "obsolete",
+      "priority": "normal",
+      "parent": null,
+      "detail": "PR #15 adds two things any agent touching BUGS.json or TODO.json should know about. (1) planning/scripts/register-resolve.sh resolves an id collision in a conflicted register. Usage: '--check <register>' exits 1 when conflicted and 0 when clean, so it fits a hook; '<register>' with no decisions lists every collision with BOTH sides' titles plus a suggested free id and exits 65; '<register> side:old:new side:old:new ...' takes every decision in ONE run, applies them, and prints the resolved register to stdout with a confirmation on stderr; re-running the SAME command prefixed with CONFIRM=<that hash> writes it in place. side is ours|theirs or either branch name. It reads git index stages (:1 base, :2 ours, :3 theirs) so it needs no checkout, refuses a divergence (both sides editing one base entry differently) as something a rename cannot fix, refuses to resolve into a register whose own side is already unsound, follows a rename into parent and into an id-valued blocked_on, and REPORTS prose mentions rather than rewriting them. (2) tests/test-register-soundness.sh runs the rules over the committed registers, which nothing did before: a finding there means the entry did not come from the writers, because bug-add.sh and todo-update.sh refuse exactly those. Run it after any hand edit. Both are MODE: DEV and repository-side only - shipping equivalents to the two skills is T81.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Superseded by T81's own resolution (closed 2026-09-09): register-resolve.sh's porting was T81f-i, marked obsolete there because the capability shipped instead as todo resolve/bugs resolve subcommands on the compiled binaries -- register-resolve.sh itself is retired and does not exist in this tree. tests/test-register-soundness.sh (the other tool this ticket named) is unaffected and still ships, still runs in pre-push-check.sh as 'TODO.json/BUGS.json is sound'. T83 was simply never closed when T81 resolved the same ground; closing it now to match reality.",
+      "created_at": "2026-09-01T16:12:10Z",
+      "updated_at": "2026-09-12T17:36:53Z"
     }
   ]
 }
