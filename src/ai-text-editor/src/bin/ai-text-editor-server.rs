@@ -1199,7 +1199,13 @@ fn write_frames<S: std::io::Write>(
         }
         if let Some(object) = frame.as_object_mut() {
             object.insert("sequence".into(), json!(sequence as u64));
-            if object.get("type").and_then(Value::as_str) == Some("data") {
+            // T119: the sentinel never reaches the wire either way -- removed
+            // here regardless of whether it asked to skip byte_count, so a
+            // frame handle() never marked (the mid-stream restart path below
+            // builds its own frames directly, bypassing handle() entirely)
+            // still gets its byte_count exactly as before.
+            let omit_byte_count = object.remove("_omit_byte_count").is_some();
+            if object.get("type").and_then(Value::as_str) == Some("data") && !omit_byte_count {
                 let byte_count = object
                     .get("payload")
                     .map(ai_text_editor::protocol::canonical_json)
@@ -1722,11 +1728,12 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
     // to route to this exact tab in the first place, refusing `tab_ambiguous`
     // instead of reaching `handle()` at all had `wanted` named more than one
     // tab on this server.
-    let addressed_by_handle = envelope
+    let addressed_by_tab_id = envelope
         .payload
         .get("tab_id")
         .and_then(Value::as_str)
-        .is_some_and(|wanted| !wanted.is_empty() && full_tab_id(&tab).starts_with(wanted))
+        .is_some_and(|wanted| !wanted.is_empty() && full_tab_id(&tab).starts_with(wanted));
+    let addressed_by_handle = addressed_by_tab_id
         || envelope
             .payload
             .get("tab_path")
@@ -2582,7 +2589,8 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             )];
         }
     };
-    if !ai_text_editor::verbosity::verb_is_exempt(&envelope.method) {
+    let exempt = ai_text_editor::verbosity::verb_is_exempt(&envelope.method);
+    if !exempt {
         for frame in &mut frames {
             // Never an error frame: a refusal's code, message and recovery
             // choices are the answer, at every level.
@@ -2594,24 +2602,70 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             }
         }
     }
-    // T98: every response names the tab it answered, at every verbosity
-    // level, because addressing the wrong tab silently is the failure the
-    // whole T96-T98 design exists to prevent. One name for the handle - the
-    // same `tab_id` a request addresses a tab by - rather than the `tab_uuid`
-    // only `open` used to report under a second name.
+    // T98: every response names the tab it answered, because addressing the
+    // wrong tab silently is the failure the whole T96-T98 design exists to
+    // prevent. One name for the handle - the same `tab_id` a request
+    // addresses a tab by - rather than the `tab_uuid` only `open` used to
+    // report under a second name.
+    //
+    // T119: the ONE exception is level 0, and only when the caller already
+    // supplied this exact tab_id -- echoing back the id the caller just sent
+    // is pure repetition, the clearest case of "level 0 must not repeat what
+    // the caller already sent". A request that named a `tab_path`, a file,
+    // or nothing at all (the focused tab) still gets the id back: none of
+    // those forms is the id itself, so it is new information the caller
+    // needs a handle for next time. This never weakens T98's guarantee for
+    // any of those other three forms, or at any level above 0.
     let answered_by = tab_id(&tab);
+    let omit_tab_id = level == 0 && !exempt && addressed_by_tab_id;
+    // T119: byte_count is added later, in write_frames, which never sees
+    // `level` -- handle()'s own return type is just the frame Vec, so the
+    // decision is carried on the frame itself via this private key rather
+    // than widening write_frames' signature for every one of its three call
+    // sites (two of which never call handle() at all, on a validation or
+    // routing refusal). write_frames strips the key before the frame is
+    // serialized, so it never reaches the wire.
+    let omit_byte_count = level == 0 && !exempt;
     for frame in &mut frames {
         if frame.get("type").and_then(Value::as_str) != Some("data") {
             continue;
         }
+        if omit_byte_count {
+            if let Some(object) = frame.as_object_mut() {
+                object.insert("_omit_byte_count".into(), json!(true));
+            }
+        }
         if let Some(payload) = frame.get_mut("payload").and_then(Value::as_object_mut) {
-            payload.insert("tab_id".into(), json!(answered_by));
+            if omit_tab_id {
+                payload.remove("tab_id");
+            } else {
+                payload.insert("tab_id".into(), json!(answered_by));
+            }
         }
     }
-    if !frames
+    let has_error = frames
         .iter()
-        .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
-    {
+        .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"));
+    // T119: the completion frame exists to tell a caller who is paging or
+    // streaming that a *sequence* of frames it already read is now over --
+    // that question has no answer to give when the whole response was one
+    // data frame, was not part of a stream, and named no pager_key. Charging
+    // every single-frame answer a second frame whose only content is
+    // "this is done" is exactly the framing overhead this ticket measured.
+    let single_unpaged_answer = frames
+        .iter()
+        .filter(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
+        .count()
+        == 1
+        && frames.iter().all(|frame| {
+            frame.get("type").and_then(Value::as_str) != Some("data")
+                || (frame.pointer("/payload/stream").and_then(Value::as_bool) != Some(true)
+                    && frame
+                        .get("payload")
+                        .and_then(Value::as_object)
+                        .is_some_and(|payload| !payload.contains_key("pager_key")))
+        });
+    if !has_error && !single_unpaged_answer {
         frames.push(complete(&envelope.request_id, &tab.revision.to_string()));
     }
     frames
