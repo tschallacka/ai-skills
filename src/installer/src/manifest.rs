@@ -154,11 +154,7 @@ pub fn agent_available(kind: &str, home: &std::path::Path) -> bool {
         "opencode" => on_path("opencode") || home.join(".config/opencode").is_dir(),
         "openclaw" => on_path("openclaw") || home.join(".openclaw").is_dir(),
         "cline" => {
-            let config_home = std::env::var("XDG_CONFIG_HOME")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| home.join(".config"));
+            let config_home = crate::shared_bin::xdg_config_home_or(home);
             home.join(".cline/skills").is_dir()
                 || home
                     .join(".vscode/extensions/saoudrizwan.claude-dev")

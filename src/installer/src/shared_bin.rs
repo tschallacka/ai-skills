@@ -18,11 +18,25 @@
 use std::path::{Path, PathBuf};
 
 pub fn shared_bin_dir(home: &Path) -> PathBuf {
-    let base = xdg_config_home()
+    xdg_config_home_or(home).join("tsch-ai-skills").join("bin")
+}
+
+/// `${XDG_CONFIG_HOME:-home/.config}` -- the one place every module that
+/// takes an explicit `home: &Path` parameter (specifically so a test can
+/// pass an isolated tempdir) resolves that fallback, through `xdg_config_home`
+/// below rather than a second inline copy of the same three lines. Before
+/// this existed, `custom_locations.rs`, `manifest.rs`, `plugins.rs` and
+/// `permissions.rs` each read `std::env::var("XDG_CONFIG_HOME")` directly and
+/// independently -- the same B327 defect (a `home` parameter silently
+/// overridden by the real ambient environment) in four more places that
+/// B327's own fix never touched, since it only fixed the two functions a CI
+/// failure had actually pointed at. One shared resolver means fixing (or
+/// re-breaking) this can only happen once, in one function.
+pub fn xdg_config_home_or(home: &Path) -> PathBuf {
+    xdg_config_home()
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"));
-    base.join("tsch-ai-skills").join("bin")
+        .unwrap_or_else(|| home.join(".config"))
 }
 
 // B327: `shared_bin_dir` takes `home` as an explicit parameter specifically so

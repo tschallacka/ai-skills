@@ -29,11 +29,9 @@ pub fn default_root(home: &Path) -> PathBuf {
             return PathBuf::from(root.trim_end_matches('/').to_string());
         }
     }
-    let base = env_value("XDG_CONFIG_HOME")
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"));
-    base.join("tsch-ai-skills").join("plans")
+    crate::shared_bin::xdg_config_home_or(home)
+        .join("tsch-ai-skills")
+        .join("plans")
 }
 
 // B327: same fix as shared_bin::shared_bin_dir, and for the same reason --

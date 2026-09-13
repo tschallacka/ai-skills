@@ -396,6 +396,27 @@ mod tests {
         fs::write(path, content).unwrap();
     }
 
+    // B328: a shared-binary fixture/assertion has to name the file the way
+    // THIS host's own build would actually produce it -- a bare
+    // `x86_64-unknown-linux-musl` triple and a bare command name are both
+    // only true on one specific platform. `current_target` mirrors
+    // `only_the_current_hosts_own_bin_triple_ships`'s own resolution so every
+    // shared-binary test agrees on one source of truth, and
+    // `platform_binary_name` adds the `.exe` suffix real Windows binaries
+    // carry (matching how `collect_relative_files` ships whatever filename
+    // is actually on disk, with no suffix logic of its own).
+    fn current_target() -> installer_platform::Target {
+        installer_platform::current().expect("test host must be a supported platform")
+    }
+
+    fn platform_binary_name(name: &str) -> String {
+        if current_target().is_windows() {
+            format!("{name}.exe")
+        } else {
+            name.to_string()
+        }
+    }
+
     #[test]
     fn copies_a_skill_directory_tree() {
         let source_root = tempfile::tempdir().unwrap();
@@ -595,15 +616,19 @@ mod tests {
         let source_root = tempfile::tempdir().unwrap();
         write_integration_tsv(source_root.path(), "ai-text-editor");
         write(
-            &source_root
-                .path()
-                .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor"),
+            &source_root.path().join(format!(
+                "ai-text-editor/bin/{}/{}",
+                current_target(),
+                platform_binary_name("ai-text-editor")
+            )),
             "skill binary",
         );
         write(
-            &source_root
-                .path()
-                .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor-mcp"),
+            &source_root.path().join(format!(
+                "ai-text-editor/bin/{}/{}",
+                current_target(),
+                platform_binary_name("ai-text-editor-mcp")
+            )),
             "mcp binary",
         );
         let target_root = tempfile::tempdir().unwrap();
@@ -620,8 +645,12 @@ mod tests {
         .unwrap();
 
         let shared = shared_bin::shared_bin_dir(home.path());
-        assert!(shared.join("ai-text-editor").is_file());
-        assert!(!shared.join("ai-text-editor-mcp").is_file());
+        assert!(shared
+            .join(platform_binary_name("ai-text-editor"))
+            .is_file());
+        assert!(!shared
+            .join(platform_binary_name("ai-text-editor-mcp"))
+            .is_file());
         assert!(!target_root.path().join("ai-text-editor/bin").exists());
     }
 
@@ -638,15 +667,19 @@ mod tests {
         let source_root = tempfile::tempdir().unwrap();
         write_integration_tsv(source_root.path(), "ai-text-editor");
         write(
-            &source_root
-                .path()
-                .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor"),
+            &source_root.path().join(format!(
+                "ai-text-editor/bin/{}/{}",
+                current_target(),
+                platform_binary_name("ai-text-editor")
+            )),
             "skill binary",
         );
         write(
-            &source_root
-                .path()
-                .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor-mcp"),
+            &source_root.path().join(format!(
+                "ai-text-editor/bin/{}/{}",
+                current_target(),
+                platform_binary_name("ai-text-editor-mcp")
+            )),
             "mcp binary",
         );
         let target_root = tempfile::tempdir().unwrap();
@@ -662,7 +695,9 @@ mod tests {
         )
         .unwrap();
         let shared = shared_bin::shared_bin_dir(home.path());
-        assert!(shared.join("ai-text-editor").is_file());
+        assert!(shared
+            .join(platform_binary_name("ai-text-editor"))
+            .is_file());
 
         install_skill(
             source_root.path(),
@@ -674,8 +709,12 @@ mod tests {
         )
         .unwrap();
 
-        assert!(shared.join("ai-text-editor").is_file());
-        assert!(shared.join("ai-text-editor-mcp").is_file());
+        assert!(shared
+            .join(platform_binary_name("ai-text-editor"))
+            .is_file());
+        assert!(shared
+            .join(platform_binary_name("ai-text-editor-mcp"))
+            .is_file());
     }
 
     #[test]
@@ -683,15 +722,19 @@ mod tests {
         let source_root = tempfile::tempdir().unwrap();
         write_integration_tsv(source_root.path(), "ai-text-editor");
         write(
-            &source_root
-                .path()
-                .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor"),
+            &source_root.path().join(format!(
+                "ai-text-editor/bin/{}/{}",
+                current_target(),
+                platform_binary_name("ai-text-editor")
+            )),
             "skill binary",
         );
         write(
-            &source_root
-                .path()
-                .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor-mcp"),
+            &source_root.path().join(format!(
+                "ai-text-editor/bin/{}/{}",
+                current_target(),
+                platform_binary_name("ai-text-editor-mcp")
+            )),
             "mcp binary",
         );
         let target_root = tempfile::tempdir().unwrap();

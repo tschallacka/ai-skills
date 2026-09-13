@@ -130,14 +130,6 @@ pub fn install_agent_identity_plugin_claude(
     )
 }
 
-fn xdg_config_home(home: &Path) -> PathBuf {
-    std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"))
-}
-
 pub enum OpencodePluginOutcome {
     /// This run's checkout does not ship the opencode variant of the plugin.
     NotShipped,
@@ -193,7 +185,7 @@ fn unregister_plugin_entry(cfg: &Path, entry: &str) -> io::Result<bool> {
 /// `tui-hint-plugin.js` to -- exposed so `uninstall.rs` can find and remove
 /// the same file it installed, without recomputing the layout itself.
 pub fn tui_hint_plugin_opencode_path(home: &Path) -> PathBuf {
-    xdg_config_home(home)
+    crate::shared_bin::xdg_config_home_or(home)
         .join("tsch-ai-skills")
         .join("tui-hint-plugin")
         .join("tui-hint-plugin.js")

@@ -13,12 +13,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 fn file_path(home: &Path) -> PathBuf {
-    let base = std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"));
-    base.join("tsch-ai-skills").join("custom-locations")
+    crate::shared_bin::xdg_config_home_or(home)
+        .join("tsch-ai-skills")
+        .join("custom-locations")
 }
 
 /// Every saved location that still exists as a directory, deduplicated in

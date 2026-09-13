@@ -40,12 +40,7 @@ fn claude_settings_path(home: &Path) -> PathBuf {
 /// `plan_migration::default_root`'s plan root, there is no dedicated
 /// override variable for this one in install.sh either.
 pub fn default_worktrees_root(home: &Path) -> PathBuf {
-    let base = std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"));
-    base.join("tsch-ai-worktrees")
+    crate::shared_bin::xdg_config_home_or(home).join("tsch-ai-worktrees")
 }
 
 /// The eight entries install.sh's `claude_permissions` grants for the
