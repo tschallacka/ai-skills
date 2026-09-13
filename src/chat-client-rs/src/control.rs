@@ -253,7 +253,11 @@ pub struct Control {
     socket: PathBuf,
     record: PathBuf,
     /// The inode this process bound. Only that inode is ever unlinked, so a
-    /// later owner that has already replaced the path keeps its socket.
+    /// later owner that has already replaced the path keeps its socket. A
+    /// unix-only concept -- the TCP arm sets it to 0 and never reads it, since
+    /// there is no path to unlink, only a record file `tcp_stop` removes
+    /// directly.
+    #[cfg_attr(not(unix), allow(dead_code))]
     inode: u64,
 }
 
