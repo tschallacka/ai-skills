@@ -23,38 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T125",
-      "title": "interactive-shell: a hook that recommends the skill when an agent says a command needs a tty/interactive input",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "An agent that tries a headless command, hits a tty/stdin requirement, and then tells the user something like 'I can't do this because it needs interactive input/a terminal/a tty' has just described exactly the situation this skill exists for -- but nothing points it there in the moment. Wanted: a hook (Stop is the natural candidate, since it can see the assistant's own just-produced text; PostToolUse on Bash could instead pattern-match the COMMAND's own stderr for tty/stdin refusals, which is a stronger, less false-positive-prone signal but only catches the raw error, not an agent explaining it in an already-decided response) that recognizes this admission-of-defeat pattern (mentions of tty, interactive, 'requires input', 'not a terminal', stdin-is-not-a-tty style phrasing, arriving after a Bash tool call) and injects a reminder naming interactive-shell as the way to actually drive the program. The two candidate hook points have different tradeoffs -- worth deciding which (or both) before building: a Bash-output pattern match is more reliable but can only fire once, at the tool-result boundary already past the assistant's own words, while a Stop-hook text scan can catch the assistant's own summary/refusal even when the underlying error was noisier or spread across several attempts. False positives (a command that fails for an unrelated reason while incidentally mentioning 'terminal', e.g. a terminal-emulator config error) need a plan too.",
-      "blocked_on": null,
-      "refs": [
-        "interactive-shell/SKILL.md",
-        "interactive-shell/docs/README.md"
-      ],
-      "note": null,
-      "created_at": "2026-09-09T07:31:25Z",
-      "updated_at": "2026-09-09T07:31:25Z"
-    },
-    {
-      "id": "T126",
-      "title": "interactive-shell: a hook that reminds the skill exists BEFORE an agent works around a TTY requirement, not only after it admits defeat",
-      "status": "open",
-      "priority": "normal",
-      "parent": "T125",
-      "detail": "T125 covers the 'admission of defeat' pattern: an agent tries a headless command, hits a tty/stdin error, and tells the user it can't do this. There is a distinct, earlier pattern T125's hook never sees: an agent that notices a program needs a TTY and proactively reasons its way AROUND that, choosing a workaround instead of ever attempting the interactive path -- e.g. Michael's example: 'msync needs a TTY for its source chooser. It has an --environment flag though -- trying that first, since a non-interactive path beats a PTY.' No error occurs, no refusal is stated, so T125's tty/stdin-refusal pattern match and its PostToolUse-on-Bash-stderr variant both never fire; the workaround is chosen silently in the agent's own reasoning before any command even runs. This is worth its own entry because the fix is different in kind: T125's hook watches an OUTCOME (a failed command, an admission), while this one would need to watch a DECISION being made in the assistant's own text -- closer to a Stop-hook or UserPromptSubmit-hook scan for phrasing like 'needs a TTY/terminal/interactive input' followed by 'instead' or 'so I will use X', regardless of whether anything was ever run. False positives need the same care T125 already flags (a program that merely mentions a terminal for unrelated reasons).",
-      "blocked_on": null,
-      "refs": [
-        "interactive-shell/SKILL.md",
-        "interactive-shell/docs/README.md"
-      ],
-      "note": "Reported by Michael, relayed via bridge:session_0114UV8CPfYa9xkB93JbKSDx (relay-ai-skills) after searching TODO.json and interactive-shell/SKILL.md and finding no existing match for the trigger sentence.",
-      "created_at": "2026-09-09T09:51:03Z",
-      "updated_at": "2026-09-09T09:51:03Z"
-    },
-    {
       "id": "T128",
       "title": "explorative: a JSONL session-transcript pruner that shrinks provably-static/superseded content in place",
       "status": "open",
@@ -1200,6 +1168,38 @@
       "note": "Shipped: call_tool (src/ai-text-editor-mcp/src/lib.rs) promotes a payload's 'path' value into 'file' before the ADAPTER_ARGUMENTS strip loop runs -- 'path' added to ADAPTER_ARGUMENTS itself (with its own schema description) so it is declared on every tool, accepted by the closed-world additionalProperties:false schema, and stripped from the outgoing payload once promoted (the server only ever sees 'file', unaffected). 'file' wins if both are given. 'file's own schema description now reads '(aka \"path\" -- either name works)' instead of B310's 'not path' warning.\n\nVerified: cargo test -p ai-text-editor-mcp (13 lib + 3 pre-existing + 2 new end-to-end integration tests against a real ai-text-editor-server: opening with 'path' alone succeeds and reports the real file path exactly as 'file' would; when both are given, 'file' wins). cargo fmt/clippy clean. Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer 968f31fb.",
       "created_at": "2026-09-09T07:00:47Z",
       "updated_at": "2026-09-12T17:01:30Z"
+    },
+    {
+      "id": "T125",
+      "title": "interactive-shell: a hook that recommends the skill when an agent says a command needs a tty/interactive input",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "An agent that tries a headless command, hits a tty/stdin requirement, and then tells the user something like 'I can't do this because it needs interactive input/a terminal/a tty' has just described exactly the situation this skill exists for -- but nothing points it there in the moment. Wanted: a hook (Stop is the natural candidate, since it can see the assistant's own just-produced text; PostToolUse on Bash could instead pattern-match the COMMAND's own stderr for tty/stdin refusals, which is a stronger, less false-positive-prone signal but only catches the raw error, not an agent explaining it in an already-decided response) that recognizes this admission-of-defeat pattern (mentions of tty, interactive, 'requires input', 'not a terminal', stdin-is-not-a-tty style phrasing, arriving after a Bash tool call) and injects a reminder naming interactive-shell as the way to actually drive the program. The two candidate hook points have different tradeoffs -- worth deciding which (or both) before building: a Bash-output pattern match is more reliable but can only fire once, at the tool-result boundary already past the assistant's own words, while a Stop-hook text scan can catch the assistant's own summary/refusal even when the underlying error was noisier or spread across several attempts. False positives (a command that fails for an unrelated reason while incidentally mentioning 'terminal', e.g. a terminal-emulator config error) need a plan too.",
+      "blocked_on": null,
+      "refs": [
+        "interactive-shell/SKILL.md",
+        "interactive-shell/docs/README.md"
+      ],
+      "note": "IMPLEMENTED as a single Stop hook, ~/.claude/hooks/tty-nudge (not tracked by this repo; the edit itself was the deployment, registered in ~/.claude/settings.json under hooks.Stop). Closes this ticket together with its sibling T126, since both patterns are visible in the SAME place -- the assistant's own final response text -- and needed one detector, not two.\n\nDesign decision made explicitly (per this ticket's own \"worth deciding which before building\"): Stop hook, reading last_assistant_message directly from the hook's own JSON stdin payload (confirmed via research: Claude Code's Stop hook input carries the assistant's final text as a plain string field, not merely a transcript path to parse). Chosen over the PostToolUse-on-Bash-stderr alternative because that variant can only ever catch T125's own pattern (a real command that actually ran and printed a tty/stdin refusal) and structurally cannot see T126's pattern at all (a workaround chosen in reasoning, with no command ever run to produce stderr).\n\nDetection: tty_related_sentence() splits the response into sentence-ish chunks and requires a tty/pty/interactive-terminal mention AND (an inability phrase for the admission-of-defeat case, T125; OR a workaround-selection phrase for the proactive case, T126) to co-occur in the SAME sentence -- not just anywhere in a long response. This is the false-positive mitigation both this ticket and T126 explicitly flagged (a terminal EMULATOR config error, or an unrelated \"terminal\" mention, must not fire): verified with a dedicated false-positive test case where a tty phrase and a workaround phrase both appear in the text but in DIFFERENT sentences, and it correctly does not fire.\n\nLoop-safety: on first invocation it blocks (exit 2, permissionDecision: deny) so the model actually sees the nudge before finishing; Claude Code's stop_hook_active field (documented, confirmed via research) tells the hook on a second invocation within the same turn that the block would be ignored anyway, so it skips the deny and returns exit 0 with only additionalContext -- avoiding an infinite retry loop if the nudge text itself, awkwardly, still matched its own trigger pattern.\n\nVerified: a standalone test script against tty_related_sentence() with 9 hand-picked cases (three admission-of-defeat phrasings including this ticket's own \"stdin is not a tty\" example, two proactive-workaround phrasings including Michael's own msync/--environment example from T126, and four deliberate false positives: a terminal-emulator config error, an unrelated \"opened a terminal window\" mention, an unrelated response with no tty content at all, and the same-response-different-sentence case) -- all 9 passed. A separate end-to-end subprocess test fed real Stop-hook JSON payloads to the hook directly: first invocation returns exit 2 with permissionDecision=deny and an additionalContext naming interactive-shell; a second invocation with stop_hook_active=true returns exit 0 with no permissionDecision at all but still carries the additionalContext; a benign message passes through with empty stdout and exit 0.\n",
+      "created_at": "2026-09-09T07:31:25Z",
+      "updated_at": "2026-09-13T13:24:07Z"
+    },
+    {
+      "id": "T126",
+      "title": "interactive-shell: a hook that reminds the skill exists BEFORE an agent works around a TTY requirement, not only after it admits defeat",
+      "status": "done",
+      "priority": "normal",
+      "parent": "T125",
+      "detail": "T125 covers the 'admission of defeat' pattern: an agent tries a headless command, hits a tty/stdin error, and tells the user it can't do this. There is a distinct, earlier pattern T125's hook never sees: an agent that notices a program needs a TTY and proactively reasons its way AROUND that, choosing a workaround instead of ever attempting the interactive path -- e.g. Michael's example: 'msync needs a TTY for its source chooser. It has an --environment flag though -- trying that first, since a non-interactive path beats a PTY.' No error occurs, no refusal is stated, so T125's tty/stdin-refusal pattern match and its PostToolUse-on-Bash-stderr variant both never fire; the workaround is chosen silently in the agent's own reasoning before any command even runs. This is worth its own entry because the fix is different in kind: T125's hook watches an OUTCOME (a failed command, an admission), while this one would need to watch a DECISION being made in the assistant's own text -- closer to a Stop-hook or UserPromptSubmit-hook scan for phrasing like 'needs a TTY/terminal/interactive input' followed by 'instead' or 'so I will use X', regardless of whether anything was ever run. False positives need the same care T125 already flags (a program that merely mentions a terminal for unrelated reasons).",
+      "blocked_on": null,
+      "refs": [
+        "interactive-shell/SKILL.md",
+        "interactive-shell/docs/README.md"
+      ],
+      "note": "Reported by Michael, relayed via bridge (relay-ai-skills) after searching TODO.json and interactive-shell/SKILL.md and finding no existing match for the trigger sentence.\n\nIMPLEMENTED together with its parent T125 (same Stop hook, ~/.claude/hooks/tty-nudge -- see T125's own close note for the full design, verification, and false-positive handling). This ticket's own distinguishing case -- a proactive workaround chosen in the assistant's reasoning with no command ever run, so no stderr for a PostToolUse hook to ever see -- is exactly why the Stop hook reads the assistant's own final text rather than a tool result: Michael's own example phrasing (\"msync needs a TTY for its source chooser... trying that first since a non-interactive path beats a PTY\") is one of the hand-picked test cases the implementation was verified against directly, and it fires correctly.\n",
+      "created_at": "2026-09-09T09:51:03Z",
+      "updated_at": "2026-09-13T13:24:18Z"
     },
     {
       "id": "T127",
