@@ -4229,3 +4229,604 @@ fn undo_after_a_move_restores_the_document_in_exactly_one_step() {
         "undo must restore the pre-move document in one step"
     );
 }
+
+// ---- T114: anchor and symbol addressing ------------------------------------
+//
+// A replace/move/copy span addressed by the TEXT at its boundaries or by a
+// CodeGraph symbol name, instead of a caller-computed line or byte range --
+// so an endpoint that used to be inferred ("up to where the next function
+// starts") is instead resolved server-side, and refused rather than guessed
+// when it is absent or ambiguous.
+
+fn seed_codegraph_symbol(
+    harness: &Harness,
+    file_relative: &str,
+    symbol_name: &str,
+    start_line: u32,
+    end_line: u32,
+) {
+    std::fs::create_dir_all(harness.path(".codegraph")).unwrap();
+    let conn = rusqlite::Connection::open(harness.path(".codegraph").join("codegraph.db")).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS nodes (
+            id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+            qualified_name TEXT NOT NULL, file_path TEXT NOT NULL,
+            language TEXT NOT NULL, start_line INTEGER NOT NULL,
+            end_line INTEGER NOT NULL, start_column INTEGER NOT NULL,
+            end_column INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL,
+            target TEXT NOT NULL, kind TEXT NOT NULL, metadata TEXT,
+            line INTEGER, col INTEGER, provenance TEXT DEFAULT NULL
+        );",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO nodes VALUES (?1, 'function', ?2, ?2, ?3, 'rust', ?4, ?5, 0, 0, 0)",
+        rusqlite::params![
+            format!("sym:{symbol_name}:{start_line}"),
+            symbol_name,
+            file_relative,
+            start_line,
+            end_line
+        ],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_replace_addresses_a_span_by_start_and_end_anchor_text() {
+    let harness = Harness::new("anchor-replace");
+    let file = harness.write(
+        "doc.rs",
+        "fn foo() {\n    old_body();\n}\n\nfn bar() {\n    unrelated();\n}\n",
+    );
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "fn foo() {",
+        "--range-end-before-match",
+        "fn bar() {",
+        "-t",
+        "fn foo() {\n    new_body();\n}\n\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", refusal_text(&replaced));
+    let payload = first_payload(&replaced);
+    assert_eq!(payload["offset"], json!(0));
+    assert_eq!(
+        payload["deleted"]["text"],
+        json!("fn foo() {\n    old_body();\n}\n\n")
+    );
+
+    let saved_revision = payload["revision"].as_u64().unwrap().to_string();
+    let saved = harness.client(&[
+        "save",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &saved_revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn foo() {\n    new_body();\n}\n\nfn bar() {\n    unrelated();\n}\n"
+    );
+}
+
+#[test]
+fn an_anchor_matching_nowhere_is_refused_by_name() {
+    let harness = Harness::new("anchor-not-found");
+    let file = harness.write("doc.txt", "alpha beta gamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let missing_start = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "nowhere",
+        "--range-end-before-match",
+        "gamma",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!missing_start.status.success());
+    assert!(refusal_text(&missing_start).contains("range_start_match_not_found"));
+
+    let missing_end = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "alpha",
+        "--range-end-before-match",
+        "nowhere",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!missing_end.status.success());
+    assert!(refusal_text(&missing_end).contains("range_end_before_match_not_found"));
+}
+
+#[test]
+fn an_anchor_matching_more_than_once_is_refused_as_ambiguous_never_the_first_occurrence() {
+    let harness = Harness::new("anchor-ambiguous");
+    let file = harness.write("doc.txt", "alpha needle beta needle gamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let ambiguous_start = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "needle",
+        "--range-end-before-match",
+        "gamma",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!ambiguous_start.status.success());
+    assert!(refusal_text(&ambiguous_start).contains("range_start_match_ambiguous"));
+
+    let ambiguous_end = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "alpha",
+        "--range-end-before-match",
+        "needle",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!ambiguous_end.status.success());
+    assert!(refusal_text(&ambiguous_end).contains("range_end_before_match_ambiguous"));
+
+    // Never silently the file unchanged, either -- both refusals above must
+    // have left it exactly as it was.
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha needle beta needle gamma\n"
+    );
+}
+
+#[test]
+fn range_match_regex_reads_anchors_as_rust_regexes() {
+    let harness = Harness::new("anchor-regex");
+    let file = harness.write("doc.txt", "id=42 mid id=99 end\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        r"id=\d+ mid",
+        "--range-end-before-match",
+        r"id=\d+ end",
+        "--range-match-regex",
+        "-t",
+        "REPLACED ",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", refusal_text(&replaced));
+    assert_eq!(
+        first_payload(&replaced)["deleted"]["text"],
+        json!("id=42 mid ")
+    );
+    let revision = first_payload(&replaced)["revision"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+
+    let invalid_pattern = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "(unclosed",
+        "--range-end-before-match",
+        "end",
+        "--range-match-regex",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!invalid_pattern.status.success());
+    assert!(refusal_text(&invalid_pattern).contains("range_match_invalid"));
+}
+
+#[test]
+fn an_incomplete_anchor_pair_is_refused_naming_what_is_missing() {
+    let harness = Harness::new("anchor-incomplete");
+    let file = harness.write("doc.txt", "alpha beta gamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let only_start = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "alpha",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!only_start.status.success());
+    assert!(refusal_text(&only_start).contains("edit_range_incomplete"));
+}
+
+#[test]
+fn an_anchor_and_a_range_addressing_the_same_edit_are_refused() {
+    let harness = Harness::new("anchor-range-conflict");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let conflict = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "alpha",
+        "--range-end-before-match",
+        "gamma",
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!conflict.status.success());
+    assert!(refusal_text(&conflict).contains("edit_range_conflict"));
+}
+
+#[test]
+fn a_replace_addresses_a_span_by_symbol_name() {
+    let harness = Harness::new("symbol-replace");
+    let file = harness.write(
+        "doc.rs",
+        "fn foo() {\n    old_body();\n}\n\nfn bar() {\n    unrelated();\n}\n",
+    );
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 5, 7);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "bar",
+        "-t",
+        "fn bar() {\n    new_bar();\n}\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", refusal_text(&replaced));
+    assert_eq!(
+        first_payload(&replaced)["deleted"]["text"],
+        json!("fn bar() {\n    unrelated();\n}\n")
+    );
+
+    let saved_revision = first_payload(&replaced)["revision"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let saved = harness.client(&[
+        "save",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &saved_revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn foo() {\n    old_body();\n}\n\nfn bar() {\n    new_bar();\n}\n"
+    );
+}
+
+#[test]
+fn a_symbol_shared_by_two_nodes_in_one_file_is_refused_as_ambiguous() {
+    let harness = Harness::new("symbol-ambiguous");
+    let file = harness.write(
+        "doc.rs",
+        "fn bar() {\n    one();\n}\n\nfn bar() {\n    two();\n}\n",
+    );
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 1, 3);
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 5, 7);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "bar",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused.status.success());
+    assert!(refusal_text(&refused).contains("symbol_ambiguous"));
+}
+
+#[test]
+fn an_unknown_symbol_name_is_refused_as_not_found() {
+    let harness = Harness::new("symbol-not-found");
+    let file = harness.write("doc.rs", "fn foo() {}\n");
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 1, 1);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "nonexistent",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused.status.success());
+    assert!(refusal_text(&refused).contains("symbol_not_found"));
+}
+
+#[test]
+fn symbol_addressing_without_codegraph_enabled_is_refused_as_unavailable() {
+    let harness = Harness::new("symbol-no-index");
+    let file = harness.write("doc.rs", "fn foo() {}\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "foo",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused.status.success());
+    assert!(refusal_text(&refused).contains("symbol_unavailable"));
+}
+
+#[test]
+fn a_symbol_and_a_match_id_addressing_the_same_edit_are_refused() {
+    let harness = Harness::new("symbol-match-id-conflict");
+    let file = harness.write("doc.rs", "fn bar() {\n    body();\n}\n");
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 1, 3);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "body",
+        "-p",
+        "structured",
+    ]);
+    let match_id = first_payload(&found)["matches"][0]["match_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "bar",
+        "--match-id",
+        &match_id,
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused.status.success());
+    assert!(refusal_text(&refused).contains("edit_range_conflict"));
+}
+
+#[test]
+fn insert_refuses_anchor_and_symbol_addressing_by_name() {
+    let harness = Harness::new("insert-refuses-anchor-symbol");
+    let file = harness.write("doc.txt", "alpha beta gamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let refused_anchor = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "alpha",
+        "--range-end-before-match",
+        "gamma",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused_anchor.status.success());
+    assert!(refusal_text(&refused_anchor).contains("edit_range_unsupported"));
+
+    let refused_symbol = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "anything",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused_symbol.status.success());
+    assert!(refusal_text(&refused_symbol).contains("edit_range_unsupported"));
+}
+
+#[test]
+fn move_addresses_its_source_by_anchor_pair() {
+    let harness = Harness::new("move-anchor");
+    let file = harness.write(
+        "doc.rs",
+        "fn foo() {\n    body();\n}\n\nfn bar() {\n    other();\n}\n",
+    );
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // foo's whole block, one past the last line, ends up after bar's.
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "fn foo() {",
+        "--range-end-before-match",
+        "fn bar() {",
+        "--dest-line",
+        "8",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(moved.status.success(), "{}", refusal_text(&moved));
+    let saved_revision = first_payload(&moved)["revision"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let saved = harness.client(&[
+        "save",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &saved_revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn bar() {\n    other();\n}\nfn foo() {\n    body();\n}\n\n"
+    );
+}
+
+#[test]
+fn copy_addresses_its_source_by_symbol_name() {
+    let harness = Harness::new("copy-symbol");
+    let file = harness.write(
+        "doc.rs",
+        "fn foo() {\n    body();\n}\n\nfn bar() {\n    other();\n}\n",
+    );
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 5, 7);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let copied = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "bar",
+        "--dest-offset",
+        "0",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(copied.status.success(), "{}", refusal_text(&copied));
+    let saved_revision = first_payload(&copied)["revision"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let saved = harness.client(&[
+        "save",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &saved_revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn bar() {\n    other();\n}\nfn foo() {\n    body();\n}\n\nfn bar() {\n    other();\n}\n"
+    );
+}

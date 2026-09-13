@@ -128,12 +128,16 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
             "expected_text",
             "expected_bytes_base64",
             "match_id",
+            "range_start_match",
+            "range_end_before_match",
+            "range_match_regex",
+            "symbol",
         ],
         // T113: the source span is addressed exactly like `replace`'s own
-        // (a range or a match_id, never a bare offset/delete_len — see
-        // `refused_payload_keys` for that refusal), plus a destination POINT
-        // (`dest_offset`/`dest_line`, exactly one of the two) neither
-        // `replace` nor `insert` has any use for.
+        // (a range, a match_id, an anchor pair, or a symbol — never a bare
+        // offset/delete_len — see `refused_payload_keys` for that refusal),
+        // plus a destination POINT (`dest_offset`/`dest_line`, exactly one
+        // of the two) neither `replace` nor `insert` has any use for.
         "move" | "copy" => &[
             "range_start_line",
             "range_end_line",
@@ -142,6 +146,10 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
             "expected_text",
             "expected_bytes_base64",
             "match_id",
+            "range_start_match",
+            "range_end_before_match",
+            "range_match_regex",
+            "symbol",
             "dest_offset",
             "dest_line",
         ],
@@ -220,6 +228,10 @@ pub fn refused_payload_keys(method: &str) -> &'static [&'static str] {
             "expected_text",
             "expected_bytes_base64",
             "match_id",
+            "range_start_match",
+            "range_end_before_match",
+            "range_match_regex",
+            "symbol",
         ],
         // "move/copy address their source with a range or match_id, never a
         // bare offset/delete_len/cursor_id — `move_source_required` is the
