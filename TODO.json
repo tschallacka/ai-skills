@@ -23,19 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T130",
-      "title": "Wire plan-overview's --watch/--refresh into run(), using the already-tested watch.rs and StateStream",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "B99 refused --watch/--refresh by name rather than silently ignoring them, since neither drove any behaviour. The pieces to wire already exist and are unit-tested: watch::watch_plan_dir(root) returns a Receiver<ChangeEvent> (with scan/coalesce/debounce already covered by tests/watch.rs), and serve::StateStream has subscribe/publish/current, but serve_on_port() currently takes a static state: String rather than a StateStream, so nothing ever calls publish(). The real work: (1) change serve_on_port to accept a StateStream and have respond()'s GET /state read state_stream.current() instead of a captured string, (2) in run(), when --watch is set, spawn watch_plan_dir and on each coalesced ChangeEvent re-extract/re-parse/re-render and state_stream.publish() the new state_json, (3) decide what --refresh actually means once --watch exists (a client poll interval for a non-serve --out render loop? a debounce window distinct from watch.rs's own DEBOUNCE_WINDOW?) - this needs a decision, not just plumbing. --refresh's exact semantics were never specified anywhere in the register, only assumed from its name.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-09T14:08:33Z",
-      "updated_at": "2026-09-09T14:08:33Z"
-    },
-    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
@@ -1216,6 +1203,19 @@
       "note": "PR #107 (feat/t129-match-id-and-preview-search) merged into master 2026-09-09 (a5ba5a8d). match_id addressing for replace with its own content-staleness guard, plus preview_lines truncation for search, both shipped. Closing now -- the only thing left outstanding per the note was confirmation of the merge itself.",
       "created_at": "2026-09-09T13:33:45Z",
       "updated_at": "2026-09-13T14:54:12Z"
+    },
+    {
+      "id": "T130",
+      "title": "Wire plan-overview's --watch/--refresh into run(), using the already-tested watch.rs and StateStream",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "B99 refused --watch/--refresh by name rather than silently ignoring them, since neither drove any behaviour. The pieces to wire already exist and are unit-tested: watch::watch_plan_dir(root) returns a Receiver<ChangeEvent> (with scan/coalesce/debounce already covered by tests/watch.rs), and serve::StateStream has subscribe/publish/current, but serve_on_port() currently takes a static state: String rather than a StateStream, so nothing ever calls publish(). The real work: (1) change serve_on_port to accept a StateStream and have respond()'s GET /state read state_stream.current() instead of a captured string, (2) in run(), when --watch is set, spawn watch_plan_dir and on each coalesced ChangeEvent re-extract/re-parse/re-render and state_stream.publish() the new state_json, (3) decide what --refresh actually means once --watch exists (a client poll interval for a non-serve --out render loop? a debounce window distinct from watch.rs's own DEBOUNCE_WINDOW?) - this needs a decision, not just plumbing. --refresh's exact semantics were never specified anywhere in the register, only assumed from its name.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Implemented on feat/t130-plan-overview-watch, PR #156, merged into nextupdate.\n\nserve_on_port's signature changed from taking a captured state: String to taking a StateStream (already existed, only unused as an argument before this ticket): respond()'s GET /state now reads state_stream.current() on every request instead of a value frozen at server start. GET / (the served HTML shell) intentionally stays the start-time snapshot -- only /state is wired live, matching this ticket's own literal wording (\"have respond()'s GET /state read state_stream.current()\"). Making the served page itself live would need a client-side poll loop that does not exist anywhere yet (assets/nav.js has none) -- left as documented future work, not silently taken on.\n\nrun(), when --watch is set, spawns watch_plan_dir(plan_dir) and drains its Receiver<ChangeEvent> with a blocking recv() followed by a recv_timeout drain loop bounded by the debounce window, then runs the drained batch through the already-tested coalesce_events (watch.rs) before re-rendering -- watch_plan_dir itself only emits one ChangeEvent per 250ms scan tick with no built-in cross-tick batching, so this draining is what actually gives --watch its debounce behavior, not watch_plan_dir alone. In --serve mode the loop re-extracts state_json and publish()es it to the StateStream from a background thread; in --out mode (no --serve) it re-renders the full HTML artifact and rewrites the output file in place, looping until the process is killed. Both loops log a transient re-render failure to stderr and keep watching rather than crashing, since a file caught mid-write is a real, expected race, not a fatal condition.\n\n--refresh decision (this ticket's own explicitly flagged open question): --refresh <ms> overrides watch.rs's own DEBOUNCE_WINDOW (100ms default), i.e. it configures how many milliseconds of additional file-change events are drained and merged into one re-render after the first change in a batch. It is refused when passed without --watch (mirroring B99's original \"refuse by name rather than silently ignore\" stance for an argument with nothing to apply to), and refused when its value does not parse as a whole number of milliseconds.\n\nVerified: cargo test -p plan-overview (all pre-existing tests, unaffected, plus 6 new main.rs unit tests for --watch/--refresh acceptance, the refresh-needs-a-value/refresh-needs-a-number/refresh-needs-watch refusals, and --serve+--watch combining). cargo fmt --check and cargo clippy --all-targets -D warnings clean. Manual end-to-end smoke test against a real plan fixture (not a unit test, a live subprocess): --out --watch rewrote the output file after a real on-disk edit, confirmed via content diff and the \"N file(s) changed, refreshing\" stderr line; --serve --watch showed GET /state picking up the live edit while GET / correctly stayed the original start-time snapshot, confirming the documented scope boundary holds in practice, not just in the code comment. Full pre-push-check.sh and full ./run-tests.sh both clean (240/240, 0 failures). PR #156 CI green across all 27 checks before merge.\n",
+      "created_at": "2026-09-09T14:08:33Z",
+      "updated_at": "2026-09-13T16:37:43Z"
     },
     {
       "id": "T143",
