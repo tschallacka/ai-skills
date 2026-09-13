@@ -3581,3 +3581,476 @@ fn jump_points_answers_null_when_codegraph_is_not_enabled_for_the_project() {
     assert_eq!(jump_points["stale"], json!(false));
     assert!(jump_points["note"].is_string());
 }
+
+// ---- T113: move/copy ------------------------------------------------------
+//
+// A rearrangement no longer pays output tokens for content the server
+// already holds: the source is a span (addressed exactly like `replace`'s
+// own), the destination a point, and the whole relocation is one atomic
+// splice-pair -- one revision, one journal record, one undo step -- computed
+// once in memory from `before`, never two separately applied edits the way
+// composing it from `replace` twice would be.
+
+#[test]
+fn a_move_earlier_in_the_buffer_lands_correctly_and_closes_the_gap_it_left() {
+    let harness = Harness::new("move-earlier");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\ndelta\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // Move line 3 ("gamma\n") to before line 1.
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "3",
+        "--range-end-line",
+        "3",
+        "--dest-line",
+        "1",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(moved.status.success(), "{}", refusal_text(&moved));
+    let payload = first_payload(&moved);
+    assert_eq!(payload["source_offset"], json!(11), "{payload}"); // "alpha\nbeta\n" = 11 bytes
+    assert_eq!(payload["source_len"], json!(6), "{payload}"); // "gamma\n"
+    assert_eq!(payload["dest_offset"], json!(0), "{payload}");
+    assert!(
+        payload.get("text").is_none() && payload.get("bytes_base64").is_none(),
+        "the moved content must never be echoed back: {payload}"
+    );
+
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "gamma\nalpha\nbeta\ndelta\n",
+        "the gap the source left must close, with no blank line behind it"
+    );
+}
+
+#[test]
+fn a_move_later_in_the_buffer_uses_the_shift_adjusted_destination() {
+    // The case most likely to have an off-by-source_len bug: the destination
+    // is given in the ORIGINAL document's coordinates, but by the time the
+    // moved bytes are re-inserted the source has already been removed, so
+    // everything from the old source's end onward shifted back by
+    // source_len. The server does that arithmetic, not the caller.
+    let harness = Harness::new("move-later");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\ndelta\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // Move line 1 ("alpha\n") to before line 4 ("delta\n").
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "4",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(moved.status.success(), "{}", refusal_text(&moved));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "beta\ngamma\nalpha\ndelta\n",
+        "a move later in the buffer must land at the shift-adjusted destination"
+    );
+}
+
+#[test]
+fn a_move_to_its_own_boundary_is_a_trivial_no_op_move() {
+    let harness = Harness::new("move-trivial");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // Line 2 ("beta\n") moved to its own start (line 2) changes nothing.
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "--dest-line",
+        "2",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        moved.status.success(),
+        "moving a span to its own boundary must succeed: {}",
+        refusal_text(&moved)
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nbeta\ngamma\n",
+        "a move to its own boundary must be a no-op on content"
+    );
+}
+
+#[test]
+fn a_move_to_a_point_strictly_inside_its_own_source_is_refused() {
+    let harness = Harness::new("move-inside-source");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // Source is line 1 ("alpha\n", bytes 0..6). dest_offset 3 is strictly
+    // inside it.
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-offset",
+        "3",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!moved.status.success());
+    let refusal = refusal_text(&moved);
+    assert!(
+        refusal.contains("move_destination_inside_source"),
+        "{refusal}"
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nbeta\ngamma\n",
+        "a refused move must not have touched the document"
+    );
+}
+
+#[test]
+fn copy_leaves_the_source_intact_and_duplicates_it_at_the_destination() {
+    let harness = Harness::new("copy-basic");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let original_len = "alpha\nbeta\ngamma\n".len();
+
+    let copied = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "4", // one past the last line: append at end of file
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(copied.status.success(), "{}", refusal_text(&copied));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    let text = String::from_utf8_lossy(&read.stdout).into_owned();
+    assert_eq!(
+        text, "alpha\nbeta\ngamma\nalpha\n",
+        "the source must remain, and an exact duplicate must land at the destination"
+    );
+    assert_eq!(
+        text.len(),
+        original_len + "alpha\n".len(),
+        "copy must grow the document by exactly the source's length"
+    );
+}
+
+#[test]
+fn expected_text_refuses_a_move_on_a_stale_source() {
+    let harness = Harness::new("move-expected-text");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "--expected-text",
+        "not-beta\n",
+        "--dest-line",
+        "1",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!moved.status.success());
+    assert!(
+        refusal_text(&moved).contains("expected_text_mismatch"),
+        "{}",
+        refusal_text(&moved)
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nbeta\ngamma\n",
+        "a refused move must not have touched the document"
+    );
+}
+
+#[test]
+fn a_bare_offset_naming_the_source_is_refused_rather_than_silently_ignored() {
+    let harness = Harness::new("move-bare-offset");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "5",
+        "--dest-line",
+        "2",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!moved.status.success());
+    assert!(
+        refusal_text(&moved).contains("move_source_required"),
+        "{}",
+        refusal_text(&moved)
+    );
+}
+
+#[test]
+fn exactly_one_of_dest_offset_and_dest_line_is_required() {
+    let harness = Harness::new("move-dest-conflict");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // Neither.
+    let neither = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!neither.status.success());
+    assert!(
+        refusal_text(&neither).contains("move_destination_required"),
+        "{}",
+        refusal_text(&neither)
+    );
+
+    // Both.
+    let both = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-offset",
+        "0",
+        "--dest-line",
+        "2",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!both.status.success());
+    assert!(
+        refusal_text(&both).contains("move_destination_conflict"),
+        "{}",
+        refusal_text(&both)
+    );
+}
+
+#[test]
+fn dest_line_addresses_before_the_first_line_before_the_last_and_past_the_end() {
+    let harness = Harness::new("move-dest-line");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let mut revision = revision_of(&opened);
+
+    // Copy "gamma" to before line 1.
+    let copied = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "3",
+        "--range-end-line",
+        "3",
+        "--dest-line",
+        "1",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(copied.status.success(), "{}", refusal_text(&copied));
+    revision = first_payload(&copied)["revision"].as_u64().unwrap();
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "gamma\nalpha\nbeta\ngamma\n"
+    );
+
+    // dest_line one past the last line (5, since the file now has 4 lines)
+    // appends at end of file.
+    let appended = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "5",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(appended.status.success(), "{}", refusal_text(&appended));
+    revision = first_payload(&appended)["revision"].as_u64().unwrap();
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "gamma\nalpha\nbeta\ngamma\ngamma\n",
+        "dest_line one past the last line must append at end of file"
+    );
+
+    // dest_line past count + 1 is genuinely invalid.
+    let invalid = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "50",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(!invalid.status.success());
+    assert!(
+        refusal_text(&invalid).contains("edit_range_invalid"),
+        "{}",
+        refusal_text(&invalid)
+    );
+}
+
+#[test]
+fn undo_after_a_move_restores_the_document_in_exactly_one_step() {
+    let harness = Harness::new("move-undo");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let before_depth = first_payload(&harness.client(&[
+        "history",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "2",
+    ]))["undo_depth"]
+        .as_u64()
+        .unwrap();
+
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "3",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(moved.status.success(), "{}", refusal_text(&moved));
+    let moved_revision = first_payload(&moved)["revision"].as_u64().unwrap();
+
+    let after_move_depth = first_payload(&harness.client(&[
+        "history",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "2",
+    ]))["undo_depth"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(
+        after_move_depth,
+        before_depth + 1,
+        "one move must add exactly one undo step, not two"
+    );
+
+    let undone = harness.client(&[
+        "undo",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &moved_revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(undone.status.success(), "{}", refusal_text(&undone));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nbeta\ngamma\n",
+        "undo must restore the pre-move document in one step"
+    );
+}

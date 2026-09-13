@@ -118,6 +118,11 @@ fn declared_tier(key: &str) -> Option<u8> {
         // not decoration — the verify-read after every edit existed because
         // these were missing.
         "offset" | "delete_len" | "bytes_written" | "deleted" => 1,
+        // T113: move/copy's own resolved span, the same verification-grade
+        // reasoning as offset/delete_len just above — the answer says what
+        // actually relocated, so the caller need not send or re-read the
+        // content to confirm it.
+        "source_offset" | "source_len" | "dest_offset" => 1,
         // A delete that crossed a line end changed more than the caller may
         // have meant; that belongs with the span it applies to.
         "spans_lines" => 1,

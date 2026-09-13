@@ -68,6 +68,8 @@ pub const METHODS: &[&str] = &[
     "read",
     "replace",
     "insert",
+    "move",
+    "copy",
     "large_edit",
     "undo",
     "redo",
@@ -126,6 +128,22 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
             "expected_text",
             "expected_bytes_base64",
             "match_id",
+        ],
+        // T113: the source span is addressed exactly like `replace`'s own
+        // (a range or a match_id, never a bare offset/delete_len — see
+        // `refused_payload_keys` for that refusal), plus a destination POINT
+        // (`dest_offset`/`dest_line`, exactly one of the two) neither
+        // `replace` nor `insert` has any use for.
+        "move" | "copy" => &[
+            "range_start_line",
+            "range_end_line",
+            "range_start_byte",
+            "range_end_byte",
+            "expected_text",
+            "expected_bytes_base64",
+            "match_id",
+            "dest_offset",
+            "dest_line",
         ],
         "large_edit" => &[
             "job_id",
@@ -203,6 +221,14 @@ pub fn refused_payload_keys(method: &str) -> &'static [&'static str] {
             "expected_bytes_base64",
             "match_id",
         ],
+        // "move/copy address their source with a range or match_id, never a
+        // bare offset/delete_len/cursor_id — `move_source_required` is the
+        // handler's own message when neither a range nor a match_id is
+        // named" (edit_span's/resolve_match_id's own conflict check already
+        // refuses these when a range or match_id IS also present; this is
+        // the case where none of that is present and the bare keys alone
+        // would otherwise be silently ignored).
+        "move" | "copy" => &["offset", "delete_len", "cursor_id"],
         _ => &[],
     }
 }
@@ -276,6 +302,8 @@ pub fn is_count_key(key: &str) -> bool {
             | "range_start_byte"
             | "range_end_byte"
             | "preview_lines"
+            | "dest_offset"
+            | "dest_line"
     )
 }
 
@@ -330,6 +358,24 @@ mod tests {
         // preview_lines is search-only.
         assert!(reads_payload_key("search", "preview_lines"));
         assert!(!reads_payload_key("replace", "preview_lines"));
+        // T113: move/copy address their source the way replace does (range or
+        // match_id), never a bare offset/delete_len/cursor_id (refused, not
+        // silently ignored), and take a destination point replace/insert have
+        // no use for.
+        for verb in ["move", "copy"] {
+            assert!(reads_payload_key(verb, "range_start_line"));
+            assert!(reads_payload_key(verb, "match_id"));
+            assert!(reads_payload_key(verb, "expected_text"));
+            assert!(reads_payload_key(verb, "dest_offset"));
+            assert!(reads_payload_key(verb, "dest_line"));
+            assert!(reads_payload_key(verb, "offset"));
+            assert!(
+                !extra_payload_keys(verb).unwrap().contains(&"offset"),
+                "{verb} refuses offset by name; it does not consume it"
+            );
+        }
+        assert!(!reads_payload_key("replace", "dest_offset"));
+        assert!(!reads_payload_key("insert", "dest_offset"));
     }
 
     /// B267. `offset` is the one that bit, but the shape is shared by every
@@ -352,6 +398,8 @@ mod tests {
             "range_end_line",
             "range_start_byte",
             "range_end_byte",
+            "dest_offset",
+            "dest_line",
         ] {
             assert!(is_count_key(key), "{key} addresses bytes or counts");
         }

@@ -21,6 +21,8 @@ pub const DEFAULT_LARGE_THRESHOLD_BYTES: u64 = 256 * 1024 * 1024;
 pub const REVISION_GUARDED_METHODS: &[&str] = &[
     "insert",
     "replace",
+    "move",
+    "copy",
     "large_edit",
     "restore",
     "undo",

@@ -228,8 +228,8 @@ active large-file threshold. `open` includes the same report.
 `begin_transaction` and `end_transaction` explicitly group ordinary edits into
 one undo step; each individual edit is still journaled for crash recovery.
 
-Mutating methods `insert`, `replace`, `large_edit`, `restore`, `undo`, `redo`,
-and `save` require the envelope's `revision` field. The server refuses a
+Mutating methods `insert`, `replace`, `move`, `copy`, `large_edit`, `restore`,
+`undo`, `redo`, and `save` require the envelope's `revision` field. The server refuses a
 missing field with `revision_required` and refuses a value other than the
 current revision with `stale_revision`; it never silently treats an omitted
 revision as last-write-wins. Read `open` or `history` again after either error.
@@ -283,6 +283,43 @@ already carries the guard `expected_text` would add. An `insert` refuses
 `match_id` the same way it refuses a range: `edit_range_unsupported`, because
 a match is a span and `insert` places bytes at a point. An id shaped wrong, or
 naming an index past the result set, is `match_id_invalid`.
+
+### move and copy
+
+`move` and `copy` relocate or duplicate a span within one tab **server-side,
+with no content in the request or response** — the server already holds the
+bytes, so a pure rearrangement no longer pays output tokens for text that
+never actually changed.
+
+The source span is addressed exactly like `replace`'s own — `range_start_line`/
+`range_end_line`, `range_start_byte`/`range_end_byte`, or `match_id` — and
+`expected_text`/`expected_bytes_base64` verify it first, the same B230 guard
+`replace` already has. A bare `offset`, `delete_len`, or `cursor_id` naming the
+source is refused as `move_source_required`: a point has no length to
+relocate, so these are refused by name rather than silently ignored.
+
+The destination is a **point**, not a range: `dest_offset` (a byte position)
+or `dest_line` (one-based, "insert immediately before this line", text tabs
+only — one past the last line appends at end of file). Exactly one of the two
+is required; naming both is `move_destination_conflict`, naming neither is
+`move_destination_required`. A destination strictly inside the source span
+has no sensible meaning and is refused as `move_destination_inside_source`;
+equal to either boundary is a legal (trivial) move.
+
+Both are **one atomic operation** — one revision, one journal record, one
+undo step — computed once in memory from the tab's current document, even
+though `move` performs two splices internally (removing the source, then
+inserting it at the shift-adjusted destination). This is deliberately *not*
+the same guarantee `begin_transaction`/`end_transaction` gives: that pair
+only groups already-applied edits into one undo step, and does not stop a
+crash between two separately applied edits from leaving a real, journaled,
+half-relocated document. `move`/`copy` never apply two edits in the first
+place, so there is nothing for a crash to catch mid-way.
+
+The response reports `source_offset`, `source_len`, and `dest_offset` (the
+destination the moved bytes actually landed at, after any shift) — enough to
+verify what happened without having sent or received the content, the same
+contract `replace`'s own resolved-span answer already gives.
 
 `search` takes `preview_lines` (an integer, `0` — the default — meaning
 unshrunk): when a match's `contents`/`contents_base64` spans more than

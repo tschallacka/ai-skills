@@ -436,6 +436,59 @@ fn tool_definitions() -> Vec<Value> {
         },
         mutating_required(),
     ));
+    for verb in ["move", "copy"] {
+        tools.push((
+            verb,
+            match verb {
+                "move" => "Relocate a span to another point in the same tab, server-side, with no content in the request or response -- the server already holds the bytes. One atomic operation (one revision, one undo step) even though it performs two splices internally. Address the source exactly like replace's own: range_start_line/range_end_line, range_start_byte/range_end_byte, or match_id (never offset/delete_len/cursor_id -- refused by name, since a point has no length to relocate). The destination is a point: dest_offset (a byte position) or dest_line (1-based, insert immediately before that line, text tabs only; one past the last line appends at end of file) -- exactly one of the two. expected_text/expected_bytes_base64 verify the source span first, same as replace. A destination strictly inside the source span is refused as move_destination_inside_source.",
+                _ => "Duplicate a span to another point in the same tab, server-side, with no content in the request or response -- the server already holds the bytes. One atomic operation (one revision, one undo step). Address the source exactly like replace's own: range_start_line/range_end_line, range_start_byte/range_end_byte, or match_id (never offset/delete_len/cursor_id -- refused by name, since a point has no length to duplicate). The destination is a point: dest_offset (a byte position) or dest_line (1-based, insert immediately before that line, text tabs only; one past the last line appends at end of file) -- exactly one of the two. expected_text/expected_bytes_base64 verify the source span first, same as replace. A destination strictly inside the source span is refused as move_destination_inside_source.",
+            },
+            {
+                let mut p: ToolProperties = Vec::new();
+                p.extend(Vec::from([
+                    (
+                        "range_start_line",
+                        int("Inclusive first line of the source span (text tabs). Needs range_end_line."),
+                    ),
+                    (
+                        "range_end_line",
+                        int("Inclusive last line of the source span; its newline goes with it."),
+                    ),
+                    (
+                        "range_start_byte",
+                        int("Inclusive first byte of the source span — a search hit's byte_start. Needs range_end_byte."),
+                    ),
+                    (
+                        "range_end_byte",
+                        int("Exclusive last byte of the source span — a search hit's byte_end."),
+                    ),
+                    (
+                        "match_id",
+                        string("A search hit's own id (<result_id>#<index>) naming the source span. Resolves to that hit's exact span and its own content guard, refused as match_id_stale if the document moved under it since."),
+                    ),
+                    (
+                        "expected_text",
+                        string("The bytes the caller believes are at the source span. Verified before anything moves and refused by name on mismatch."),
+                    ),
+                    (
+                        "expected_bytes_base64",
+                        string("expected_text for a raw or hex tab, or for bytes that are not UTF-8. Pass one of the two, not both."),
+                    ),
+                    (
+                        "dest_offset",
+                        int("Destination byte position. Exactly one of dest_offset/dest_line is required."),
+                    ),
+                    (
+                        "dest_line",
+                        int("Destination line (1-based, text tabs only): insert immediately before this line. One past the last line appends at end of file."),
+                    ),
+                    ("expected_revision", revision_guard()),
+                ]));
+                p
+            },
+            mutating_required(),
+        ));
+    }
     tools.push(("large_edit", "Stream an acknowledged job-owned rewrite of a large file and atomically replace it.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("job_id", int("Queued job this edit executes.")),
         ("resume_token", string("The job's resume token; required, and never disclosed to callers without it.")),

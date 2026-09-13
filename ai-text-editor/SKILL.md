@@ -283,6 +283,17 @@ default gives you.
     CodeGraph is not enabled for this project (no `.codegraph/` index) or
     its index is not in a shape this reader supports, not that the file has
     no references.
+17. `move`/`copy` relocate or duplicate a span server-side, with no content
+    in the request or response -- a rearrangement no longer pays for text
+    that never changed. The source is addressed exactly like `replace`'s
+    own (a range or `--match-id`, never a bare offset -- refused by name,
+    since a point has no length to relocate); the destination is a point,
+    `--dest-offset` or `--dest-line` (one past the last line appends at end
+    of file). Both are one atomic operation -- one revision, one undo step
+    -- even though `move` performs two splices internally, which is why
+    `begin-transaction`/`end-transaction` (undo-grouping only) is not the
+    same guarantee. A destination strictly inside the source span is
+    refused as `move_destination_inside_source`.
 
 ## Agent responsibilities
 
@@ -297,9 +308,10 @@ default gives you.
 3. Acknowledge recovery, large-file work, force-save, and other safety prompts.
 4. Decide whether external bytes need a `.back` copy and whether a closing tab's
    journal is preserved or explicitly cleaned. Backup failure blocks the action.
-5. Every mutating request (`insert`, `replace`, `large_edit`, `restore`, `undo`,
-   `redo`, and `save`) must include the revision most recently returned by
-   `open`, `history`, or a completed mutation. Missing revisions are refused;
+5. Every mutating request (`insert`, `replace`, `move`, `copy`, `large_edit`,
+   `restore`, `undo`, `redo`, and `save`) must include the revision most
+   recently returned by `open`, `history`, or a completed mutation. Missing
+   revisions are refused;
    stale revisions are never merged implicitly.
 6. A request that names a file is only served by the tab holding that file;
    a request routed to a different tab is refused with `file_mismatch` and
