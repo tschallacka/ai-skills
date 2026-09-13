@@ -737,6 +737,8 @@ jobs:
             planning/binaries.tsv
             ai-text-editor/ai-text-editor.1
             ai-text-editor/schemas
+            installer/tools.tsv
+            .agents/profiles
             src
             Cargo.toml
             Cargo.lock

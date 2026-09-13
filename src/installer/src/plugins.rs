@@ -53,6 +53,7 @@ const AGENT_IDENTITY_PLUGIN_EXECUTABLES: &[&str] = &["hooks/lib.sh", "hooks/suba
 /// `target_root/plugin_name`, then makes `executables` (a subset of `files`)
 /// executable on unix. A file the shipped tree does not have is silently
 /// skipped, same as install.sh's `[ -f "$source" ] || continue`.
+#[cfg_attr(not(unix), allow(unused_variables))]
 fn copy_plugin_files(
     source_root: &Path,
     plugin_name: &str,

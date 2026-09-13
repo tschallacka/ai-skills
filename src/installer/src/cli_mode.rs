@@ -447,6 +447,12 @@ mod tests {
         );
     }
 
+    // Windows symlinks need elevated privileges (or Developer Mode) and a
+    // different API (std::os::windows::fs::symlink_file); this test's whole
+    // point is unix symlink behavior, so it is skipped there rather than
+    // ported, the same shape interactive-shell's whole crate is excluded on
+    // Windows in ci.yml for a deeper platform reason.
+    #[cfg(unix)]
     #[test]
     fn install_skill_cli_refuses_even_a_managed_upgrade_over_a_symlink() {
         let dir = tempfile::tempdir().unwrap();
