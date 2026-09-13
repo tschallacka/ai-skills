@@ -24,6 +24,8 @@
 pub mod control;
 
 mod cli;
+/// Challenge/proof primitives `control.rs`'s loopback-TCP arm uses (T111).
+mod control_auth;
 mod discovery;
 mod local;
 mod net;

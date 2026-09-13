@@ -39,13 +39,20 @@
 //! monitor side, including the wait for the reply, and that wait has a deadline:
 //! when it expires the monitor answers "owner busy" itself, because an
 //! unanswered send must never look delivered.
-// On a non-unix build everything below the wire types is unreachable: `imp`
-// answers None for serve and ask, so the queue, the deadline and the record
-// are dead code there. Allowed rather than split behind another cfg, so the
-// two arms stay one program and T111 has a single place to add the loopback
-// transport Windows needs.
-#![cfg_attr(not(unix), allow(dead_code))]
+// T111: the queue/deadline/record machinery below is shared by both
+// transports -- the unix arm's own UnixListener/UnixStream code and the
+// platform-neutral TCP transport (`tcp_serve`/`tcp_ask`/`tcp_stop`, used by
+// non-unix builds and exercised directly by this file's own tests on every
+// platform, since std::net works the same everywhere). Only the choice of
+// *which* socket type serve()/ask() end up using is platform-gated, in the
+// two `mod imp` blocks below. On a unix build the TCP functions are reached
+// only from tests (real callers go through the unix `mod imp` instead), which
+// is exactly the point -- real coverage here, not only on Windows CI -- but
+// it does mean rustc sees them as unreachable from a unix build's own
+// non-test code.
+#![cfg_attr(unix, allow(dead_code))]
 
+use crate::control_auth;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -65,6 +72,11 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(30);
 /// failure: the request may not have been attempted at all, so a caller can
 /// retry it.
 pub const EX_BUSY: i32 = 75;
+/// Exit code the TCP arm's owner answers with when a connection's challenge
+/// proof does not verify. The asking side treats this the same as any other
+/// reason the borrow did not work (None, fall back to an independent
+/// connection) rather than surfacing it as a real answer -- see `tcp_ask`.
+const EX_AUTH_FAILED: i32 = 77;
 
 /// One borrowed verb, as it crosses the socket. Flat and optional-free: a field
 /// a verb does not use is simply empty, which keeps the wire readable by hand
@@ -139,6 +151,13 @@ pub struct OwnerRecord {
     pub nick: String,
     #[serde(default)]
     pub chan: String,
+    /// The TCP arm's shared secret (T111): empty on unix, where the socket's
+    /// own file permissions are the guard. Never sent in the clear -- every
+    /// connection proves it knows this via an HMAC challenge/response
+    /// instead (`control_auth`), the same shape `ai_text_editor::auth` uses
+    /// for its own TCP fallback.
+    #[serde(default)]
+    pub auth_token: String,
 }
 
 /// Where the record lives. A borrower can derive this from its own arguments
@@ -295,6 +314,275 @@ fn new_inner() -> Arc<Inner> {
         shutdown: AtomicBool::new(false),
         in_flight: AtomicUsize::new(0),
     })
+}
+
+/// An explicit `--nick` or `--server` that disagrees with the owner asks to
+/// be someone else, which borrowing the owner's connection cannot honour.
+/// Empty means "whatever the session says", which the owner already is.
+/// Shared by both transports -- purely a comparison, nothing socket-specific.
+fn identity_matches(record: &OwnerRecord, request: &Request) -> bool {
+    if !request.nick.is_empty() && request.nick != record.nick {
+        return false;
+    }
+    if !request.server.is_empty() && request.server != record.server {
+        return false;
+    }
+    true
+}
+
+// ---- the loopback-TCP transport (T111) -------------------------------------
+//
+// Plain `std::net`, so this compiles and runs identically on every platform;
+// it is not behind `cfg(not(unix))`. Only the *choice* of using it (over the
+// unix arm's own UnixListener/UnixStream code) is platform-gated, in the two
+// `mod imp` blocks below. That is deliberate: it is what lets this file's own
+// tests exercise the real mechanism on any machine, including this one,
+// rather than leaving it provably untested until it reaches Windows CI.
+
+/// Bind loopback TCP on an ephemeral port, generate a shared secret, and
+/// serve it from a new thread -- the same "None is not an error" contract
+/// `imp::serve` has on unix: an unfittable state, a live owner, or a failed
+/// bind all mean "no owner; the caller tails on its own connection instead".
+fn tcp_serve(state_dir: &Path, key: &str, mut record: OwnerRecord) -> Option<Control> {
+    let record_dir = owner_dir(state_dir);
+    std::fs::create_dir_all(&record_dir).ok()?;
+    let record_path = record_path(state_dir, key);
+    // A record already there is either a live owner or a leftover -- ask,
+    // rather than assume, the same way the unix arm asks the socket path.
+    if let Ok(text) = std::fs::read_to_string(&record_path) {
+        if let Ok(existing) = serde_json::from_str::<OwnerRecord>(&text) {
+            if let Ok(addr) = existing.socket.parse::<std::net::SocketAddr>() {
+                if std::net::TcpStream::connect(addr).is_ok() {
+                    return None;
+                }
+            }
+        }
+    }
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).ok()?;
+    let port = listener.local_addr().ok()?.port();
+    let secret = control_auth::nonce().ok()?;
+    record.socket = format!("127.0.0.1:{port}");
+    record.pid = std::process::id();
+    record.started_at_ns = now_ns();
+    record.auth_token = secret.clone();
+    let json = serde_json::to_string_pretty(&record).ok()?;
+    std::fs::write(&record_path, json).ok()?;
+    let inner = new_inner();
+    let started_at_ns = record.started_at_ns;
+    spawn_tcp_monitor(listener, Arc::clone(&inner), secret, started_at_ns);
+    Some(Control {
+        inner,
+        socket: PathBuf::from(record.socket),
+        record: record_path,
+        inode: 0,
+    })
+}
+
+fn spawn_tcp_monitor(
+    listener: std::net::TcpListener,
+    inner: Arc<Inner>,
+    secret: String,
+    started_at_ns: u64,
+) {
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            if inner.shutdown.load(Ordering::Acquire) {
+                break;
+            }
+            match stream {
+                Ok(stream) => tcp_handle(&inner, stream, &secret, started_at_ns),
+                Err(_) => continue,
+            }
+        }
+        // No path to unlink, unlike unix: the listener (and its ephemeral
+        // port) simply drops when this thread ends.
+    });
+}
+
+fn tcp_handle(inner: &Arc<Inner>, stream: std::net::TcpStream, secret: &str, started_at_ns: u64) {
+    inner.in_flight.fetch_add(1, Ordering::AcqRel);
+    tcp_serve_connection(inner, stream, secret, started_at_ns);
+    inner.in_flight.fetch_sub(1, Ordering::AcqRel);
+}
+
+/// One connection's whole exchange: challenge, verify the proof, then the
+/// same read-request/await/answer logic the unix arm has. A connection that
+/// fails the challenge is answered `EX_AUTH_FAILED` and dropped without ever
+/// reading a request line -- a legitimate client always has the current
+/// secret (it reads the same record file this serve() call just wrote), so
+/// this path is only ever reached by a stale record or a wake-up self-connect
+/// from `tcp_stop`, never a normal borrower.
+fn tcp_serve_connection(
+    inner: &Arc<Inner>,
+    stream: std::net::TcpStream,
+    secret: &str,
+    started_at_ns: u64,
+) {
+    use std::io::{BufRead, BufReader, Write};
+    let _ = stream.set_read_timeout(Some(CLIENT_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(CLIENT_TIMEOUT));
+    let mut reader = BufReader::new(match stream.try_clone() {
+        Ok(clone) => clone,
+        Err(_) => return,
+    });
+    let Ok(nonce_b64) = control_auth::nonce() else {
+        return;
+    };
+    let Ok(nonce_bytes) = control_auth::decode_nonce(&nonce_b64) else {
+        return;
+    };
+    let challenge = serde_json::json!({"type": "challenge", "nonce": nonce_b64});
+    let Ok(mut challenge_bytes) = serde_json::to_vec(&challenge) else {
+        return;
+    };
+    challenge_bytes.push(b'\n');
+    {
+        let writer = reader.get_mut();
+        if writer.write_all(&challenge_bytes).is_err() || writer.flush().is_err() {
+            return;
+        }
+    }
+    let mut line = String::new();
+    if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
+        return;
+    }
+    #[derive(Deserialize)]
+    struct AuthMessage {
+        nonce: String,
+        proof: String,
+    }
+    let authenticated = serde_json::from_str::<AuthMessage>(line.trim())
+        .ok()
+        .and_then(|auth| {
+            let decoded = control_auth::decode_nonce(&auth.nonce).ok()?;
+            (decoded == nonce_bytes).then_some(auth)
+        })
+        .map(|auth| {
+            control_auth::verify(secret.as_bytes(), &nonce_bytes, started_at_ns, &auth.proof)
+        })
+        .unwrap_or(false);
+    if !authenticated {
+        tcp_answer(
+            reader.into_inner(),
+            &Reply::fail(
+                EX_AUTH_FAILED,
+                "chat-client-rs: control connection authentication failed",
+            ),
+        );
+        return;
+    }
+    line.clear();
+    if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
+        return;
+    }
+    let request: Request = match serde_json::from_str(line.trim()) {
+        Ok(request) => request,
+        Err(error) => {
+            tcp_answer(
+                reader.into_inner(),
+                &Reply::fail(65, format!("owner: {}", error)),
+            );
+            return;
+        }
+    };
+    tcp_answer(
+        reader.into_inner(),
+        &await_reply(inner, request, REPLY_TIMEOUT),
+    );
+}
+
+fn tcp_answer(mut stream: std::net::TcpStream, reply: &Reply) {
+    use std::io::Write;
+    if let Ok(mut json) = serde_json::to_vec(reply) {
+        json.push(b'\n');
+        let _ = stream.write_all(&json);
+        let _ = stream.flush();
+    }
+}
+
+fn tcp_stop(control: &Control) {
+    control.inner.shutdown.store(true, Ordering::Release);
+    let deadline = SystemTime::now() + CLIENT_TIMEOUT;
+    while control.inner.in_flight.load(Ordering::Acquire) > 0 && SystemTime::now() < deadline {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    // accept() is blocking, so the monitor thread has to be woken to see the
+    // shutdown flag -- one local connect, no handshake attempted or expected.
+    if let Some(addr) = control
+        .socket
+        .to_str()
+        .and_then(|s| s.parse::<std::net::SocketAddr>().ok())
+    {
+        let _ = std::net::TcpStream::connect(addr);
+    }
+    let _ = std::fs::remove_file(&control.record);
+}
+
+/// Connect to the owner's TCP endpoint, complete the challenge, forward the
+/// request, and return its answer. `None` covers every reason the borrow did
+/// not work -- no record, a record for a different transport, a dead port, a
+/// malformed challenge, or the owner rejecting the proof -- collapsing an
+/// auth failure into exactly the same fallback as a socket nobody answers,
+/// per this module's own "nothing regresses" contract.
+fn tcp_ask(state_dir: &Path, key: &str, request: &Request) -> Option<Reply> {
+    use std::io::{BufRead, BufReader, Write};
+    let record: OwnerRecord =
+        serde_json::from_str(&std::fs::read_to_string(record_path(state_dir, key)).ok()?).ok()?;
+    if !identity_matches(&record, request) {
+        return None;
+    }
+    if record.auth_token.is_empty() {
+        return None;
+    }
+    let addr: std::net::SocketAddr = record.socket.parse().ok()?;
+    let mut stream = std::net::TcpStream::connect(addr).ok()?;
+    stream.set_read_timeout(Some(CLIENT_TIMEOUT)).ok()?;
+    stream.set_write_timeout(Some(CLIENT_TIMEOUT)).ok()?;
+    let mut reader = BufReader::new(stream.try_clone().ok()?);
+    let mut line = String::new();
+    if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
+        return None;
+    }
+    #[derive(Deserialize)]
+    struct Challenge {
+        #[serde(rename = "type")]
+        kind: String,
+        nonce: String,
+    }
+    let challenge: Challenge = serde_json::from_str(line.trim()).ok()?;
+    if challenge.kind != "challenge" {
+        return None;
+    }
+    let nonce_bytes = control_auth::decode_nonce(&challenge.nonce).ok()?;
+    let proof = control_auth::proof(
+        record.auth_token.as_bytes(),
+        &nonce_bytes,
+        record.started_at_ns,
+    )
+    .ok()?;
+    let auth_line = serde_json::json!({"nonce": challenge.nonce, "proof": proof});
+    let mut auth_bytes = serde_json::to_vec(&auth_line).ok()?;
+    auth_bytes.push(b'\n');
+    let mut request_bytes = serde_json::to_vec(request).ok()?;
+    request_bytes.push(b'\n');
+    stream.write_all(&auth_bytes).ok()?;
+    stream.write_all(&request_bytes).ok()?;
+    stream.flush().ok()?;
+    line.clear();
+    // Accepted then unanswered is NOT a fallback case: the owner may have
+    // sent it, and retrying on our own connection could double the message --
+    // same reasoning the unix arm's `ask` states for the same shape.
+    if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
+        return Some(Reply::fail(
+            EX_BUSY,
+            "chat-client-rs: the session owner accepted the request and did not answer; it may or may not have been sent",
+        ));
+    }
+    let reply: Reply = serde_json::from_str(line.trim()).ok()?;
+    if reply.code == EX_AUTH_FAILED {
+        return None;
+    }
+    Some(reply)
 }
 
 #[cfg(unix)]
@@ -480,37 +768,27 @@ mod imp {
         }
         serde_json::from_str(line.trim()).ok()
     }
-
-    /// An explicit `--nick` or `--server` that disagrees with the owner asks to
-    /// be someone else, which borrowing the owner's connection cannot honour.
-    /// Empty means "whatever the session says", which the owner already is.
-    fn identity_matches(record: &OwnerRecord, request: &Request) -> bool {
-        if !request.nick.is_empty() && request.nick != record.nick {
-            return false;
-        }
-        if !request.server.is_empty() && request.server != record.server {
-            return false;
-        }
-        true
-    }
 }
 
-/// Windows has no unix socket. The shape it needs is loopback TCP with a token
-/// in the record, as `ai-text-editor`'s transport already does -- and until that
-/// is written and tested on Windows, every verb there keeps the behaviour it has
-/// today rather than a socket nobody has run.
+/// Windows has no unix socket (T111): loopback TCP with a token in the
+/// record, the shape `ai-text-editor`'s own TCP fallback already uses. The
+/// mechanism itself (`tcp_serve`/`tcp_ask`/`tcp_stop`, above) is plain
+/// `std::net` and not platform-gated at all; only this choice of using it
+/// over the unix arm's UnixListener/UnixStream code is.
 #[cfg(not(unix))]
 mod imp {
     use super::*;
 
-    pub fn serve(_state_dir: &Path, _key: &str, _record: OwnerRecord) -> Option<Control> {
-        None
+    pub fn serve(state_dir: &Path, key: &str, record: OwnerRecord) -> Option<Control> {
+        tcp_serve(state_dir, key, record)
     }
 
-    pub fn stop(_control: &Control) {}
+    pub fn stop(control: &Control) {
+        tcp_stop(control)
+    }
 
-    pub fn ask(_state_dir: &Path, _key: &str, _request: &Request) -> Option<Reply> {
-        None
+    pub fn ask(state_dir: &Path, key: &str, request: &Request) -> Option<Reply> {
+        tcp_ask(state_dir, key, request)
     }
 }
 
@@ -750,6 +1028,142 @@ mod tests {
         )
         .is_none());
         stop(&control);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- the loopback-TCP transport (T111) ---------------------------------
+    //
+    // Calls tcp_serve/tcp_ask/tcp_stop directly rather than through serve/ask/
+    // stop: on this (unix) machine those dispatch to the unix arm, but
+    // std::net works identically everywhere, so exercising the TCP functions
+    // by name gives real coverage of the mechanism Windows CI is the only
+    // place that reaches through imp::serve/imp::ask instead.
+
+    #[test]
+    fn a_tcp_served_request_completes_the_challenge_and_reaches_the_owner() {
+        let dir = tmp_dir("tcp-round-trip");
+        let record = OwnerRecord {
+            nick: "owner".into(),
+            server: "127.0.0.1:1".into(),
+            chan: "#ops".into(),
+            ..OwnerRecord::default()
+        };
+        let control = tcp_serve(&dir, "k", record).expect("tcp must bind on loopback");
+        assert!(
+            !control.socket.to_string_lossy().is_empty(),
+            "the record must carry the bound address"
+        );
+        let asked = std::thread::spawn({
+            let dir = dir.clone();
+            move || {
+                tcp_ask(
+                    &dir,
+                    "k",
+                    &Request {
+                        verb: "names".into(),
+                        chan: "#ops".into(),
+                        ..Request::default()
+                    },
+                )
+            }
+        });
+        let deadline = SystemTime::now() + Duration::from_secs(10);
+        loop {
+            for pending in control.take_pending() {
+                assert_eq!(pending.request.verb, "names");
+                pending.answer(Reply::ok(vec!["alice".into(), "bob".into()]));
+            }
+            if asked.is_finished() || SystemTime::now() > deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let reply = asked
+            .join()
+            .unwrap()
+            .expect("the owner answered over the authenticated connection");
+        assert_eq!(reply.code, 0);
+        assert_eq!(reply.out, vec!["alice".to_string(), "bob".to_string()]);
+        tcp_stop(&control);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_tcp_connection_with_no_proof_is_rejected_and_the_client_falls_back() {
+        // A raw connection that never completes the challenge -- standing in
+        // for a stray process finding the port without ever reading the
+        // record's secret. tcp_ask always completes the real handshake, so
+        // this drives the wire directly to prove the owner itself refuses.
+        let dir = tmp_dir("tcp-no-proof");
+        let control = tcp_serve(&dir, "k", OwnerRecord::default()).expect("tcp must bind");
+        let addr = control
+            .socket
+            .to_str()
+            .unwrap()
+            .parse::<std::net::SocketAddr>()
+            .unwrap();
+        use std::io::{BufRead, BufReader, Write};
+        let mut stream = std::net::TcpStream::connect(addr).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(
+            line.contains("challenge"),
+            "must open with a challenge: {line}"
+        );
+        // Garbage instead of a real auth message.
+        stream.write_all(b"not json at all\n").unwrap();
+        stream.flush().unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        let reply: Reply = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(reply.code, EX_AUTH_FAILED);
+        tcp_stop(&control);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_second_tcp_owner_does_not_take_a_live_port_and_a_dead_one_is_reclaimed() {
+        let dir = tmp_dir("tcp-second-owner");
+        let first = tcp_serve(&dir, "k", OwnerRecord::default()).expect("first owner binds");
+        assert!(
+            tcp_serve(&dir, "k", OwnerRecord::default()).is_none(),
+            "a live port must not be rebound: the second tail just tails"
+        );
+        tcp_stop(&first);
+        let third = tcp_serve(&dir, "k", OwnerRecord::default())
+            .expect("a dead port's record is reclaimed");
+        tcp_stop(&third);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_tcp_request_for_another_identity_is_declined_so_the_caller_falls_back() {
+        let dir = tmp_dir("tcp-identity");
+        let record = OwnerRecord {
+            nick: "owner".into(),
+            server: "127.0.0.1:1".into(),
+            ..OwnerRecord::default()
+        };
+        let control = tcp_serve(&dir, "k", record).expect("owner binds");
+        assert!(tcp_ask(
+            &dir,
+            "k",
+            &Request {
+                verb: "send".into(),
+                nick: "someone-else".into(),
+                ..Request::default()
+            }
+        )
+        .is_none());
+        tcp_stop(&control);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn asking_tcp_with_no_owner_is_none_not_an_error() {
+        let dir = tmp_dir("tcp-no-owner");
+        assert!(tcp_ask(&dir, "k", &Request::default()).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
