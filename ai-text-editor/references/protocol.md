@@ -24,6 +24,15 @@ this order:
    names no tab is refused with `tab_unknown` and the open tabs listed; it
    never falls through to whichever tab discovery would have found instead,
    because a caller that named a tab did not ask for a different one.
+   The value reported is the shortest prefix unambiguous among the tabs
+   registered when THIS one first was, git-style — one tab alone gets a
+   single character, assigned once and fixed for its whole life; a later tab
+   whose real id would collide with one already claimed is simply given a
+   longer one instead, so an id already handed to a caller is never
+   invalidated by anything that registers afterward. A query too short to
+   name just one tab is refused with `tab_ambiguous`, naming each real
+   candidate by its own assigned form, the same as `tab_path`'s own ambiguity
+   refusal below; a full id, if held, still resolves exactly as always.
 2. **`tab_path`** — a filename, or a trailing run of path components, naming an
    open tab. The recovery for a caller that has lost the id. Matched on
    component boundaries, not as a substring, so `port.txt` does not name

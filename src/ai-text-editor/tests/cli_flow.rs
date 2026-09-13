@@ -2784,6 +2784,25 @@ fn tab_id_of(output: &Output) -> String {
         .to_owned()
 }
 
+/// T118: with exactly one tab open in a fresh, isolated registry, nothing
+/// else is registered to disambiguate against -- the shortest unambiguous
+/// prefix is the ticket's own literal example, a single character.
+#[test]
+fn a_lone_tab_is_addressed_by_a_single_character() {
+    let harness = Harness::new("tabid-lone");
+    let alpha = harness.write("alpha.txt", "in alpha\n");
+    let opened = harness.open_verbose(&alpha);
+    let id = tab_id_of(&opened);
+    assert_eq!(
+        id.len(),
+        1,
+        "a lone tab has nothing to disambiguate against: {id}"
+    );
+    let read = harness.client(&["read", "--tab-id", &id, "-p", "text"]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "in alpha\n");
+}
+
 /// T96: a tab id is addressing enough on its own, for every verb.
 ///
 /// Verbs routed by file, endpoint or session token; the tab uuid came back in

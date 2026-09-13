@@ -295,7 +295,7 @@ fn tool_definitions() -> Vec<Value> {
             (
                 "tab_id",
                 string(
-                    "The tab_id a previous answer reported, and addressing enough on its own: with it, no file or endpoint is needed for any verb. Wins over file and tab_path, and is refused by name (tab_unknown) rather than falling back to some other tab if it names none.",
+                    "The tab_id a previous answer reported, and addressing enough on its own: with it, no file or endpoint is needed for any verb. It is the shortest prefix unambiguous among currently open tabs (git-style), not always the full id. Wins over file and tab_path, and is refused by name -- tab_unknown if it names no tab, tab_ambiguous (naming the candidates) if it is too short to name just one -- rather than falling back to some other tab.",
                 ),
             ),
             // T99: on every tool, because the ladder applies to every

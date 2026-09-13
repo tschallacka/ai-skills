@@ -52,6 +52,17 @@ struct Tab {
     auth_token: Option<String>,
     session_token: String,
     server_generation: String,
+    /// T118: `session::tab_uuid_for(&session_token, &server_generation)`,
+    /// computed once at construction rather than rehashed on every call --
+    /// `session_token`/`server_generation` are never reassigned after this,
+    /// so the value is invariant for the tab's whole lifetime.
+    tab_uuid: String,
+    /// T118: this tab's permanent, first-come-assigned short id (see
+    /// `session::register`'s own doc comment) -- read back once, right after
+    /// registration, from what `register` just persisted. Never recomputed
+    /// afterward: it must survive unchanged for as long as this tab lives,
+    /// regardless of what other tabs register later.
+    short_id: String,
     large_file: Option<LargeFile>,
     large_threshold_bytes: u64,
     jobs: JobRegistry,
@@ -310,6 +321,12 @@ fn main() {
         auth_token: configured_auth_token.clone(),
         session_token: session_token.clone(),
         server_generation: server_generation.clone(),
+        tab_uuid: session::tab_uuid_for(&session_token, &server_generation),
+        // `register_session` (below) hasn't run yet at this point -- the
+        // real, first-come-assigned value is read back and patched in right
+        // after each of its two call sites, once it has. The full id is a
+        // safe placeholder until then.
+        short_id: session::tab_uuid_for(&session_token, &server_generation),
         large_file,
         large_threshold_bytes: large_threshold,
         jobs: JobRegistry::default(),
@@ -392,6 +409,7 @@ fn main() {
             &session_token,
             Some(&auth_token),
         );
+        backfill_short_id(&tab);
         announce(&path, &endpoint, &server_generation);
         let generation = server_generation;
         for stream in listener.incoming().flatten() {
@@ -489,6 +507,7 @@ fn main() {
             &session_token,
             configured_auth_token.as_deref(),
         );
+        backfill_short_id(&tab);
         announce(&path, &endpoint, &server_generation);
         for stream in listener.incoming().flatten() {
             let state = Arc::clone(&state);
@@ -572,6 +591,16 @@ fn register_session(
     );
     if let Err(error) = session::register(&record) {
         eprintln!("ai-text-editor-server: cannot register session: {error}");
+    }
+}
+
+/// T118: reads back the short id `register_session` (just called) actually
+/// persisted for this tab, and patches it into the `Tab` itself -- a plain
+/// read-after-write, since the real assignment already happened, under
+/// `session::register`'s own lock, the moment that call returned.
+fn backfill_short_id(tab: &Arc<Mutex<Tab>>) {
+    if let Ok(mut tab) = tab.lock() {
+        tab.short_id = session::short_id_for(&tab.tab_uuid).unwrap_or_else(|| tab.tab_uuid.clone());
     }
 }
 
@@ -763,6 +792,7 @@ fn open_additional_tab(
     let _ = metadata.record(&path, mode, recovered_revision, index.bytes);
     let session_token =
         auth::nonce().map_err(|error| format!("cannot create session token: {error}"))?;
+    let tab_uuid = session::tab_uuid_for(&session_token, &server_generation);
     let index_complete = index_loaded || large_file.is_none();
     let mut tab = Tab {
         path: path.clone(),
@@ -787,6 +817,11 @@ fn open_additional_tab(
         auth_token,
         session_token,
         server_generation,
+        tab_uuid: tab_uuid.clone(),
+        // Backfilled by the caller right after `register_session`, once it
+        // actually runs (below): the full id is a safe placeholder until
+        // then, matching `main`'s own two constructions of `Tab`.
+        short_id: tab_uuid,
         large_file,
         large_threshold_bytes,
         jobs: JobRegistry::default(),
@@ -1345,8 +1380,22 @@ fn candidate_advice(state_guard: &ServerState) -> String {
     )
 }
 
+/// The tab's real, full 64-char id -- what routing and authorization
+/// checks compare against. Never itself sent in a response; `tab_id` below
+/// is the abbreviated form every response actually reports.
+fn full_tab_id(tab: &Tab) -> &str {
+    &tab.tab_uuid
+}
+
+/// T118: the shortest prefix of this tab's real id every response actually
+/// reports -- assigned once, first come first served, when the tab
+/// registered (`session::register`), and cached in `Tab.short_id` ever
+/// since. Never recomputed here: unlike a scheme that finds "the shortest
+/// prefix unambiguous right now" fresh on every call, a value already
+/// cached at registration time cannot be invalidated by whatever registers
+/// later.
 fn tab_id(tab: &Tab) -> String {
-    session::tab_uuid_for(&tab.session_token, &tab.server_generation)
+    tab.short_id.clone()
 }
 
 /// Every open tab as `{tab_id, path}`, newest addressing first. The candidate
@@ -1430,17 +1479,66 @@ fn select_tab(
     // happens to hold. It is not the weaker credential either - the id is a
     // blake3 of the session token and the server generation, so holding one is
     // holding the other.
+    //
+    // T118: `wanted` is a PREFIX, matched against each tab's real (full)
+    // id -- a full id still matches exactly as before, since it can only
+    // ever equal, never merely prefix, one real tab's id. Among 2+ raw
+    // matches, the one tab whose OWN officially assigned `short_id` (first
+    // come, see `session::register`) exactly equals `wanted` always wins
+    // outright: any other match only collides by coincidence of its real
+    // hash, since it was specifically given a LONGER id because this one
+    // registered first. Only when no candidate's own assignment matches
+    // that way is naming several tabs genuinely ambiguous, refused the same
+    // shape `tab_path`'s own ambiguity refusal just below already uses.
     if let Some(wanted) = envelope.payload.get("tab_id").and_then(Value::as_str) {
-        for tab in state_guard.tabs.values() {
-            if tab.lock().ok().is_some_and(|tab| tab_id(&tab) == wanted) {
-                ensure_tab_file(tab, requested.as_ref(), &envelope.method)?;
-                return Ok(tab.clone());
+        if wanted.is_empty() {
+            return Err(format!(
+                "tab_unknown: tab_id must not be empty; {}",
+                candidate_advice(&state_guard)
+            ));
+        }
+        let matched: Vec<Arc<Mutex<Tab>>> = state_guard
+            .tabs
+            .values()
+            .filter(|tab| {
+                tab.lock()
+                    .ok()
+                    .is_some_and(|tab| full_tab_id(&tab).starts_with(wanted))
+            })
+            .cloned()
+            .collect();
+        let owner = matched
+            .iter()
+            .find(|tab| tab.lock().is_ok_and(|tab| tab.short_id == wanted))
+            .cloned();
+        let resolved = owner.or_else(|| (matched.len() == 1).then(|| matched[0].clone()));
+        match resolved {
+            Some(tab) => {
+                ensure_tab_file(&tab, requested.as_ref(), &envelope.method)?;
+                return Ok(tab);
+            }
+            None if matched.is_empty() => {
+                return Err(format!(
+                    "tab_unknown: no tab on this server has tab_id {wanted}; {}",
+                    candidate_advice(&state_guard)
+                ))
+            }
+            None => {
+                let ambiguous: Vec<Value> = matched
+                    .iter()
+                    .filter_map(|tab| {
+                        tab.lock()
+                            .ok()
+                            .map(|tab| json!({"tab_id": tab_id(&tab), "path": tab.path}))
+                    })
+                    .collect();
+                return Err(format!(
+                    "tab_ambiguous: {wanted} names {} open tabs on this server; address one by a longer tab_id: {}",
+                    matched.len(),
+                    serde_json::to_string(&ambiguous).unwrap_or_default()
+                ));
             }
         }
-        return Err(format!(
-            "tab_unknown: no tab on this server has tab_id {wanted}; {}",
-            candidate_advice(&state_guard)
-        ));
     }
     // T97: the recovery for a caller that forgot the id. A filename, or a
     // trailing run of path components, resolves to the one tab it names -
@@ -1561,7 +1659,7 @@ fn select_tab(
                 threshold,
             )?;
             if let Some(endpoint) = endpoint {
-                let tab_guard = tab;
+                let mut tab_guard = tab;
                 let session_token = tab_guard.session_token.clone();
                 register_session(
                     &endpoint,
@@ -1569,6 +1667,8 @@ fn select_tab(
                     &session_token,
                     auth_token.as_deref(),
                 );
+                tab_guard.short_id = session::short_id_for(&tab_guard.tab_uuid)
+                    .unwrap_or_else(|| tab_guard.tab_uuid.clone());
                 let tab = Arc::new(Mutex::new(tab_guard));
                 let key = tab_key(path);
                 let mut state_guard = state.lock().unwrap();
@@ -1616,11 +1716,17 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
     // path and be handed a token. A tab id is not the weaker credential of the
     // two in any case: it is a blake3 of the session token and the server
     // generation.
+    //
+    // T118: `wanted` may be an abbreviated prefix rather than the full id --
+    // safe to accept here via the same `starts_with` check `select_tab` used
+    // to route to this exact tab in the first place, refusing `tab_ambiguous`
+    // instead of reaching `handle()` at all had `wanted` named more than one
+    // tab on this server.
     let addressed_by_handle = envelope
         .payload
         .get("tab_id")
         .and_then(Value::as_str)
-        .is_some_and(|wanted| wanted == tab_id(&tab))
+        .is_some_and(|wanted| !wanted.is_empty() && full_tab_id(&tab).starts_with(wanted))
         || envelope
             .payload
             .get("tab_path")

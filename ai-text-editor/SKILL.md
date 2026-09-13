@@ -49,7 +49,13 @@ tree out of a typo.
 ## Addressing a tab
 
 Every response reports a `tab_id`, and that id is addressing enough on its own
-for every verb — no path, no endpoint:
+for every verb — no path, no endpoint. It is the shortest prefix unambiguous
+among the currently open tabs when it was first assigned, git-style, not
+always the full id — one tab alone gets a single character, fixed for that
+tab's whole life; a later tab whose id would collide with one already claimed
+gets a longer one instead, never the other way around (a query too short to
+mean just one tab is refused as `tab_ambiguous`, naming candidates, rather
+than guessed):
 
 ```text
 ai-text-editor read --tab-id 4f2a...      # no -f needed
