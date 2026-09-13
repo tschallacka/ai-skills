@@ -1,4 +1,5 @@
 // MODE: DEV
+// PACKAGE: DEV
 //! pack-release SRC_DIR OUT.tar.gz — maintainer tool, never shipped. Packs a
 //! directory into the same gzipped-tar format `installer_release::fetch_and_extract`
 //! reads back, for building a real release or a local test fixture.
