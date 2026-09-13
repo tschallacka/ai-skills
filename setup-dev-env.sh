@@ -111,14 +111,14 @@ if [ "$mode" = list ] || [ "$mode" = check ]; then
         if [ "$mode" = check ]; then
             state=$([ -x "$repo_root/$dest" ] && echo present || echo MISSING)
             printf '  %-16s -> %-52s %s\n' "$crate" "$dest" "$state"
-            if [ -f "$repo_root/planning/scripts/$binary.sh" ]; then
+            if stages_into_planning_scripts "$binary"; then
                 sibling="planning/scripts/$binary$exe"
                 state=$([ -x "$repo_root/$sibling" ] && echo present || echo MISSING)
                 printf '  %-16s -> %-52s %s\n' "$crate" "$sibling" "$state"
             fi
         else
             printf '  %-16s -> %s\n' "$crate" "$dest"
-            if [ -f "$repo_root/planning/scripts/$binary.sh" ]; then
+            if stages_into_planning_scripts "$binary"; then
                 printf '  %-16s -> %s\n' "$crate" "planning/scripts/$binary$exe"
             fi
         fi
@@ -176,7 +176,7 @@ while IFS="$(printf '\t')" read -r crate binary; do
         cp "$repo_root/target/$triple/release/$binary$exe" "$dest_dir/$binary$exe"
         chmod +x "$dest_dir/$binary$exe"
         printf 'ok -> bin/%s/%s%s\n' "$triple" "$binary" "$exe"
-        if [ -f "$repo_root/planning/scripts/$binary.sh" ]; then
+        if stages_into_planning_scripts "$binary"; then
             cp "$repo_root/target/$triple/release/$binary$exe" \
                 "$repo_root/planning/scripts/$binary$exe"
             chmod +x "$repo_root/planning/scripts/$binary$exe"

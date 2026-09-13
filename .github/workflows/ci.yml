@@ -263,7 +263,12 @@ jobs:
         # native job's own "Build and execute every registered planning
         # command" step: planning/rust-migration.tsv names the migrated
         # crates, and a binary is staged into planning/scripts/ only where a
-        # `.sh` sibling still names it as this repository's own oracle.
+        # `.sh` sibling still names it as this repository's own oracle --
+        # except register-rebuild, whose .sh predecessor was deliberately
+        # retired once skill_files() took over listing the binary directly
+        # (see planning/PACKAGE-MAP.tsv); that retirement left no `.sh` for
+        # the gate below to find, silently dropping it from every one of
+        # this repository's own build steps (setup-dev-env.sh included).
         run: |
           set -euo pipefail
           while IFS=$'\t' read -r path kind candidate note; do
@@ -273,7 +278,12 @@ jobs:
               overview-state) crate=plan-overview ;;
               *) crate="$candidate" ;;
             esac
-            [ -f "planning/scripts/$candidate.sh" ] || continue
+            if [ ! -f "planning/scripts/$candidate.sh" ]; then
+              case "$candidate" in
+                register-rebuild) : ;; # retired its .sh oracle; still ships
+                *) continue ;;
+              esac
+            fi
             manifest="src/$crate/Cargo.toml"
             [ -f "$manifest" ] || { echo "::error::missing crate for $candidate: $manifest"; exit 1; }
             cargo build --manifest-path "$manifest" --release
@@ -283,6 +293,7 @@ jobs:
             chmod +x "planning/scripts/$candidate"
           done < <({
             printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
+            printf 'planning\truntime-binary\tregister-rebuild\tdeclared in planning/PACKAGE-MAP.tsv\n'
             awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
           } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
           # ~45 crates' worth of dependency objects (deps/, build/,

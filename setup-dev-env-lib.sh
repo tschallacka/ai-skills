@@ -35,6 +35,18 @@ check_stray_src_dirs() {
     exit 70
 }
 
+# Whether $1's compiled binary belongs in planning/scripts/ alongside its bin/
+# copy. Normally that is exactly the crates whose `.sh` predecessor still
+# exists (it names this repository's own oracle for that shell test), but
+# register-rebuild retired its `.sh` once skill_files() took over listing the
+# binary directly (planning/PACKAGE-MAP.tsv) -- that retirement left no `.sh`
+# for a bare existence check to find, so it is named here explicitly instead.
+# ci.yml's own two build steps carry the same exception for the same reason.
+stages_into_planning_scripts() {
+    [ -f "$repo_root/planning/scripts/$1.sh" ] && return 0
+    [ "$1" = register-rebuild ]
+}
+
 # The host's Rust target triple, using the same five-row house list the skills
 # resolve against at runtime (rust-development-guidelines.md section 4). A
 # machine outside the list has no row to build and is refused by name.

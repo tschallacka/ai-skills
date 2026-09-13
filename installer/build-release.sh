@@ -87,13 +87,54 @@ host_target() {
     esac
 }
 
+# Whether $1 belongs beside its shell oracle in planning/scripts/. Normally
+# that is exactly the candidates whose `.sh` still exists; register-rebuild
+# retired its `.sh` once skill_files() took over listing the binary directly
+# (planning/PACKAGE-MAP.tsv), so it is named here explicitly instead -- same
+# exception ci.yml's own two build steps and setup-dev-env-lib.sh's
+# stages_into_planning_scripts carry for the same reason.
+stages_beside_shell_oracle() {
+    [ -f "$repo_root/planning/scripts/$1.sh" ] && return 0
+    [ "$1" = register-rebuild ]
+}
+
+# Resolves the release artifact for one planning command, building it if the
+# bin/<target> copy from setup-dev-env.sh isn't already there. Echoes the
+# artifact path and returns 0 on success; returns 2 (no output) for
+# render-plans-board, intentionally absent from this branch; returns 66 (with
+# a message on stderr) for any other failure.
+resolve_planning_command_artifact() { # <candidate> <target> <exe>
+    local candidate="$1" target="$2" exe="$3" source artifact
+    artifact="$repo_root/bin/$target/$candidate$exe"
+    if [ ! -x "$artifact" ]; then
+        source="$candidate"
+        [ "$candidate" = overview-state ] && source=plan-overview
+        if [ ! -f "$repo_root/src/$source/Cargo.toml" ]; then
+            [ "$candidate" = render-plans-board ] && return 2
+            printf '%s: no crate for planning command %s\n' "${0##*/}" "$candidate" >&2
+            return 66
+        fi
+        command -v cargo >/dev/null 2>&1 || {
+            printf '%s: cargo is required to build planning command %s\n' "${0##*/}" "$candidate" >&2
+            return 66
+        }
+        ( cd "$repo_root" && cargo build --release \
+            --manifest-path "$repo_root/src/$source/Cargo.toml" --target "$target" ) \
+            || { printf '%s: cargo build %s failed\n' "${0##*/}" "$candidate" >&2; return 66; }
+        artifact="$repo_root/target/$target/release/$candidate$exe"
+    fi
+    [ -x "$artifact" ] || {
+        printf '%s: no executable artifact for planning command %s\n' "${0##*/}" "$candidate" >&2
+        return 66
+    }
+    printf '%s\n' "$artifact"
+}
+
 # Stage extensionless planning commands beside their shell oracles. The
 # migration registry is the source of truth for the command-to-crate mapping;
-# the renderer is deliberately omitted because another agent owns it. A root
-# bin artifact from setup-dev-env.sh is reused, while a clean release build
-# compiles the individual crate in the pinned target environment.
+# the renderer is deliberately omitted because another agent owns it.
 prepare_planning_rust_commands() {
-    local target exe candidate artifact source
+    local target exe candidate artifact rc
     target="$(host_target)" || {
         printf '%s: unsupported host for planning Rust commands\n' "${0##*/}" >&2
         return 66
@@ -102,34 +143,20 @@ prepare_planning_rust_commands() {
     case "$target" in *windows-msvc) exe='.exe' ;; esac
     while IFS= read -r candidate; do
         [ -n "$candidate" ] || continue
-        [ -f "$repo_root/planning/scripts/$candidate.sh" ] || continue
-        artifact="$repo_root/bin/$target/$candidate$exe"
-        if [ ! -x "$artifact" ]; then
-            source="$candidate"
-            [ "$candidate" = overview-state ] && source=plan-overview
-            [ -f "$repo_root/src/$source/Cargo.toml" ] || {
-                # render-plans-board is intentionally absent from this branch.
-                [ "$candidate" = render-plans-board ] && continue
-                printf '%s: no crate for planning command %s\n' "${0##*/}" "$candidate" >&2
-                return 66
-            }
-            command -v cargo >/dev/null 2>&1 || {
-                printf '%s: cargo is required to build planning command %s\n' "${0##*/}" "$candidate" >&2
-                return 66
-            }
-            ( cd "$repo_root" && cargo build --release \
-                --manifest-path "$repo_root/src/$source/Cargo.toml" --target "$target" ) \
-                || { printf '%s: cargo build %s failed\n' "${0##*/}" "$candidate" >&2; return 66; }
-            artifact="$repo_root/target/$target/release/$candidate$exe"
-        fi
-        [ -x "$artifact" ] || {
-            printf '%s: no executable artifact for planning command %s\n' "${0##*/}" "$candidate" >&2
-            return 66
+        stages_beside_shell_oracle "$candidate" || continue
+        artifact="$(resolve_planning_command_artifact "$candidate" "$target" "$exe")" && {
+            cp "$artifact" "$repo_root/planning/scripts/$candidate$exe"
+            chmod +x "$repo_root/planning/scripts/$candidate$exe"
+            continue
         }
-        cp "$artifact" "$repo_root/planning/scripts/$candidate$exe"
-        chmod +x "$repo_root/planning/scripts/$candidate$exe"
-    done < <(awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" { print $3 }' \
-        "$repo_root/planning/rust-migration.tsv" | LC_ALL=C sort -u)
+        rc=$?
+        [ "$rc" -eq 2 ] && continue
+        return "$rc"
+    done < <({
+        printf 'register-rebuild\n' # declared in planning/PACKAGE-MAP.tsv
+        awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" { print $3 }' \
+            "$repo_root/planning/rust-migration.tsv"
+    } | LC_ALL=C sort -u)
 }
 
 # A file's own header decides. Read the top only: a heredoc further down mentions
