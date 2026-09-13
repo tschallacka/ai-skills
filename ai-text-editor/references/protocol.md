@@ -2,9 +2,13 @@
 # ai-text-editor protocol reference
 
 The authoritative transport is versioned NDJSON: one request per short-lived
-connection and zero or more ordered response frames ending in `complete`.
-Structured output is the default; text, paging, and streaming are explicit
-client presentation choices.
+connection and one or more ordered response frames. An error frame is
+always the last frame, on its own. A data response that is a single frame —
+not streamed, not paged — ends there too: only a stream or a paged result
+leaves a caller with a real question ("is the sequence I've been reading
+now over?"), so only those get a trailing `complete` frame. Structured
+output is the default; text, paging, and streaming are explicit client
+presentation choices.
 
 `server start --file PATH` creates the initial tab and shared endpoint.
 `open --endpoint ENDPOINT --file PATH` selects an existing tab by canonical
@@ -115,9 +119,11 @@ clients must update their saved session token. On Unix, group/world-readable
 credential files are refused.
 
 Every response frame carries a zero-based `sequence`. Data frames also carry
-`byte_count`, the UTF-8 byte length of their canonical JSON `payload`. A
-consumer can therefore detect skipped frames and account for output without
-parsing presentation text.
+`byte_count`, the UTF-8 byte length of their canonical JSON `payload` — except
+at verbosity 0, where it is dropped along with everything else level 0 does
+not carry (see "Response verbosity" below). A consumer that wants it can
+always ask at level 1 or above; a consumer can otherwise detect skipped
+frames and account for output without parsing presentation text.
 
 The protocol frame ceiling is 8 MiB. Large raw reads default to and are capped
 at 4 MiB before base64/JSON framing; oversized result or index windows return
@@ -129,17 +135,23 @@ Every method takes `verbosity` 0-3, and **1 is the default**:
 
 | level | what the payload carries |
 |---|---|
-| 0 | the method's own result and the `tab_id` that produced it, and nothing else |
+| 0 | the method's own result, and nothing else — plus the `tab_id` that produced it, unless the request already addressed this exact tab by `tab_id` (see rule 1 below) |
 | 1 | level 0 plus what verification and the next step need: `revision`, `dirty`, `disk_diverged`, `external_change_pending`, the tab's `mode`, the resolved edit span (`offset`, `delete_len`, `bytes_written`, `deleted`), `complete`/`eof`, `start_line`/`end_line`, `returned_bytes`, a search's `pager_key` and `count`, and a zero-result search's `note` |
 | 2 | level 1 plus navigation: `cursors`, `total_bytes`, `start_byte`/`end_byte`, `result_id`, `limit`, index block paging, undo/redo depths |
 | 3 | everything, exactly the payload before the ladder existed |
 
 Three rules the levels do not bend:
 
-1. **Every level carries the method's own result and names its tab.** A `read`
-   returns its text at level 0; a search returns its matches. The ladder
-   governs *metadata*. `tab_id` is level 0 because addressing the wrong tab
-   silently is the failure the addressing design exists to prevent.
+1. **Every level carries the method's own result and names its tab — unless
+   the caller already named it.** A `read` returns its text at level 0; a
+   search returns its matches. The ladder governs *metadata*. `tab_id` is
+   level 0 because addressing the wrong tab silently is the failure the
+   addressing design exists to prevent — but at level 0, and only there, a
+   request that already addressed this exact tab by `--tab-id` gets no
+   `tab_id` echoed back, since repeating an id the caller just sent is not
+   new information. A request that named a `tab_path`, a file, or nothing
+   at all (the focused tab) still gets it back at every level, level 0
+   included: none of those forms is the id itself.
 2. **A refusal is never trimmed.** An error frame keeps its `code`, `message`
    and recovery `choices` at every level, because for a refused request those
    *are* the answer.

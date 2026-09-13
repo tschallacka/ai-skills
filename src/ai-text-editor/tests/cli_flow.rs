@@ -3471,6 +3471,162 @@ fn the_verbosity_ladder_shortens_the_answer_without_dropping_the_guard() {
     );
 }
 
+/// T119: a single, non-streamed, non-paged answer needs no second frame to
+/// say it is done -- that frame's only content (request_id, sequence,
+/// result_generation, version) is pure repetition of what the first frame
+/// already carried. This holds at every verbosity level, not only 0: the
+/// lever is about frame COUNT, not payload richness.
+#[test]
+fn a_single_unpaged_answer_gets_no_completion_frame_at_any_level() {
+    let harness = Harness::new("no-complete-frame");
+    let file = harness.write("solo.txt", "alpha\nbeta\n");
+    harness.open(&file);
+    for level in ["0", "1", "2", "3"] {
+        let read = harness.client(&[
+            "read",
+            "-f",
+            file.to_str().unwrap(),
+            "-p",
+            "structured",
+            "--verbosity",
+            level,
+        ]);
+        let frames = stdout_json(&read);
+        assert_eq!(
+            frames.len(),
+            1,
+            "a single-frame read at level {level} must get exactly one frame back, not a trailing completion frame: {frames:?}"
+        );
+        assert_eq!(frames[0]["type"], json!("data"));
+    }
+}
+
+/// The completion frame is not gone everywhere: a paged search result still
+/// needs it, since `pager_key` means there may be more to page and the
+/// client still needs to know this particular exchange has ended.
+#[test]
+fn a_paged_search_result_still_gets_a_completion_frame() {
+    let harness = Harness::new("paged-complete-frame");
+    let file = harness.write("hay.txt", "alpha needle beta needle gamma\n");
+    harness.open(&file);
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "needle",
+        "-p",
+        "structured",
+    ]);
+    let frames = stdout_json(&found);
+    assert!(
+        first_payload(&found).get("pager_key").is_some(),
+        "this search must actually be a paged result for the test to mean anything: {frames:?}"
+    );
+    assert!(
+        frames
+            .iter()
+            .any(|frame| frame.get("type").and_then(Value::as_str) == Some("complete")),
+        "a paged result must still get a completion frame: {frames:?}"
+    );
+}
+
+/// T119: byte_count is pure transport bookkeeping the client never asked
+/// for at level 0 -- the transport already frames the message, so a second
+/// count of the same bytes is exactly the kind of repetition level 0 exists
+/// to drop. Levels above 0 are unaffected.
+#[test]
+fn verbosity_0_drops_byte_count_but_higher_levels_keep_it() {
+    let harness = Harness::new("byte-count-ladder");
+    let file = harness.write("counted.txt", "alpha\nbeta\n");
+    harness.open(&file);
+    let bare = harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]);
+    let bare_frame = stdout_json(&bare)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
+        .expect("a data frame");
+    assert!(
+        bare_frame.get("byte_count").is_none(),
+        "level 0 must not carry byte_count: {bare_frame}"
+    );
+    let default_level = harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "1",
+    ]);
+    let default_frame = stdout_json(&default_level)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
+        .expect("a data frame");
+    assert!(
+        default_frame.get("byte_count").is_some(),
+        "level 1 must still carry byte_count: {default_frame}"
+    );
+}
+
+/// T119's "sharper rule": level 0 must not repeat what the caller already
+/// sent. A `--tab-id` addressed request has the id already -- echoing it
+/// back is pure repetition -- but a `-f`/file-addressed or unmarked
+/// (focused-tab) request has no id yet, so it is new information and must
+/// still come back, exactly as T98 already guarantees at every other level.
+#[test]
+fn verbosity_0_omits_tab_id_only_when_the_caller_already_supplied_it() {
+    let harness = Harness::new("redundant-tab-id");
+    let file = harness.write("named.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let opened_payload = first_payload(&opened);
+    let tab_id = opened_payload["tab_id"].as_str().unwrap();
+
+    let by_id = first_payload(&harness.client(&[
+        "read",
+        "--tab-id",
+        tab_id,
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]));
+    assert!(
+        by_id.get("tab_id").is_none(),
+        "a --tab-id addressed request already has the id; level 0 must not echo it back: {by_id}"
+    );
+
+    let by_file = first_payload(&harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]));
+    assert!(
+        by_file.get("tab_id").is_some(),
+        "a file-addressed request has no id yet; level 0 must still return it: {by_file}"
+    );
+
+    let unmarked =
+        first_payload(&harness.client(&["read", "-p", "structured", "--verbosity", "0"]));
+    assert!(
+        unmarked.get("tab_id").is_some(),
+        "an unmarked (focused-tab) request has no id yet either; level 0 must still return it: {unmarked}"
+    );
+}
+
 /// T100: `jump-points` reads CodeGraph's own SQLite index directly rather
 /// than shelling out per symbol. Seeds a fixture `.codegraph/codegraph.db`
 /// with the real schema (no dependency on the `codegraph` binary being
