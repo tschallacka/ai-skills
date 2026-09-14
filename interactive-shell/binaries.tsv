@@ -24,5 +24,5 @@ x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	interactive-sh
 x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	interactive-shell-input.exe	64-bit Windows loopback-TCP input client
 x86_64-pc-cygwin	CYGWIN*:x86_64|amd64	interactive-shell.exe	Cygwin-native PTY wrapper (openpty, unmodified POSIX code) emitting JSONL screen events
 x86_64-pc-cygwin	CYGWIN*:x86_64|amd64	interactive-shell-input.exe	Cygwin-native unix-socket input client
-x86_64-pc-msys	MSYS*:x86_64|amd64	interactive-shell.exe	MSYS2-native PTY wrapper (same x86_64-pc-cygwin build, linked with MSYS2's own gcc/msys-2.0.dll instead of Cygwin's) emitting JSONL screen events
-x86_64-pc-msys	MSYS*:x86_64|amd64	interactive-shell-input.exe	MSYS2-native unix-socket input client
+x86_64-pc-cygwin	MSYS*:x86_64|amd64	interactive-shell.exe	MSYS2-native PTY wrapper (same x86_64-pc-cygwin build, linked with MSYS2's own gcc/msys-2.0.dll instead of Cygwin's) emitting JSONL screen events
+x86_64-pc-cygwin	MSYS*:x86_64|amd64	interactive-shell-input.exe	MSYS2-native unix-socket input client
