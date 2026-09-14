@@ -459,6 +459,31 @@ mod tests {
         String::from_utf8_lossy(&collected).into_owned()
     }
 
+    /// Polls `read()` until `predicate` matches the full text accumulated so
+    /// far, or `timeout` elapses. PowerShell's own startup (profile load,
+    /// module imports) is slow and variable, so a fixed sleep-then-write is
+    /// unreliable -- this waits for the actual prompt instead of a guess.
+    fn wait_for(
+        backend: &mut WindowsBackend,
+        timeout: Duration,
+        predicate: impl Fn(&str) -> bool,
+    ) -> String {
+        let start = Instant::now();
+        let mut collected = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match backend.read(&mut buf) {
+                Ok(n) if n > 0 => collected.extend_from_slice(&buf[..n]),
+                _ => {}
+            }
+            let text = String::from_utf8_lossy(&collected).into_owned();
+            if predicate(&text) || start.elapsed() >= timeout {
+                return text;
+            }
+            sleep(Duration::from_millis(20));
+        }
+    }
+
     #[test]
     fn spawn_write_read_resize_stop_round_trip() {
         // powershell.exe, not cmd.exe: real windows-latest CI runs showed
@@ -473,14 +498,20 @@ mod tests {
         let mut backend =
             WindowsBackend::spawn(&["powershell.exe".to_string()], 80, 24).expect("spawn shell");
 
-        // Drain the initial banner/prompt so it can't mask the assertion below.
-        let banner = read_for(&mut backend, Duration::from_millis(1000));
+        // Wait for the actual prompt, not a fixed sleep: PowerShell's own
+        // startup (profile load, module imports) is slow and variable.
+        let banner = wait_for(&mut backend, Duration::from_secs(20), |text| {
+            text.contains("PS ")
+        });
         eprintln!("initial banner ({} bytes): {banner:?}", banner.len());
+        assert!(banner.contains("PS "), "shell never reached a prompt");
 
         backend
             .write(b"echo hello-conpty\r\n")
             .expect("write echo command");
-        let output = read_for(&mut backend, Duration::from_secs(5));
+        let output = wait_for(&mut backend, Duration::from_secs(10), |text| {
+            text.contains("hello-conpty")
+        });
         assert!(
             output.contains("hello-conpty"),
             "expected echoed output, got: {output:?}"
