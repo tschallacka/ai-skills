@@ -26,6 +26,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
+        with:
+          # A full checkout hits Windows' MAX_PATH on this repo's deeply
+          # nested benchmark/results fixtures (the same reason ci.yml's own
+          # windows-latest leg sparse-checks out too); this job only needs
+          # the workspace sources.
+          sparse-checkout: |
+            src
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
 
       - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.98
