@@ -471,6 +471,7 @@ mod tests {
         let start = Instant::now();
         let mut collected = Vec::new();
         let mut buf = [0u8; 4096];
+        let mut last_progress_log = Instant::now();
         loop {
             match backend.read(&mut buf) {
                 Ok(n) if n > 0 => collected.extend_from_slice(&buf[..n]),
@@ -479,6 +480,15 @@ mod tests {
             let text = String::from_utf8_lossy(&collected).into_owned();
             if predicate(&text) || start.elapsed() >= timeout {
                 return text;
+            }
+            if last_progress_log.elapsed() >= Duration::from_secs(5) {
+                eprintln!(
+                    "wait_for: {:?} elapsed, {} bytes so far, try_wait: {:?}",
+                    start.elapsed(),
+                    collected.len(),
+                    backend.try_wait()
+                );
+                last_progress_log = Instant::now();
             }
             sleep(Duration::from_millis(20));
         }
@@ -495,27 +505,28 @@ mod tests {
         // attribute" as a reverse-shell signature (this exact API pattern
         // is a well-known C2 technique). The plan's own acceptance criteria
         // names either shell as acceptable evidence.
-        // -NoProfile/-NoLogo: run 9 showed powershell.exe alive but stuck
-        // for the full 20s timeout after its initial ConPTY setup escapes,
-        // never printing a prompt -- consistent with a hung/slow profile
-        // script (module auto-import, telemetry, update checks) rather than
-        // ConPTY itself; automation contexts standardly skip the profile.
-        let mut backend = WindowsBackend::spawn(
-            &[
-                "powershell.exe".to_string(),
-                "-NoProfile".to_string(),
-                "-NoLogo".to_string(),
-            ],
-            80,
-            24,
-        )
-        .expect("spawn shell");
+        // Bare "powershell.exe", no flags: -NoProfile/-NoLogo made the
+        // child die quickly (code 0) instead of surviving, the opposite of
+        // what a "skip slow startup work" flag should do -- that flag
+        // combination is itself a well-known stealthy-PowerShell signature
+        // (used by countless offensive tooling to suppress the banner), so
+        // it plausibly trips a stricter Defender/EDR heuristic than a bare
+        // interactive-looking invocation. Bare invocations stayed alive in
+        // every run; they were just slow to reach a prompt.
+        let mut backend =
+            WindowsBackend::spawn(&["powershell.exe".to_string()], 80, 24).expect("spawn shell");
 
-        // Wait for the actual prompt, not a fixed sleep.
-        let banner = wait_for(&mut backend, Duration::from_secs(20), |text| {
+        // Wait for the actual prompt, not a fixed sleep: profile loading on
+        // a cold CI VM has taken 20+ seconds in earlier runs without dying.
+        let start = Instant::now();
+        let banner = wait_for(&mut backend, Duration::from_secs(60), |text| {
             text.contains("PS ")
         });
-        eprintln!("initial banner ({} bytes): {banner:?}", banner.len());
+        eprintln!(
+            "initial banner after {:?} ({} bytes): {banner:?}",
+            start.elapsed(),
+            banner.len()
+        );
         eprintln!("try_wait at banner-wait deadline: {:?}", backend.try_wait());
         assert!(banner.contains("PS "), "shell never reached a prompt");
 
