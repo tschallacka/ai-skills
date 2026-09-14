@@ -459,15 +459,17 @@ mod tests {
         String::from_utf8_lossy(&collected).into_owned()
     }
 
-    /// Diagnostic-only: reproduces `spawn()`'s own sequence with a knob for
-    /// whether the parent closes its copies of `input.read`/`output.write`
-    /// right after `CreatePseudoConsole` (as Microsoft's own ConPTY sample
-    /// does, and as the real `spawn()` above does) or leaves them open for
-    /// the backend's whole lifetime. Isolates whether that close is racing
-    /// with conhost's internal handle duplication -- real CI runs showed
-    /// cmd.exe exiting (code 0, no prompt ever printed) within ~2s of spawn
-    /// with zero input sent, which is consistent with stdin seeing EOF.
-    fn spawn_debug_variant(close_pty_ends: bool) -> Result<WindowsBackend, String> {
+    /// Diagnostic-only: reproduces `spawn()`'s own sequence with knobs the
+    /// real `spawn()` doesn't need, to localize why real CI runs showed the
+    /// child exiting (code 0, no prompt ever printed) within ~2s with zero
+    /// input sent -- consistent with stdin seeing EOF, but the first probe
+    /// (closing input.read/output.write immediately vs. leaving them open)
+    /// ruled out a conhost handle-duplication race: both died the same way.
+    fn spawn_debug_variant(
+        program: &str,
+        close_pty_ends: bool,
+        use_job: bool,
+    ) -> Result<WindowsBackend, String> {
         let input = create_pipe()?;
         let output = create_pipe()?;
         let size = COORD { X: 80, Y: 24 };
@@ -486,7 +488,7 @@ mod tests {
         let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
         startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
         startup.lpAttributeList = attrs.as_ptr();
-        let mut command_line = quote_command_line(&["cmd.exe".to_string()]);
+        let mut command_line = quote_command_line(&[program.to_string()]);
         let mut process_information: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
         let created = unsafe {
             CreateProcessW(
@@ -505,10 +507,18 @@ mod tests {
         if created == 0 {
             return Err(io::Error::last_os_error().to_string());
         }
-        let job = unsafe { CreateJobObjectW(null(), null()) };
-        if unsafe { AssignProcessToJobObject(job, process_information.hProcess) } == 0 {
-            return Err(io::Error::last_os_error().to_string());
-        }
+        let job = if use_job {
+            let job = unsafe { CreateJobObjectW(null(), null()) };
+            if job.is_null() {
+                return Err(io::Error::last_os_error().to_string());
+            }
+            if unsafe { AssignProcessToJobObject(job, process_information.hProcess) } == 0 {
+                return Err(io::Error::last_os_error().to_string());
+            }
+            job
+        } else {
+            null_mut()
+        };
         Ok(WindowsBackend {
             hpc,
             input_write: input.write,
@@ -521,15 +531,29 @@ mod tests {
     }
 
     #[test]
-    fn debug_does_closing_pty_ends_early_matter() {
-        for close_pty_ends in [true, false] {
-            let mut backend =
-                spawn_debug_variant(close_pty_ends).expect("spawn cmd.exe (debug variant)");
-            sleep(Duration::from_secs(2));
-            eprintln!(
-                "close_pty_ends={close_pty_ends}: try_wait after 2s idle: {:?}",
-                backend.try_wait()
-            );
+    fn debug_isolate_why_the_child_exits_immediately() {
+        let cases: &[(&str, bool, bool)] = &[
+            ("cmd.exe", true, true),
+            ("cmd.exe", true, false),
+            ("powershell.exe", true, true),
+        ];
+        for &(program, close_pty_ends, use_job) in cases {
+            match spawn_debug_variant(program, close_pty_ends, use_job) {
+                Ok(mut backend) => {
+                    sleep(Duration::from_secs(2));
+                    eprintln!(
+                        "program={program} close_pty_ends={close_pty_ends} use_job={use_job}: \
+                         try_wait after 2s idle: {:?}",
+                        backend.try_wait()
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "program={program} close_pty_ends={close_pty_ends} use_job={use_job}: \
+                         spawn failed: {e}"
+                    );
+                }
+            }
         }
     }
 
