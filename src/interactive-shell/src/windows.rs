@@ -13,6 +13,8 @@ use std::io;
 use std::mem::size_of;
 use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, STILL_ACTIVE};
+#[cfg(test)]
+use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows_sys::Win32::System::Console::{
     ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
@@ -27,6 +29,8 @@ use windows_sys::Win32::System::Threading::{
     EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTUPINFOEXW,
 };
+#[cfg(test)]
+use windows_sys::Win32::System::Threading::{STARTF_USESTDHANDLES, STARTUPINFOW};
 
 /// Builds the single command-line string `CreateProcessW` expects, following
 /// the same backslash/quote escaping `CommandLineToArgvW` unpacks on the
@@ -437,37 +441,6 @@ mod tests {
     use std::thread::sleep;
     use std::time::Instant;
 
-    /// Reads for up to `timeout`, reporting what happened along the way so a
-    /// CI failure is diagnosable from the test log alone: an empty result
-    /// could mean "the shell produced nothing" or "read() itself is broken",
-    /// and those need different fixes.
-    fn read_for(backend: &mut WindowsBackend, timeout: Duration) -> String {
-        let start = Instant::now();
-        let mut collected = Vec::new();
-        let mut buf = [0u8; 4096];
-        let mut other_errors = 0u32;
-        let mut last_error = None;
-        while start.elapsed() < timeout {
-            match backend.read(&mut buf) {
-                Ok(n) if n > 0 => collected.extend_from_slice(&buf[..n]),
-                Ok(_) => sleep(Duration::from_millis(20)),
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    sleep(Duration::from_millis(20));
-                }
-                Err(e) => {
-                    other_errors += 1;
-                    last_error = Some(e.to_string());
-                    sleep(Duration::from_millis(20));
-                }
-            }
-        }
-        eprintln!(
-            "read_for: collected {} bytes, {other_errors} non-WouldBlock errors, last: {last_error:?}",
-            collected.len()
-        );
-        String::from_utf8_lossy(&collected).into_owned()
-    }
-
     /// Polls `read()` until `predicate` matches the full text accumulated so
     /// far, or `timeout` elapses. PowerShell's own startup (profile load,
     /// module imports) is slow and variable, so a fixed sleep-then-write is
@@ -598,5 +571,95 @@ mod tests {
 
         backend.stop();
         assert!(matches!(backend.try_wait(), Ok(Some(_))));
+    }
+
+    /// Isolation test: spawns bare `cmd.exe` via a completely ordinary,
+    /// non-ConPTY `CreateProcessW` (classic inheritable-pipe stdio
+    /// redirection, `bInheritHandles = TRUE`, no attribute list, no Job
+    /// Object) -- the same shape `std::process::Command` itself uses
+    /// internally. Real CI runs showed the SAME shell, spawned via ConPTY,
+    /// exiting cleanly (code 0) within ~250ms-650ms with no prompt and no
+    /// Win32 error ever returned, inconsistently across runs. If this
+    /// plain spawn reliably survives, the fault is specific to ConPTY on
+    /// this runner/OS; if it ALSO dies immediately, something about
+    /// process creation itself is broken in this environment, unrelated
+    /// to ConPTY.
+    #[test]
+    fn debug_plain_createprocess_without_conpty_survives() {
+        let sa = SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: null_mut(),
+            bInheritHandle: 1,
+        };
+        let mut stdin_read: HANDLE = null_mut();
+        let mut stdin_write: HANDLE = null_mut();
+        let mut stdout_read: HANDLE = null_mut();
+        let mut stdout_write: HANDLE = null_mut();
+        unsafe {
+            assert_ne!(
+                CreatePipe(&mut stdin_read, &mut stdin_write, &sa, 0),
+                0,
+                "CreatePipe (stdin) failed: {}",
+                io::Error::last_os_error()
+            );
+            assert_ne!(
+                CreatePipe(&mut stdout_read, &mut stdout_write, &sa, 0),
+                0,
+                "CreatePipe (stdout) failed: {}",
+                io::Error::last_os_error()
+            );
+        }
+
+        let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+        startup.cb = size_of::<STARTUPINFOW>() as u32;
+        startup.dwFlags = STARTF_USESTDHANDLES;
+        startup.hStdInput = stdin_read;
+        startup.hStdOutput = stdout_write;
+        startup.hStdError = stdout_write;
+
+        let mut command_line = quote_command_line(&["cmd.exe".to_string()]);
+        let mut process_information: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+        let created = unsafe {
+            CreateProcessW(
+                null(),
+                command_line.as_mut_ptr(),
+                null(),
+                null(),
+                1, // bInheritHandles: TRUE -- classic pipe-redirection shape.
+                0,
+                null(),
+                null(),
+                &startup,
+                &mut process_information,
+            )
+        };
+        assert_ne!(
+            created,
+            0,
+            "CreateProcessW failed: {}",
+            io::Error::last_os_error()
+        );
+        unsafe {
+            CloseHandle(stdin_read);
+            CloseHandle(stdout_write);
+        }
+
+        sleep(Duration::from_secs(2));
+        let mut code = 0u32;
+        unsafe { GetExitCodeProcess(process_information.hProcess, &mut code) };
+        eprintln!("plain CreateProcessW cmd.exe, no ConPTY: exit code after 2s = {code} (STILL_ACTIVE = {STILL_ACTIVE})");
+
+        unsafe {
+            TerminateProcess(process_information.hProcess, 1);
+            CloseHandle(process_information.hProcess);
+            CloseHandle(process_information.hThread);
+            CloseHandle(stdin_write);
+            CloseHandle(stdout_read);
+        }
+
+        assert_eq!(
+            code, STILL_ACTIVE as u32,
+            "plain (non-ConPTY) cmd.exe also exited early -- not a ConPTY-specific issue"
+        );
     }
 }
