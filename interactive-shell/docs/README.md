@@ -3,7 +3,8 @@
 
 This directory contains the agent instructions for operating interactive
 terminal programs. The Rust crate in `src/interactive-shell` provides the PTY
-wrapper and Unix-socket input client.
+wrapper and socket-based input client (a Unix domain socket on Linux/macOS,
+loopback TCP on Windows).
 
 The tools are generic: they do not know whether the child is `bash`, `nano`,
 `mc`, `mcedit`, `lynx`, `less`, or another TUI. The agent observes the current
@@ -23,7 +24,8 @@ nix develop .#default --command cargo build \
 The resulting binaries are under `src/interactive-shell/target/debug/`:
 
 - `interactive-shell` starts a child in a real PTY and exposes its terminal
-  state through a Unix socket.
+  state through a socket (a Unix domain socket on Linux/macOS, loopback TCP
+  on Windows).
 - `interactive-shell-input` observes that state and sends input requests.
 - `interactive-shell-fixture` is a deterministic protocol-test child.
 

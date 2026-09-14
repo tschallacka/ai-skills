@@ -61,7 +61,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/installer/bootstrap.sh	15664
-package/interactive-shell/SKILL.md	14407
+package/interactive-shell/SKILL.md	14471
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/appprofiles/FORMAT.md	3629
 package/interactive-shell/appprofiles/alsamixer.md	1289
@@ -126,9 +126,9 @@ package/interactive-shell/appprofiles/vmstat.md	1474
 package/interactive-shell/appprofiles/watch.md	1177
 package/interactive-shell/appprofiles/whiptail.md	2183
 package/interactive-shell/appprofiles/write.md	2257
-package/interactive-shell/binaries.tsv	1996
-package/interactive-shell/docs/README.md	6019
-package/interactive-shell/requires.tsv	1918
+package/interactive-shell/binaries.tsv	1902
+package/interactive-shell/docs/README.md	6143
+package/interactive-shell/requires.tsv	2032
 package/interactive-shell/tests/test-interactive-shell-exploration.sh	5492
 package/interactive-shell/tests/test-interactive-shell.sh	7688
 package/merge-request-etiquette/SKILL.md	7307

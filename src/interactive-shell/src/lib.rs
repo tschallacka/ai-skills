@@ -25,6 +25,8 @@ type PlatformListener = posix::PosixListener;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
+pub use windows::connect_in_directory;
+#[cfg(windows)]
 use windows::install_interrupt_handler;
 #[cfg(windows)]
 type PlatformBackend = windows::WindowsBackend;

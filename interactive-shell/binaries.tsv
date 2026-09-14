@@ -11,11 +11,6 @@
 # lines of every shipped file for a maintainer marker, and a comment shaped
 # like one reads as one.
 #
-# No Windows row, unlike chat: the wrapper is POSIX-only by construction. It
-# allocates the PTY through libc (TIOCSCTTY, TIOCSWINSZ), terminates a child
-# process group with SIGTERM/SIGKILL, and the input client speaks
-# std::os::unix::net::UnixStream. x86_64-pc-windows-msvc does not compile, so
-# declaring a row would promise an artifact the release can never produce.
 target	condition	binary	why
 x86_64-unknown-linux-musl	Linux:x86_64|amd64	interactive-shell	Static 64-bit x86 Linux PTY wrapper emitting JSONL screen events
 x86_64-unknown-linux-musl	Linux:x86_64|amd64	interactive-shell-input	Static 64-bit x86 Linux unix-socket input client
@@ -25,3 +20,5 @@ x86_64-apple-darwin	Darwin:x86_64	interactive-shell	Intel macOS PTY wrapper emit
 x86_64-apple-darwin	Darwin:x86_64	interactive-shell-input	Intel macOS unix-socket input client
 aarch64-apple-darwin	Darwin:arm64	interactive-shell	Apple Silicon macOS PTY wrapper emitting JSONL screen events
 aarch64-apple-darwin	Darwin:arm64	interactive-shell-input	Apple Silicon macOS unix-socket input client
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	interactive-shell.exe	64-bit Windows PTY wrapper emitting JSONL screen events
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	interactive-shell-input.exe	64-bit Windows loopback-TCP input client

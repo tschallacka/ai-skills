@@ -24,8 +24,10 @@
 # else on the target. Neither is committed or built at install time — the
 # release/CI builds them against binaries.tsv and install.sh copies them. They
 # depend only on libc and serde, allocate the PTY through libc directly, and
-# speak JSONL on stdout and a 0600 unix socket, so there is no external tool to
-# verify: no jq (the agent parses the JSONL), no rjq, no terminal library.
+# speak JSONL on stdout and a locally authenticated socket (a 0600 Unix
+# domain socket on Linux/macOS, a loopback TCP port with a per-start nonce on
+# Windows), so there is no external tool to verify: no jq (the agent parses
+# the JSONL), no rjq, no terminal library.
 #
 # The child program the wrapper drives (nano, mc, lynx, a pager) is the user's
 # choice at call time, not a dependency of the skill — the wrapper is generic
