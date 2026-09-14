@@ -33,9 +33,9 @@
       "refs": [
         "T147"
       ],
-      "note": "filed per explicit user request ahead of 2.0.0-alpha",
+      "note": "picked up first of T145/T146/T147 (processing sequentially per user request); drafting a plan before implementation",
       "created_at": "2026-09-14T18:23:18Z",
-      "updated_at": "2026-09-14T18:23:18Z"
+      "updated_at": "2026-09-14T18:26:33Z"
     },
     {
       "id": "T146",
