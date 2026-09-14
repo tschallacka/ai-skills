@@ -1298,6 +1298,7 @@ jobs:
             Cargo.toml
             Cargo.lock
             rust-toolchain.toml
+            .github/cygwin-drive-bash-check.sh
 
       - name: Install Cygwin (gcc-core, gcc-g++)
         uses: cygwin/cygwin-install-action@v6
