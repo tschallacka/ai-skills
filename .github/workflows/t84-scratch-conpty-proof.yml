@@ -1,0 +1,33 @@
+name: "T84 scratch: ConPTY backend proof (temporary -- removed once evidence is captured)"
+
+# Not part of the plan's permanent CI surface. This proves windows.rs's
+# WindowsBackend (goal 02-conpty-backend, W13) works against a real
+# cmd.exe on a real windows-latest runner, in isolation from the crate's
+# normal client()/run() entry point -- interactive-shell has no Windows
+# transport yet (goal 3, W14/W15), so `cargo test --workspace` still
+# excludes it on Windows in ci.yml. This job builds and runs ONLY
+# interactive-shell's --lib target, which is enough to reach the
+# `windows::tests` module without needing that transport to exist.
+#
+# manual-only: this never runs on push/PR, only on demand while goal 2 is
+# proving itself out.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  conpty-proof:
+    name: windows.rs Backend round trip (spawn/write/read/resize/stop)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Pin the toolchain and target
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: cargo test --lib (windows::tests only)
+        shell: bash
+        working-directory: src/interactive-shell
+        run: cargo test --lib windows:: -- --nocapture

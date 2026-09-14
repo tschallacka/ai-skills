@@ -22,6 +22,15 @@ type PlatformBackend = posix::PosixBackend;
 #[cfg(unix)]
 type PlatformListener = posix::PosixListener;
 
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows::install_interrupt_handler;
+#[cfg(windows)]
+type PlatformBackend = windows::WindowsBackend;
+#[cfg(windows)]
+type PlatformListener = windows::WindowsListener;
+
 const MAX_LINE: usize = 65_536;
 pub(crate) static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
