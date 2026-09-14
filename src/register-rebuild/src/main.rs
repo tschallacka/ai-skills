@@ -171,7 +171,10 @@ fn findings(items: &[Value], kind: &str) -> Vec<String> {
             ]
             .contains(&status)
         } else {
-            ["open", "done", "blocked", "partly", "decided", "obsolete"].contains(&status)
+            [
+                "open", "done", "blocked", "partly", "decided", "dropped", "obsolete",
+            ]
+            .contains(&status)
         };
         if !valid {
             result.push(format!(
@@ -223,8 +226,9 @@ fn sort_items(items: &mut [Value], kind: &str) {
                 "partly" => 2,
                 "decided" => 3,
                 "done" => 4,
-                "obsolete" => 5,
-                _ => 6,
+                "dropped" => 5,
+                "obsolete" => 6,
+                _ => 7,
             }
         };
         let number = text(object, "id")
@@ -278,12 +282,18 @@ fn civil(days: i64) -> (i64, i64, i64) {
 
 #[cfg(test)]
 mod tests {
-    use super::missing;
-    use serde_json::Map;
+    use super::{findings, missing};
+    use serde_json::{json, Map};
     #[test]
     fn empty_stamp_is_missing() {
         let mut map = Map::new();
         map.insert("created_at".into(), "".into());
         assert!(missing(&map, "created_at"));
+    }
+
+    #[test]
+    fn a_task_at_status_dropped_is_not_flagged_unknown() {
+        let items = vec![json!({"id": "T1", "status": "dropped"})];
+        assert!(findings(&items, "tasks").is_empty());
     }
 }
