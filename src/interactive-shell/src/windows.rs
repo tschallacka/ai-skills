@@ -17,7 +17,7 @@ use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, STILL_ACTIVE};
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows_sys::Win32::System::Console::{
-    ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
+    ClosePseudoConsole, CreatePseudoConsole, FreeConsole, ResizePseudoConsole, COORD, HPCON,
 };
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, TerminateJobObject,
@@ -162,6 +162,17 @@ pub struct WindowsBackend {
 
 impl Backend for WindowsBackend {
     fn spawn(command: &[String], cols: u16, rows: u16) -> Result<Self, String> {
+        // By default a console process inherits its parent's console
+        // (independent of bInheritHandles, which only governs the HANDLE
+        // table); if this process is itself attached to one -- as it can
+        // be here, launched via a shell that has its own conhost session
+        // -- the ConPTY-attached child can bind to THAT console instead of
+        // the pseudo one, rendering its prompt into it rather than our
+        // pipes. FreeConsole() detaches from any inherited console before
+        // CreatePseudoConsole runs; it is a harmless no-op when there
+        // isn't one to detach from.
+        unsafe { FreeConsole() };
+
         let input = create_pipe()?;
         let output = create_pipe()?;
 
