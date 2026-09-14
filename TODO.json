@@ -29,13 +29,13 @@
       "priority": "high",
       "parent": null,
       "detail": "Scripts currently assume bash (arrays, [[ ]], local, and other bash-specific builtins -- CODE-STYLE.md's own portability floor is bash 3.2, not POSIX sh). Requested ahead of the 2.0.0-alpha release: either make shipped .sh entrypoints genuinely POSIX /bin/sh compatible, or fall back to explicit bash+zsh dual compatibility since those are the two shells actually in wide use -- full shell-agnosticism is the preferred outcome over picking one alternate shell. Scope: audit planning/scripts/** and any other shipped .sh entrypoints for bash-only constructs; extend CI portability legs (today: bash32 floor + macOS system bash) to cover zsh and/or dash. Overlaps with T147: a script ported to Rust needs no shell-portability work at all, so scope this against whatever T147 leaves as shell scripts.",
-      "blocked_on": null,
+      "blocked_on": "T147",
       "refs": [
         "T147"
       ],
-      "note": "picked up first of T145/T146/T147 (processing sequentially per user request); drafting a plan before implementation",
+      "note": "Reordered per user: do the Rust-conversion step (T147) first, then scope T145's shell-portability work only against whatever T147 leaves as actual shell scripts -- avoids doing portability work on scripts about to be rewritten in Rust anyway. Sequence is now T147 -> T146 -> T145.",
       "created_at": "2026-09-14T18:23:18Z",
-      "updated_at": "2026-09-14T18:26:33Z"
+      "updated_at": "2026-09-14T18:39:32Z"
     },
     {
       "id": "T146",
