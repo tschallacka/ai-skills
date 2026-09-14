@@ -428,16 +428,34 @@ mod tests {
     use std::thread::sleep;
     use std::time::Instant;
 
+    /// Reads for up to `timeout`, reporting what happened along the way so a
+    /// CI failure is diagnosable from the test log alone: an empty result
+    /// could mean "the shell produced nothing" or "read() itself is broken",
+    /// and those need different fixes.
     fn read_for(backend: &mut WindowsBackend, timeout: Duration) -> String {
         let start = Instant::now();
         let mut collected = Vec::new();
         let mut buf = [0u8; 4096];
+        let mut other_errors = 0u32;
+        let mut last_error = None;
         while start.elapsed() < timeout {
             match backend.read(&mut buf) {
                 Ok(n) if n > 0 => collected.extend_from_slice(&buf[..n]),
-                _ => sleep(Duration::from_millis(20)),
+                Ok(_) => sleep(Duration::from_millis(20)),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    sleep(Duration::from_millis(20));
+                }
+                Err(e) => {
+                    other_errors += 1;
+                    last_error = Some(e.to_string());
+                    sleep(Duration::from_millis(20));
+                }
             }
         }
+        eprintln!(
+            "read_for: collected {} bytes, {other_errors} non-WouldBlock errors, last: {last_error:?}",
+            collected.len()
+        );
         String::from_utf8_lossy(&collected).into_owned()
     }
 
@@ -445,13 +463,19 @@ mod tests {
     fn spawn_write_read_resize_stop_round_trip() {
         let mut backend =
             WindowsBackend::spawn(&["cmd.exe".to_string()], 80, 24).expect("spawn cmd.exe");
+        eprintln!(
+            "spawned; try_wait right after spawn: {:?}",
+            backend.try_wait()
+        );
         // Drain the initial banner/prompt so it can't mask the assertion below.
-        let _ = read_for(&mut backend, Duration::from_millis(500));
+        let banner = read_for(&mut backend, Duration::from_millis(500));
+        eprintln!("initial banner ({} bytes): {banner:?}", banner.len());
 
         backend
             .write(b"echo hello-conpty\r\n")
             .expect("write echo command");
         let output = read_for(&mut backend, Duration::from_secs(5));
+        eprintln!("try_wait after echo attempt: {:?}", backend.try_wait());
         assert!(
             output.contains("hello-conpty"),
             "expected echoed output, got: {output:?}"
