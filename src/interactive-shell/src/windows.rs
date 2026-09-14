@@ -466,7 +466,7 @@ mod tests {
     /// (closing input.read/output.write immediately vs. leaving them open)
     /// ruled out a conhost handle-duplication race: both died the same way.
     fn spawn_debug_variant(
-        program: &str,
+        command: &[&str],
         close_pty_ends: bool,
         use_job: bool,
     ) -> Result<WindowsBackend, String> {
@@ -488,7 +488,8 @@ mod tests {
         let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
         startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
         startup.lpAttributeList = attrs.as_ptr();
-        let mut command_line = quote_command_line(&[program.to_string()]);
+        let owned: Vec<String> = command.iter().map(|s| s.to_string()).collect();
+        let mut command_line = quote_command_line(&owned);
         let mut process_information: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
         let created = unsafe {
             CreateProcessW(
@@ -532,24 +533,32 @@ mod tests {
 
     #[test]
     fn debug_isolate_why_the_child_exits_immediately() {
-        let cases: &[(&str, bool, bool)] = &[
-            ("cmd.exe", true, true),
-            ("cmd.exe", true, false),
-            ("powershell.exe", true, true),
+        // Positive control first: does a command that's SUPPOSED to run and
+        // exit quickly still get its output through our read() pipe before
+        // it dies? If yes, the plumbing works and bare cmd.exe/powershell.exe
+        // specifically mis-detect their console as non-interactive. If the
+        // /k (keep the shell open) case ALSO dies immediately, ConPTY itself
+        // isn't attaching the child to a real interactive console here.
+        let cases: &[(&[&str], bool, bool)] = &[
+            (&["cmd.exe", "/c", "echo probe-output-12345"], true, true),
+            (&["cmd.exe", "/k", "echo alive-and-well"], true, true),
+            (&["cmd.exe"], true, true),
+            (&["cmd.exe"], true, false),
+            (&["powershell.exe"], true, true),
         ];
-        for &(program, close_pty_ends, use_job) in cases {
-            match spawn_debug_variant(program, close_pty_ends, use_job) {
+        for &(command, close_pty_ends, use_job) in cases {
+            match spawn_debug_variant(command, close_pty_ends, use_job) {
                 Ok(mut backend) => {
-                    sleep(Duration::from_secs(2));
+                    let output = read_for(&mut backend, Duration::from_secs(2));
                     eprintln!(
-                        "program={program} close_pty_ends={close_pty_ends} use_job={use_job}: \
-                         try_wait after 2s idle: {:?}",
+                        "command={command:?} close_pty_ends={close_pty_ends} use_job={use_job}: \
+                         try_wait after 2s: {:?}, captured: {output:?}",
                         backend.try_wait()
                     );
                 }
                 Err(e) => {
                     eprintln!(
-                        "program={program} close_pty_ends={close_pty_ends} use_job={use_job}: \
+                        "command={command:?} close_pty_ends={close_pty_ends} use_job={use_job}: \
                          spawn failed: {e}"
                     );
                 }
