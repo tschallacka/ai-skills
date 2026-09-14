@@ -1358,6 +1358,87 @@ jobs:
           $script = & D:\cygwin\bin\cygpath.exe -u $winPath
           D:\cygwin\bin\bash.exe --login $script
 
+  msys2:
+    # T84c: MSYS2's own research (05-msys2-research, W23) found MSYS2 needs
+    # no distinct Rust target at all -- MSYS2 itself builds its official
+    # `rust` package by reusing x86_64-pc-cygwin unchanged, linking with its
+    # own gcc (msys-2.0.dll) instead of Cygwin's (cygwin1.dll). Same job
+    # shape as the cygwin job above, for the same reason (tier 3, needs
+    # nightly + -Z build-std, a toolchain install the other platforms have
+    # no use for).
+    name: x86_64-pc-cygwin (MSYS2-linked) builds and drives a real MSYS2 bash
+    runs-on: windows-latest
+    needs: scope
+    if: needs.scope.outputs.scope != 'none'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          sparse-checkout: |
+            src
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+            .github/cygwin-drive-bash-check.sh
+
+      - name: Install MSYS2 (native MSYS gcc, not mingw-w64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          install: gcc
+
+      # interactive-shell's own session-socket directory check (unmodified
+      # POSIX code, the cygwin job above already proves it unchanged) needs
+      # its parent directory's permission bits to read exactly 0700 --
+      # MSYS2 defaults to `noacl` mounts (Cygwin defaults to `acl` on), so
+      # chmod bits are not actually enforced or reported there, and that
+      # check fails ("socket parent must be a private directory owned by
+      # the current user"). Enabling acl for MSYS2's own root mount
+      # (NTFS-only, which this runner is) matches Cygwin's default.
+      - name: Enable ACL on MSYS2's root mount (matches Cygwin's default)
+        shell: pwsh
+        run: |
+          $msysRoot = "$env:RUNNER_TEMP\msys64"
+          Add-Content -Path "$msysRoot\etc\fstab" -Value "$msysRoot / ntfs override,acl,binary,posix=1 0 0"
+
+      - name: Install nightly Rust with rust-src
+        shell: pwsh
+        run: rustup toolchain install nightly --component rust-src
+
+      - name: Build interactive-shell for x86_64-pc-cygwin, linked via MSYS2's gcc
+        shell: pwsh
+        run: |
+          # setup-msys2 installs to $RUNNER_TEMP\msys64 (D:\a\_temp\msys64
+          # on this runner type), not C:\msys64 -- not a documented stable
+          # contract, confirmed empirically.
+          #
+          # Invoking gcc.exe by its full path is not enough on its own: gcc
+          # still resolves its OWN internal ld/plugins via PATH, and this
+          # runner already has at least one other x86_64-pc-cygwin-capable
+          # gcc on PATH (Git for Windows bundles its own under
+          # C:\Program Files\Git\usr\lib\gcc\x86_64-pc-cygwin), plus a
+          # generic C:\mingw64 toolchain -- linking failed cross-wired
+          # between them ("ld.exe: ...msys-lto_plugin.dll: error loading
+          # plugin") until MSYS2's own usr\bin was put first on PATH, so
+          # gcc finds its own matching ld/plugins ahead of either.
+          $env:PATH = "$env:RUNNER_TEMP\msys64\usr\bin;$env:PATH"
+          $env:CARGO_TARGET_X86_64_PC_CYGWIN_LINKER = "$env:RUNNER_TEMP\msys64\usr\bin\gcc.exe"
+          cargo +nightly build -Z build-std=std,panic_abort --release `
+            --target x86_64-pc-cygwin `
+            -p interactive-shell --bin interactive-shell --bin interactive-shell-input
+
+      # Reuses the cygwin job's own script verbatim: the built binary lands
+      # at the same target/x86_64-pc-cygwin/release path regardless of
+      # which gcc linked it, and the test itself (spawn bash, type an echo
+      # command, confirm the output appears on screen) is identical either
+      # way. setup-msys2's own registered `msys2 {0}` shell handles script
+      # invocation correctly on its own -- no CRLF-stripping or cygpath
+      # dance needed here, unlike the cygwin job (which has no equivalent
+      # first-party GitHub Action for that part).
+      - name: Drive a real MSYS2 bash through the built wrapper
+        shell: msys2 {0}
+        run: .github/cygwin-drive-bash-check.sh
+
   rust-artifact-manifest:
     name: publish Rust artifact hashes
     runs-on: ubuntu-latest
