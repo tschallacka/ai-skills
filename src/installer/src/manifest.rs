@@ -55,21 +55,14 @@ pub const PROFILES: &[Profile] = &[Profile {
 }];
 
 /// The reason `skill` cannot be installed on the running host, or `None`
-/// when this platform supports it -- ported from
-/// installer/src/50-manifest.sh's `skill_unsupported_here`. Only
-/// interactive-shell is gated today: its PTY wrapper is POSIX-only (no
-/// Windows build exists at all, see interactive-shell/binaries.tsv), so a
-/// Windows install would otherwise try to copy a binary that was never
-/// shipped for this platform instead of naming the real reason up front.
-/// Checked against `cfg!(windows)` rather than bash's own MINGW*/MSYS*/
-/// CYGWIN*/Windows* `uname -s` match: those four are how Windows looks to a
-/// bash script running under different POSIX layers, but this is a native
-/// Rust binary asking about its own compiled target, which `cfg!(windows)`
-/// already answers directly.
-pub fn skill_unsupported_here(skill: &str) -> Option<&'static str> {
-    if skill == "interactive-shell" && cfg!(windows) {
-        return Some("no Windows build exists; the PTY wrapper is POSIX-only");
-    }
+/// when this platform supports it. interactive-shell was the only skill
+/// ever gated here (its PTY wrapper had no Windows build); T84 shipped one
+/// (ConPTY + a loopback TCP transport), so every shipped skill now has a
+/// build for every platform this binary itself can run on. Kept, rather
+/// than removed, as the one place a future platform-specific gap would be
+/// named up front instead of failing as a missing file partway through
+/// copying a skill's other files.
+pub fn skill_unsupported_here(_skill: &str) -> Option<&'static str> {
     None
 }
 
@@ -184,13 +177,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn interactive_shell_is_unsupported_only_on_windows() {
-        let reason = skill_unsupported_here("interactive-shell");
-        if cfg!(windows) {
-            assert!(reason.is_some());
-        } else {
-            assert!(reason.is_none());
-        }
+    fn interactive_shell_is_supported_everywhere_now() {
+        assert!(skill_unsupported_here("interactive-shell").is_none());
     }
 
     #[test]
