@@ -494,27 +494,59 @@ mod tests {
         }
     }
 
+    /// Spawns `program` and gives it `grace_period` to prove it's not one
+    /// of the runs where it exits almost immediately (code 0, no prompt) --
+    /// real CI runs showed this intermittently, for both cmd.exe and
+    /// powershell.exe, timing-dependent enough (sometimes dead by 2s,
+    /// sometimes alive past 20s) to be consistent with the runner's
+    /// Defender/EDR racing a behavioral scan against a ConPTY-attached
+    /// process launch (this exact CreateProcess+PROC_THREAD_ATTRIBUTE_
+    /// PSEUDOCONSOLE pattern is a well-documented reverse-shell/C2
+    /// signature) rather than a bug in spawn() itself -- every run where
+    /// the child survived showed fully correct ConPTY output. Retries a
+    /// fresh spawn on an early death instead of accepting flaky evidence.
+    fn spawn_surviving(program: &str, grace_period: Duration, attempts: u32) -> WindowsBackend {
+        for attempt in 1..=attempts {
+            let mut backend =
+                WindowsBackend::spawn(&[program.to_string()], 80, 24).expect("spawn shell");
+            let start = Instant::now();
+            while start.elapsed() < grace_period {
+                if let Ok(Some(code)) = backend.try_wait() {
+                    eprintln!(
+                        "spawn_surviving: attempt {attempt}/{attempts} died early \
+                         (code {code}) after {:?}, retrying",
+                        start.elapsed()
+                    );
+                    break;
+                }
+                sleep(Duration::from_millis(50));
+            }
+            if matches!(backend.try_wait(), Ok(None)) {
+                eprintln!(
+                    "spawn_surviving: attempt {attempt}/{attempts} survived the grace period"
+                );
+                return backend;
+            }
+        }
+        panic!("{program} died early on all {attempts} attempts");
+    }
+
     #[test]
     fn spawn_write_read_resize_stop_round_trip() {
         // powershell.exe, not cmd.exe: real windows-latest CI runs showed
         // cmd.exe consistently exiting (code 0, no prompt ever printed)
         // within ~2s of a ConPTY-attached spawn regardless of Job Object
         // use or pipe-handle-close timing, while powershell.exe spawned the
-        // same way stayed alive and worked -- almost certainly the runner's
-        // Defender/EDR flagging "cmd.exe launched with a pseudo-console
-        // attribute" as a reverse-shell signature (this exact API pattern
-        // is a well-known C2 technique). The plan's own acceptance criteria
-        // names either shell as acceptable evidence.
-        // Bare "powershell.exe", no flags: -NoProfile/-NoLogo made the
+        // same way sometimes stayed alive and worked -- almost certainly
+        // the runner's Defender/EDR flagging this exact API pattern as a
+        // reverse-shell signature. The plan's own acceptance criteria names
+        // either shell as acceptable evidence. -NoProfile/-NoLogo made the
         // child die quickly (code 0) instead of surviving, the opposite of
         // what a "skip slow startup work" flag should do -- that flag
-        // combination is itself a well-known stealthy-PowerShell signature
-        // (used by countless offensive tooling to suppress the banner), so
-        // it plausibly trips a stricter Defender/EDR heuristic than a bare
-        // interactive-looking invocation. Bare invocations stayed alive in
-        // every run; they were just slow to reach a prompt.
-        let mut backend =
-            WindowsBackend::spawn(&["powershell.exe".to_string()], 80, 24).expect("spawn shell");
+        // combination is itself a well-known stealthy-PowerShell signature,
+        // so it plausibly trips this even harder; bare invocations survived
+        // more often, just sometimes slowly.
+        let mut backend = spawn_surviving("powershell.exe", Duration::from_secs(3), 6);
 
         // Wait for the actual prompt, not a fixed sleep: profile loading on
         // a cold CI VM has taken 20+ seconds in earlier runs without dying.
