@@ -349,7 +349,7 @@
     {
       "id": "B333",
       "title": "bash32 fails to link on aarch64-darwin, so nix develop cannot build a shell and setup-dev-env produces no binaries",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -360,12 +360,12 @@
       "surfaces": [
         "flake.nix"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "flake.nix's mkBash32 gained -fcommon in both places -std=gnu89 was already duplicated: CFLAGS and the preBuild CC= line (the Makefile compiles its own helper tools like mkbuiltins/mksyntax via CC directly, bypassing CFLAGS).",
+      "verification": "PR #164 (commit f03a035c, merged ce08f36f): aarch64-apple-darwin builds and runs every subject in scope passed on real CI, direct proof the devShell now realises and setup-dev-env.sh produces bin/aarch64-apple-darwin/ binaries on this platform. x86_64-linux (nix build .#bash32, nix develop) unaffected. Full pre-push-check.sh PASS.",
       "found_by": "migration of the dev environment to Apple Silicon; first attempt to run setup-dev-env.sh on aarch64-apple-darwin",
       "notes": "FIX IS PROVEN, NOT PROPOSED: add -fcommon to mkBash32 in two places, CFLAGS and the preBuild CC= line. Both, for the same reason -std=gnu89 is already duplicated across both and the derivation own comments explain: the Makefile compiles its helper tools (mkbuiltins, mksyntax) with CC directly and they never see CFLAGS. Verified by building bash 3.2.57 out of tree with only that flag added, which produced a working \"GNU bash, version 3.2.57(1)-release (aarch64-apple-darwin25.6.0)\" Mach-O arm64 executable. The mutation is the flag itself: without -fcommon the link fails as observed, with it the build completes. WHY IT WENT UNNOTICED: the derivation was written and debugged on Linux (its comments reference glibc and \"a current gcc\") and has never been built on Apple Silicon, where the nixpkgs stdenv is a much newer clang. Two things also mask it. First, --list and --check return before the script touches nix at all, so ./setup-dev-env.sh --check succeeds on this platform and reports every artifact MISSING, which reads as \"not built yet\" rather than \"cannot be built\". Second, bash32 exists precisely so the suite can be exercised against the macOS bash 3.2 floor of CODE-STYLE.md section 1 — so the one platform it cannot be built on is the platform it exists to emulate, and the one where /bin/bash already is 3.2.57. SECONDARY OBSERVATION, possibly its own entry: this path exits 1, outside the script documented exit vocabulary (64 bad usage, 69 nix missing, 70 a crate failed to build). setup-dev-env.sh line 139 execs nix develop, so nix own exit code replaces the script and a caller checking for 69 or 70 sees an undocumented 1. require_nix passes, because nix IS present; it is the devShell that cannot be realised, which the vocabulary has no code for.",
       "created_at": "2026-09-14T13:57:31Z",
-      "updated_at": "2026-09-14T13:57:31Z"
+      "updated_at": "2026-09-14T15:46:54Z"
     },
     {
       "id": "B33",
@@ -6804,6 +6804,28 @@
       "notes": null,
       "created_at": "2026-09-13T08:26:29Z",
       "updated_at": "2026-09-13T08:26:29Z"
+    },
+    {
+      "id": "B334",
+      "title": "todo-update/register-rebuild's own status enum still lacks 'dropped', reopening B102's gap in the Rust dev tools",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cd ai-skills/src && cargo build -p todo-update --release 2>/dev/null; cd - >/dev/null; TODO_JSON=<a copy of a live TODO.json with any T### already at status \"dropped\"> ./bin/x86_64-unknown-linux-musl/todo-update <that id> --note x   # refused: \"<id>: unknown status dropped\" / \"update refused; nothing was written\"",
+      "observed": "Hit live: closing T84a via todo-update against the real registers-branch TODO.json (which already has T140/T141 at status \"dropped\", added 2026-09-09/10) refused with \"T140: unknown status dropped\", \"T141: unknown status dropped\", \"todo-update: update refused; nothing was written\" (exit 65) -- for an edit to an unrelated task, because findings() validates every entry in the file, not just the one being updated.",
+      "expected": "Any entry already at a schema-valid status (dropped is in the shipped schema.2.0.0-alpha.1.json enum) should never block writes to a different, unrelated entry; todo-update should accept the same status vocabulary the schema and the canonical `todo` binary already do.",
+      "mechanism": "B102 fixed the shell reg_findings() in planning/scripts/register-lib.sh to include 'dropped', and the canonical todo/src/register.rs::STATUSES already lists it correctly. But two other, independent Rust copies of the same status allowlist were never updated to match: planning-register/src/lib.rs::findings() (used by the standalone todo-update/bug-update binaries) and register-rebuild/src/main.rs::findings() both still hardcode [\"open\", \"done\", \"blocked\", \"partly\", \"decided\", \"obsolete\"] with no 'dropped'. Both refuse to write the WHOLE file if ANY entry anywhere fails validation, so once any task legitimately carries status dropped (T140/T141 have since 2026-09-09), every future todo-update call against that file is refused regardless of what it is trying to change.",
+      "surfaces": [
+        "src/planning-register/src/lib.rs",
+        "src/register-rebuild/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "hit live while closing T84a through todo-update during the T84 Windows-support backlog sweep, 2026-09-14",
+      "notes": null,
+      "created_at": "2026-09-14T15:47:14Z",
+      "updated_at": "2026-09-14T15:47:14Z"
     },
     {
       "id": "B25",
