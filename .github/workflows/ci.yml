@@ -1302,19 +1302,24 @@ jobs:
       - name: Install Cygwin (gcc-core, gcc-g++)
         uses: cygwin/cygwin-install-action@v6
         with:
+          install-dir: 'D:\cygwin'
           packages: |
             gcc-core
             gcc-g++
 
       # pwsh, not bash: cygwin-install-action prepends Cygwin's own bin dir
       # to PATH, so `shell: bash` resolves to Cygwin's bash rather than
-      # Git-Bash from this point on -- invoking rustup/cargo (native Windows
+      # Git-Bash from this point on. Invoking rustup/cargo (native Windows
       # executables) through it corrupted an argument in W19's own scratch
-      # run (a literal embedded newline landed inside a flag). pwsh avoids
-      # that translation layer for every step that calls rustup or cargo
-      # directly; Cygwin's own bash is used only for the final run of the
-      # Cygwin-linked binary itself, where that translation is exactly what
-      # is being verified.
+      # run (a literal embedded newline landed inside a flag), and even
+      # GitHub Actions' own auto-generated `shell: bash` wrapper script
+      # (its "set -eo pipefail" startup line) hit the identical corruption
+      # when Cygwin's bash ran it. pwsh avoids that translation layer for
+      # the rustup/cargo steps; driving the Cygwin-linked binary itself
+      # uses Cygwin's bash directly against a real, committed script file
+      # (plain LF line endings, never auto-generated), which does not hit
+      # whatever GitHub Actions' own script-file generation does
+      # differently.
       - name: Install nightly Rust with rust-src
         shell: pwsh
         run: rustup toolchain install nightly --component rust-src
@@ -1332,42 +1337,8 @@ jobs:
             -p interactive-shell --bin interactive-shell --bin interactive-shell-input
 
       - name: Drive a real Cygwin bash through the built wrapper
-        shell: bash
-        run: |
-          set -euo pipefail
-          release="$GITHUB_WORKSPACE/target/x86_64-pc-cygwin/release"
-          wrapper="$release/interactive-shell"
-          [ -x "$wrapper" ] || wrapper="$wrapper.exe"
-          input="$release/interactive-shell-input"
-          [ -x "$input" ] || input="$input.exe"
-
-          session="cygwin-ci-$$"
-          "$wrapper" --session "$session" --cols 80 --rows 24 --idle-timeout 15 -- bash \
-            >"$RUNNER_TEMP/wrapper.jsonl" 2>"$RUNNER_TEMP/wrapper.log" &
-          wrapper_pid=$!
-          trap 'kill "$wrapper_pid" 2>/dev/null || true' EXIT
-
-          # Poll for the socket/discovery file session_socket() creates,
-          # rather than a fixed sleep: openpty/fork/exec plus Cygwin's own
-          # process startup has no fixed latency worth guessing at.
-          for _ in $(seq 1 50); do
-              "$input" --session "$session" view >/dev/null 2>&1 && break
-              sleep 0.2
-          done
-
-          screen="$("$input" --session "$session" text 'echo cygwin-conpty-check-12345' && \
-                     "$input" --session "$session" key ENTER && \
-                     sleep 1 && \
-                     "$input" --session "$session" view)"
-          echo "$screen"
-          case "$screen" in
-              *cygwin-conpty-check-12345*) ;;
-              *) echo "::error::expected echo output never appeared on screen"; exit 1 ;;
-          esac
-
-          "$input" --session "$session" shutdown >/dev/null 2>&1 || true
-          wait "$wrapper_pid" 2>/dev/null || true
-          echo "interactive-shell spawned and drove a real Cygwin bash"
+        shell: pwsh
+        run: D:\cygwin\bin\bash.exe --login "$env:GITHUB_WORKSPACE/.github/cygwin-drive-bash-check.sh"
 
   rust-artifact-manifest:
     name: publish Rust artifact hashes
