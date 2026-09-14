@@ -459,6 +459,80 @@ mod tests {
         String::from_utf8_lossy(&collected).into_owned()
     }
 
+    /// Diagnostic-only: reproduces `spawn()`'s own sequence with a knob for
+    /// whether the parent closes its copies of `input.read`/`output.write`
+    /// right after `CreatePseudoConsole` (as Microsoft's own ConPTY sample
+    /// does, and as the real `spawn()` above does) or leaves them open for
+    /// the backend's whole lifetime. Isolates whether that close is racing
+    /// with conhost's internal handle duplication -- real CI runs showed
+    /// cmd.exe exiting (code 0, no prompt ever printed) within ~2s of spawn
+    /// with zero input sent, which is consistent with stdin seeing EOF.
+    fn spawn_debug_variant(close_pty_ends: bool) -> Result<WindowsBackend, String> {
+        let input = create_pipe()?;
+        let output = create_pipe()?;
+        let size = COORD { X: 80, Y: 24 };
+        let mut hpc: HPCON = 0;
+        let hr = unsafe { CreatePseudoConsole(size, input.read, output.write, 0, &mut hpc) };
+        if hr < 0 {
+            return Err(format!("CreatePseudoConsole failed: HRESULT {hr:#x}"));
+        }
+        if close_pty_ends {
+            unsafe {
+                CloseHandle(input.read);
+                CloseHandle(output.write);
+            }
+        }
+        let mut attrs = AttributeList::new(hpc)?;
+        let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
+        startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
+        startup.lpAttributeList = attrs.as_ptr();
+        let mut command_line = quote_command_line(&["cmd.exe".to_string()]);
+        let mut process_information: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+        let created = unsafe {
+            CreateProcessW(
+                null(),
+                command_line.as_mut_ptr(),
+                null(),
+                null(),
+                0,
+                EXTENDED_STARTUPINFO_PRESENT,
+                null(),
+                null(),
+                &startup.StartupInfo,
+                &mut process_information,
+            )
+        };
+        if created == 0 {
+            return Err(io::Error::last_os_error().to_string());
+        }
+        let job = unsafe { CreateJobObjectW(null(), null()) };
+        if unsafe { AssignProcessToJobObject(job, process_information.hProcess) } == 0 {
+            return Err(io::Error::last_os_error().to_string());
+        }
+        Ok(WindowsBackend {
+            hpc,
+            input_write: input.write,
+            output_read: output.read,
+            process: process_information.hProcess,
+            thread: process_information.hThread,
+            job,
+            reaped: false,
+        })
+    }
+
+    #[test]
+    fn debug_does_closing_pty_ends_early_matter() {
+        for close_pty_ends in [true, false] {
+            let mut backend =
+                spawn_debug_variant(close_pty_ends).expect("spawn cmd.exe (debug variant)");
+            sleep(Duration::from_secs(2));
+            eprintln!(
+                "close_pty_ends={close_pty_ends}: try_wait after 2s idle: {:?}",
+                backend.try_wait()
+            );
+        }
+    }
+
     #[test]
     fn spawn_write_read_resize_stop_round_trip() {
         let mut backend =
