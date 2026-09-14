@@ -126,7 +126,7 @@ package/interactive-shell/appprofiles/vmstat.md	1474
 package/interactive-shell/appprofiles/watch.md	1177
 package/interactive-shell/appprofiles/whiptail.md	2183
 package/interactive-shell/appprofiles/write.md	2257
-package/interactive-shell/binaries.tsv	2155
+package/interactive-shell/binaries.tsv	2457
 package/interactive-shell/docs/README.md	6143
 package/interactive-shell/requires.tsv	2032
 package/interactive-shell/tests/test-interactive-shell-exploration.sh	5492
