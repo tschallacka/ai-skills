@@ -52,6 +52,17 @@ jobs:
           # on this runner type), not C:\msys64 -- confirmed via cygpath -w
           # in the previous step, since it isn't documented as a stable
           # contract.
+          #
+          # Invoking gcc.exe by its full path is not enough on its own: gcc
+          # still resolves its OWN internal ld/plugins via PATH, and this
+          # runner already has at least one other x86_64-pc-cygwin-capable
+          # gcc on PATH (Git for Windows bundles its own under
+          # C:\Program Files\Git\usr\lib\gcc\x86_64-pc-cygwin), plus a
+          # generic C:\mingw64 toolchain -- linking failed cross-wired
+          # between them ("ld.exe: ...msys-lto_plugin.dll: error loading
+          # plugin"). Putting MSYS2's own usr\bin first on PATH makes gcc
+          # find its own matching ld/plugins ahead of either.
+          $env:PATH = "$env:RUNNER_TEMP\msys64\usr\bin;$env:PATH"
           $env:CARGO_TARGET_X86_64_PC_CYGWIN_LINKER = "$env:RUNNER_TEMP\msys64\usr\bin\gcc.exe"
           cargo +nightly build -Z build-std=std,panic_abort --release `
             --target x86_64-pc-cygwin `
