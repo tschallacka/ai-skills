@@ -795,49 +795,21 @@ jobs:
       # considered and rejected: clippy and test are cheap next to the release
       # builds, and a workspace-wide pass is what catches a library change
       # breaking a consumer that selection failed to name.
-      # interactive-shell is the workspace's first POSIX-only member, so
-      # --workspace cannot mean "every member" on the Windows leg any more.
       #
-      # THE UNIX SOCKET IS NOT THE REASON. A loopback port would replace it
-      # without difficulty -- the chat skill already offers exactly that choice
-      # -- so naming the transport here would be naming the one part that does
-      # port cleanly. What does not port is the terminal core:
-      #
-      #   lib.rs:1415  libc::openpty                 no Windows equivalent;
-      #                                              ConPTY (CreatePseudoConsole)
-      #                                              is a different API, not a flag
-      #   lib.rs:1437  ioctl(slave, TIOCSCTTY, 0)    Windows has no controlling
-      #                                              terminal to assign
-      #   lib.rs:1897  ioctl(fd, TIOCSWINSZ)         resize is a ConPTY call
-      #   lib.rs:1436  setsid()                      no sessions
-      #   lib.rs:1443  setpgid(0, 0)                 no process groups, so
-      #   lib.rs:1463  kill(-pid, SIGKILL)           signalling a whole group by
-      #   lib.rs:1473  kill(-pid, SIGTERM)           negative pid has no analogue
-      #                                              (Job Objects are the nearest)
-      #
-      # plus twelve raw-fd sites (AsRawFd/FromRawFd/dup2/fcntl) against a
-      # platform whose equivalent is a HANDLE. Porting means rewriting the PTY
-      # and process-lifecycle layer, not swapping a transport.
-      # interactive-shell/binaries.tsv declares no Windows row for the same
-      # reason, so the exclusion and the shipped set agree.
-      #
-      # An --exclude rather than cfg-gating the crate into an inert Windows
-      # stub: a binary that builds on Windows and refuses to run is a worse
-      # answer than one that is honestly absent, and it would put a
-      # do-nothing artifact next to the four real ones.
+      # interactive-shell now builds and tests on every leg, Windows included
+      # (T84): windows.rs implements the same Backend/Transport/Listener
+      # traits goal 1 extracted, using ConPTY/Job Objects and a loopback TCP
+      # transport (mirroring ai-text-editor's own pattern) in place of
+      # openpty/ioctl/setsid/kill and the Unix socket. tests/protocol.rs is
+      # cfg(unix)-gated (its own transport is Unix-socket-specific), so
+      # --workspace's test run is meaningful on every target unmodified.
       - name: Format, lint and test the whole workspace
         shell: bash
         run: |
           set -euo pipefail
-          exclude=''
-          case "${{ matrix.target }}" in
-            *windows*) exclude='--exclude interactive-shell' ;;
-          esac
           cargo fmt --all --check
-          # shellcheck disable=SC2086
-          cargo clippy --workspace $exclude --all-targets --target "${{ matrix.target }}" -- -D warnings
-          # shellcheck disable=SC2086
-          cargo test --workspace $exclude --all-targets --target "${{ matrix.target }}"
+          cargo clippy --workspace --all-targets --target "${{ matrix.target }}" -- -D warnings
+          cargo test --workspace --all-targets --target "${{ matrix.target }}"
 
       # ---- rjq -------------------------------------------------------------
       - name: Build rjq and prove it answers a query
@@ -939,10 +911,8 @@ jobs:
       # `scope != 'none'` condition is the gate.
       #
       # The fixture binary is deliberately not built: it is maintainer-only and
-      # has no binaries.tsv row. Windows is excluded for the same reason the
-      # workspace gate excludes the crate there.
+      # has no binaries.tsv row.
       - name: Build the interactive-shell binaries and prove they launch
-        if: "!contains(matrix.target, 'windows')"
         shell: bash
         run: |
           set -euo pipefail
@@ -950,9 +920,11 @@ jobs:
             --bin interactive-shell --bin interactive-shell-input
           release="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release"
           for binary in interactive-shell interactive-shell-input; do
+            bin="$release/$binary"
+            [ -x "$bin" ] || bin="$bin.exe"
             # Executed, not just built: these are shipped as prebuilt artifacts,
             # so "it linked" is not the claim being made about them.
-            "$release/$binary" --help >/dev/null
+            "$bin" --help >/dev/null
             printf '%s launches on %s\n' "$binary" '${{ matrix.target }}'
           done
 
@@ -970,14 +942,23 @@ jobs:
             esac
           done
 
+      - name: Stage the interactive-shell artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "interactive-shell-artifacts/${{ matrix.target }}"
+          release="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release"
+          for binary in interactive-shell interactive-shell-input; do
+            bin="$release/$binary"
+            [ -x "$bin" ] || bin="$bin.exe"
+            cp "$bin" "interactive-shell-artifacts/${{ matrix.target }}/$(basename "$bin")"
+          done
+
       - name: Upload the interactive-shell artifacts
-        if: "!contains(matrix.target, 'windows')"
         uses: actions/upload-artifact@v7.0.1
         with:
           name: interactive-shell-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/interactive-shell
-            target/${{ matrix.target }}/release/interactive-shell-input
+          path: interactive-shell-artifacts
           if-no-files-found: error
 
       # ---- installer ---------------------------------------------------------
@@ -986,10 +967,10 @@ jobs:
       # branch (install.rs/permissions.rs's executable-bit handling), and
       # installer_platform already resolves x86_64-pc-windows-msvc as a real
       # target. installer/bootstrap.sh, the curl-piped bash LAUNCHER around
-      # this binary, is the actually POSIX-only piece (same reason
-      # interactive-shell is excluded above) -- but that is a statement about
-      # bootstrap.sh, not about whether this binary builds, runs, and answers
-      # --platform/--help correctly on Windows, which is what this leg checks.
+      # this binary, is the actually POSIX-only piece -- but that is a
+      # statement about bootstrap.sh, not about whether this binary builds,
+      # runs, and answers --platform/--help correctly on Windows, which is
+      # what this leg checks.
       # Verified by running it, not just linking it: --platform must answer
       # with this leg's own target, and a musl leg must actually BE static --
       # installer/build-installer-release.sh itself carries the comment for
