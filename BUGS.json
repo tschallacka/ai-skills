@@ -347,6 +347,27 @@
       "updated_at": "2026-09-11T08:43:46Z"
     },
     {
+      "id": "B333",
+      "title": "bash32 fails to link on aarch64-darwin, so nix develop cannot build a shell and setup-dev-env produces no binaries",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "cd ai-skills && ./setup-dev-env.sh    # on aarch64-apple-darwin (Darwin 25.6.0, Determinate Nix 3.22.3)",
+      "observed": "Exits 1 with no binary produced; bin/aarch64-apple-darwin/ is never created. nix fails realising the devShell because bash32-3.2.57 will not link: \"duplicate symbol '_PC' in: ./lib/readline/libreadline.a(terminal.o) ./lib/termcap/libtermcap.a(termcap.o)\", then \"ld: 1 duplicate symbol for architecture arm64\", \"make: *** [Makefile:523: bash] Error 1\", and \"error: Cannot build nix-shell-env.drv: 1 dependency failed\".",
+      "expected": "The devShell builds, setup-dev-env.sh re-execs into it and compiles each crate into bin/aarch64-apple-darwin/ (bugs, todo, rjq, ai-text-editor, ai-text-editor-server, ai-text-editor-mcp, interactive-shell, the planning helpers).",
+      "mechanism": "bash 3.2 declares the termcap global PC as a tentative definition (file scope, no initialiser) in BOTH its bundled readline (lib/readline/terminal.c) and its bundled termcap (lib/termcap/termcap.c). Under -fcommon those merge into one common symbol, which was every compiler default when bash 3.2 shipped in 2007. clang 11 and gcc 10 changed the default to -fno-common, so each tentative definition emits a strong definition in its own object file and the link sees two definitions of _PC. The stdenv on aarch64-darwin here is clang 21.1.8. mkBash32 in flake.nix sets CFLAGS to \"-O2 -w -std=gnu89 -Wno-implicit-function-declaration\" with no -fcommon, and bash32 is an unconditional member of the devShell packages list, so nothing in the shell can be built on this platform.",
+      "surfaces": [
+        "flake.nix"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "migration of the dev environment to Apple Silicon; first attempt to run setup-dev-env.sh on aarch64-apple-darwin",
+      "notes": "FIX IS PROVEN, NOT PROPOSED: add -fcommon to mkBash32 in two places, CFLAGS and the preBuild CC= line. Both, for the same reason -std=gnu89 is already duplicated across both and the derivation own comments explain: the Makefile compiles its helper tools (mkbuiltins, mksyntax) with CC directly and they never see CFLAGS. Verified by building bash 3.2.57 out of tree with only that flag added, which produced a working \"GNU bash, version 3.2.57(1)-release (aarch64-apple-darwin25.6.0)\" Mach-O arm64 executable. The mutation is the flag itself: without -fcommon the link fails as observed, with it the build completes. WHY IT WENT UNNOTICED: the derivation was written and debugged on Linux (its comments reference glibc and \"a current gcc\") and has never been built on Apple Silicon, where the nixpkgs stdenv is a much newer clang. Two things also mask it. First, --list and --check return before the script touches nix at all, so ./setup-dev-env.sh --check succeeds on this platform and reports every artifact MISSING, which reads as \"not built yet\" rather than \"cannot be built\". Second, bash32 exists precisely so the suite can be exercised against the macOS bash 3.2 floor of CODE-STYLE.md section 1 — so the one platform it cannot be built on is the platform it exists to emulate, and the one where /bin/bash already is 3.2.57. SECONDARY OBSERVATION, possibly its own entry: this path exits 1, outside the script documented exit vocabulary (64 bad usage, 69 nix missing, 70 a crate failed to build). setup-dev-env.sh line 139 execs nix develop, so nix own exit code replaces the script and a caller checking for 69 or 70 sees an undocumented 1. require_nix passes, because nix IS present; it is the devShell that cannot be realised, which the vocabulary has no code for.",
+      "created_at": "2026-09-14T13:57:31Z",
+      "updated_at": "2026-09-14T13:57:31Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
@@ -4513,24 +4534,94 @@
     },
     {
       "id": "B328",
-      "title": "install.rs's shared-binary tests assert an exact filename that does not exist on Windows",
-      "status": "confirmed",
+      "title": "install.rs's shared-binary tests hardcode x86_64-unknown-linux-musl and a bare filename, wrong on any other real CI target",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
       "reproduce": "cargo test --target x86_64-pc-windows-msvc -p installer --all-targets on a real Windows runner (windows-latest in CI; not reproducible via cross-compilation from Linux since blake3's build script needs a real MSVC assembler).",
       "observed": "install::tests::a_skill_mode_install_ships_only_the_skill_binary and install::tests::switching_mode_never_deletes_the_previous_modes_shared_binary both fail: assertion failed: shared.join(\\\"ai-text-editor\\\").is_file() at install.rs:623 and :665. Deterministic, not the B327 race -- both tests fail identically on every windows-latest run.",
       "expected": "The assertion accounts for the platform's own binary suffix (.exe on Windows), the way shared_bin's own runtime resolution presumably already must, since the installed binary genuinely is named ai-text-editor.exe there.",
-      "mechanism": "Both tests hardcode the bare command name with no suffix. On unix that is the real filename; on Windows the compiled/installed binary is ai-text-editor.exe, so `shared.join(\"ai-text-editor\").is_file()` is correctly false there and the test fails every single time on that platform, not intermittently.",
+      "mechanism": "Both tests hardcode the literal triple x86_64-unknown-linux-musl in the fixture path AND the bare command name (no .exe) in both the fixture and the assertion, instead of resolving the actual current target the way only_the_current_hosts_own_bin_triple_ships already does (installer_platform::current()). On any CI leg whose real target differs from x86_64-unknown-linux-musl -- aarch64-unknown-linux-musl, any apple-darwin target, or windows-msvc -- either the fixture's bin/<triple>/ entry is never picked up at all (no matching triple), or the installed filename lacks the .exe suffix Windows actually uses.",
       "surfaces": [
         "src/installer/src/install.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Added current_target()/platform_binary_name() test helpers to install.rs (mirroring only_the_current_hosts_own_bin_triple_ships's own installer_platform::current() resolution and Target::is_windows()), and switched all three affected tests (a_skill_mode_install_ships_only_the_skill_binary, switching_mode_never_deletes_the_previous_modes_shared_binary, an_unattended_reinstall_carries_the_installed_mode_forward) to build their bin/<triple>/<name> fixture paths and shared-bin assertions through them instead of the literal x86_64-unknown-linux-musl/ai-text-editor[-mcp] strings.",
+      "verification": "cargo test -p installer: 218 passed (up from 215; the 3 rewritten tests still pass on this host's own x86_64-unknown-linux-musl target). cargo fmt --check and cargo clippy --all-targets -D warnings clean. Not yet confirmed green on the actual aarch64-unknown-linux-musl/windows-msvc CI legs (no local cross-compiled/Windows runner available) -- confirm via the next real CI run on feat/rust-installer's PR.",
       "found_by": "T111's CI verification pass (feat/rust-installer's first-ever pull request, first real Windows CI run of the installer crate's test suite). Not fixed as part of that ticket -- explicitly deferred by the user rather than expanding T111's scope further.",
       "notes": null,
       "created_at": "2026-09-13T06:20:42Z",
-      "updated_at": "2026-09-13T06:20:42Z"
+      "updated_at": "2026-09-13T07:18:28Z"
+    },
+    {
+      "id": "B329",
+      "title": "B327's env-override defect existed in four more functions B327's own fix never touched",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cargo test --workspace on a CI runner with XDG_CONFIG_HOME set ambiently (observed on the aarch64-unknown-linux-musl leg after B327's own fix landed): custom_locations::tests::save_then_load_round_trips failed with load(home) returning [] right after save(home, path) wrote it, because a concurrently-running test using a DIFFERENT tempdir home resolved to the SAME real XDG_CONFIG_HOME-backed file.",
+      "observed": "custom_locations::tests::save_then_load_round_trips: assertion left == right failed, left: [], right: [\"/tmp/.tmpXXXXX/my-root\"].",
+      "expected": "Every function taking an explicit home: &Path parameter resolves XDG_CONFIG_HOME the same test-isolated way shared_bin_dir/default_root do post-B327: unset by default in a test build, real env var only in production, never silently overriding the caller's own home argument.",
+      "mechanism": "custom_locations.rs's file_path, manifest.rs's agent_available (the cline branch), plugins.rs's xdg_config_home, and permissions.rs's default_worktrees_root all take an explicit home: &Path parameter for the same reason shared_bin_dir/default_root did (B327) -- so a test can pass an isolated tempdir -- but each independently called std::env::var(\"XDG_CONFIG_HOME\") first, silently overriding that parameter whenever the real ambient env var was set. B327's own fix only touched the two functions a specific CI failure had pointed at (shared_bin_dir, default_root); these four were the same defect, just not yet observed failing.",
+      "surfaces": [
+        "src/installer/src/custom_locations.rs",
+        "src/installer/src/manifest.rs",
+        "src/installer/src/plugins.rs",
+        "src/installer/src/permissions.rs",
+        "src/installer/src/shared_bin.rs"
+      ],
+      "fix": "Added shared_bin::xdg_config_home_or(home) -- the one shared resolver (built on shared_bin's existing test-isolated xdg_config_home/test_env machinery) every one of these functions now delegates to instead of its own inline std::env::var(\"XDG_CONFIG_HOME\") copy: custom_locations::file_path, manifest::agent_available's cline branch, plugins.rs (removed its own private xdg_config_home entirely, callers now call shared_bin::xdg_config_home_or directly), and permissions::default_worktrees_root. Fixing the whole class in one shared function means it can only be broken again in one place.",
+      "verification": "cargo build/test/fmt --check/clippy -p installer --all-targets -D warnings all clean (218 tests passed). Full nix develop . --command ./pre-push-check.sh and ./run-tests.sh to be re-run before push to confirm no regression.",
+      "found_by": "Discovered while verifying B328's fix on the real aarch64-unknown-linux-musl CI leg: a third, previously-unnoticed test (custom_locations::tests::save_then_load_round_trips, unrelated to B328 itself) failed with the exact B327 signature, prompting a grep across the crate for every other std::env::var(\"XDG_CONFIG_HOME\") call site taking an explicit home parameter.",
+      "notes": null,
+      "created_at": "2026-09-13T07:18:56Z",
+      "updated_at": "2026-09-13T07:18:56Z"
+    },
+    {
+      "id": "B330",
+      "title": "register-rebuild never gets staged into planning/scripts/ on a fresh checkout or in CI",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "On a fresh checkout (no manually-placed planning/scripts/register-rebuild), run ./setup-dev-env.sh, or run CI's ubuntu-latest/macos-latest 'Test suite passes' shards: test-persona-drift, tests/test-skill-files-manifest.sh, planning/tests/test-blast-radius.sh, and tests/test-release-package.sh all fail because planning/scripts/register-rebuild does not exist.",
+      "observed": "test-persona-drift: 'persona drift: manifest references missing file: planning/scripts/register-rebuild'. test-skill-files-manifest.sh: 'expected \"\", got \"scripts/register-rebuild\"'. test-blast-radius: 'consistent tree: exited 1, want 0'. test-release-package.sh: 'command failed: \"$builder\" --out \"$work/dist\"'. Confirmed pre-existing on the CI run immediately before this fix (same failures on the prior commit) -- not caused by any change in this session.",
+      "expected": "A fresh checkout's own build tooling (setup-dev-env.sh locally; ci.yml's 'Build and stage every migrated planning command (T116)' step and its native cross-target counterpart; installer/build-release.sh for a packaged release) reproduces planning/scripts/register-rebuild the same way it reproduces every other rust-migrated planning command, matching what planning/PACKAGE-MAP.tsv already declares as a shipped file.",
+      "mechanism": "register-rebuild.sh was deliberately deleted (commit 02b330c4, 'planning: retire register-rebuild.sh now that the binary ships') once skill_files() took over listing the compiled binary directly. But every one of the four places that build/stage a migrated planning command into planning/scripts/ (setup-dev-env.sh, both ci.yml steps, installer/build-release.sh) decides whether to do so by checking '[ -f planning/scripts/<candidate>.sh ]' -- a signal that retirement commit removed, without also updating rust-migration.tsv (which no longer lists register-rebuild at all, having been the source these steps read their candidate list from) or any of the four build steps to keep staging it unconditionally. The binary now on this dev machine was left over from a manual, undocumented step at migration time, not reproduced by any current tooling.",
+      "surfaces": [
+        "setup-dev-env.sh",
+        "setup-dev-env-lib.sh",
+        ".github/workflows/ci.yml",
+        "installer/build-release.sh"
+      ],
+      "fix": "Added an explicit register-rebuild exception in all four places: setup-dev-env-lib.sh gained a shared stages_into_planning_scripts() helper (an .sh-sibling check, OR candidate = register-rebuild) that setup-dev-env.sh's three call sites (--check, --list, and the real build-and-copy step) now call instead of a bare -f test; ci.yml's T116-sharded staging step gained a hardcoded synthetic row (matching the existing plan-overview precedent) plus the same .sh-or-register-rebuild bypass on its gate; installer/build-release.sh's prepare_planning_rust_commands gained the same bypass on its own gate plus register-rebuild added to its candidate stream (it has no rust-migration.tsv row to read from). ci.yml's native cross-target 'Build and execute every registered planning command' step needed no gate change (it has none), only the same hardcoded row, so register-rebuild now also gets a cross-platform build+--help smoke test like every other migrated command.",
+      "verification": "Removed the pre-existing (manually-placed) planning/scripts/register-rebuild and confirmed ./setup-dev-env.sh --check correctly reports it MISSING, then a real ./setup-dev-env.sh run rebuilds and re-stages it. tests/test-skill-files-manifest.sh, planning/tests/test-persona-drift.sh, and planning/tests/test-blast-radius.sh now all PASS. nix develop . --command bash tests/test-release-package.sh: PASS. Confirmed green on real CI (ubuntu-latest, all four shards) after the first push -- BUT the macOS bash-3.2-portability-floor job still failed on test-persona-drift with the identical missing-file symptom: ci.yml has a THIRD, near-identical copy of the T116 staging step (one per job: default-bash sharded, bash-3.2-floor sharded, and the native cross-target smoke-test step) and the initial fix only touched the first and third, missing the bash-3.2-floor job's own copy entirely. Fixed in a follow-up commit applying the identical gate-bypass and hardcoded row to that second copy too. All three copies now grepped and confirmed identical in shape (no bare '.sh' gate anywhere, register-rebuild's row present in every one).",
+      "found_by": "",
+      "notes": null,
+      "created_at": "2026-09-13T07:56:36Z",
+      "updated_at": "2026-09-13T09:22:20Z"
+    },
+    {
+      "id": "B332",
+      "title": "test-release-package.sh fails on CI's ubuntu-latest 'Test suite passes' job: no musl C toolchain for chat-server-rs's ring dependency",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "CI's 'Test suite passes on ubuntu-latest' job (shards 2 and 3 specifically, wherever test-release-package.sh happens to land), present since this branch's very first CI run (run 34734122848, before any fix in this session): test-release-package.sh calls installer/build-release.sh, which cross-compiles the whole workspace for x86_64-unknown-linux-musl, which fails building chat-server-rs's ring@0.17.14 dependency.",
+      "observed": "test-release-package FAIL (exit 66): 'error occurred in cc-rs: failed to find tool \"x86_64-linux-musl-gcc\": No such file or directory (os error 2)', from ring@0.17.14's build script; build-release.sh: cargo build chat-server-rs failed; test-release-package.sh:85: command failed.",
+      "expected": "The job that runs test-release-package.sh has the same musl C toolchain (musl-tools) the workspace's other musl cross-compile jobs already install, since build-release.sh cross-compiles for the host's own musl target on Linux regardless of which job invokes it.",
+      "mechanism": "ci.yml's 'X builds and runs every subject in scope' jobs install musl-tools (conditioned on the target containing linux-musl) before cross-compiling anything -- but the separate 'Test suite passes on ${{ matrix.os }}' job, which is what actually runs test-release-package.sh (via run-tests.sh), never installs it, since that job only ever ran plain cargo test against the host's native toolchain until build-release.sh's own cross-compilation step was reached inside the test itself.",
+      "surfaces": [
+        ".github/workflows/ci.yml"
+      ],
+      "fix": "Added the same 'Install the musl C toolchain' step ('sudo apt-get install -y -qq musl-tools', guarded by runner.os == Linux) to the 'Test suite passes on ${{ matrix.os }}' job in .github/workflows/ci.yml, right after its existing rust-toolchain setup step -- mirroring the exact step the cross-target build jobs already use for the same package.",
+      "verification": "python3 -c 'import yaml; yaml.safe_load(...)' confirms ci.yml still parses. Diagnosed by confirming the same musl-tools install step already exists (and works) for the analogous cross-target jobs, and that chat-server-rs's ring@0.17.14 dependency (confirmed in Cargo.lock) is exactly the crate cc-rs failed to build for. Not yet confirmed green on a real CI run (staged for the next push, since a rustup-based musl-gcc gap cannot be reproduced in this dev machine's nix-provided environment).",
+      "found_by": "Investigating a NEW ubuntu-latest shard failure that appeared after pushing the B331 fix -- turned out to be an unrelated, genuinely pre-existing failure (confirmed present in the branch's first-ever CI run, before this session touched anything) that a prior run had never surfaced because test-release-package.sh's own earlier register-rebuild failure (B330) exited before reaching this cross-compile step.",
+      "notes": null,
+      "created_at": "2026-09-13T08:57:11Z",
+      "updated_at": "2026-09-13T08:57:11Z"
     },
     {
       "id": "B6",
@@ -6691,6 +6782,28 @@
       "notes": null,
       "created_at": "2026-09-12T17:19:37Z",
       "updated_at": "2026-09-12T17:19:37Z"
+    },
+    {
+      "id": "B331",
+      "title": "Two long-standing baseline CI failures: pack-release.rs missing PACKAGE marker, requirements.rs's intentional jq fallback misflagged as a migration leftover",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash tests/test-mode-markers.sh and bash tests/test-rjq-active-references.sh on master or any branch, before this fix -- both fail deterministically, unrelated to any of this session's other changes (confirmed present on origin/master and on every CI run polled this session).",
+      "observed": "test-mode-markers: 'FAIL: every file in scope declares its MODE: expected \"\", got \"src/installer-release/src/bin/pack-release.rs(no-PACKAGE)\"'. test-rjq-active-references: 'active reference test: jq remains outside historical evidence', naming src/installer/src/requirements.rs:225 and :466.",
+      "expected": "test-mode-markers: every .rs file under a crate's src/ tree (compiler input, CODE-STYLE 1b) declares a PACKAGE marker. test-rjq-active-references: only genuine post-migration jq leftovers are flagged, not requirements.rs's own permanent, documented rjq-falls-back-to-jq compatibility path (tool_available's own doc comment, proven by the a_missing_rjq_falls_back_to_a_system_jq test).",
+      "mechanism": "pack-release.rs (a maintainer-only release-packing tool, 'never shipped' per its own doc comment) had // MODE: DEV but no // PACKAGE: marker at all, unlike every sibling bin/*.rs in the repo. test-rjq-active-references.sh's exclusion list already carves out src/rjq/tests/differential.rs (a legitimate jq reference, used there as a reference oracle) but never added the one other legitimate reference: requirements.rs's tool_available(), which deliberately falls back to a system jq only once a bundled and PATH rjq have both failed, since rjq is a jq-compatible reimplementation -- a permanent design decision, not code left over from the jq-to-rjq migration.",
+      "surfaces": [
+        "src/installer-release/src/bin/pack-release.rs",
+        "tests/test-rjq-active-references.sh"
+      ],
+      "fix": "Added '// PACKAGE: DEV' to pack-release.rs (matching interactive-shell-fixture.rs's own precedent for a maintainer-only, never-shipped bin target). Added ':!src/installer/src/requirements.rs' to test-rjq-active-references.sh's own git-grep exclusion list, with a comment explaining why the reference there is permanent and intentional rather than a leftover.",
+      "verification": "bash tests/test-mode-markers.sh: PASS. PATH=\"$(./bootstrap.sh rjq --path-only):$PATH\" bash tests/test-rjq-active-references.sh: PASS (fails only for the expected, unrelated 'rjq not on PATH' reason without that PATH prefix, matching this repo's own documented bootstrap convention). cargo build -p installer-release --bins clean. Full nix develop . --command ./pre-push-check.sh: PASS.",
+      "found_by": "",
+      "notes": null,
+      "created_at": "2026-09-13T08:26:29Z",
+      "updated_at": "2026-09-13T08:26:29Z"
     },
     {
       "id": "B25",
