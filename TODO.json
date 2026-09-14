@@ -69,6 +69,21 @@
       "updated_at": "2026-09-14T18:40:27Z"
     },
     {
+      "id": "T148",
+      "title": "Turn the planning skill's review personas into proper .agents/profiles/*.json, alongside nitpicker",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "The repo already has a real, shipping cross-harness agent-profile system (T102): a canonical JSON persona at .agents/profiles/<name>.json (fields: name, description, instructions), translated per-harness by src/installer/src/profiles.rs's ProfileTranslator trait into Claude Code's .claude/agents/*.md frontmatter, opencode's markdown+YAML, and codex's TOML. Today .agents/profiles/ holds exactly one profile, nitpicker.json. Meanwhile the planning skill's adversarial-review/execution/cleanup personas (Alex, Benny, Chris/Christian/Christoph, Dana, Frank, Willie -- named in planning/roles/ROLES.md's index) live only as prose inside three bundled phase docs (planning/roles/planning.md, execution.md, cleanup.md) plus planning/roles/VOICES.md, loaded ad hoc at review time via planning/scripts/role-context.sh <persona> rather than as installable, harness-native subagents. Requested: extract each individual persona (one canonical JSON per person, matching nitpicker.json's density and single-voice style) into its own .agents/profiles/<name>.json, register each in installer/src/05-config.sh's PROFILE_NAMES array and wherever installer/src/50-manifest.sh's per-profile case arm needs a matching entry, and decide whether role-context.sh's phase-scoped loading (planning vs execution vs cleanup casts) is retired in favor of the profile system or kept as a separate, complementary mechanism for the planning skill's own bounded-read-locked reviewer dispatch (see part-3.md of the planning skill for that dispatch's exact contract). Note a persona like Chris changes name across phases (Chris in planning, Christian/Christoph elsewhere per ROLES.md) -- clarify whether these are the same profile reused or genuinely distinct personas before splitting files.",
+      "blocked_on": null,
+      "refs": [
+        "T146"
+      ],
+      "note": "filed while running the planning-skill-rustify plan's adversarial review (persona chris), 2026-09-14",
+      "created_at": "2026-09-14T19:04:10Z",
+      "updated_at": "2026-09-14T19:04:10Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
