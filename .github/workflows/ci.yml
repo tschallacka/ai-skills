@@ -1340,10 +1340,22 @@ jobs:
       - name: Drive a real Cygwin bash through the built wrapper
         shell: pwsh
         run: |
+          # actions/checkout on this Windows runner checked the script out
+          # with CRLF line endings (no .gitattributes forces LF repo-wide);
+          # Cygwin's bash then read "set -euo pipefail\r" as an option named
+          # "pipefail<CR>", which does not match the real "pipefail" and
+          # fails as an invalid option name -- the exact shape of the
+          # embedded-newline corruption W19's own scratch run hit with
+          # rustup's --no-self-update flag. Strip the CRs before handing
+          # the file to bash, rather than a repo-wide .gitattributes change
+          # for one script.
+          $winPath = "$env:GITHUB_WORKSPACE/.github/cygwin-drive-bash-check.sh"
+          (Get-Content -Raw $winPath) -replace "`r`n", "`n" | Set-Content -NoNewline -Path $winPath
+
           # Cygwin's bash rejects a native Windows path outright ("No such
           # file or directory") -- cygpath converts it to the /cygdrive/...
           # form bash actually resolves.
-          $script = & D:\cygwin\bin\cygpath.exe -u "$env:GITHUB_WORKSPACE/.github/cygwin-drive-bash-check.sh"
+          $script = & D:\cygwin\bin\cygpath.exe -u $winPath
           D:\cygwin\bin\bash.exe --login $script
 
   rust-artifact-manifest:
