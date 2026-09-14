@@ -22,3 +22,5 @@ aarch64-apple-darwin	Darwin:arm64	interactive-shell	Apple Silicon macOS PTY wrap
 aarch64-apple-darwin	Darwin:arm64	interactive-shell-input	Apple Silicon macOS unix-socket input client
 x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	interactive-shell.exe	64-bit Windows PTY wrapper emitting JSONL screen events
 x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	interactive-shell-input.exe	64-bit Windows loopback-TCP input client
+x86_64-pc-cygwin	CYGWIN*:x86_64|amd64	interactive-shell.exe	Cygwin-native PTY wrapper (openpty, unmodified POSIX code) emitting JSONL screen events
+x86_64-pc-cygwin	CYGWIN*:x86_64|amd64	interactive-shell-input.exe	Cygwin-native unix-socket input client

@@ -1267,6 +1267,97 @@ jobs:
             target/${{ matrix.target }}/release/todo.exe
           if-no-files-found: error
 
+  cygwin:
+    # T84a: x86_64-pc-cygwin is tier 3 (no prebuilt std), so this is its own
+    # job rather than a sixth `native` matrix leg -- it needs a nightly
+    # toolchain with -Z build-std and a Cygwin install the other four
+    # platforms have no use for, not just a different os/target pair.
+    #
+    # Gated the same way `native` is gated (needs.scope.outputs.scope !=
+    # 'none'), rather than a parallel selective-compilation mechanism of its
+    # own: interactive-shell's other per-target builds already ride on that
+    # same job-level condition with no scope flag of their own (see the
+    # `native` job's own comment), and this is one more per-target build of
+    # the same crate.
+    #
+    # Cygwin's own libc bindings for openpty/setsid/ioctl/setpgid/kill are an
+    # UNVERIFIED assumption T84a's own ticket does not independently audit;
+    # this leg is what would surface an incompatibility, by actually
+    # spawning and driving a real Cygwin bash, not just linking one.
+    name: x86_64-pc-cygwin builds and drives a real Cygwin bash
+    runs-on: windows-latest
+    needs: scope
+    if: needs.scope.outputs.scope != 'none'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          # Same MAX_PATH concern as the native job's own windows-latest leg.
+          sparse-checkout: |
+            src
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+            .github/cygwin-drive-bash-check.sh
+
+      - name: Install Cygwin (gcc-core, gcc-g++)
+        uses: cygwin/cygwin-install-action@v6
+        with:
+          install-dir: 'D:\cygwin'
+          packages: |
+            gcc-core
+            gcc-g++
+
+      # pwsh, not bash: cygwin-install-action prepends Cygwin's own bin dir
+      # to PATH, so `shell: bash` resolves to Cygwin's bash rather than
+      # Git-Bash from this point on. Invoking rustup/cargo (native Windows
+      # executables) through it corrupted an argument in W19's own scratch
+      # run (a literal embedded newline landed inside a flag), and even
+      # GitHub Actions' own auto-generated `shell: bash` wrapper script
+      # (its "set -eo pipefail" startup line) hit the identical corruption
+      # when Cygwin's bash ran it. pwsh avoids that translation layer for
+      # the rustup/cargo steps; driving the Cygwin-linked binary itself
+      # uses Cygwin's bash directly against a real, committed script file
+      # (plain LF line endings, never auto-generated), which does not hit
+      # whatever GitHub Actions' own script-file generation does
+      # differently.
+      - name: Install nightly Rust with rust-src
+        shell: pwsh
+        run: rustup toolchain install nightly --component rust-src
+
+      - name: Build interactive-shell for x86_64-pc-cygwin
+        shell: pwsh
+        env:
+          # Cygwin's own gcc (plain `gcc`, not an x86_64-pc-cygwin-gcc-
+          # prefixed binary -- confirmed in W19's own scratch run) is a
+          # sufficient linker; no cross-compiler package is installed.
+          CARGO_TARGET_X86_64_PC_CYGWIN_LINKER: gcc
+        run: |
+          cargo +nightly build -Z build-std=std,panic_abort --release `
+            --target x86_64-pc-cygwin `
+            -p interactive-shell --bin interactive-shell --bin interactive-shell-input
+
+      - name: Drive a real Cygwin bash through the built wrapper
+        shell: pwsh
+        run: |
+          # actions/checkout on this Windows runner checked the script out
+          # with CRLF line endings (no .gitattributes forces LF repo-wide);
+          # Cygwin's bash then read "set -euo pipefail\r" as an option named
+          # "pipefail<CR>", which does not match the real "pipefail" and
+          # fails as an invalid option name -- the exact shape of the
+          # embedded-newline corruption W19's own scratch run hit with
+          # rustup's --no-self-update flag. Strip the CRs before handing
+          # the file to bash, rather than a repo-wide .gitattributes change
+          # for one script.
+          $winPath = "$env:GITHUB_WORKSPACE/.github/cygwin-drive-bash-check.sh"
+          (Get-Content -Raw $winPath) -replace "`r`n", "`n" | Set-Content -NoNewline -Path $winPath
+
+          # Cygwin's bash rejects a native Windows path outright ("No such
+          # file or directory") -- cygpath converts it to the /cygdrive/...
+          # form bash actually resolves.
+          $script = & D:\cygwin\bin\cygpath.exe -u $winPath
+          D:\cygwin\bin\bash.exe --login $script
+
   rust-artifact-manifest:
     name: publish Rust artifact hashes
     runs-on: ubuntu-latest
