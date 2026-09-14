@@ -35,4 +35,4 @@ jobs:
       - name: cargo test --lib (windows::tests only)
         shell: bash
         working-directory: src/interactive-shell
-        run: cargo test --lib windows:: -- --nocapture
+        run: "cargo test --lib windows:: -- --nocapture"
