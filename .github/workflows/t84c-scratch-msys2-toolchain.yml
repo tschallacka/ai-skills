@@ -1,0 +1,56 @@
+name: "T84c scratch: MSYS2 toolchain route discovery (temporary -- removed once evidence is captured)"
+
+# Not part of the plan's permanent CI surface. T84c's own research (goal
+# 05-msys2-research, W23) found that MSYS2 itself builds its official Rust
+# package by reusing the x86_64-pc-cygwin target unchanged, linking with
+# MSYS2's own gcc (which links against msys-2.0.dll) instead of Cygwin's
+# gcc (cygwin1.dll) -- see .plans/windows-interactive-shell/
+# 05-msys2-research/working-context.md. This scratch job confirms that
+# empirically before committing to a permanent CI leg shape, the same way
+# goal 4's own W19 scratch job did for Cygwin.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    branches: [nextupdate]
+
+jobs:
+  msys2-build-std:
+    name: build-std x86_64-pc-cygwin, linked with MSYS2's gcc (nightly)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          sparse-checkout: |
+            src
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+
+      - name: Install MSYS2 (native MSYS gcc, not mingw-w64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          install: gcc
+
+      - name: Report what MSYS2's gcc actually is
+        shell: msys2 {0}
+        run: |
+          which gcc
+          gcc --version
+          uname -a
+
+      - name: Install nightly Rust with rust-src
+        shell: pwsh
+        run: rustup toolchain install nightly --component rust-src
+
+      - name: Attempt -Z build-std for x86_64-pc-cygwin, linked via MSYS2's gcc
+        shell: pwsh
+        env:
+          # MSYS2's own native gcc, NOT Cygwin's -- this is the one part
+          # of goal 4's recipe this scratch job changes.
+          CARGO_TARGET_X86_64_PC_CYGWIN_LINKER: 'C:\msys64\usr\bin\gcc.exe'
+        run: |
+          cargo +nightly build -Z build-std=std,panic_abort --release `
+            --target x86_64-pc-cygwin `
+            -p interactive-shell --bin interactive-shell --bin interactive-shell-input
