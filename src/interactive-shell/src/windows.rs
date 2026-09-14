@@ -467,13 +467,23 @@ mod tests {
             "spawned; try_wait right after spawn: {:?}",
             backend.try_wait()
         );
+        // Does cmd.exe survive on its own, before any input at all? If it's
+        // already gone here, the write below isn't what's killing it.
+        sleep(Duration::from_secs(2));
+        eprintln!(
+            "try_wait after 2s idle, before any write: {:?}",
+            backend.try_wait()
+        );
+
         // Drain the initial banner/prompt so it can't mask the assertion below.
         let banner = read_for(&mut backend, Duration::from_millis(500));
         eprintln!("initial banner ({} bytes): {banner:?}", banner.len());
+        eprintln!("try_wait after banner drain: {:?}", backend.try_wait());
 
         backend
             .write(b"echo hello-conpty\r\n")
             .expect("write echo command");
+        eprintln!("try_wait immediately after write: {:?}", backend.try_wait());
         let output = read_for(&mut backend, Duration::from_secs(5));
         eprintln!("try_wait after echo attempt: {:?}", backend.try_wait());
         assert!(
