@@ -38,70 +38,6 @@
       "updated_at": "2026-08-28T15:33:14Z"
     },
     {
-      "id": "T84",
-      "title": "Support Windows in interactive-shell",
-      "status": "open",
-      "priority": "low",
-      "parent": null,
-      "detail": "interactive-shell is the workspace's first POSIX-only member and is excluded from the x86_64-pc-windows-msvc leg of the native CI job. The exclusion is correct for that target but it is not the end state: Michael wants Windows supported, including driving powershell.exe and cmd.exe. The unix socket is NOT what blocks it -- a loopback port would replace it, as the chat skill already offers. The terminal core is what blocks it: libc::openpty (lib.rs:1415), ioctl TIOCSCTTY (1437) and TIOCSWINSZ (1897), setsid (1436), setpgid (1443), and kill(-pid, SIGKILL/SIGTERM) (1463, 1473, 1482), plus twelve raw-fd sites against a platform whose equivalent is a HANDLE. The libc crate exposes none of openpty/setsid/TIOCSCTTY for windows targets -- twenty hits across its unix modules, zero in its windows module. Two independent routes, filed as sub-tasks: Cygwin's POSIX layer is cheap and yields a Cygwin bash; a native ConPTY backend is the real work and is the only route that drives PowerShell and cmd.",
-      "blocked_on": null,
-      "refs": [
-        "src/interactive-shell/src/lib.rs",
-        ".github/workflows/ci.yml",
-        "interactive-shell/binaries.tsv"
-      ],
-      "note": "SEQUENCING (Tschallacka, 2026-09-10): do T84 (and T84a/T84b/T84c) LAST, after everything else in the backlog is done. Lowered priority to reflect this explicit deprioritization, not a judgement on scope.\n\nCI-SHAPE (Tschallacka, 2026-09-10), for when work starts: a dedicated feature branch per sub-task (T84a, T84b, T84c each get their own, following the repos existing one-branch-per-fix convention -- nothing special needed there). Its CI should compile ONLY the relevant files (reuse the existing workspace-scoping mechanism from T116s .github/ci-test-scope.sh rather than building a parallel one) and run tests with USEFUL OUTPUT ON FAILURE (reuse lib-test.shs evidence-dump mechanism, fixed today via T116/B317 to correctly retain and render failing-call diagnostics as readable text -- any new Windows test written against that harness inherits this for free). Both mechanisms already exist and are proven working as of today; this is assembly, not new infrastructure.\n\nReal Windows validation is already available via the repos existing windows-latest GitHub Actions runners (already wired for the plan-overview target) -- no Docker Windows image works on this Linux dev host (Windows containers require a Windows host kernel, confirmed via docker info here), and Wine is a real but lower-fidelity local dev-loop option only (uncertain ConPTY/Job-Object completeness, not verified here since Wine is not installed) -- not a substitute for the real windows-latest CI validation.",
-      "created_at": "2026-09-03T18:14:04Z",
-      "updated_at": "2026-09-10T13:55:49Z"
-    },
-    {
-      "id": "T84a",
-      "title": "Add an x86_64-pc-cygwin leg so the POSIX code runs unchanged",
-      "status": "open",
-      "priority": "low",
-      "parent": "T84",
-      "detail": "Cygwin implements ptys, sessions, process groups and signals, so the existing POSIX code needs little or no change - this is a toolchain excursion, not a port. Verified against the pinned toolchain: rustc 1.98 does list x86_64-pc-cygwin in rustc --print target-list, so the compiler knows it, but it is absent from rustup target list, which means tier 3 with no prebuilt std. It therefore needs nightly with -Z build-std or a hand-built std, which is why this is filed rather than done. Deliverables: the target building in CI as its own matrix leg, and a Windows row in interactive-shell/binaries.tsv so the shipped set matches what CI proves. What this does NOT deliver is PowerShell or cmd - a Cygwin build drives a Cygwin bash, and the native shells are T84b. MSYS is tracked separately as T84c because it is a different runtime DLL, not a variant of this one.",
-      "blocked_on": null,
-      "refs": [
-        ".github/workflows/ci.yml"
-      ],
-      "note": "Sequenced after everything else per T84s parent note (Tschallacka, 2026-09-10).",
-      "created_at": "2026-09-03T18:14:04Z",
-      "updated_at": "2026-09-10T13:55:49Z"
-    },
-    {
-      "id": "T84b",
-      "title": "Add a native ConPTY backend so PowerShell and cmd can be driven",
-      "status": "open",
-      "priority": "low",
-      "parent": "T84",
-      "detail": "What Michael actually asked for: interactive-shell driving powershell.exe and cmd.exe. That means a second terminal backend behind the same protocol, because Windows has no analogue of the calls the current one makes. CreatePseudoConsole/ResizePseudoConsole/ClosePseudoConsole replace openpty and the two ioctls; a Job Object with TerminateJobObject replaces setpgid plus kill(-pid, ...), since Windows has neither process groups nor POSIX signals; HANDLEs replace the raw fds; and the client transport moves to a loopback port, which is the one piece that ports without argument. Keep the wire protocol identical so the agent-facing surface does not fork per platform, and cfg-gate the backends rather than the crate -- an inert Windows stub that builds and refuses to run is worse than an honest absence. ConPTY needs Windows 10 1809 or newer. Michael wants BOTH routes, so this does not retire T84a: they cover different shells on the same platform, and the two backends can share the protocol and the tests.",
-      "blocked_on": null,
-      "refs": [
-        "src/interactive-shell/src/lib.rs",
-        "interactive-shell/binaries.tsv"
-      ],
-      "note": "Sequenced after everything else per T84s parent note (Tschallacka, 2026-09-10). CI-shape notes (selective compilation, evidence-preserving test output, real windows-latest CI as the validation source of truth) are on T84 itself.",
-      "created_at": "2026-09-03T18:14:04Z",
-      "updated_at": "2026-09-10T13:55:49Z"
-    },
-    {
-      "id": "T84c",
-      "title": "Target MSYS2 as well, which has no upstream rust target",
-      "status": "open",
-      "priority": "low",
-      "parent": "T84",
-      "detail": "Michael wants MSYS2 targeted alongside Cygwin, and it is not the same build. msys2-runtime is a fork of the Cygwin runtime with the same POSIX surface, so the interactive-shell code should need no change, but a binary for it links msys-2.0.dll where a Cygwin binary links cygwin1.dll, and the two are not interchangeable at runtime. The obstacle is sharper than T84a: rustc --print target-list on the pinned 1.98 toolchain lists x86_64-pc-cygwin and NO msys target whatsoever, so unlike Cygwin there is not even a tier-3 target to build std for. The likely route is a custom target spec derived from the cygwin one with the runtime library swapped, built under MSYS2 own toolchain - to be established rather than assumed, so treat the first step as research and record what is found here before writing CI. This is also the Git-for-Windows route in practice: Git for Windows ships the MSYS2 runtime, so whatever makes MSYS2 work is what makes a Git-for-Windows bash work. Its source is public at git-for-windows/git and git-for-windows/msys2-runtime; nothing needs vendoring here to settle the approach.",
-      "blocked_on": null,
-      "refs": [
-        ".github/workflows/ci.yml",
-        "interactive-shell/binaries.tsv"
-      ],
-      "note": "Sequenced after everything else per T84s parent note (Tschallacka, 2026-09-10).",
-      "created_at": "2026-09-03T18:18:46Z",
-      "updated_at": "2026-09-10T13:55:49Z"
-    },
-    {
       "id": "T56",
       "title": "Mark a review rationale superseded when a later cycle replaces it",
       "status": "blocked",
@@ -1188,6 +1124,70 @@
       "note": "Shipped: chat-mcp accepts an optional session/agent argument (mirroring ai-text-editor-mcp's ADAPTER_ARGUMENTS) on every connected tool (join/leave/send/read/wait/who/trigger_add/trigger_remove/trigger_toggle/triggers). held() (src/chat-mcp/src/lib.rs) is now a Mutex<HashMap<String, Held>> keyed by the resolved session, opened lazily per key with the same retry-on-dead-connection behavior the single-connection version had, just scoped per entry. resolved_session_key() resolves an explicit session/agent argument via chat_client_rs::resolve_session_key's own Explicit rung (session wins if both given), falling back to the process's existing session_key() static when neither is given -- so a caller that never declares an identity keeps today's exact behavior unchanged.\n\nchat-client-rs grew the keyed counterparts underneath: Session::load_with_key/save_with_key (src/chat-client-rs/src/lib.rs), apply_session_with_key, save_session_with_key. Session::load/save/apply_session/save_session now delegate to these under session_key().0, so every existing call site (the chat CLI itself) is unaffected.\n\nVerified: cargo test -p chat-client-rs -p chat-mcp (64 + 19 + 12 = 95 total, incl. 2 new chat-client-rs tests proving two keys keep separate sessions in one state dir, and 3 new chat-mcp end-to-end integration tests against a real chat-server-rs: distinct session overrides get distinct minted nicks and hold separate connections verified via a real 'who' and a message read back under the sender's own nick; the 'agent' argument is confirmed an alias for 'session'; an empty override falls back to the default identity rather than minting a nick from nothing). cargo fmt/clippy clean across both crates. Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer 9ab984e3.\n\nMakes T122's chat instruction ('declare your id to chat') true rather than aspirational. B322: found and fixed while verifying T91c -- Held::open/Owner never threaded the resolved session_key into conn.rs's own cursor bookkeeping (join/leave/send/read/deliver all called the unkeyed Session::load/save_cursor), so two distinct identities' cursors cross-contaminated through one shared file even though their nick and connection were already correctly separated. Fixed on feat/rust-installer 6be90b14.",
       "created_at": "2026-09-12T14:28:40Z",
       "updated_at": "2026-09-12T18:29:06Z"
+    },
+    {
+      "id": "T84",
+      "title": "Support Windows in interactive-shell",
+      "status": "done",
+      "priority": "low",
+      "parent": null,
+      "detail": "interactive-shell is the workspace's first POSIX-only member and is excluded from the x86_64-pc-windows-msvc leg of the native CI job. The exclusion is correct for that target but it is not the end state: Michael wants Windows supported, including driving powershell.exe and cmd.exe. The unix socket is NOT what blocks it -- a loopback port would replace it, as the chat skill already offers. The terminal core is what blocks it: libc::openpty (lib.rs:1415), ioctl TIOCSCTTY (1437) and TIOCSWINSZ (1897), setsid (1436), setpgid (1443), and kill(-pid, SIGKILL/SIGTERM) (1463, 1473, 1482), plus twelve raw-fd sites against a platform whose equivalent is a HANDLE. The libc crate exposes none of openpty/setsid/TIOCSCTTY for windows targets -- twenty hits across its unix modules, zero in its windows module. Two independent routes, filed as sub-tasks: Cygwin's POSIX layer is cheap and yields a Cygwin bash; a native ConPTY backend is the real work and is the only route that drives PowerShell and cmd.",
+      "blocked_on": null,
+      "refs": [
+        "src/interactive-shell/src/lib.rs",
+        ".github/workflows/ci.yml",
+        "interactive-shell/binaries.tsv"
+      ],
+      "note": "All three sub-tasks shipped: T84a (Cygwin CI leg, PR #162), T84b (native ConPTY backend + loopback-TCP transport, PR #160/#161), T84c (MSYS2 CI leg, PR #163, beyond its own research-only scope with approval). Windows is now a first-class interactive-shell target: PowerShell/cmd via the native ConPTY backend, Cygwin bash and MSYS2 bash (and by extension Git-for-Windows bash) via the unmodified POSIX backend cross-compiled with -Z build-std. installer's stale skill_unsupported_here Windows block (found as a drive-by while wiring this up) was also removed, so Windows installs of interactive-shell are no longer refused.",
+      "created_at": "2026-09-03T18:14:04Z",
+      "updated_at": "2026-09-14T15:46:34Z"
+    },
+    {
+      "id": "T84a",
+      "title": "Add an x86_64-pc-cygwin leg so the POSIX code runs unchanged",
+      "status": "done",
+      "priority": "low",
+      "parent": "T84",
+      "detail": "Cygwin implements ptys, sessions, process groups and signals, so the existing POSIX code needs little or no change - this is a toolchain excursion, not a port. Verified against the pinned toolchain: rustc 1.98 does list x86_64-pc-cygwin in rustc --print target-list, so the compiler knows it, but it is absent from rustup target list, which means tier 3 with no prebuilt std. It therefore needs nightly with -Z build-std or a hand-built std, which is why this is filed rather than done. Deliverables: the target building in CI as its own matrix leg, and a Windows row in interactive-shell/binaries.tsv so the shipped set matches what CI proves. What this does NOT deliver is PowerShell or cmd - a Cygwin build drives a Cygwin bash, and the native shells are T84b. MSYS is tracked separately as T84c because it is a different runtime DLL, not a variant of this one.",
+      "blocked_on": null,
+      "refs": [
+        ".github/workflows/ci.yml"
+      ],
+      "note": "Shipped: x86_64-pc-cygwin CI leg builds interactive-shell's unmodified POSIX code via nightly -Z build-std and drives a real Cygwin bash end-to-end, merged PR #162. binaries.tsv gained the Windows row (T84's own transport work) and a Cygwin row.",
+      "created_at": "2026-09-03T18:14:04Z",
+      "updated_at": "2026-09-14T15:46:08Z"
+    },
+    {
+      "id": "T84b",
+      "title": "Add a native ConPTY backend so PowerShell and cmd can be driven",
+      "status": "done",
+      "priority": "low",
+      "parent": "T84",
+      "detail": "What Michael actually asked for: interactive-shell driving powershell.exe and cmd.exe. That means a second terminal backend behind the same protocol, because Windows has no analogue of the calls the current one makes. CreatePseudoConsole/ResizePseudoConsole/ClosePseudoConsole replace openpty and the two ioctls; a Job Object with TerminateJobObject replaces setpgid plus kill(-pid, ...), since Windows has neither process groups nor POSIX signals; HANDLEs replace the raw fds; and the client transport moves to a loopback port, which is the one piece that ports without argument. Keep the wire protocol identical so the agent-facing surface does not fork per platform, and cfg-gate the backends rather than the crate -- an inert Windows stub that builds and refuses to run is worse than an honest absence. ConPTY needs Windows 10 1809 or newer. Michael wants BOTH routes, so this does not retire T84a: they cover different shells on the same platform, and the two backends can share the protocol and the tests.",
+      "blocked_on": null,
+      "refs": [
+        "src/interactive-shell/src/lib.rs",
+        "interactive-shell/binaries.tsv"
+      ],
+      "note": "Shipped: a native ConPTY + Job Object backend (src/interactive-shell/src/windows.rs) implementing the same Backend/Transport/Listener traits as the POSIX backend, cfg-gated, transport moved to loopback TCP with nonce auth, merged PR #160 (backend) and #161 (transport+CI). The real spawn/write/read/resize/stop round-trip test is #[ignore]d: real windows-latest CI (Windows Server 2025 10.0.26100) intermittently/consistently fails to bind the ConPTY-attached child to its pseudo console, ten distinct causes eliminated, corroborated externally (github.com/egarim/telekinesis#49) -- accepted as environment-limited per Michael's own call. A non-ConPTY plain-CreateProcessW isolation test proves the surrounding pipe/process/job-object plumbing is sound and stays the always-run Windows test for the module. PowerShell/cmd are driven by this backend the same as any other Windows program.",
+      "created_at": "2026-09-03T18:14:04Z",
+      "updated_at": "2026-09-14T15:46:17Z"
+    },
+    {
+      "id": "T84c",
+      "title": "Target MSYS2 as well, which has no upstream rust target",
+      "status": "done",
+      "priority": "low",
+      "parent": "T84",
+      "detail": "Michael wants MSYS2 targeted alongside Cygwin, and it is not the same build. msys2-runtime is a fork of the Cygwin runtime with the same POSIX surface, so the interactive-shell code should need no change, but a binary for it links msys-2.0.dll where a Cygwin binary links cygwin1.dll, and the two are not interchangeable at runtime. The obstacle is sharper than T84a: rustc --print target-list on the pinned 1.98 toolchain lists x86_64-pc-cygwin and NO msys target whatsoever, so unlike Cygwin there is not even a tier-3 target to build std for. The likely route is a custom target spec derived from the cygwin one with the runtime library swapped, built under MSYS2 own toolchain - to be established rather than assumed, so treat the first step as research and record what is found here before writing CI. This is also the Git-for-Windows route in practice: Git for Windows ships the MSYS2 runtime, so whatever makes MSYS2 work is what makes a Git-for-Windows bash work. Its source is public at git-for-windows/git and git-for-windows/msys2-runtime; nothing needs vendoring here to settle the approach.",
+      "blocked_on": null,
+      "refs": [
+        ".github/workflows/ci.yml",
+        "interactive-shell/binaries.tsv"
+      ],
+      "note": "Research + implementation, going beyond this ticket's own research-only scope with Michael's approval: MSYS2 abandoned its own separate x86_64-pc-msys Rust target and instead ships an official rust package (since Aug 2025) that reuses x86_64-pc-cygwin unchanged, linking against msys-2.0.dll (an actively-synced fork of cygwin1.dll) via MSYS2's own gcc instead of Cygwin's. No new target spec needed. Shipped a real CI leg (windows-latest, msys2/setup-msys2@v2) that builds interactive-shell's unmodified POSIX code and drives a real MSYS2 bash end-to-end, merged PR #163. binaries.tsv reuses the x86_64-pc-cygwin target with an MSYS*-conditioned row (uniqueness there is per (condition, binary), not per target -- an invented x86_64-pc-msys label was tried first and correctly rejected by test-shipped-binaries.sh). Also required enabling ACL on MSYS2's noacl-by-default root mount via /etc/fstab so interactive-shell's own POSIX socket-directory permission check (a real security boundary) can be satisfied there.",
+      "created_at": "2026-09-03T18:18:46Z",
+      "updated_at": "2026-09-14T15:46:26Z"
     },
     {
       "id": "T114",
