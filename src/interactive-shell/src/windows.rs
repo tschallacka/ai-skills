@@ -491,13 +491,20 @@ mod tests {
     /// of the runs where it exits almost immediately (code 0, no prompt) --
     /// real CI runs showed this intermittently, for both cmd.exe and
     /// powershell.exe, timing-dependent enough (sometimes dead by 2s,
-    /// sometimes alive past 20s) to be consistent with the runner's
-    /// Defender/EDR racing a behavioral scan against a ConPTY-attached
-    /// process launch (this exact CreateProcess+PROC_THREAD_ATTRIBUTE_
-    /// PSEUDOCONSOLE pattern is a well-documented reverse-shell/C2
-    /// signature) rather than a bug in spawn() itself -- every run where
-    /// the child survived showed fully correct ConPTY output. Retries a
-    /// fresh spawn on an early death instead of accepting flaky evidence.
+    /// sometimes alive past 20s). Ruled out as the cause: Defender's
+    /// real-time/IOAV/behavior monitoring disabled and confirmed off via
+    /// `Get-MpComputerStatus` (no change); an explicit `WinSta0\Default`
+    /// desktop (no change); `FreeConsole()` before `CreatePseudoConsole`
+    /// (no change) -- despite catching this process's own inherited
+    /// console rendering the child's real prompt directly into the CI
+    /// step's log, the smoking-gun symptom of a known, externally
+    /// reported, unresolved ConPTY bug on recent Windows builds (see
+    /// `working-context.md`'s "Known issue" section). Not a bug in
+    /// `spawn()` itself -- a parallel isolation test proves plain
+    /// (non-ConPTY) `CreateProcessW` survives reliably in this same
+    /// environment, and every run where the ConPTY child DID survive
+    /// showed fully correct output. Retries a fresh spawn on an early
+    /// death since it does sometimes work.
     fn spawn_surviving(program: &str, grace_period: Duration, attempts: u32) -> WindowsBackend {
         for attempt in 1..=attempts {
             let mut backend =
@@ -524,21 +531,22 @@ mod tests {
         panic!("{program} died early on all {attempts} attempts");
     }
 
+    /// Goal 2's W13 verification. On this crate's target CI (real
+    /// windows-latest runners as of Windows Server 2025, build 10.0.26100,
+    /// image windows-2025-vs2026), this test is flaky-to-failing: `cmd.exe`
+    /// via ConPTY dies (code 0, no prompt) almost immediately on this OS
+    /// build essentially every time, and `powershell.exe` does so
+    /// intermittently. See `spawn_surviving`'s doc comment for the full
+    /// elimination trail; the short version is that this matches a known,
+    /// externally reported, currently unresolved Windows/ConPTY bug on
+    /// recent Windows builds (github.com/egarim/telekinesis#49 has the
+    /// identical symptom on a different machine/architecture, using
+    /// Microsoft's own reference implementation), not a defect in
+    /// `windows.rs`. Left in place, unignored, as the intended real
+    /// verification: it passes outright on a Windows build without this
+    /// bug, and the `spawn_surviving` retry sometimes recovers even here.
     #[test]
     fn spawn_write_read_resize_stop_round_trip() {
-        // powershell.exe, not cmd.exe: real windows-latest CI runs showed
-        // cmd.exe consistently exiting (code 0, no prompt ever printed)
-        // within ~2s of a ConPTY-attached spawn regardless of Job Object
-        // use or pipe-handle-close timing, while powershell.exe spawned the
-        // same way sometimes stayed alive and worked -- almost certainly
-        // the runner's Defender/EDR flagging this exact API pattern as a
-        // reverse-shell signature. The plan's own acceptance criteria names
-        // either shell as acceptable evidence. -NoProfile/-NoLogo made the
-        // child die quickly (code 0) instead of surviving, the opposite of
-        // what a "skip slow startup work" flag should do -- that flag
-        // combination is itself a well-known stealthy-PowerShell signature,
-        // so it plausibly trips this even harder; bare invocations survived
-        // more often, just sometimes slowly.
         let mut backend = spawn_surviving("powershell.exe", Duration::from_secs(3), 6);
 
         // Wait for the actual prompt, not a fixed sleep: profile loading on
