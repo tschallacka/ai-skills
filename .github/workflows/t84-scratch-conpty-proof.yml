@@ -9,10 +9,15 @@ name: "T84 scratch: ConPTY backend proof (temporary -- removed once evidence is 
 # interactive-shell's --lib target, which is enough to reach the
 # `windows::tests` module without needing that transport to exist.
 #
-# manual-only: this never runs on push/PR, only on demand while goal 2 is
-# proving itself out.
+# Runs on the throwaway PR that carries this scratch job (GitHub will not
+# dispatch a brand-new workflow_dispatch trigger from a non-default branch
+# until the workflow file exists on the default branch, so pull_request is
+# the only way to fire this before goal 2's real PR merges). Also kept as
+# workflow_dispatch for a manual re-run once that registration exists.
 on:
   workflow_dispatch: {}
+  pull_request:
+    branches: [nextupdate]
 
 jobs:
   conpty-proof:
