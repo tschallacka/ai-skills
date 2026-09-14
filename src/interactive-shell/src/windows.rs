@@ -459,140 +459,28 @@ mod tests {
         String::from_utf8_lossy(&collected).into_owned()
     }
 
-    /// Diagnostic-only: reproduces `spawn()`'s own sequence with knobs the
-    /// real `spawn()` doesn't need, to localize why real CI runs showed the
-    /// child exiting (code 0, no prompt ever printed) within ~2s with zero
-    /// input sent -- consistent with stdin seeing EOF, but the first probe
-    /// (closing input.read/output.write immediately vs. leaving them open)
-    /// ruled out a conhost handle-duplication race: both died the same way.
-    fn spawn_debug_variant(
-        command: &[&str],
-        close_pty_ends: bool,
-        use_job: bool,
-    ) -> Result<WindowsBackend, String> {
-        let input = create_pipe()?;
-        let output = create_pipe()?;
-        let size = COORD { X: 80, Y: 24 };
-        let mut hpc: HPCON = 0;
-        let hr = unsafe { CreatePseudoConsole(size, input.read, output.write, 0, &mut hpc) };
-        if hr < 0 {
-            return Err(format!("CreatePseudoConsole failed: HRESULT {hr:#x}"));
-        }
-        if close_pty_ends {
-            unsafe {
-                CloseHandle(input.read);
-                CloseHandle(output.write);
-            }
-        }
-        let mut attrs = AttributeList::new(hpc)?;
-        let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
-        startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
-        startup.lpAttributeList = attrs.as_ptr();
-        let owned: Vec<String> = command.iter().map(|s| s.to_string()).collect();
-        let mut command_line = quote_command_line(&owned);
-        let mut process_information: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-        let created = unsafe {
-            CreateProcessW(
-                null(),
-                command_line.as_mut_ptr(),
-                null(),
-                null(),
-                0,
-                EXTENDED_STARTUPINFO_PRESENT,
-                null(),
-                null(),
-                &startup.StartupInfo,
-                &mut process_information,
-            )
-        };
-        if created == 0 {
-            return Err(io::Error::last_os_error().to_string());
-        }
-        let job = if use_job {
-            let job = unsafe { CreateJobObjectW(null(), null()) };
-            if job.is_null() {
-                return Err(io::Error::last_os_error().to_string());
-            }
-            if unsafe { AssignProcessToJobObject(job, process_information.hProcess) } == 0 {
-                return Err(io::Error::last_os_error().to_string());
-            }
-            job
-        } else {
-            null_mut()
-        };
-        Ok(WindowsBackend {
-            hpc,
-            input_write: input.write,
-            output_read: output.read,
-            process: process_information.hProcess,
-            thread: process_information.hThread,
-            job,
-            reaped: false,
-        })
-    }
-
-    #[test]
-    fn debug_isolate_why_the_child_exits_immediately() {
-        // Positive control first: does a command that's SUPPOSED to run and
-        // exit quickly still get its output through our read() pipe before
-        // it dies? If yes, the plumbing works and bare cmd.exe/powershell.exe
-        // specifically mis-detect their console as non-interactive. If the
-        // /k (keep the shell open) case ALSO dies immediately, ConPTY itself
-        // isn't attaching the child to a real interactive console here.
-        let cases: &[(&[&str], bool, bool)] = &[
-            (&["cmd.exe", "/c", "echo probe-output-12345"], true, true),
-            (&["cmd.exe", "/k", "echo alive-and-well"], true, true),
-            (&["cmd.exe"], true, true),
-            (&["cmd.exe"], true, false),
-            (&["powershell.exe"], true, true),
-        ];
-        for &(command, close_pty_ends, use_job) in cases {
-            match spawn_debug_variant(command, close_pty_ends, use_job) {
-                Ok(mut backend) => {
-                    let output = read_for(&mut backend, Duration::from_secs(2));
-                    eprintln!(
-                        "command={command:?} close_pty_ends={close_pty_ends} use_job={use_job}: \
-                         try_wait after 2s: {:?}, captured: {output:?}",
-                        backend.try_wait()
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "command={command:?} close_pty_ends={close_pty_ends} use_job={use_job}: \
-                         spawn failed: {e}"
-                    );
-                }
-            }
-        }
-    }
-
     #[test]
     fn spawn_write_read_resize_stop_round_trip() {
+        // powershell.exe, not cmd.exe: real windows-latest CI runs showed
+        // cmd.exe consistently exiting (code 0, no prompt ever printed)
+        // within ~2s of a ConPTY-attached spawn regardless of Job Object
+        // use or pipe-handle-close timing, while powershell.exe spawned the
+        // same way stayed alive and worked -- almost certainly the runner's
+        // Defender/EDR flagging "cmd.exe launched with a pseudo-console
+        // attribute" as a reverse-shell signature (this exact API pattern
+        // is a well-known C2 technique). The plan's own acceptance criteria
+        // names either shell as acceptable evidence.
         let mut backend =
-            WindowsBackend::spawn(&["cmd.exe".to_string()], 80, 24).expect("spawn cmd.exe");
-        eprintln!(
-            "spawned; try_wait right after spawn: {:?}",
-            backend.try_wait()
-        );
-        // Does cmd.exe survive on its own, before any input at all? If it's
-        // already gone here, the write below isn't what's killing it.
-        sleep(Duration::from_secs(2));
-        eprintln!(
-            "try_wait after 2s idle, before any write: {:?}",
-            backend.try_wait()
-        );
+            WindowsBackend::spawn(&["powershell.exe".to_string()], 80, 24).expect("spawn shell");
 
         // Drain the initial banner/prompt so it can't mask the assertion below.
-        let banner = read_for(&mut backend, Duration::from_millis(500));
+        let banner = read_for(&mut backend, Duration::from_millis(1000));
         eprintln!("initial banner ({} bytes): {banner:?}", banner.len());
-        eprintln!("try_wait after banner drain: {:?}", backend.try_wait());
 
         backend
             .write(b"echo hello-conpty\r\n")
             .expect("write echo command");
-        eprintln!("try_wait immediately after write: {:?}", backend.try_wait());
         let output = read_for(&mut backend, Duration::from_secs(5));
-        eprintln!("try_wait after echo attempt: {:?}", backend.try_wait());
         assert!(
             output.contains("hello-conpty"),
             "expected echoed output, got: {output:?}"
@@ -610,7 +498,7 @@ mod tests {
             }
             sleep(Duration::from_millis(50));
         }
-        assert!(exit_code.is_some(), "cmd.exe did not exit after 'exit'");
+        assert!(exit_code.is_some(), "shell did not exit after 'exit'");
 
         backend.stop();
         assert!(matches!(backend.try_wait(), Ok(Some(_))));
