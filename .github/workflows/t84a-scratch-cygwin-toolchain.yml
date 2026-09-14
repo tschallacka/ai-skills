@@ -1,0 +1,58 @@
+name: "T84a scratch: Cygwin toolchain route discovery (temporary -- removed once evidence is captured)"
+
+# Not part of the plan's permanent CI surface. T84a (goal 04-cygwin-ci-leg,
+# W19) needs to confirm, on a real CI run, whether nightly Rust with
+# -Z build-std=std,panic_abort can actually build interactive-shell for
+# x86_64-pc-cygwin (tier 3, no prebuilt std) before committing to a
+# permanent matrix leg shape. Runs on the throwaway PR that carries this
+# scratch job, same reason goal 2's own scratch job did (workflow_dispatch
+# cannot be dispatched from a non-default branch until the trigger is
+# registered on the default branch first).
+on:
+  workflow_dispatch: {}
+  pull_request:
+    branches: [nextupdate]
+
+jobs:
+  cygwin-build-std:
+    name: build-std x86_64-pc-cygwin (nightly)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          # Same MAX_PATH concern as goal 2's own scratch job.
+          sparse-checkout: |
+            src
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+
+      - name: Install Cygwin (gcc-core, gcc-g++)
+        uses: cygwin/cygwin-install-action@v6
+        with:
+          packages: |
+            gcc-core
+            gcc-g++
+
+      - name: Report what Cygwin's gcc actually installed as
+        shell: bash
+        run: |
+          which gcc || true
+          gcc --version || true
+          which x86_64-pc-cygwin-gcc || echo "no x86_64-pc-cygwin-gcc on PATH"
+
+      - name: Install nightly Rust with rust-src
+        shell: bash
+        run: |
+          rustup toolchain install nightly --component rust-src --no-self-update
+          rustup run nightly rustc --version
+
+      - name: Attempt -Z build-std for x86_64-pc-cygwin
+        shell: bash
+        env:
+          CARGO_TARGET_X86_64_PC_CYGWIN_LINKER: gcc
+        run: |
+          cargo +nightly build -Z build-std=std,panic_abort \
+            --target x86_64-pc-cygwin \
+            -p interactive-shell --bin interactive-shell --bin interactive-shell-input
