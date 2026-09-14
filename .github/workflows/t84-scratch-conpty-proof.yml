@@ -42,6 +42,19 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      # Real CI runs showed the ConPTY-attached child (cmd.exe consistently,
+      # powershell.exe intermittently) exiting almost immediately (code 0,
+      # no prompt ever printed), with the "sometimes works, sometimes
+      # doesn't, always a clean exit code" pattern pointing at Defender's
+      # real-time behavioral scanning racing the process launch --
+      # CreateProcess+PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE is a documented
+      # reverse-shell/C2 signature. This is a short-lived, throwaway
+      # GitHub-hosted runner discarded after this job, so disabling
+      # real-time monitoring for its lifetime is safe.
+      - name: Disable Defender real-time monitoring for this ephemeral runner
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: cargo test --lib (windows::tests only)
         shell: bash
         working-directory: src/interactive-shell
