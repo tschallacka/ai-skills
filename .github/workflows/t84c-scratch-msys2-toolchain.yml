@@ -39,6 +39,14 @@ jobs:
           which gcc
           gcc --version
           uname -a
+          cygpath -w "$(which gcc)"
+
+      - name: Confirm the Windows-side path to gcc.exe exists
+        shell: pwsh
+        run: |
+          Test-Path 'C:\msys64\usr\bin\gcc.exe'
+          Get-ChildItem -Path C:\ -Filter msys64 -Directory -ErrorAction SilentlyContinue
+          Get-ChildItem -Path D:\ -Filter msys64 -Directory -ErrorAction SilentlyContinue
 
       - name: Install nightly Rust with rust-src
         shell: pwsh
