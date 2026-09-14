@@ -42,17 +42,23 @@ jobs:
           gcc --version || true
           which x86_64-pc-cygwin-gcc || echo "no x86_64-pc-cygwin-gcc on PATH"
 
+      # pwsh, not bash: cygwin-install-action prepends Cygwin's own bin dir
+      # to PATH, so `shell: bash` now resolves to Cygwin's bash rather than
+      # Git-Bash -- invoking native Windows executables (rustup, cargo)
+      # through it corrupted an argument (a literal embedded newline landed
+      # inside --no-self-update). pwsh sidesteps that translation layer
+      # entirely for the native toolchain steps.
       - name: Install nightly Rust with rust-src
-        shell: bash
+        shell: pwsh
         run: |
-          rustup toolchain install nightly --component rust-src --no-self-update
+          rustup toolchain install nightly --component rust-src
           rustup run nightly rustc --version
 
       - name: Attempt -Z build-std for x86_64-pc-cygwin
-        shell: bash
+        shell: pwsh
         env:
           CARGO_TARGET_X86_64_PC_CYGWIN_LINKER: gcc
         run: |
-          cargo +nightly build -Z build-std=std,panic_abort \
-            --target x86_64-pc-cygwin \
+          cargo +nightly build -Z build-std=std,panic_abort `
+            --target x86_64-pc-cygwin `
             -p interactive-shell --bin interactive-shell --bin interactive-shell-input
