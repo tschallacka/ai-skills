@@ -80,3 +80,8 @@ jobs:
       - name: Drive a real MSYS2 bash through the built wrapper
         shell: msys2 {0}
         run: .github/cygwin-drive-bash-check.sh
+
+      - name: Show the wrapper's own stderr regardless of outcome
+        if: always()
+        shell: msys2 {0}
+        run: cat "$RUNNER_TEMP/wrapper.log" 2>&1 || echo "no wrapper.log found"
