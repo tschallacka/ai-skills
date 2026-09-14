@@ -84,8 +84,9 @@ pub fn sort(root: &mut Value, key: &str, bugs: bool) {
                 "partly" => 2,
                 "decided" => 3,
                 "done" => 4,
-                "obsolete" => 5,
-                _ => 6,
+                "dropped" => 5,
+                "obsolete" => 6,
+                _ => 7,
             }
         };
         let number = text(object, "id")
@@ -153,7 +154,10 @@ pub fn findings(root: &Value, key: &str, bugs: bool) -> Vec<String> {
             ]
             .contains(&status)
         } else {
-            ["open", "done", "blocked", "partly", "decided", "obsolete"].contains(&status)
+            [
+                "open", "done", "blocked", "partly", "decided", "dropped", "obsolete",
+            ]
+            .contains(&status)
         };
         if !allowed {
             result.push(format!(
@@ -219,7 +223,7 @@ fn civil(days: i64) -> (i64, i64, i64) {
 
 #[cfg(test)]
 mod tests {
-    use super::next_id;
+    use super::{findings, next_id};
     use serde_json::json;
     #[test]
     fn nonnumeric_ids_are_ignored() {
@@ -227,5 +231,17 @@ mod tests {
             next_id(&json!({"tasks":[{"id":"T1e"},{"id":"T9"}]}), "tasks", 'T'),
             10
         );
+    }
+
+    #[test]
+    fn a_task_at_status_dropped_is_not_flagged_unknown() {
+        let root = json!({"tasks": [{
+            "id": "T1",
+            "status": "dropped",
+            "priority": "normal",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }]});
+        assert!(findings(&root, "tasks", false).is_empty());
     }
 }
