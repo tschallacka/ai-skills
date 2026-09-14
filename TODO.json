@@ -23,6 +23,52 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
+      "id": "T145",
+      "title": "Make shell scripts portable across sh/bash/zsh (or fully shell-agnostic)",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Scripts currently assume bash (arrays, [[ ]], local, and other bash-specific builtins -- CODE-STYLE.md's own portability floor is bash 3.2, not POSIX sh). Requested ahead of the 2.0.0-alpha release: either make shipped .sh entrypoints genuinely POSIX /bin/sh compatible, or fall back to explicit bash+zsh dual compatibility since those are the two shells actually in wide use -- full shell-agnosticism is the preferred outcome over picking one alternate shell. Scope: audit planning/scripts/** and any other shipped .sh entrypoints for bash-only constructs; extend CI portability legs (today: bash32 floor + macOS system bash) to cover zsh and/or dash. Overlaps with T147: a script ported to Rust needs no shell-portability work at all, so scope this against whatever T147 leaves as shell scripts.",
+      "blocked_on": null,
+      "refs": [
+        "T147"
+      ],
+      "note": "filed per explicit user request ahead of 2.0.0-alpha",
+      "created_at": "2026-09-14T18:23:18Z",
+      "updated_at": "2026-09-14T18:23:18Z"
+    },
+    {
+      "id": "T146",
+      "title": "Port the planning skill to a Rust-backed MCP tool with atomic concurrent writes",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Port the planning skill (currently planning/scripts/*.sh operating on JSON plan-state files) to a Rust binary exposed both as a CLI and as an MCP server, mirroring ai-text-editor's dual CLI/MCP delivery model. Must be atomic under concurrent access: many subworkers/subagents routinely operate on the same plan's task list at once today, and the current file-based approach has no real concurrency guarantee, risking lost updates or corrupted plan state. Needs a real atomicity mechanism (e.g. file locking, revision-guarded compare-and-swap matching ai-text-editor's own revision-guard pattern, or a single-writer server model) rather than best-effort file writes. Requested ahead of the 2.0.0-alpha release. Plan the design with the planning skill itself before implementation, per this repo's own convention for non-trivial work.",
+      "blocked_on": null,
+      "refs": [
+        "T147"
+      ],
+      "note": "filed per explicit user request ahead of 2.0.0-alpha",
+      "created_at": "2026-09-14T18:23:18Z",
+      "updated_at": "2026-09-14T18:23:18Z"
+    },
+    {
+      "id": "T147",
+      "title": "Convert remaining bash-backed skills to Rust-backed implementations",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Survey every bash-backed skill in the repo and convert as many as practical to Rust-backed binaries, following the precedent already set by ai-text-editor, todo/bugs, register-rebuild, planning-register, and the installer. Goals: portability (removes bash-version-specific behavior entirely rather than chasing it, see T145), maintainability, and testability (cargo test vs. shell test harnesses). Requested ahead of the 2.0.0-alpha release. The planning skill is one candidate for this conversion but is tracked separately as T146 given its size and its concurrent-write atomicity requirement.",
+      "blocked_on": null,
+      "refs": [
+        "T145",
+        "T146"
+      ],
+      "note": "filed per explicit user request ahead of 2.0.0-alpha",
+      "created_at": "2026-09-14T18:23:18Z",
+      "updated_at": "2026-09-14T18:23:18Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
