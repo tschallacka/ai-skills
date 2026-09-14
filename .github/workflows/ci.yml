@@ -1267,6 +1267,108 @@ jobs:
             target/${{ matrix.target }}/release/todo.exe
           if-no-files-found: error
 
+  cygwin:
+    # T84a: x86_64-pc-cygwin is tier 3 (no prebuilt std), so this is its own
+    # job rather than a sixth `native` matrix leg -- it needs a nightly
+    # toolchain with -Z build-std and a Cygwin install the other four
+    # platforms have no use for, not just a different os/target pair.
+    #
+    # Gated the same way `native` is gated (needs.scope.outputs.scope !=
+    # 'none'), rather than a parallel selective-compilation mechanism of its
+    # own: interactive-shell's other per-target builds already ride on that
+    # same job-level condition with no scope flag of their own (see the
+    # `native` job's own comment), and this is one more per-target build of
+    # the same crate.
+    #
+    # Cygwin's own libc bindings for openpty/setsid/ioctl/setpgid/kill are an
+    # UNVERIFIED assumption T84a's own ticket does not independently audit;
+    # this leg is what would surface an incompatibility, by actually
+    # spawning and driving a real Cygwin bash, not just linking one.
+    name: x86_64-pc-cygwin builds and drives a real Cygwin bash
+    runs-on: windows-latest
+    needs: scope
+    if: needs.scope.outputs.scope != 'none'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          # Same MAX_PATH concern as the native job's own windows-latest leg.
+          sparse-checkout: |
+            src
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+
+      - name: Install Cygwin (gcc-core, gcc-g++)
+        uses: cygwin/cygwin-install-action@v6
+        with:
+          packages: |
+            gcc-core
+            gcc-g++
+
+      # pwsh, not bash: cygwin-install-action prepends Cygwin's own bin dir
+      # to PATH, so `shell: bash` resolves to Cygwin's bash rather than
+      # Git-Bash from this point on -- invoking rustup/cargo (native Windows
+      # executables) through it corrupted an argument in W19's own scratch
+      # run (a literal embedded newline landed inside a flag). pwsh avoids
+      # that translation layer for every step that calls rustup or cargo
+      # directly; Cygwin's own bash is used only for the final run of the
+      # Cygwin-linked binary itself, where that translation is exactly what
+      # is being verified.
+      - name: Install nightly Rust with rust-src
+        shell: pwsh
+        run: rustup toolchain install nightly --component rust-src
+
+      - name: Build interactive-shell for x86_64-pc-cygwin
+        shell: pwsh
+        env:
+          # Cygwin's own gcc (plain `gcc`, not an x86_64-pc-cygwin-gcc-
+          # prefixed binary -- confirmed in W19's own scratch run) is a
+          # sufficient linker; no cross-compiler package is installed.
+          CARGO_TARGET_X86_64_PC_CYGWIN_LINKER: gcc
+        run: |
+          cargo +nightly build -Z build-std=std,panic_abort --release `
+            --target x86_64-pc-cygwin `
+            -p interactive-shell --bin interactive-shell --bin interactive-shell-input
+
+      - name: Drive a real Cygwin bash through the built wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="$GITHUB_WORKSPACE/target/x86_64-pc-cygwin/release"
+          wrapper="$release/interactive-shell"
+          [ -x "$wrapper" ] || wrapper="$wrapper.exe"
+          input="$release/interactive-shell-input"
+          [ -x "$input" ] || input="$input.exe"
+
+          session="cygwin-ci-$$"
+          "$wrapper" --session "$session" --cols 80 --rows 24 --idle-timeout 15 -- bash \
+            >"$RUNNER_TEMP/wrapper.jsonl" 2>"$RUNNER_TEMP/wrapper.log" &
+          wrapper_pid=$!
+          trap 'kill "$wrapper_pid" 2>/dev/null || true' EXIT
+
+          # Poll for the socket/discovery file session_socket() creates,
+          # rather than a fixed sleep: openpty/fork/exec plus Cygwin's own
+          # process startup has no fixed latency worth guessing at.
+          for _ in $(seq 1 50); do
+              "$input" --session "$session" view >/dev/null 2>&1 && break
+              sleep 0.2
+          done
+
+          screen="$("$input" --session "$session" text 'echo cygwin-conpty-check-12345' && \
+                     "$input" --session "$session" key ENTER && \
+                     sleep 1 && \
+                     "$input" --session "$session" view)"
+          echo "$screen"
+          case "$screen" in
+              *cygwin-conpty-check-12345*) ;;
+              *) echo "::error::expected echo output never appeared on screen"; exit 1 ;;
+          esac
+
+          "$input" --session "$session" shutdown >/dev/null 2>&1 || true
+          wait "$wrapper_pid" 2>/dev/null || true
+          echo "interactive-shell spawned and drove a real Cygwin bash"
+
   rust-artifact-manifest:
     name: publish Rust artifact hashes
     runs-on: ubuntu-latest
