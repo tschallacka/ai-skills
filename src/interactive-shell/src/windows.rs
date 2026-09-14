@@ -199,6 +199,15 @@ impl Backend for WindowsBackend {
         let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
         startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
         startup.lpAttributeList = attrs.as_ptr();
+        // Explicit desktop: on some CI runners the launching process isn't
+        // itself attached to an interactive window station/desktop, and a
+        // child spawned without an explicit one can fail to bind properly
+        // to ConPTY's virtual console, exiting cleanly almost immediately
+        // instead of erroring. WinSta0\Default is the standard interactive
+        // desktop; naming it explicitly costs nothing when it's already
+        // correct and fixes it when it silently wasn't.
+        let mut desktop: Vec<u16> = "WinSta0\\Default\0".encode_utf16().collect();
+        startup.StartupInfo.lpDesktop = desktop.as_mut_ptr();
 
         let mut command_line = quote_command_line(command);
         let mut process_information: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
