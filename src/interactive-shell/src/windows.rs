@@ -495,15 +495,28 @@ mod tests {
         // attribute" as a reverse-shell signature (this exact API pattern
         // is a well-known C2 technique). The plan's own acceptance criteria
         // names either shell as acceptable evidence.
-        let mut backend =
-            WindowsBackend::spawn(&["powershell.exe".to_string()], 80, 24).expect("spawn shell");
+        // -NoProfile/-NoLogo: run 9 showed powershell.exe alive but stuck
+        // for the full 20s timeout after its initial ConPTY setup escapes,
+        // never printing a prompt -- consistent with a hung/slow profile
+        // script (module auto-import, telemetry, update checks) rather than
+        // ConPTY itself; automation contexts standardly skip the profile.
+        let mut backend = WindowsBackend::spawn(
+            &[
+                "powershell.exe".to_string(),
+                "-NoProfile".to_string(),
+                "-NoLogo".to_string(),
+            ],
+            80,
+            24,
+        )
+        .expect("spawn shell");
 
-        // Wait for the actual prompt, not a fixed sleep: PowerShell's own
-        // startup (profile load, module imports) is slow and variable.
+        // Wait for the actual prompt, not a fixed sleep.
         let banner = wait_for(&mut backend, Duration::from_secs(20), |text| {
             text.contains("PS ")
         });
         eprintln!("initial banner ({} bytes): {banner:?}", banner.len());
+        eprintln!("try_wait at banner-wait deadline: {:?}", backend.try_wait());
         assert!(banner.contains("PS "), "shell never reached a prompt");
 
         backend
