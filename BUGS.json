@@ -347,6 +347,27 @@
       "updated_at": "2026-09-11T08:43:46Z"
     },
     {
+      "id": "B333",
+      "title": "bash32 fails to link on aarch64-darwin, so nix develop cannot build a shell and setup-dev-env produces no binaries",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "cd ai-skills && ./setup-dev-env.sh    # on aarch64-apple-darwin (Darwin 25.6.0, Determinate Nix 3.22.3)",
+      "observed": "Exits 1 with no binary produced; bin/aarch64-apple-darwin/ is never created. nix fails realising the devShell because bash32-3.2.57 will not link: \"duplicate symbol '_PC' in: ./lib/readline/libreadline.a(terminal.o) ./lib/termcap/libtermcap.a(termcap.o)\", then \"ld: 1 duplicate symbol for architecture arm64\", \"make: *** [Makefile:523: bash] Error 1\", and \"error: Cannot build nix-shell-env.drv: 1 dependency failed\".",
+      "expected": "The devShell builds, setup-dev-env.sh re-execs into it and compiles each crate into bin/aarch64-apple-darwin/ (bugs, todo, rjq, ai-text-editor, ai-text-editor-server, ai-text-editor-mcp, interactive-shell, the planning helpers).",
+      "mechanism": "bash 3.2 declares the termcap global PC as a tentative definition (file scope, no initialiser) in BOTH its bundled readline (lib/readline/terminal.c) and its bundled termcap (lib/termcap/termcap.c). Under -fcommon those merge into one common symbol, which was every compiler default when bash 3.2 shipped in 2007. clang 11 and gcc 10 changed the default to -fno-common, so each tentative definition emits a strong definition in its own object file and the link sees two definitions of _PC. The stdenv on aarch64-darwin here is clang 21.1.8. mkBash32 in flake.nix sets CFLAGS to \"-O2 -w -std=gnu89 -Wno-implicit-function-declaration\" with no -fcommon, and bash32 is an unconditional member of the devShell packages list, so nothing in the shell can be built on this platform.",
+      "surfaces": [
+        "flake.nix"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "migration of the dev environment to Apple Silicon; first attempt to run setup-dev-env.sh on aarch64-apple-darwin",
+      "notes": "FIX IS PROVEN, NOT PROPOSED: add -fcommon to mkBash32 in two places, CFLAGS and the preBuild CC= line. Both, for the same reason -std=gnu89 is already duplicated across both and the derivation own comments explain: the Makefile compiles its helper tools (mkbuiltins, mksyntax) with CC directly and they never see CFLAGS. Verified by building bash 3.2.57 out of tree with only that flag added, which produced a working \"GNU bash, version 3.2.57(1)-release (aarch64-apple-darwin25.6.0)\" Mach-O arm64 executable. The mutation is the flag itself: without -fcommon the link fails as observed, with it the build completes. WHY IT WENT UNNOTICED: the derivation was written and debugged on Linux (its comments reference glibc and \"a current gcc\") and has never been built on Apple Silicon, where the nixpkgs stdenv is a much newer clang. Two things also mask it. First, --list and --check return before the script touches nix at all, so ./setup-dev-env.sh --check succeeds on this platform and reports every artifact MISSING, which reads as \"not built yet\" rather than \"cannot be built\". Second, bash32 exists precisely so the suite can be exercised against the macOS bash 3.2 floor of CODE-STYLE.md section 1 — so the one platform it cannot be built on is the platform it exists to emulate, and the one where /bin/bash already is 3.2.57. SECONDARY OBSERVATION, possibly its own entry: this path exits 1, outside the script documented exit vocabulary (64 bad usage, 69 nix missing, 70 a crate failed to build). setup-dev-env.sh line 139 execs nix develop, so nix own exit code replaces the script and a caller checking for 69 or 70 sees an undocumented 1. require_nix passes, because nix IS present; it is the devShell that cannot be realised, which the vocabulary has no code for.",
+      "created_at": "2026-09-14T13:57:31Z",
+      "updated_at": "2026-09-14T13:57:31Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
