@@ -1338,7 +1338,12 @@ jobs:
 
       - name: Drive a real Cygwin bash through the built wrapper
         shell: pwsh
-        run: D:\cygwin\bin\bash.exe --login "$env:GITHUB_WORKSPACE/.github/cygwin-drive-bash-check.sh"
+        run: |
+          # Cygwin's bash rejects a native Windows path outright ("No such
+          # file or directory") -- cygpath converts it to the /cygdrive/...
+          # form bash actually resolves.
+          $script = & D:\cygwin\bin\cygpath.exe -u "$env:GITHUB_WORKSPACE/.github/cygwin-drive-bash-check.sh"
+          D:\cygwin\bin\bash.exe --login $script
 
   rust-artifact-manifest:
     name: publish Rust artifact hashes
