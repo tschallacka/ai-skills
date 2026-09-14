@@ -41,24 +41,18 @@ jobs:
           uname -a
           cygpath -w "$(which gcc)"
 
-      - name: Confirm the Windows-side path to gcc.exe exists
-        shell: pwsh
-        run: |
-          Test-Path 'C:\msys64\usr\bin\gcc.exe'
-          Get-ChildItem -Path C:\ -Filter msys64 -Directory -ErrorAction SilentlyContinue
-          Get-ChildItem -Path D:\ -Filter msys64 -Directory -ErrorAction SilentlyContinue
-
       - name: Install nightly Rust with rust-src
         shell: pwsh
         run: rustup toolchain install nightly --component rust-src
 
       - name: Attempt -Z build-std for x86_64-pc-cygwin, linked via MSYS2's gcc
         shell: pwsh
-        env:
-          # MSYS2's own native gcc, NOT Cygwin's -- this is the one part
-          # of goal 4's recipe this scratch job changes.
-          CARGO_TARGET_X86_64_PC_CYGWIN_LINKER: 'C:\msys64\usr\bin\gcc.exe'
         run: |
+          # setup-msys2 installs to $RUNNER_TEMP\msys64 (D:\a\_temp\msys64
+          # on this runner type), not C:\msys64 -- confirmed via cygpath -w
+          # in the previous step, since it isn't documented as a stable
+          # contract.
+          $env:CARGO_TARGET_X86_64_PC_CYGWIN_LINKER = "$env:RUNNER_TEMP\msys64\usr\bin\gcc.exe"
           cargo +nightly build -Z build-std=std,panic_abort --release `
             --target x86_64-pc-cygwin `
             -p interactive-shell --bin interactive-shell --bin interactive-shell-input
