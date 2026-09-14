@@ -6808,7 +6808,7 @@
     {
       "id": "B334",
       "title": "todo-update/register-rebuild's own status enum still lacks 'dropped', reopening B102's gap in the Rust dev tools",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6820,12 +6820,12 @@
         "src/planning-register/src/lib.rs",
         "src/register-rebuild/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Added 'dropped' to the status allowlists in both stale Rust duplicates: planning-register/src/lib.rs::findings() and register-rebuild/src/main.rs::findings(), matching the canonical todo/src/register.rs::STATUSES and the shipped schema.2.0.0-alpha.1.json enum. Also added 'dropped' to each file's own status-rank sort table (previously falling into the catch-all _ arm), consistent with B102's precedent and todo/src/register.rs's own rank ordering. Shipped as PR #165, commit 7b8042cc.",
+      "verification": "Added a unit test in each crate (a_task_at_status_dropped_is_not_flagged_unknown) asserting findings() returns no error for an entry at status dropped; both pass under cargo test -p planning-register -p register-rebuild. Full pre-push-check.sh (fmt, clippy -D warnings, cargo test, register soundness) passed clean, and PR #165's CI (28/28 checks) passed before merge.",
       "found_by": "hit live while closing T84a through todo-update during the T84 Windows-support backlog sweep, 2026-09-14",
       "notes": null,
       "created_at": "2026-09-14T15:47:14Z",
-      "updated_at": "2026-09-14T15:47:14Z"
+      "updated_at": "2026-09-14T17:39:08Z"
     },
     {
       "id": "B25",
