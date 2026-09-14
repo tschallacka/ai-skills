@@ -34,6 +34,21 @@ jobs:
           msystem: MSYS
           install: gcc
 
+      # interactive-shell's own session-socket directory check (inherited
+      # unchanged from POSIX, goal 4 proved it unmodified on Cygwin) refuses
+      # to start unless its parent directory's permission bits show exactly
+      # 0700 -- "socket parent must be a private directory owned by the
+      # current user". MSYS2 defaults to `noacl` mounts (unlike Cygwin,
+      # which defaults to `acl` on), so chmod/permission bits are not
+      # actually enforced or reported accurately there, and that check
+      # fails. Enabling acl for MSYS2's own root mount (NTFS-only, which
+      # this runner is) makes it behave like Cygwin's default.
+      - name: Enable ACL on MSYS2's root mount (matches Cygwin's default)
+        shell: pwsh
+        run: |
+          $msysRoot = "$env:RUNNER_TEMP\msys64"
+          Add-Content -Path "$msysRoot\etc\fstab" -Value "$msysRoot / ntfs override,acl,binary,posix=1 0 0"
+
       - name: Report what MSYS2's gcc actually is
         shell: msys2 {0}
         run: |
