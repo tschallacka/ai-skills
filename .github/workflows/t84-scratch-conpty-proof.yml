@@ -53,7 +53,10 @@ jobs:
       # real-time monitoring for its lifetime is safe.
       - name: Disable Defender real-time monitoring for this ephemeral runner
         shell: pwsh
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true
+          Get-MpComputerStatus | Format-List RealTimeProtectionEnabled, AMRunningMode, IsTamperProtected
+          Get-MpPreference | Format-List DisableRealtimeMonitoring, DisableIOAVProtection, DisableBehaviorMonitoring
 
       - name: cargo test --lib (windows::tests only)
         shell: bash
