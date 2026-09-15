@@ -252,7 +252,14 @@ fn parse_csv_line(line: &str) -> Result<Vec<String>, ()> {
     let mut index = 0;
     while index < chars.len() {
         let ch = chars[index];
-        if ch == '"' {
+        if ch == '\\' && chars.get(index + 1) == Some(&'"') {
+            // Checked ahead of the bare-quote case, matching
+            // plan_render_csv_table_awk_parse_csv's own if-order: a
+            // backslash-escaped quote is a literal '"' in the field
+            // regardless of quoted state, not a quote-toggle.
+            field.push('"');
+            index += 1;
+        } else if ch == '"' {
             if quoted && chars.get(index + 1) == Some(&'"') {
                 field.push('"');
                 index += 1;
@@ -307,6 +314,18 @@ mod tests {
         assert_eq!(
             csv_to_markdown(2, "a\n"),
             Err(CsvError::WrongColumnCount(1, 1, 2))
+        );
+    }
+
+    #[test]
+    fn a_backslash_escaped_quote_is_a_literal_quote_in_the_field() {
+        // Matches plan_render_csv_table_awk_parse_csv's own if-order: \" is
+        // checked ahead of the bare-quote toggle, so it never opens or
+        // closes a quoted field -- just a literal '"' character, alongside
+        // the RFC4180 doubled-quote ("") escape already covered above.
+        assert_eq!(
+            csv_to_markdown(2, r#""Name","Value"\n"Status","He said \"go\"""#).unwrap(),
+            "| Name | Value |\n|---|---|\n| Status | He said \"go\" |\n"
         );
     }
 
