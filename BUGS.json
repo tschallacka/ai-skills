@@ -4684,6 +4684,27 @@
       "updated_at": "2026-09-15T09:58:43Z"
     },
     {
+      "id": "B339",
+      "title": "plan-content.sh find --in all/stories crashes with 'matches_file: unbound variable' on any plan lacking ui-user-stories.md",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "planning/scripts/plan-content.sh find <plan-with-no-ui-user-stories.md> \"<any pattern present elsewhere>\" --in all   # or --in stories",
+      "observed": "planning/scripts/plan-content-lib.sh: line 1: matches_file: unbound variable (exit 1), instead of the real find results",
+      "expected": "find --in all/--in stories reports real matches (or a clean 'no matches' for --in stories) on any plan, including one with no ui-user-stories.md",
+      "mechanism": "content_find_scope_units_and_stories() guarded its stories branch (and, latently, its units/coverage branches) with a bare '[ -f FILE ] && CMD' statement under 'set -euo pipefail'. When the guard file does not exist -- true for any plan without a UI-affecting goal, since ui-user-stories.md is only created when UI is affected -- the compound statement's own exit status is 1 (the awk never runs), which under errexit propagates an unintended early return through every calling function (content_find_scope_units_and_stories -> content_find_by_scope -> content_find_command), unwinding the whole script. The EXIT trap set in content_find_by_scope (\"trap ... rm -f \\\"$matches_file\\\"\") then fires at the point the shell actually exits, in a context where the local variable matches_file is no longer in scope; under set -u this reports \"planning/scripts/plan-content-lib.sh: line 1: matches_file: unbound variable\" instead of the real error, obscuring the root cause entirely. The compiled Rust binary does not have this bug. Discovered while using this exact command (the review protocol's own recommended mechanical stale-phrase sweep) against the bash-to-rust-conversion plan, which has no UI-affecting goals and therefore no ui-user-stories.md.\n",
+      "surfaces": [
+        "planning/scripts/plan-content-lib.sh"
+      ],
+      "fix": "Rewrote the three case-branch guards in content_find_scope_units_and_stories() (planning/scripts/plan-content-lib.sh) from '[ -f FILE ] && CMD' to 'if [ -f FILE ]; then CMD; fi', so a false guard is no longer itself a failing statement under errexit. Verified against the exact repro: 'planning/scripts/plan-content.sh find .plans/bash-to-rust-conversion \"skill_root\" --in all' now returns the correct 10-match count (matching the compiled binary's own output byte-for-byte) instead of crashing. Added a regression test to planning/tests/test-plan-commands.sh (the $fresh_plan fixture, which create-plan.sh/add-goal.sh leave with no ui-user-stories.md) exercising both 'find --in all' (must not crash, must find the real match) and 'find --in stories' (must cleanly report zero matches, not crash) against a plan lacking the file. shellcheck -s bash --severity=error clean on both changed files. Full test-plan-commands.sh passes (bash fallback and, via run-tests.sh's own dual-mode wrapper, wired mode too).\n",
+      "verification": "Directly reproduced the fix with `planning/scripts/plan-content.sh find .plans/bash-to-rust-conversion \"skill_root\" --in all`, before showing the crash and after showing the correct 10-match output matching the compiled binary byte-for-byte. Added and ran a new regression test in planning/tests/test-plan-commands.sh covering both --in all and --in stories against a plan with no ui-user-stories.md; the full test file passes. Ran shellcheck -s bash --severity=error on both changed files with zero findings.\n",
+      "found_by": "adversarial reviewer (persona chris) ran plan-content.sh find --in all as the review protocol's own recommended stale-phrase sweep against .plans/bash-to-rust-conversion",
+      "notes": null,
+      "created_at": "2026-09-15T13:44:26Z",
+      "updated_at": "2026-09-15T13:44:26Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
