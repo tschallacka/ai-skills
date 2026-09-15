@@ -1110,6 +1110,9 @@ version = "0.1.0"
 [[package]]
 name = "planning-progress"
 version = "0.1.0"
+dependencies = [
+ "planning-table",
+]
 
 [[package]]
 name = "planning-register"
@@ -1121,6 +1124,15 @@ dependencies = [
 [[package]]
 name = "planning-table"
 version = "0.1.0"
+
+[[package]]
+name = "planning-validator-coherence"
+version = "0.1.0"
+dependencies = [
+ "planning-validator-common",
+ "planning-validator-stale",
+ "regex",
+]
 
 [[package]]
 name = "planning-validator-commands"
@@ -1147,12 +1159,14 @@ name = "planning-validator-docs"
 version = "0.1.0"
 dependencies = [
  "planning-validator-common",
+ "regex",
 ]
 
 [[package]]
 name = "planning-validator-goals"
 version = "0.1.0"
 dependencies = [
+ "planning-table",
  "planning-validator-common",
  "planning-validator-inventory",
  "serde_json",
@@ -1177,8 +1191,10 @@ dependencies = [
 name = "planning-validator-propagation"
 version = "0.1.0"
 dependencies = [
+ "planning-table",
  "planning-validator-common",
  "planning-validator-inventory",
+ "planning-validator-stale",
 ]
 
 [[package]]
@@ -1346,6 +1362,7 @@ dependencies = [
 name = "register-rebuild"
 version = "0.1.0"
 dependencies = [
+ "planning-register",
  "serde_json",
 ]
 
@@ -1907,6 +1924,7 @@ version = "0.1.0"
 dependencies = [
  "planning-core",
  "planning-progress",
+ "planning-table",
 ]
 
 [[package]]
@@ -1921,8 +1939,10 @@ name = "update-work-unit"
 version = "0.1.0"
 dependencies = [
  "planning-core",
+ "planning-document",
  "planning-inventory",
  "planning-progress",
+ "planning-table",
 ]
 
 [[package]]
@@ -1966,6 +1986,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 name = "validate-plan"
 version = "0.1.0"
 dependencies = [
+ "planning-validator-coherence",
  "planning-validator-commands",
  "planning-validator-common",
  "planning-validator-comparisons",

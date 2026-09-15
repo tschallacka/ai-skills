@@ -1,5 +1,6 @@
 // MODE: DEV
 // PACKAGE: PROD
+use planning_register::{findings, sort};
 use serde_json::{Map, Value};
 use std::env;
 use std::fs;
@@ -108,11 +109,11 @@ fn main() {
             }
         }
     }
-    sort_items(items, kind);
-    let findings = findings(items, kind);
+    sort(&mut root, array_key, kind == "bugs");
+    let found = findings(&root, array_key, kind == "bugs");
     write_json(&path, &root);
-    if !findings.is_empty() {
-        for finding in findings {
+    if !found.is_empty() {
+        for finding in found {
             eprintln!("{finding}");
         }
         die(
@@ -141,107 +142,6 @@ fn missing(object: &Map<String, Value>, key: &str) -> bool {
         .get(key)
         .and_then(Value::as_str)
         .is_none_or(str::is_empty)
-}
-
-fn text<'a>(object: &'a Map<String, Value>, key: &str) -> &'a str {
-    object.get(key).and_then(Value::as_str).unwrap_or("")
-}
-
-fn findings(items: &[Value], kind: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut ids = std::collections::HashSet::new();
-    for item in items {
-        let Some(object) = item.as_object() else {
-            result.push("register entry is not an object".into());
-            continue;
-        };
-        let id = text(object, "id");
-        if !ids.insert(id) {
-            result.push("duplicate ids".into());
-        }
-        let status = text(object, "status");
-        let valid = if kind == "bugs" {
-            [
-                "reported",
-                "confirmed",
-                "fixed",
-                "not-a-defect",
-                "wont-fix",
-                "obsolete",
-            ]
-            .contains(&status)
-        } else {
-            [
-                "open", "done", "blocked", "partly", "decided", "dropped", "obsolete",
-            ]
-            .contains(&status)
-        };
-        if !valid {
-            result.push(format!(
-                "{id}: unknown status {}",
-                if status.is_empty() { "missing" } else { status }
-            ));
-        }
-        if kind == "bugs" {
-            if !["blocking", "major", "minor", "cosmetic"].contains(&text(object, "severity")) {
-                result.push(format!("{id}: unknown severity"));
-            }
-            if status == "confirmed" && text(object, "mechanism").is_empty() {
-                result.push(format!("{id}: confirmed without a mechanism"));
-            }
-            if status == "fixed" && text(object, "verification").is_empty() {
-                result.push(format!("{id}: fixed without verification"));
-            }
-            if text(object, "reproduce").is_empty() {
-                result.push(format!("{id}: no reproduction"));
-            }
-        }
-    }
-    result
-}
-
-fn sort_items(items: &mut [Value], kind: &str) {
-    let rank = |value: &Value| {
-        let object = value.as_object().unwrap();
-        let priority = match text(object, "priority") {
-            "urgent" => 0,
-            "high" => 1,
-            "normal" => 2,
-            "low" => 3,
-            "someday" => 4,
-            _ => 5,
-        };
-        let second = if kind == "bugs" {
-            match text(object, "severity") {
-                "blocking" => 0,
-                "major" => 1,
-                "minor" => 2,
-                "cosmetic" => 3,
-                _ => 4,
-            }
-        } else {
-            match text(object, "status") {
-                "open" => 0,
-                "blocked" => 1,
-                "partly" => 2,
-                "decided" => 3,
-                "done" => 4,
-                "dropped" => 5,
-                "obsolete" => 6,
-                _ => 7,
-            }
-        };
-        let number = text(object, "id")
-            .trim_start_matches(char::is_alphabetic)
-            .parse::<u64>()
-            .unwrap_or(u64::MAX);
-        (
-            if kind == "bugs" { priority } else { second },
-            if kind == "bugs" { second } else { priority },
-            number,
-        )
-    };
-    items.sort_by_key(rank);
 }
 
 fn write_json(path: &PathBuf, value: &Value) {
@@ -293,7 +193,13 @@ mod tests {
 
     #[test]
     fn a_task_at_status_dropped_is_not_flagged_unknown() {
-        let items = vec![json!({"id": "T1", "status": "dropped"})];
-        assert!(findings(&items, "tasks").is_empty());
+        let root = json!({"tasks": [{
+            "id": "T1",
+            "status": "dropped",
+            "priority": "normal",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }]});
+        assert!(findings(&root, "tasks", false).is_empty());
     }
 }

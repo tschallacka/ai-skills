@@ -1,7 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
 use planning_core::{atomic_write, git_snapshot};
-use planning_progress::{status_label, table_cell};
+use planning_progress::status_label;
+use planning_table::table_cell;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
