@@ -4624,6 +4624,28 @@
       "updated_at": "2026-09-13T08:57:11Z"
     },
     {
+      "id": "B335",
+      "title": "compiled validate-plan binary misflags every step with a -testing.md companion as a duplicate step number",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Build the compiled validate-plan binary (cargo build -p validate-plan), then run it against any plan fixture that has -testing.md companion files for its steps -- e.g. target/debug/validate-plan planning/tests/fixtures/overview/navigation, or planning/tests/fixtures/overview/size. Compare against planning/scripts/validate-plan.sh run on the same fixture.",
+      "observed": "The binary emits 'FAIL: <goal> has two steps numbered NN (NN-step-X-testing.md and NN-step-X.md); their order is undefined' for every single step that has a testing companion, turning what bash correctly reports as a PASS (exit 0) into a FAIL (exit 1) on both the navigation and size fixtures (each has dozens of such spurious FAILs).",
+      "expected": "Like the bash implementation, the binary should exclude *-testing.md companion files from step-number duplicate detection entirely -- a step and its own testing companion sharing a number is normal and expected, not a conflict.",
+      "mechanism": "The binary's step-number-extraction logic (in planning-validator-goals or validate-plan's own main.rs, not yet localized further) appears to treat every .md file under a goal's steps/ directory as a distinct numbered step, including *-testing.md companions, rather than filtering them out the way the bash validate-plan-goals-lib.sh does.",
+      "surfaces": [
+        "src/validate-plan/src/main.rs",
+        "src/planning-validator-goals/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "goal 3 (parity-verify-validate-plan-and-update-plan-content) of the planning-skill-rustify plan, 2026-09-15 -- discovered via direct bash-vs-binary comparison across planning/tests/fixtures/overview/*, documented in parity-verification-report.md",
+      "notes": null,
+      "created_at": "2026-09-15T00:41:09Z",
+      "updated_at": "2026-09-15T00:41:09Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
