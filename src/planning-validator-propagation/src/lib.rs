@@ -3,6 +3,7 @@
 //! Completion and propagation validation formerly provided by
 //! `validate-plan-propagation-lib.sh`.
 
+use planning_table::table_cell;
 use planning_validator_common::Findings;
 use planning_validator_inventory::{Inventory, Unit};
 use std::collections::HashSet;
@@ -77,6 +78,78 @@ pub fn validate_reach(plan: &Path, inventory: &Inventory, findings: &mut Finding
     }
 }
 
+/// A step's Handoff prose must not promise a later unit something the
+/// dependency graph does not order: a consumer that reads the Handoff as a
+/// licence to run early needs an edge, not a sentence. Ported from
+/// `plan_validate_propagation_handoff` / `plan_handoff_units` in
+/// `validate-plan-propagation-lib.sh`, which this crate had not yet carried
+/// over (found as a parity gap alongside B335, goal 4 of
+/// planning-skill-rustify).
+/// The WNN ids a step's Handoff paragraphs actually claim, paragraph by
+/// paragraph (blank-line delimited, each paragraph's lines flattened to one
+/// line) -- a paragraph whose flattened text carries a history marker is
+/// dropped whole, so a corrective paragraph restating an old, disproven claim
+/// never re-triggers the ordering check it was written to retract. Mirrors
+/// `plan_handoff_units`'s own awk-based paragraph buffering exactly.
+fn handoff_units(plan: &Path, unit: &Unit) -> Vec<String> {
+    let section = read_section(plan, unit, "## Handoff");
+    let mut paragraphs = Vec::new();
+    let mut current = String::new();
+    for line in section.lines() {
+        if line.trim().is_empty() {
+            if !current.is_empty() {
+                paragraphs.push(std::mem::take(&mut current));
+            }
+        } else if current.is_empty() {
+            current.push_str(line);
+        } else {
+            current.push(' ');
+            current.push_str(line);
+        }
+    }
+    if !current.is_empty() {
+        paragraphs.push(current);
+    }
+    let mut result = Vec::new();
+    for paragraph in paragraphs {
+        let lower = paragraph.to_ascii_lowercase();
+        if planning_validator_stale::STALE_MARKERS
+            .iter()
+            .any(|marker| lower.contains(marker))
+        {
+            continue;
+        }
+        for id in ids_in(&paragraph) {
+            if !result.contains(&id) {
+                result.push(id);
+            }
+        }
+    }
+    result
+}
+
+pub fn validate_handoff(plan: &Path, inventory: &Inventory, findings: &mut Findings) {
+    for unit in &inventory.units {
+        for named in handoff_units(plan, unit) {
+            if named == unit.id {
+                continue;
+            }
+            if !inventory.units.iter().any(|other| other.id == named) {
+                // A WNN outside this plan's inventory is a cross-plan
+                // reference, correct prose, not a claim this graph could
+                // ever order.
+                continue;
+            }
+            if !reachable(inventory, &unit.id, &named) && !reachable(inventory, &named, &unit.id) {
+                findings.warn(format!(
+                    "{} handoff names {named}, but neither has a dependency path to the other; add the ordering edge or correct the handoff",
+                    unit.id
+                ));
+            }
+        }
+    }
+}
+
 pub fn validate_companions(plan: &Path, inventory: &Inventory, findings: &mut Findings) {
     for unit in &inventory.units {
         let path = plan
@@ -142,6 +215,22 @@ pub fn validate_leaves(inventory: &Inventory, findings: &mut Findings) {
     }
 }
 
+/// Lines whose edit-intent verb makes a ::-symbol on them worth checking for
+/// ownership. Matches `plan_validate_propagation_symbols_unit`'s own
+/// `grep -iE '(create|add|implement|edit|change|update|modify|rewrite|replace|override)'`.
+const EDIT_INTENT_VERBS: &[&str] = &[
+    "create",
+    "add",
+    "implement",
+    "edit",
+    "change",
+    "update",
+    "modify",
+    "rewrite",
+    "replace",
+    "override",
+];
+
 pub fn validate_symbols(plan: &Path, inventory: &Inventory, findings: &mut Findings) {
     let prefixes = inventory
         .units
@@ -152,46 +241,112 @@ pub fn validate_symbols(plan: &Path, inventory: &Inventory, findings: &mut Findi
             }
             Some(match unit.file.split_once('\\') {
                 Some((root, _)) => root.to_owned(),
-                None => unit.file.split('/').next().unwrap_or_default().to_owned(),
+                None if unit.file.starts_with("app/") || unit.file.starts_with("vendor/") => {
+                    unit.file.split('/').next().unwrap_or_default().to_owned()
+                }
+                None => std::path::Path::new(&unit.file)
+                    .parent()
+                    .map(|parent| parent.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
             })
         })
+        .filter(|prefix| !prefix.is_empty())
         .collect::<Vec<_>>();
     for unit in &inventory.units {
         let text = read_section(plan, unit, "## Instructions");
-        if !text.to_ascii_lowercase().contains("edit")
-            && !text.to_ascii_lowercase().contains("change")
-            && !text.to_ascii_lowercase().contains("update")
-            && !text.to_ascii_lowercase().contains("implement")
-        {
+        let edit_lines = text
+            .lines()
+            .filter(|line| {
+                let lower = line.to_ascii_lowercase();
+                EDIT_INTENT_VERBS.iter().any(|verb| lower.contains(verb))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if edit_lines.is_empty() {
             continue;
         }
-        for token in symbol_tokens(&text) {
+        for token in symbol_tokens(&edit_lines) {
             if token.ends_with("::class") {
                 continue;
             }
             let class = token.split("::").next().unwrap_or_default();
             let short = class.rsplit('\\').next().unwrap_or(class);
-            if !prefixes
-                .iter()
-                .any(|prefix| class.starts_with(prefix) || short.starts_with(prefix))
+            // A Vendor_Module::path/to/template.phtml token is a template id,
+            // not a Class::method call -- confirmed by a slash after `::` on
+            // the same edit line (plan_validate_propagation_symbols_token).
+            if is_vendor_module_class(class)
+                && edit_lines
+                    .lines()
+                    .any(|line| line_has_template_path(line, class))
+            {
+                continue;
+            }
+            // A namespaced class (one with a `\` root) must sit under a
+            // prefix the plan itself edits, or it is a vendor seam and drops
+            // out. A bare, unnamespaced class carries no namespace to check
+            // against, so it is always treated as a candidate for ownership
+            // -- matching the shell case arm `"$klass_short")`, which always
+            // matches when klass has no namespace (klass == klass_short).
+            if class != short
+                && !prefixes
+                    .iter()
+                    .any(|prefix| class.starts_with(prefix) || short.starts_with(prefix))
             {
                 continue;
             }
             let owned = inventory.units.iter().any(|candidate| {
-                candidate
-                    .file
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or_default()
-                    .trim_end_matches(".php")
-                    == short
-                    || candidate.scope.starts_with(class)
+                candidate.file.rsplit('/').next().unwrap_or_default() == short
+                    || candidate.file == class
+                    || candidate.scope.split("::").next().unwrap_or_default() == class
+                    || candidate
+                        .scope
+                        .split("::")
+                        .next()
+                        .unwrap_or_default()
+                        .rsplit('\\')
+                        .next()
+                        .unwrap_or_default()
+                        == short
             });
-            if !owned {
+            if !owned && token != unit.id {
                 findings.warn(format!("{} instructions mention '{}' which no inventory row owns; verify it is a seam description, or add a discovery/ownership row if it is an edit target", unit.id, token));
             }
         }
     }
+}
+
+/// `Vendor_Module::...` shape: two capitalized, underscore-joined words
+/// ahead of `::` (`^[A-Z][a-zA-Z0-9]*_[A-Z][a-zA-Z0-9]*` in the shell pass).
+fn is_vendor_module_class(class: &str) -> bool {
+    let Some((first, second)) = class.split_once('_') else {
+        return false;
+    };
+    let starts_upper = |part: &str| part.chars().next().is_some_and(|c| c.is_ascii_uppercase());
+    starts_upper(first)
+        && first.chars().all(|c| c.is_ascii_alphanumeric())
+        && starts_upper(second)
+        && second.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// True when `line` carries `class<word-chars>::<path-with-a-slash>` ahead of
+/// a space or `(`, i.e. a template identifier rather than a method call.
+fn line_has_template_path(line: &str, class: &str) -> bool {
+    let Some(after_class) = line.split_once(class) else {
+        return false;
+    };
+    let rest = after_class.1;
+    let Some(sep) = rest.find("::") else {
+        return false;
+    };
+    let (extra, path) = (&rest[..sep], &rest[sep + 2..]);
+    if !extra.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return false;
+    }
+    let path_segment = path
+        .find([' ', '('])
+        .map(|end| &path[..end])
+        .unwrap_or(path);
+    path_segment.contains('/')
 }
 
 pub fn validate_roster(plan: &Path, inventory: &Inventory, findings: &mut Findings) {
@@ -401,16 +556,6 @@ fn reachable(inventory: &Inventory, from: &str, to: &str) -> bool {
     }
     false
 }
-fn table_cell(line: &str, index: usize) -> String {
-    if !line.starts_with('|') {
-        return String::new();
-    }
-    line.split('|')
-        .nth(index)
-        .unwrap_or_default()
-        .trim()
-        .to_owned()
-}
 fn symbol_tokens(text: &str) -> Vec<String> {
     let mut result = Vec::new();
     for word in text.split_whitespace().map(|word| {
@@ -430,6 +575,50 @@ fn symbol_tokens(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_completed_plan_and_goal_progress_table_satisfies_the_completion_gate() {
+        // Regression: this crate once carried its own private, differently
+        // indexed `table_cell` (missing the canonical function's `- 1`
+        // adjustment), silently reading the wrong columns -- Goalname read
+        // back as the Description cell, Completion status as an empty
+        // trailing cell -- so a fully-completed plan always FAILed under
+        // --complete. Fixed by importing planning_table::table_cell instead
+        // of shadowing it locally.
+        let root = std::env::temp_dir().join(format!(
+            "validator-propagation-completion-{}",
+            std::process::id()
+        ));
+        let goal_dir = root.join("01-goal");
+        fs::create_dir_all(&goal_dir).unwrap();
+        fs::write(
+            root.join("progress.md"),
+            "| Goalname | Description | Completion status |\n|---|---|---|\n| 01-goal | do the thing | ✅ completed |\n",
+        )
+        .unwrap();
+        fs::write(
+            goal_dir.join("progress.md"),
+            "| Goalname | Stepname | Description | Completion status |\n|---|---|---|---|\n| 01-goal | 01-step | do the thing | ✅ completed |\n",
+        )
+        .unwrap();
+        let inventory = Inventory {
+            units: vec![Unit {
+                id: "W01".into(),
+                goal: "01-goal".into(),
+                step: "01-step".into(),
+                ..Unit::default()
+            }],
+            goals: [("01-goal".into(), vec!["W01".into()])]
+                .into_iter()
+                .collect(),
+            ..Inventory::default()
+        };
+        let mut findings = Findings::default();
+        validate_completion(&root, &inventory, true, &mut findings);
+        assert_eq!(findings.errors, 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[test]
     fn finds_transitive_dependency() {
         let inventory = Inventory {
@@ -478,6 +667,106 @@ mod tests {
         let mut findings = Findings::default();
         validate_roster(&root, &inventory, &mut findings);
         assert_eq!(findings.errors, 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn scratch_symbols_plan(name: &str, instructions: &str) -> (std::path::PathBuf, Unit) {
+        let root =
+            std::env::temp_dir().join(format!("validator-symbols-{name}-{}", std::process::id()));
+        let steps = root.join("01-goal").join("steps");
+        fs::create_dir_all(&steps).unwrap();
+        fs::write(
+            steps.join("01-step.md"),
+            format!("## Instructions\n\n{instructions}\n\n## Acceptance criteria\n"),
+        )
+        .unwrap();
+        let unit = Unit {
+            id: "W01".into(),
+            file: "src/plan-overview/src/render/shell.rs".into(),
+            goal: "01-goal".into(),
+            step: "01-step".into(),
+            ..Unit::default()
+        };
+        (root, unit)
+    }
+
+    #[test]
+    fn a_bare_class_with_no_namespace_is_always_checked_for_ownership() {
+        // RenderBuffer carries no namespace root, so it cannot be matched
+        // against any project prefix -- bash's own case pattern always
+        // treats this shape as a candidate (B335-adjacent gap, goal 4).
+        let (root, unit) = scratch_symbols_plan(
+            "bare-class",
+            "Create memory.rs against RenderBuffer::new in render/shell.rs.",
+        );
+        let inventory = Inventory {
+            units: vec![unit],
+            ..Inventory::default()
+        };
+        let mut findings = Findings::default();
+        validate_symbols(&root, &inventory, &mut findings);
+        assert_eq!(findings.warnings, 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn create_and_add_are_edit_intent_verbs_not_just_edit_change_update_implement() {
+        let (root, unit) =
+            scratch_symbols_plan("create-verb", "Add a call to Widget::render here.");
+        let inventory = Inventory {
+            units: vec![unit],
+            ..Inventory::default()
+        };
+        let mut findings = Findings::default();
+        validate_symbols(&root, &inventory, &mut findings);
+        assert_eq!(findings.warnings, 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_symbol_an_inventory_row_already_owns_is_not_flagged() {
+        let (root, mut unit) =
+            scratch_symbols_plan("owned", "Update RenderBuffer::write_str for the new field.");
+        unit.scope = "RenderBuffer::write_str".into();
+        let inventory = Inventory {
+            units: vec![unit],
+            ..Inventory::default()
+        };
+        let mut findings = Findings::default();
+        validate_symbols(&root, &inventory, &mut findings);
+        assert_eq!(findings.warnings, 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_vendor_module_template_path_is_not_a_class_method_token() {
+        let (root, unit) = scratch_symbols_plan(
+            "template-path",
+            "Update the Magento_Weee::email/items/price/row.phtml template.",
+        );
+        let inventory = Inventory {
+            units: vec![unit],
+            ..Inventory::default()
+        };
+        let mut findings = Findings::default();
+        validate_symbols(&root, &inventory, &mut findings);
+        assert_eq!(findings.warnings, 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_line_with_no_edit_intent_verb_is_never_flagged() {
+        let (root, unit) = scratch_symbols_plan(
+            "no-verb",
+            "See RenderBuffer::new for context on the seam boundary.",
+        );
+        let inventory = Inventory {
+            units: vec![unit],
+            ..Inventory::default()
+        };
+        let mut findings = Findings::default();
+        validate_symbols(&root, &inventory, &mut findings);
+        assert_eq!(findings.warnings, 0);
         let _ = fs::remove_dir_all(root);
     }
 }
