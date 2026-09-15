@@ -4665,6 +4665,25 @@
       "updated_at": "2026-09-15T00:41:09Z"
     },
     {
+      "id": "B338",
+      "title": "Widespread .file_name().unwrap() panic risk across planning binaries when a plan/goal path is '.', '..', or the filesystem root",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Invoke any of the ~19 remaining affected binaries (grep -rn 'file_name().unwrap()' src/*/src/main.rs after B338's fix to create-ui-validation for the full current list -- as of this filing: add-goal, add-work-unit, cleanup-plans, create-adversarial-review, create-plan, create-plan-progress, create-ui-story-run-cache, create-work-unit-inventory, configure-ui-story-cache, plan-content, plan-context, plan-env, remove-work-unit, update-work-unit, verify-target) with a plan or goal directory argument of '.', '..', or a path whose last component cannot be represented as file_name() returns (e.g. the filesystem root).",
+      "observed": "Path::file_name() returns None for these inputs, and the unwrap() panics (a Rust panic, not a clean die() with a real exit code and message) instead of refusing cleanly or resolving the path to derive a sensible name. Confirmed as a real, reproducible crash for create-ui-validation specifically (AR-12 in .plans/bash-to-rust-conversion, goal 04-wire-misc-batch-one's adversarial review) when invoked with '.' as its plan-dir; the bash originals these binaries replace generally use basename, which handles '.' and '..' without crashing.",
+      "expected": "Every binary that derives a display name from a plan or goal directory path resolves it the same crash-proof way create-ui-validation now does (canonicalize the path first, falling back to the literal path or '.' if that fails), so a caller passing '.', '..', or a path ending in '..' never crashes any of these tools.",
+      "mechanism": "Path::file_name().unwrap() called directly on a caller-supplied directory path without canonicalizing it first or handling the None case.",
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "bash-to-rust-conversion plan, goal 04-wire-misc-batch-one, adversarial review cycle 9 (AR-12) -- create-ui-validation's own instance was fixed immediately since it blocked that goal's own regression sweep; this bug tracks the remaining ~19 occurrences across other binaries, out of scope for that goal",
+      "notes": "create-ui-validation's own instance is already fixed (src/create-ui-validation/src/main.rs, canonicalize-then-file_name with a '.' fallback), verified against the real test-plan-dir-synonym.sh which reproduces the crash as a precondition. The other ~19 occurrences listed above are unfixed.",
+      "created_at": "2026-09-15T09:58:30Z",
+      "updated_at": "2026-09-15T09:58:43Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
