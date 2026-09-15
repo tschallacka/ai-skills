@@ -7270,6 +7270,25 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-09-12T17:33:28Z"
+    },
+    {
+      "id": "B336",
+      "title": "Step files/document IDs whose target script name ends in \"-testing\" are misclassified as testing companions",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Add a plan step whose Change target is a script ending in \"-testing\" (e.g. planning/scripts/create-step-testing.sh), naming the step file itself something like NN-step-wire-create-step-testing.md (its real testing companion is NN-step-wire-create-step-testing-testing.md). Run rebuild-plan-progress.sh (or add-work-unit.sh, which rebuilds progress internally) on that goal, or call plan_document_kind \"step:<goal>/<step>\" directly, or run update-step.sh <goal-dir> <step-name> completed.",
+      "observed": "The real step file is silently dropped from progress.md (missing row entirely; update-step.sh reports \"Step row not found exactly once\"). plan_document_kind() classifies the step id as kind \"testing\" purely because it ends in the literal substring \"-testing\", identical to what its real testing companion (which also ends in \"-testing\") resolves to. The same *-testing.md filename-suffix glob (not just plan_document_kind) is used to exclude testing companions in overview-state.sh:142, plan-content-lib.sh:171/181, plan-context-lib.sh:309, and validate-plan-stale-lib.sh:141 -- all of them exclude the real step file too, since its filename also ends in -testing.md.",
+      "expected": "A step whose target script coincidentally ends in \"-testing\" is still recognized as a normal step everywhere (progress rows, plan_document_kind, and every *-testing.md exclusion glob), distinguished from its real testing companion by something other than a bare filename/ID suffix match -- e.g. checking whether stripping exactly one trailing \"-testing\" segment yields another file/id that actually exists, rather than pattern-matching the suffix alone.",
+      "mechanism": null,
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "bash-to-rust-conversion plan, goal 03-wire-create-scripts, W19 (wiring create-step-testing.sh) -- discovered when update-step.sh could not find that step's progress.md row",
+      "notes": null,
+      "created_at": "2026-09-15T08:45:24Z",
+      "updated_at": "2026-09-15T08:45:24Z"
     }
   ]
 }
