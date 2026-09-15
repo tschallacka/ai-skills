@@ -2,6 +2,7 @@
 // PACKAGE: PROD
 //! Goal and step validation formerly provided by `validate-plan-goals-lib.sh`.
 
+use planning_table::table_cell;
 use planning_validator_common::Findings;
 use planning_validator_inventory::{Inventory, Unit};
 use serde_json::Value;
@@ -349,18 +350,35 @@ fn validate_yes_no_tables(
 ) {
     for section in yes_no_sections(text) {
         if !registry.sections.contains(&section) {
-            findings.fail(format!("{} has a hand-written yes/no table under '{}'; only registered goal sections may carry one", file.display(), section));
+            let registered_list = if registry.sections.is_empty() {
+                "none".to_owned()
+            } else {
+                registry
+                    .sections
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            findings.fail(format!("{} has a hand-written yes/no table under '{}'; only {registered_list} may carry one. Rebuild that section through update-plan-content.sh -gs (or -gp for the one paragraph, -tr for the testing requirement), never by hand", file.display(), section));
         }
     }
 }
 
 fn validate_atomicity(plan: &Path, unit: &Unit, file: &Path, text: &str, findings: &mut Findings) {
+    // Column-exact match (Stepname is column 3, Completion status is column
+    // 5), not a substring scan across the whole line -- a step's own
+    // Description cell can legitimately contain the word "completed" in
+    // prose while its actual status is still incomplete (B335-adjacent gap,
+    // found alongside it in goal 4 of planning-skill-rustify).
     let completed = fs::read_to_string(plan.join(&unit.goal).join("progress.md"))
         .ok()
         .is_some_and(|progress| {
-            progress
-                .lines()
-                .any(|line| line.contains(&unit.step) && line.contains("completed"))
+            progress.lines().any(|line| {
+                line.starts_with('|')
+                    && table_cell(line, 3) == unit.step
+                    && table_cell(line, 5).contains("completed")
+            })
         });
     for sentence in [
         "This step owns exactly one inventory work unit.",
