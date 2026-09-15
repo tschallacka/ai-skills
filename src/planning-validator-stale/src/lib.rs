@@ -25,7 +25,12 @@ pub const COMPARISON_PHRASES: &[&str] = &[
     "exactly identical",
 ];
 
-const MARKERS: &[&str] = &[
+/// Phrases marking a paragraph as a correction of an earlier, now-disproven
+/// claim rather than a live one. Shared verbatim with the shell's own
+/// `stale_markers`, and reused by `planning-validator-coherence` (T138) and
+/// `planning-validator-propagation`'s handoff check (B113) for the identical
+/// purpose -- one owner for the one vocabulary.
+pub const STALE_MARKERS: &[&str] = &[
     "an earlier version",
     "previously",
     "superseded by",
@@ -90,7 +95,9 @@ impl ParagraphScanner {
         self.paragraph += 1;
         let flat_lower = self.flat.to_lowercase();
         if self.content.contains(phrase)
-            && !MARKERS.iter().any(|marker| flat_lower.contains(marker))
+            && !STALE_MARKERS
+                .iter()
+                .any(|marker| flat_lower.contains(marker))
         {
             self.hits.push(Hit {
                 file: file.to_path_buf(),
