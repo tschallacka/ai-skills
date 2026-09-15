@@ -4,6 +4,7 @@
 //! `validate-plan-docs-lib.sh`.
 
 use planning_validator_common::{get_single_field, require_heading, Findings};
+use regex::Regex;
 use std::path::{Path, PathBuf};
 
 pub const REQUIRED_PLAN_HEADINGS: &[&str] = &[
@@ -90,6 +91,13 @@ pub fn validate_step_numbers(plan: &Path, findings: &mut Findings) {
             let Some(name) = step.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
+            // A testing companion shares its step's number by design (B335) --
+            // exclude it before counting rather than reporting it as a
+            // collision, matching plan_duplicate_step_numbers.sh's own
+            // `case ... in *-testing.md) continue ;; esac`.
+            if name.ends_with("-testing.md") {
+                continue;
+            }
             let Some((number, _)) = name.split_once('-') else {
                 continue;
             };
@@ -231,6 +239,7 @@ pub fn validate_plan_documents(
         plan_docs.extend(steps);
     }
     plan_docs.push(inventory);
+    validate_hardening(&plan_docs, findings);
     DocumentState {
         ui_affected,
         review_approved,
@@ -238,9 +247,64 @@ pub fn validate_plan_documents(
     }
 }
 
+/// Hardens every plan document against hand-edit damage:
+/// helper-flag-shaped text, duplicate paragraph labels, and shell-variable
+/// path fragments. Ported from `plan_validate_plan_docs_hardening`.
+fn validate_hardening(plan_docs: &[PathBuf], findings: &mut Findings) {
+    let swallowed_flag = swallowed_flag_regex();
+    let label_line = paragraph_label_regex();
+    for doc in plan_docs {
+        if !doc.is_file() {
+            continue;
+        }
+        let name = doc
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let Ok(text) = std::fs::read_to_string(doc) else {
+            continue;
+        };
+        if swallowed_flag.is_match(&text) {
+            findings.fail(format!("{name} contains helper-flag-shaped text (-p N.N: etc.); mutate plan documents through the helpers, never by hand"));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for line in text.lines() {
+            if label_line.is_match(line) && !seen.insert(line.to_owned()) {
+                findings.fail(format!(
+                    "{name} has duplicate paragraph label {line}; renumber through the helpers"
+                ));
+                break;
+            }
+        }
+        if text.contains("$script_dir/") || text.contains("$PLANNING_SKILL_DIR/") {
+            findings.fail(format!(
+                "{name} contains a shell-variable path fragment; bind file paths to the plan, not to script internals"
+            ));
+        }
+    }
+}
+
+fn swallowed_flag_regex() -> &'static Regex {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(^|[[:space:]])-(p|dp|gp|sp|rp|tp|ia|ib)[[:space:]]+[0-9]+\.[0-9]+[[:space:]]*:",
+        )
+        .expect("swallowed-flag regex is a fixed literal")
+    })
+}
+
+fn paragraph_label_regex() -> &'static Regex {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^§ [0-9]+\.[0-9]+$").expect("paragraph-label regex is a fixed literal")
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::validate_obsolete;
+    use super::{validate_hardening, validate_obsolete, validate_step_numbers};
+    use planning_validator_common::Findings;
     use std::fs;
 
     #[test]
@@ -250,5 +314,93 @@ mod tests {
         fs::write(root.join("OBSOLETE"), "replaced-by: newer-plan\n").unwrap();
         assert_eq!(validate_obsolete(&root, "validate-plan.sh"), Some(65));
         let _ = fs::remove_dir_all(root);
+    }
+
+    fn scratch_plan(name: &str, steps: &[&str]) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "validator-docs-step-numbers-{name}-{}",
+            std::process::id()
+        ));
+        let steps_dir = root.join("01-goal").join("steps");
+        let _ = fs::create_dir_all(&steps_dir);
+        for step in steps {
+            fs::write(steps_dir.join(step), "").unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn a_step_and_its_own_testing_companion_are_not_flagged_as_duplicates() {
+        let root = scratch_plan("companion", &["01-step-foo.md", "01-step-foo-testing.md"]);
+        let mut findings = Findings::default();
+        validate_step_numbers(&root, &mut findings);
+        assert_eq!(findings.errors, 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn two_genuinely_different_steps_sharing_a_number_are_still_flagged() {
+        let root = scratch_plan("collision", &["01-step-foo.md", "01-step-bar.md"]);
+        let mut findings = Findings::default();
+        validate_step_numbers(&root, &mut findings);
+        assert_eq!(findings.errors, 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn scratch_doc(name: &str, content: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "validator-docs-hardening-{name}-{}.md",
+            std::process::id()
+        ));
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn helper_flag_shaped_text_pasted_into_prose_is_flagged() {
+        let doc = scratch_doc(
+            "flag-shaped",
+            "§ 5.9\nrun update-plan-content.sh -dp 2.3: x\n",
+        );
+        let mut findings = Findings::default();
+        validate_hardening(std::slice::from_ref(&doc), &mut findings);
+        assert_eq!(findings.errors, 1);
+        let _ = fs::remove_file(doc);
+    }
+
+    #[test]
+    fn ordinary_prose_mentioning_a_paragraph_label_is_not_flagged() {
+        let doc = scratch_doc(
+            "ordinary",
+            "§ 5.1\nRun the migration and check the output.\n",
+        );
+        let mut findings = Findings::default();
+        validate_hardening(std::slice::from_ref(&doc), &mut findings);
+        assert_eq!(findings.errors, 0);
+        let _ = fs::remove_file(doc);
+    }
+
+    #[test]
+    fn a_duplicate_paragraph_label_is_flagged() {
+        let doc = scratch_doc(
+            "duplicate-label",
+            "§ 2.1\nfirst\n\n§ 2.1\nrepeated by mistake\n",
+        );
+        let mut findings = Findings::default();
+        validate_hardening(std::slice::from_ref(&doc), &mut findings);
+        assert_eq!(findings.errors, 1);
+        let _ = fs::remove_file(doc);
+    }
+
+    #[test]
+    fn a_shell_variable_path_fragment_is_flagged() {
+        let doc = scratch_doc(
+            "shell-path",
+            "§ 5.1\nSee $script_dir/validate-plan.sh for the logic.\n",
+        );
+        let mut findings = Findings::default();
+        validate_hardening(std::slice::from_ref(&doc), &mut findings);
+        assert_eq!(findings.errors, 1);
+        let _ = fs::remove_file(doc);
     }
 }
