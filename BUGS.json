@@ -368,6 +368,25 @@
       "updated_at": "2026-09-14T15:46:54Z"
     },
     {
+      "id": "B337",
+      "title": "update-plan-content.sh's --review-status approved gate never actually detects an open finding recorded via update-adversarial-review.sh",
+      "status": "fixed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Create a plan, run create-adversarial-review.sh, then land a genuinely open finding through the normal reviewer path: write adversarial-review-incoming.md with a Status column of plain \"open\" (or \"in-progress\") and run update-adversarial-review.sh <plan> to land it -- exactly what part-3.md instructs every fresh reviewer to do. Then run update-plan-content.sh --review-status <plan> approved (or the compiled update-plan-content binary, which has the identical bug).",
+      "observed": "The approval succeeds (exit 0, review-status flips to approved) even though a real, unresolved finding is present. Both the bash implementation (planning/scripts/update-plan-content.sh, the review-status dispatch case) and the compiled binary (src/update-plan-content/src/main.rs) check the Status cell against only the emoji-prefixed spellings \"💤 open\" / \"⏳ in progress\" -- the convention add-adversarial-finding writes when it appends a single new row. update-adversarial-review.sh (the tool that lands a whole reviewer CSV, and the one the review protocol actually tells a fresh reviewer to use) passes the CSV Status column through completely unprefixed (\"open\", \"in-progress\", \"resolved\"), so every finding landed that way is invisible to the approval gate regardless of its real status.",
+      "expected": "The approval gate treats a Status cell as open whenever it denotes open or in-progress under either convention (with or without the emoji prefix), so --review-status approved correctly refuses while any real finding -- landed by either add-adversarial-finding or update-adversarial-review.sh -- remains unresolved.",
+      "mechanism": "Exact string match against \"💤 open\"/\"⏳ in progress\" only, instead of a convention-agnostic check (e.g. case-folded, checking whether the Status cell ends in \"open\" or \"in-progress\"/\"in progress\" regardless of an emoji prefix).",
+      "surfaces": [],
+      "fix": "Fixed in both planning/scripts/update-plan-content.sh (the review-status dispatch case, now reading column 5 precisely via plan_table_cell and case-folding it) and src/update-plan-content/src/main.rs (new review_has_open_finding function with unit tests for both status conventions plus a false-positive guard for the word 'open' appearing in an earlier free-text cell). Verified by direct reproduction in both wired and fall-through mode: the exact repro now correctly refuses with exit 64.",
+      "verification": "Manually reproduced pre-fix (approval wrongly succeeded), applied the fix to both implementations, rebuilt the compiled binary, and re-ran the same repro in wired and fall-through mode: both now correctly refuse with 'Cannot approve a review with unresolved findings' (exit 64). Confirmed legitimate approval (only resolved findings, in either status-text convention) still succeeds in both modes. cargo test/fmt/clippy clean for the crate; shellcheck clean for the script.",
+      "found_by": "bash-to-rust-conversion plan, goal 04-wire-misc-batch-one, adversarial review of goal 4 (incidental finding, verified and fixed by the coordinator)",
+      "notes": null,
+      "created_at": "2026-09-15T09:13:01Z",
+      "updated_at": "2026-09-15T09:13:11Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
@@ -7043,6 +7062,25 @@
       "updated_at": "2026-09-10T14:31:39Z"
     },
     {
+      "id": "B336",
+      "title": "Step files/document IDs whose target script name ends in \"-testing\" are misclassified as testing companions",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Add a plan step whose Change target is a script ending in \"-testing\" (e.g. planning/scripts/create-step-testing.sh), naming the step file itself something like NN-step-wire-create-step-testing.md (its real testing companion is NN-step-wire-create-step-testing-testing.md). Run rebuild-plan-progress.sh (or add-work-unit.sh, which rebuilds progress internally) on that goal, or call plan_document_kind \"step:<goal>/<step>\" directly, or run update-step.sh <goal-dir> <step-name> completed.",
+      "observed": "The real step file is silently dropped from progress.md (missing row entirely; update-step.sh reports \"Step row not found exactly once\"). plan_document_kind() classifies the step id as kind \"testing\" purely because it ends in the literal substring \"-testing\", identical to what its real testing companion (which also ends in \"-testing\") resolves to. The same *-testing.md filename-suffix glob (not just plan_document_kind) is used to exclude testing companions in overview-state.sh:142, plan-content-lib.sh:171/181, plan-context-lib.sh:309, and validate-plan-stale-lib.sh:141 -- all of them exclude the real step file too, since its filename also ends in -testing.md.",
+      "expected": "A step whose target script coincidentally ends in \"-testing\" is still recognized as a normal step everywhere (progress rows, plan_document_kind, and every *-testing.md exclusion glob), distinguished from its real testing companion by something other than a bare filename/ID suffix match -- e.g. checking whether stripping exactly one trailing \"-testing\" segment yields another file/id that actually exists, rather than pattern-matching the suffix alone.",
+      "mechanism": null,
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "bash-to-rust-conversion plan, goal 03-wire-create-scripts, W19 (wiring create-step-testing.sh) -- discovered when update-step.sh could not find that step's progress.md row",
+      "notes": null,
+      "created_at": "2026-09-15T08:45:24Z",
+      "updated_at": "2026-09-15T08:45:24Z"
+    },
+    {
       "id": "B59",
       "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
       "status": "fixed",
@@ -7270,25 +7308,6 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-09-12T17:33:28Z"
-    },
-    {
-      "id": "B336",
-      "title": "Step files/document IDs whose target script name ends in \"-testing\" are misclassified as testing companions",
-      "status": "reported",
-      "severity": "minor",
-      "priority": "low",
-      "parent": null,
-      "reproduce": "Add a plan step whose Change target is a script ending in \"-testing\" (e.g. planning/scripts/create-step-testing.sh), naming the step file itself something like NN-step-wire-create-step-testing.md (its real testing companion is NN-step-wire-create-step-testing-testing.md). Run rebuild-plan-progress.sh (or add-work-unit.sh, which rebuilds progress internally) on that goal, or call plan_document_kind \"step:<goal>/<step>\" directly, or run update-step.sh <goal-dir> <step-name> completed.",
-      "observed": "The real step file is silently dropped from progress.md (missing row entirely; update-step.sh reports \"Step row not found exactly once\"). plan_document_kind() classifies the step id as kind \"testing\" purely because it ends in the literal substring \"-testing\", identical to what its real testing companion (which also ends in \"-testing\") resolves to. The same *-testing.md filename-suffix glob (not just plan_document_kind) is used to exclude testing companions in overview-state.sh:142, plan-content-lib.sh:171/181, plan-context-lib.sh:309, and validate-plan-stale-lib.sh:141 -- all of them exclude the real step file too, since its filename also ends in -testing.md.",
-      "expected": "A step whose target script coincidentally ends in \"-testing\" is still recognized as a normal step everywhere (progress rows, plan_document_kind, and every *-testing.md exclusion glob), distinguished from its real testing companion by something other than a bare filename/ID suffix match -- e.g. checking whether stripping exactly one trailing \"-testing\" segment yields another file/id that actually exists, rather than pattern-matching the suffix alone.",
-      "mechanism": null,
-      "surfaces": [],
-      "fix": null,
-      "verification": null,
-      "found_by": "bash-to-rust-conversion plan, goal 03-wire-create-scripts, W19 (wiring create-step-testing.sh) -- discovered when update-step.sh could not find that step's progress.md row",
-      "notes": null,
-      "created_at": "2026-09-15T08:45:24Z",
-      "updated_at": "2026-09-15T08:45:24Z"
     }
   ]
 }
