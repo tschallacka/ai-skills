@@ -220,7 +220,7 @@ package/planning/scripts/role-context.sh	11093
 package/planning/scripts/run-adversary-probe.sh	5445
 package/planning/scripts/supervision-frame.sh	6303
 package/planning/scripts/update-adversarial-review.sh	12862
-package/planning/scripts/update-plan-content.sh	33900
+package/planning/scripts/update-plan-content.sh	36488
 package/planning/scripts/update-plan-progress.sh	3360
 package/planning/scripts/update-progress.sh	2256
 package/planning/scripts/update-step.sh	7182
@@ -240,7 +240,7 @@ package/planning/scripts/validate-plan-serve-lib.sh	4377
 package/planning/scripts/validate-plan-stale-lib.sh	7059
 package/planning/scripts/validate-plan-stale-wording.awk	3439
 package/planning/scripts/validate-plan-ui-lib.sh	8341
-package/planning/scripts/validate-plan.sh	10820
+package/planning/scripts/validate-plan.sh	13540
 package/planning/scripts/verify-fix-keys.sh	9571
 package/planning/scripts/verify-skill-load.sh	3051
 package/planning/scripts/verify-target.sh	9497

@@ -36,6 +36,43 @@ set -euo pipefail
 export LC_ALL=C
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# Exec the compiled update-plan-content binary when this installation has one
+# (a dev tree after ./setup-dev-env.sh, or a packaged release with rjq and
+# friends shipped alongside it) with the exact, unshifted "$@" this script
+# itself received; otherwise fall through to the bash implementation below,
+# completely unchanged. Mirrors the resolve-then-fall-through shape
+# plan_crypt_resolve.sh already established for plan-crypt: nothing breaks
+# when no binary is present.
+#
+# plan-document-lib.sh (sourced further below, once dispatch_mode has been
+# read off "$@") already carries plan_bin_dir transitively via its own
+# `source .../plan-crypt-lib.sh` line, but that happens too late for this
+# early-exit check, so the same file is sourced here too -- sourcing it twice
+# is a no-op (it only (re)defines functions, nothing readonly) -- and every
+# name it introduced is unset again in the fall-through branch so the rest of
+# this script runs with nothing extra in scope beyond what it already sources
+# itself. Uniquely prefixed (upc_bin_pref_*) so nothing here can collide with
+# a later variable of the same short name.
+upc_bin_pref_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-crypt-lib.sh
+source "$upc_bin_pref_script_dir/plan-crypt-lib.sh"
+if upc_bin_pref_dir="$(plan_bin_dir)" && [ -x "$upc_bin_pref_dir/update-plan-content" ]; then
+    exec "$upc_bin_pref_dir/update-plan-content" "$@"
+fi
+unset -f plan_bin_dir plan_crypt_bin plan_crypt_resolve plan_crypt_target_triple \
+    plan_fix_key plan_random_hex plan_sha256_chain plan_sha256_hex
+# PLAN_CRYPT_LIB_LOADED is plan-crypt-lib.sh's own idempotency guard (`[ -z
+# "${PLAN_CRYPT_LIB_LOADED:-}" ] || return 0`); left set, the legitimate
+# `source plan-crypt-lib.sh` inside plan-document-lib.sh (sourced further
+# below) would see it already "loaded" and return immediately without
+# redefining the functions this block just unset -- leaving plan_bin_dir
+# undefined for the rest of the script.
+unset PLAN_CRYPT_LIB_LOADED
+unset upc_bin_pref_script_dir upc_bin_pref_dir
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Usage and flag translation
 # ─────────────────────────────────────────────────────────────────────────────
 

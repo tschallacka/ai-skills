@@ -35,6 +35,44 @@
 set -euo pipefail
 export LC_ALL=C
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# Exec the compiled validate-plan binary when this installation has one (a dev
+# tree after ./setup-dev-env.sh, or a packaged release), with the exact,
+# unshifted "$@" this script itself received; otherwise fall through to the
+# bash implementation below, completely unchanged. Same shape as
+# update-plan-content.sh's own binary-preference block: sourcing
+# plan-crypt-lib.sh here is harmless even though nothing else in this script
+# happens to source it too (it only (re)defines functions, nothing readonly),
+# and every name it introduced is unset again in the fall-through branch so
+# the rest of this script runs with nothing extra in scope. Uniquely prefixed
+# (vp_bin_pref_*) so nothing here can collide with a later variable of the
+# same short name.
+vp_bin_pref_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-crypt-lib.sh
+source "$vp_bin_pref_script_dir/plan-crypt-lib.sh"
+if vp_bin_pref_dir="$(plan_bin_dir)" && [ -x "$vp_bin_pref_dir/validate-plan" ]; then
+    # The binary reads placeholders.json/goal-tables.json/etc. relative to
+    # PLANNING_SKILL_ROOT (falling back to a bare "planning", which only
+    # resolves by accident when the caller's cwd happens to be this repo's
+    # own root); it ships in a shared bin/ directory with no fixed relation
+    # to any particular skill's own resource files, so it has no way to find
+    # them unless told. This script always knows its own skill root, so it
+    # states it authoritatively rather than trusting whatever the caller's
+    # environment happened to inherit.
+    PLANNING_SKILL_ROOT="$(cd "$vp_bin_pref_script_dir/.." && pwd)" \
+        exec "$vp_bin_pref_dir/validate-plan" "$@"
+fi
+unset -f plan_bin_dir plan_crypt_bin plan_crypt_resolve plan_crypt_target_triple \
+    plan_fix_key plan_random_hex plan_sha256_chain plan_sha256_hex
+# PLAN_CRYPT_LIB_LOADED is plan-crypt-lib.sh's own idempotency guard; left set,
+# any later `source plan-crypt-lib.sh` (directly, or transitively through a
+# sibling library) would see it already "loaded" and return immediately
+# without redefining the functions this block just unset.
+unset PLAN_CRYPT_LIB_LOADED
+unset vp_bin_pref_script_dir vp_bin_pref_dir
+
 case "${1:-}" in
     -h|--help)
         echo "Usage: $(basename "$0") [--complete] [--propagation|--no-propagation] [--stale <file-of-phrases>|default] [--repo-root DIR] [--plan-dir] <plan-directory>" >&2
