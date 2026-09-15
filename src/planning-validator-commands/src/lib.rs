@@ -20,6 +20,7 @@ const BUILTIN_WORDS: &[&str] = &[
 pub struct CommandRegistry {
     path: Option<PathBuf>,
     commands: BTreeSet<String>,
+    registered_words: BTreeSet<String>,
     never_executable_extensions: BTreeSet<String>,
     available: bool,
 }
@@ -35,7 +36,7 @@ impl CommandRegistry {
             .ok()
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
             .unwrap_or(Value::Null);
-        let commands = value
+        let commands: BTreeSet<String> = value
             .as_object()
             .map(|object| {
                 object
@@ -58,9 +59,20 @@ impl CommandRegistry {
                     .collect()
             })
             .unwrap_or_default();
+        // report 20 §3: a registered command's first token teaches the
+        // detector that tool word, so an unregistered but shape-plausible
+        // sibling invocation (a new flag, a different subcommand) is still a
+        // candidate worth checking against the registry, matching
+        // `command_shaped`'s own `$registered_words` membership test.
+        let registered_words = commands
+            .iter()
+            .filter_map(|command| command.split_whitespace().next())
+            .map(str::to_owned)
+            .collect();
         Self {
             path: Some(path.to_path_buf()),
             commands,
+            registered_words,
             never_executable_extensions,
             available,
         }
@@ -86,8 +98,12 @@ impl CommandRegistry {
                 continue;
             };
             for span in command_spans(&text) {
-                if command_candidate(&span)
-                    && !command_disqualified(&span, &self.never_executable_extensions)
+                if command_candidate(&span, &self.registered_words)
+                    && !command_disqualified(
+                        &span,
+                        &self.never_executable_extensions,
+                        &self.registered_words,
+                    )
                     && !self.registered(&span)
                 {
                     let message = format!(
@@ -214,18 +230,26 @@ fn builtin_command(line: &str) -> bool {
         && line.contains(char::is_whitespace)
 }
 
-fn command_candidate(span: &str) -> bool {
+fn command_candidate(span: &str, registered_words: &BTreeSet<String>) -> bool {
     let token = span.split_whitespace().next().unwrap_or_default();
-    CORE_WORDS
-        .iter()
-        .chain(BUILTIN_WORDS)
-        .any(|word| *word == token)
+    // Only the small cross-language core is a candidate by bare word alone
+    // (matches `command_shaped`'s own `core_words`, which excludes
+    // BUILTIN_WORDS -- those wider names only widen the fenced-code-block
+    // LINE gate in `builtin_command`, one rung earlier). A bare `composer` or
+    // `phpunit` invocation is silent until registered or path-shaped: rules
+    // 1-3 are the only entry points, and this list is rule 1's static half.
+    CORE_WORDS.contains(&token)
+        || registered_words.contains(token)
         || bin_under(token)
         || (token.contains('/')
             && fs::metadata(token).is_ok_and(|meta| meta.is_file() && is_executable(token)))
 }
 
-fn command_disqualified(span: &str, never_executable_extensions: &BTreeSet<String>) -> bool {
+fn command_disqualified(
+    span: &str,
+    never_executable_extensions: &BTreeSet<String>,
+    registered_words: &BTreeSet<String>,
+) -> bool {
     let token = span.split_whitespace().next().unwrap_or_default();
     let last = span.split_whitespace().last().unwrap_or_default();
     let extension = last
@@ -240,11 +264,11 @@ fn command_disqualified(span: &str, never_executable_extensions: &BTreeSet<Strin
     {
         return true;
     }
-    if span.starts_with('/') && !bin_like(span) && !command_candidate(token) {
+    if span.starts_with('/') && !bin_like(span) && !command_candidate(token, registered_words) {
         return true;
     }
     if let Some(arg) = span.split_whitespace().nth(1) {
-        if arg.starts_with('/') && !bin_like(span) && !command_candidate(token) {
+        if arg.starts_with('/') && !bin_like(span) && !command_candidate(token, registered_words) {
             return true;
         }
     }
@@ -288,11 +312,22 @@ mod tests {
     }
     #[test]
     fn bin_paths_are_candidates_but_citations_are_not() {
-        assert!(command_candidate("bin/tool --check"));
+        assert!(command_candidate("bin/tool --check", &BTreeSet::new()));
         assert!(command_disqualified(
             "docs/report.md:12",
-            &BTreeSet::from([".md".into()])
+            &BTreeSet::from([".md".into()]),
+            &BTreeSet::new(),
         ));
+    }
+
+    #[test]
+    fn a_registered_commands_first_word_is_a_candidate_even_unregistered() {
+        // Registering "pytest -q" teaches "pytest" as a tool word (report 20
+        // §3), so a DIFFERENT pytest invocation ("pytest --forked") is still a
+        // candidate worth checking, even though it is not itself registered.
+        let registered_words = BTreeSet::from(["pytest".to_owned()]);
+        assert!(command_candidate("pytest --forked", &registered_words));
+        assert!(!command_candidate("pytest --forked", &BTreeSet::new()));
     }
 
     #[test]
