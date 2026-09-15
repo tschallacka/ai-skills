@@ -2,6 +2,9 @@
 // PACKAGE: PROD
 //! Rust orchestration for the planning validation passes.
 
+use planning_validator_coherence::{
+    validate_countable_enumeration, validate_stale_wording_retained,
+};
 use planning_validator_commands::CommandRegistry;
 use planning_validator_common::Findings;
 use planning_validator_comparisons::ComparisonRegistry;
@@ -14,8 +17,8 @@ use planning_validator_goals::{
 use planning_validator_inventory::Inventory;
 use planning_validator_placeholders::PlaceholderValidator;
 use planning_validator_propagation::{
-    validate_companions, validate_completion, validate_freshness, validate_leaves, validate_reach,
-    validate_roster, validate_symbols,
+    validate_companions, validate_completion, validate_freshness, validate_handoff,
+    validate_leaves, validate_reach, validate_roster, validate_symbols,
 };
 use planning_validator_serve::{ServeRegistry, Unit as ServeUnit};
 use planning_validator_stale::validate_stale;
@@ -66,6 +69,13 @@ fn main() {
         options.stale.as_deref().map(Path::new),
         &mut findings,
     );
+    let stale_docs = documents
+        .plan_docs
+        .iter()
+        .map(PathBuf::as_path)
+        .collect::<Vec<_>>();
+    validate_stale_wording_retained(&stale_docs, &mut findings);
+    validate_countable_enumeration(&stale_docs, &mut findings);
     let inventory = Inventory::parse(&plan.join("work-unit-inventory.md"), &mut findings);
     inventory.validate_dependency_graph(&mut findings);
     inventory.validate_target_paths(options.repo_root.as_deref(), &mut findings);
@@ -116,6 +126,7 @@ fn main() {
         validate_symbols(&plan, &inventory, &mut findings);
         validate_reach(&plan, &inventory, &mut findings);
         validate_companions(&plan, &inventory, &mut findings);
+        validate_handoff(&plan, &inventory, &mut findings);
         validate_leaves(&inventory, &mut findings);
         validate_roster(&plan, &inventory, &mut findings);
         if let Some(repo_root) = options.repo_root.as_deref() {
@@ -127,13 +138,14 @@ fn main() {
     if findings.errors > 0 {
         eprintln!("Plan validation failed with {} error(s).", findings.errors);
         eprintln!(
-            "Gates: structurally valid=no (errors above)  adversarially approved={}  implementation complete={}",
-            review_gate(&plan, documents.review_approved),
-            if options.complete {
-                "yes"
-            } else {
-                "not checked (pass --complete)"
-            }
+            "{}",
+            report_gates(
+                options.complete,
+                findings.errors,
+                placeholder_result.warnings,
+                &plan,
+                documents.review_approved,
+            )
         );
         std::process::exit(1);
     }
@@ -149,15 +161,51 @@ fn main() {
         );
     }
     println!(
-        "Gates: structurally valid={}  adversarially approved={}  implementation complete={}",
-        if findings.errors == 0 { "yes" } else { "no" },
-        review_gate(&plan, documents.review_approved),
-        if options.complete {
+        "{}",
+        report_gates(
+            options.complete,
+            findings.errors,
+            placeholder_result.warnings,
+            &plan,
+            documents.review_approved,
+        )
+    );
+}
+
+/// Mirrors `plan_report_gates` in validate-plan.sh: under `--complete` the
+/// error count mixes structural defects with execution state and the two
+/// cannot be separated after the fact, so the structural gate says that
+/// rather than inferring yes/no from a number answering a different
+/// question (T55).
+fn report_gates(
+    complete_mode: bool,
+    errors: usize,
+    placeholder_warnings: usize,
+    plan: &Path,
+    review_approved: bool,
+) -> String {
+    let structural = if complete_mode {
+        "not separable here (run without --complete)".to_owned()
+    } else if errors > 0 {
+        "no (errors above)".to_owned()
+    } else if placeholder_warnings > 0 {
+        "no (placeholders)".to_owned()
+    } else {
+        "yes".to_owned()
+    };
+    let complete = if complete_mode {
+        if errors == 0 {
             "yes"
         } else {
-            "not checked (pass --complete)"
+            "no"
         }
-    );
+    } else {
+        "not checked (pass --complete)"
+    };
+    format!(
+        "Gates: structurally valid={structural}  adversarially approved={}  implementation complete={complete}",
+        review_gate(plan, review_approved)
+    )
 }
 
 fn review_gate(plan: &Path, approved: bool) -> &'static str {
