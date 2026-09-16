@@ -55,6 +55,52 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
+# hoist one, so there is no hoist ordering to preserve; placed immediately
+# after repo_root is computed (the only genuine prerequisite: the relative
+# path to plan-core-lib.sh needs it) and before wrapper is resolved, before
+# the AI_SKILLS_RESOURCE_LIMIT case statement, and before anything else this
+# script does -- as early as structurally possible, matching pre-push-check.sh's
+# own goal-14 precedent exactly, since the compiled binary re-derives the
+# resource-limit/wrapper selection itself and needs nothing bash would
+# otherwise compute first. run-tests.sh lives at the repository root itself,
+# one level shallower than ci-failures/scripts, so the relative path to
+# plan-core-lib.sh crosses one directory level down, not the two
+# ci-failures.sh crosses upward.
+#
+# RUN_TESTS_BASH exports the bash interpreter THIS invocation is actually
+# running under (bash's own $BASH), so the compiled binary can propagate the
+# same interpreter into every child test process exactly as run_one's own
+# "$BASH" "$t" invocation does -- required for bash32-run-tests (which
+# re-execs this very script under a specific bash 3.2 binary) to keep testing
+# every individual script under bash 3.2, not only the top-level runner.
+RUN_TESTS_BASH="$BASH"
+export RUN_TESTS_BASH
+rt_script_dir="$repo_root"
+source "$rt_script_dir/planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present run-tests "$rt_script_dir" "$@"
+unset rt_script_dir
+# plan_exec_compiled_binary_if_present's own doc comment covers this in
+# detail: plan-core-lib.sh (just sourced above, needed to get that function
+# into scope at all) sets `set -euo pipefail` at its own top, which persists
+# in THIS shell once sourced -- reached only on the fall-through path (an
+# exec on the found-binary path replaces the process outright). This
+# script's own deliberate `set -uo pipefail` (no -e: several of
+# bootstrap_generated's own calls below, e.g. generate-portability.sh, are
+# bare statements never wrapped in `||`, and a real failure there must not
+# abort the whole suite before its summary prints) must be forced back, or a
+# single build-tool failure would silently abort every test that follows.
+# `set -uo pipefail` alone only ADDS u/pipefail -- it does not clear an
+# already-set e, so +e is explicit and separate.
+set +e
+set -uo pipefail
+
 wrapper="$repo_root/resource-limited-testing/scripts/limited-run.sh"
 
 # The cap protects a developer's machine, which a disposable single-job runner
@@ -386,6 +432,11 @@ bootstrap_generated() {
     if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then
         "$repo_root/planning/scripts/generate-reviewer.sh" >&2
     fi
+    # Regenerated unconditionally, every run, unlike the two build-if-missing
+    # artifacts above: it is a live catalogue rather than a load-bearing
+    # dependency, cheap to rebuild, and this way it is never stale by the time
+    # test-portability-contract.sh reads it.
+    "$repo_root/generate-portability.sh" >&2
     if ! command -v rjq >/dev/null 2>&1; then
         dir=""
         if dir="$("$repo_root/bootstrap.sh" rjq --path-only 2>/dev/null)" && [ -n "$dir" ]; then
