@@ -125,7 +125,11 @@ of CI are blocking, so this is also where a BSD-only failure first shows.
   red run; everything else cleans up after itself.
 - Never rewrite `verify-both-shells.sh` while a run is in flight. Bash reads
   its source incrementally, so an edit lands mid-parse and executes comment
-  fragments as commands (B17, the `been: command not found` ghost).
+  fragments as commands (B17, the `been: command not found` ghost). This is a
+  bash-fallback-path hazard specifically: once `setup-dev-env.sh` has staged
+  the compiled `verify-both-shells` binary (T145 goal 19), a run through it
+  reads no script source at all, so a concurrent edit to the `.sh` file
+  cannot land mid-parse there.
 - Editing any other file during a run is fine: the worktree is overlaid once,
   at startup, from the then-current tree — later edits belong to the next run.
 - A failure that only exists on macOS cannot be reproduced on Linux. Diagnose
