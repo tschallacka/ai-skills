@@ -706,6 +706,25 @@ jobs:
             cp "target/x86_64-unknown-linux-musl/release/$bin" "bin/x86_64-unknown-linux-musl/$bin"
           done
 
+      - name: Generate plan-core-lib.sh so the compiled-binary wiring can activate
+        # plan_exec_compiled_binary_if_present (the wiring the step above
+        # exists to feed) is reached only through
+        # planning/scripts/plan-core-lib.sh, which is GENERATED (by
+        # build-plan-libs.sh) and gitignored -- it does not exist on a fresh
+        # checkout like this job's own, so without this step every one of
+        # ci-scope.sh/ci-subjects.sh/ci-test-scope.sh's own `if [ -f
+        # .../plan-core-lib.sh ]` guards is false and all three silently fall
+        # all the way through to their bash bodies, staged binaries above or
+        # not. Bash's own body then needs `rjq` on PATH (only the bash
+        # implementation parses `cargo metadata` output that way; the
+        # compiled binaries use serde_json natively and never call rjq at
+        # all) -- and nothing in this job builds or stages rjq either, so
+        # that fallback fails too. Running this now is what makes the step
+        # above actually reachable, instead of the compiled binaries sitting
+        # in bin/x86_64-unknown-linux-musl unused.
+        shell: bash
+        run: ./planning/scripts/build-plan-libs.sh
+
       - name: Decide the scope
         id: decide
         shell: bash
