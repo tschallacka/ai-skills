@@ -26,6 +26,34 @@
 set -uo pipefail
 
 src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed immediately after src is computed and
+# BEFORE the case "${1:-}" argument-parsing block -- as early as structurally
+# possible, letting even --help reach the compiled binary when present
+# (unlike blast-radius.sh in goal 18, where --help was structurally
+# unreachable through the compiled binary; this script's own -h|--help exit
+# sits AFTER this point, so there is no such obstruction here). This script
+# already declares set -uo pipefail above (deliberately WITHOUT -e, so both
+# shell legs and the overlay loop tolerate individual command failures
+# without aborting the whole harness); sourcing plan-core-lib.sh would
+# otherwise silently add -e back on the fall-through path, so it is forced
+# back off immediately below. verify-both-shells.sh lives at the repository
+# root itself, one level shallower than planning/scripts, so the relative
+# path to plan-core-lib.sh crosses one directory level down, matching every
+# prior goal's own precedent. Nothing before this point consumes "$@" via
+# shift, so it is safe to forward unmodified.
+vb_script_dir="$src"
+source "$vb_script_dir/planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present verify-both-shells "$vb_script_dir" "$@"
+unset vb_script_dir
+set +e
+set -uo pipefail
+
 keep=false
 case "${1:-}" in
     --keep) keep=true ;;

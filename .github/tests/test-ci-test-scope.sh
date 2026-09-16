@@ -55,6 +55,9 @@ check_scope "a workflow"               full .github/workflows/ci.yml
 check_scope "the selector itself"      full .github/ci-test-scope.sh
 check_scope "run-tests.sh"             full run-tests.sh
 check_scope "lib-test.sh"              full planning/tests/lib-test.sh
+# The selector must not exempt its OWN compiled source either -- matching
+# test-ci-scope.sh's own equivalent case for src/ci-scope/* (goal 21).
+check_scope "the compiled selector's own source" full src/ci-test-scope/src/main.rs
 
 echo "ci-test-scope: a push to an integration branch is exhaustive"
 for branch in master nextupdate; do

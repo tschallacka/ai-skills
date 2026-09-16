@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 //! Real subprocess-level integration tests: a real planning-server binary,
 //! started as a genuine child process with its own socket, driven by the
 //! real planning-client binary (and, for the parity test, the real

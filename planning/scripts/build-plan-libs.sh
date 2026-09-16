@@ -46,9 +46,22 @@ export LC_ALL=C
 # exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
 # hoist one, so there is no hoist ordering to preserve; placed immediately
 # after both anchor lines above.
+#
+# Self-referential bootstrap hazard, unique to this script: plan-core-lib.sh
+# is one of the five files THIS script's own job is to generate, so on a
+# genuinely fresh clone (none of the five plan-*-lib.sh files exist yet)
+# sourcing it unconditionally fails outright under set -e, before this
+# script ever reaches the bash implementation that would have generated it.
+# Guard the whole block on the file already existing -- when it does not,
+# skip straight to the bash implementation below (which is exactly the
+# fresh-clone bootstrap path and produces plan-core-lib.sh among its five
+# outputs); a later invocation, once it exists, uses the normal exec
+# preference.
 bpl_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$bpl_script_dir/plan-core-lib.sh"
-plan_exec_compiled_binary_if_present build-plan-libs "$bpl_script_dir" "$@"
+if [ -f "$bpl_script_dir/plan-core-lib.sh" ]; then
+    source "$bpl_script_dir/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present build-plan-libs "$bpl_script_dir" "$@"
+fi
 unset bpl_script_dir
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

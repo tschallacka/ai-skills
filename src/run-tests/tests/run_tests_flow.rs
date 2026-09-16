@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 // Real-subprocess integration coverage for the compiled run-tests binary,
 // mirroring pre-push-check/ci-failures's own established convention: a
 // small synthetic scratch tree built to look like a repository this binary

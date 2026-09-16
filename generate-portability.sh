@@ -15,6 +15,26 @@ set -euo pipefail
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed immediately after repo_root is
+# computed, before rules/output are set -- as early as structurally possible,
+# matching every prior goal's precedent. This script already declares
+# set -euo pipefail above, matching what sourcing plan-core-lib.sh itself
+# wants, so no call-site set +e fix is needed here. generate-portability.sh
+# lives at the repository root itself, one level shallower than
+# planning/scripts, so the relative path to plan-core-lib.sh crosses one
+# directory level down, matching pre-push-check.sh/setup-dev-env.sh's own
+# precedent.
+gp_script_dir="$repo_root"
+source "$gp_script_dir/planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present generate-portability "$gp_script_dir" "$@"
+unset gp_script_dir
+
 rules="$repo_root/portability-rules.json"
 # Overridable so a test can generate two scans to temp paths and compare them.
 # Comparing against the committed file instead only answers "is it fresh",

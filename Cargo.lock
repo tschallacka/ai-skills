@@ -167,6 +167,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "blast-radius"
+version = "0.1.0"
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -286,6 +290,22 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "ci-scope"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ci-subjects"
+version = "0.1.0"
+
+[[package]]
+name = "ci-test-scope"
+version = "0.1.0"
 
 [[package]]
 name = "cleanup-plans"
@@ -522,6 +542,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "generate-portability"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1663,6 +1691,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "setup-dev-env"
+version = "0.1.0"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2060,6 +2092,13 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "verify-both-shells"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "verify-fix-keys"

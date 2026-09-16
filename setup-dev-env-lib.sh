@@ -166,6 +166,12 @@ plan_primary() {
 }
 
 plan_secondary() {
+    plan_secondary_core
+    plan_secondary_ported
+}
+
+# The original, pre-T145 secondary-command roster.
+plan_secondary_core() {
     cat <<'PLAN'
 mint-fix-keys	mint-fix-keys
 plan-crypt	plan-crypt
@@ -185,9 +191,21 @@ tony-the-pony	tony-the-pony
 update-adversarial-review	update-adversarial-review
 update-progress	update-progress
 update-ui-story	update-ui-story
+PLAN
+}
+
+# T145's own bash-to-rust conversions (rjq/bug-report/todo predate T145 but
+# are grouped here since they were already adjacent to it), in the order
+# each goal closed. function-length-ratchet: this function grows by one row
+# per goal, so it is split from plan_secondary_core() here specifically to
+# stay under the 40-line cap rather than let the combined roster cross it
+# again the next time a goal appends a row.
+plan_secondary_ported() {
+    cat <<'PLAN'
 rjq	rjq
 bug-report	bugs
 todo	todo
+build-plan-libs	build-plan-libs
 generate-skill-docs	generate-skill-docs
 verify-skill-load	verify-skill-load
 ci-failures	ci-failures
@@ -196,5 +214,12 @@ run-tests	run-tests
 planning-server	planning-server
 planning-server	planning-client
 planning-mcp	planning-mcp
+setup-dev-env	setup-dev-env
+generate-portability	generate-portability
+blast-radius	blast-radius
+verify-both-shells	verify-both-shells
+ci-subjects	ci-subjects
+ci-scope	ci-scope
+ci-test-scope	ci-test-scope
 PLAN
 }

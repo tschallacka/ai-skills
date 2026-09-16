@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 // Integration coverage that must run the real compiled binary as a
 // subprocess, not the crate's own unit-test process: relocating the binary
 // (and the cwd) OUTSIDE this repository is the only way to make BOTH of

@@ -41,6 +41,15 @@ case "${1:-}" in
         ;;
 esac
 
+# PORTABILITY(empty-array-setu): saved here, before the arg-parsing loop
+# below consumes "$@" via shift, so the compiled-binary wiring further down
+# (necessarily placed after repo_root is computed, which this script only
+# resolves AFTER parsing args) can still exec with the caller's own argv
+# exactly as received rather than an already-emptied "$@". Guarded the same
+# way `paths` is below: an empty array's [@] expansion is an
+# unbound-variable error under bash 3.2's own set -u semantics.
+br_original_args=("$@")
+
 base=master
 paths=()
 while [ "$#" -gt 0 ]; do
@@ -56,6 +65,34 @@ done
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
     printf '%s: not a git work tree\n' "${0##*/}" >&2; exit 69
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed immediately after repo_root is
+# computed and BEFORE the `cd "$repo_root"` below -- matching the placement
+# already used in pre-push-check.sh, run-tests.sh, and setup-dev-env.sh
+# (wiring block immediately after repo_root is computed, strictly before any
+# subsequent cd), not merely "before registry is set" (which the cd below
+# would also satisfy). This script already declares set -euo pipefail above,
+# matching what sourcing plan-core-lib.sh itself wants, so no call-site
+# set +e fix is needed here. blast-radius.sh lives at the repository root
+# itself, one level shallower than planning/scripts, so the relative path to
+# plan-core-lib.sh crosses one directory level down, matching
+# generate-portability.sh/pre-push-check.sh/setup-dev-env.sh's own precedent.
+#
+# Forwards br_original_args, NOT "$@": unlike every other already-wired
+# script, this one parses its own args (consuming "$@" via shift) BEFORE
+# computing repo_root, so by this point "$@" is empty and would silently
+# strip every argument from the compiled binary's own invocation.
+br_script_dir="$repo_root"
+source "$br_script_dir/planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present blast-radius "$br_script_dir" \
+    ${br_original_args[@]+"${br_original_args[@]}"}
+unset br_script_dir br_original_args
+
 cd "$repo_root"
 registry="$repo_root/coupling.tsv"
 [ -f "$registry" ] || { printf '%s: coupling.tsv not found\n' "${0##*/}" >&2; exit 69; }

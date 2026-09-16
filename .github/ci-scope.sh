@@ -71,6 +71,27 @@ set -uo pipefail
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed immediately after repo_root is
+# computed and BEFORE the rest of this script's own variable defaults -- as
+# early as structurally possible, and safe since nothing before this point
+# consumes "$@". Unlike ci-subjects.sh (goal 20), this script already
+# computes its own repo_root for its own real use (the git/cargo-metadata
+# work below), so the wiring call reuses that existing variable rather than
+# computing a second, differently-named one. This script already declares
+# set -uo pipefail above (deliberately WITHOUT -e), so it is forced back off
+# immediately below, matching this plan's own established fix for that class
+# of caller.
+source "$repo_root/planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present ci-scope "$repo_root" "$@"
+set +e
+set -uo pipefail
+
 base_ref=""
 files_from=""
 push_to=""
@@ -185,12 +206,21 @@ file_count="$(printf '%s\n' "$changed" | awk 'NF' | wc -l | tr -d ' ')"
 # narrowed scope, and a mistake in it is invisible exactly once, on the run
 # that introduces it. Caught the honest way: this very change came back
 # `scope=none`, because a selector edit is not a crate edit.
+#
+# `src/ci-scope/*` is the SAME self-protection, extended for the compiled
+# binary this selector now prefers (goal 21): that binary lives under src/,
+# not under .github/, so the arm above does not cover it on its own. Without
+# this arm, a bug in the compiled selector's own source would be treated as
+# an ordinary crate change -- correctly triggering a selective rebuild of
+# ci-scope and its dependents, but NOT the mandatory full run every other
+# change to this selector's own logic gets.
 global_hit=""
 while IFS= read -r path; do
     [ -n "$path" ] || continue
     case "$path" in
         Cargo.toml|Cargo.lock|rust-toolchain.toml|flake.nix|flake.lock) global_hit="$path"; break ;;
         .github/*) global_hit="$path"; break ;;
+        src/ci-scope/*) global_hit="$path"; break ;;
     esac
 done <<CHANGED
 $changed

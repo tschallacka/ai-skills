@@ -57,6 +57,10 @@ echo "ci-scope: the selector does not exempt itself"
 check "the selector itself"    full .github/ci-scope.sh
 check "the subject mapper"     full .github/ci-subjects.sh
 check "its own tests"          full .github/tests/test-ci-scope.sh
+# The same self-protection, extended for the compiled binary this selector
+# now prefers: it lives under src/, not .github/, so the arm above alone
+# does not cover it.
+check "the compiled selector's own source" full src/ci-scope/src/main.rs
 
 echo "ci-scope: a push to an integration branch is exhaustive"
 # REGRESSION. On a push to master, HEAD is origin/master, so the merge base is

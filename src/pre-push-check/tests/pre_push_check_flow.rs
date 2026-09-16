@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 // Real-subprocess integration coverage for the compiled pre-push-check
 // binary, mirroring ci-failures's own established convention: a real,
 // throwaway git repository rather than a stubbed one, since this binary's

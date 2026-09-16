@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 // Real-subprocess integration coverage for the compiled ci-failures binary,
 // mirroring planning/tests/test-ci-failures-contract.sh's own established
 // stub convention exactly (a fake gh/glab executable on PATH that logs its

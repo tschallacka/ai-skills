@@ -38,6 +38,27 @@
 set -uo pipefail
 export LC_ALL=C
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed immediately after export LC_ALL=C and
+# BEFORE the argument-parsing loop -- as early as structurally possible.
+# UNLIKE every prior goal's script, this one lives under .github/, one level
+# BELOW the repository root, and has no repo_root of its own; computed here
+# solely for the wiring call, going UP one level (the opposite relative
+# direction from every prior repo-root script). This script already declares
+# set -uo pipefail above (deliberately WITHOUT -e), so it is forced back off
+# immediately below, matching this plan's own established fix for that class
+# of caller.
+cs_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$cs_repo_root/planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present ci-subjects "$cs_repo_root" "$@"
+unset cs_repo_root
+set +e
+set -uo pipefail
+
 scope=""
 crates=""
 

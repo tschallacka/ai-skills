@@ -57,6 +57,27 @@ set -uo pipefail
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed immediately after repo_root is
+# computed and BEFORE run_tests=/the rest of this script's own variable
+# defaults -- as early as structurally possible, and safe since nothing
+# before this point consumes "$@". Matching goal 21's own precedent for
+# ci-scope.sh: this script already computes its own repo_root for its own
+# real use (the run_tests= line below), so the wiring call reuses that
+# existing variable rather than computing a second, differently-named one.
+# This script already declares set -uo pipefail above (deliberately WITHOUT
+# -e), so it is forced back off immediately below, matching this plan's own
+# established fix for that class of caller.
+source "$repo_root/planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present ci-test-scope "$repo_root" "$@"
+set +e
+set -uo pipefail
+
 run_tests="$repo_root/run-tests.sh"
 base_ref=""
 files_from=""
@@ -128,7 +149,14 @@ file_count="$(printf '%s\n' "$changed" | awk 'NF' | wc -l | tr -d ' ')"
 # ---- global inputs: anything that can change what ANY test exercises ------
 # The selector must not exempt itself (`.github/*`), and run-tests.sh and
 # lib-test.sh are the execution machinery every test implicitly depends on
-# whether or not it names them in a COVERS line.
+# whether or not it names them in a COVERS line. src/ci-test-scope/* is the
+# self-protection extension goal 22 adds: it lives under src/, NOT under
+# .github/, so the existing .github/* arm does not cover it -- without this
+# arm, a bug in the compiled selector's own source would be treated as an
+# ordinary crate change (correctly triggering a selective test run touching
+# that crate, but not necessarily the mandatory full run every other
+# CI-surface change gets), letting the selector validate itself via its own
+# narrowed, unproven logic.
 global_hit=""
 while IFS= read -r path; do
     [ -n "$path" ] || continue
@@ -137,6 +165,7 @@ while IFS= read -r path; do
         .github/*) global_hit="$path"; break ;;
         run-tests.sh) global_hit="$path"; break ;;
         planning/tests/lib-test.sh) global_hit="$path"; break ;;
+        src/ci-test-scope/*) global_hit="$path"; break ;;
     esac
 done <<CHANGED
 $changed

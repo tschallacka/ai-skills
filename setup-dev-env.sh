@@ -40,6 +40,27 @@ export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed immediately after repo_root is
+# computed and BEFORE setup-dev-env-lib.sh is sourced -- as early as
+# structurally possible, matching pre-push-check.sh's own precedent -- since
+# the compiled binary re-derives everything itself, including its own
+# nix-shell entry, and needs nothing bash would otherwise compute first.
+# setup-dev-env.sh already declares `set -euo pipefail` above, matching what
+# sourcing plan-core-lib.sh itself wants, so no call-site `set +e` fix is
+# needed here (unlike run-tests.sh's own `set -uo pipefail`). setup-dev-env.sh
+# lives at the repository root itself, one level shallower than
+# planning/scripts, so the relative path to plan-core-lib.sh crosses one
+# directory level down, matching pre-push-check.sh's own precedent exactly.
+sde_script_dir="$repo_root"
+source "$sde_script_dir/planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present setup-dev-env "$sde_script_dir" "$@"
+unset sde_script_dir
+
 # shellcheck source=setup-dev-env-lib.sh
 source "$repo_root/setup-dev-env-lib.sh"
 
