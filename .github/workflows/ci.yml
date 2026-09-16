@@ -640,9 +640,11 @@ jobs:
           fi
 
   scope:
-    # Proves: nothing. This job DECIDES, and the decision is what the native
-    # legs below obey. It is deliberately tiny and always runs, because every
-    # other crate job depends on its answer.
+    # Proves: nothing, except that the selector scripts below run compiled
+    # rather than bash (see the build step ahead of "Decide the scope"). This
+    # job DECIDES, and the decision is what the native legs below obey. It is
+    # otherwise deliberately tiny and always runs, because every other crate
+    # job depends on its answer.
     #
     # The default is always the widest scope. See .github/ci-scope.sh — every
     # error path returns full, including no merge base, a shallow clone and
@@ -674,6 +676,35 @@ jobs:
         # cargo metadata supplies the reverse-dependency graph, so the selector
         # needs cargo even though it builds nothing.
         uses: dtolnay/rust-toolchain@1.98
+
+      - name: Build and stage the compiled selector binaries
+        # ci-scope.sh, ci-subjects.sh and ci-test-scope.sh each prefer their
+        # own compiled binary over their bash body via
+        # plan_exec_compiled_binary_if_present (T145 goals 20-22), which finds
+        # it via plan_bin_dir's own upward walk for a bin/<triple> directory --
+        # anchored at plan-crypt-lib.sh's own location (planning/scripts/,
+        # BASH_SOURCE[0] inside a function resolves to where it was defined,
+        # not where it was called from), not at the caller's own directory, so
+        # the outermost bin/<triple> found walking up from there is what
+        # every caller in this repository shares: this checkout's own
+        # repo-root bin/<triple>. plan_crypt_target_triple's own answer for a
+        # Linux x86_64 runner is unconditionally x86_64-unknown-linux-musl
+        # (plan-crypt-lib.sh), not whatever the host toolchain happens to
+        # build for. Without this step
+        # no compiled binary exists yet this early in a real run, so all three
+        # scripts below would always fall through to bash -- the wiring these
+        # three goals added would be proven only by their own local test
+        # harnesses and dead code in every actual CI run.
+        shell: bash
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get install -y -qq musl-tools
+          cargo build --release --target x86_64-unknown-linux-musl \
+            -p ci-scope -p ci-subjects -p ci-test-scope
+          mkdir -p bin/x86_64-unknown-linux-musl
+          for bin in ci-scope ci-subjects ci-test-scope; do
+            cp "target/x86_64-unknown-linux-musl/release/$bin" "bin/x86_64-unknown-linux-musl/$bin"
+          done
 
       - name: Decide the scope
         id: decide
