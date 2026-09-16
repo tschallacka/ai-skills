@@ -8,6 +8,9 @@
 # mechanical gates are applied to that:
 #   git diff --check        whitespace, in the worktree, the index and the
 #                           branch's committed diff
+#   PORTABILITY.md          regenerated unconditionally, so it always matches
+#                           what's about to be pushed (it is untracked; see
+#                           generate-portability.sh)
 #   bash -n                 every changed shell script
 #   static shell gate       the changed scripts at warning severity, with -x so
 #                           `source=` resolves from disk. CI lints the whole
@@ -46,6 +49,26 @@ set -u
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
+# hoist one, so there is no hoist ordering to preserve; placed immediately
+# after both anchor lines above, before pre-push-check-lib.sh is sourced and
+# before the nix-shell re-exec below -- a wired invocation execs the compiled
+# binary before bash ever sources its own library or attempts its own
+# re-exec, and the compiled binary performs its own equivalent re-exec check
+# internally. pre-push-check.sh lives at the repository root itself, one
+# level shallower than ci-failures/scripts, so the relative path to
+# plan-core-lib.sh crosses one directory level down, not the two ci-failures.sh
+# crosses upward.
+ppc_script_dir="$repo_root"
+source "$ppc_script_dir/planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present pre-push-check "$ppc_script_dir" "$@"
+unset ppc_script_dir
 
 # shellcheck source=pre-push-check-lib.sh
 source "$repo_root/pre-push-check-lib.sh"
@@ -208,6 +231,17 @@ if [ "$ws_rc" -eq 0 ]; then
     ok "git diff --check (worktree, index, branch diff)"
 else
     bad "whitespace errors: git diff --check"
+fi
+
+# ---- 1b. regenerate the portability catalogue ------------------------------
+# Unconditional, every run: PORTABILITY.md is untracked and cheap to rebuild,
+# so a push always leaves the working tree with a copy that actually matches
+# what just got pushed, rather than relying on whoever pushes to remember to
+# run generate-portability.sh by hand first.
+if "$repo_root/generate-portability.sh" >/dev/null 2>&1; then
+    ok "regenerated PORTABILITY.md"
+else
+    bad "generate-portability.sh failed; the portability catalogue may be stale"
 fi
 
 # ---- 2. syntax on changed shell scripts ------------------------------------
