@@ -108,6 +108,17 @@ t_assert_contains 'and the second' 'PB-02' "$rendered"
 # zero-length and the script still reported success. The seam is a rjq on PATH
 # that passes everything through except the append -- the one call carrying
 # --arg now -- which it answers with nothing.
+#
+# This is rjq's own failure mode, not the command's: the compiled binary
+# builds and serializes the document in-process with serde_json and never
+# shells out to rjq for the write (confirmed against
+# src/add-planning-bug/src/main.rs), so the stub below has nothing to
+# intercept there and the scenario cannot be reproduced against it. Force the
+# bash fallback with an AI_SKILLS_BIN_ROOT that exists but is empty --
+# plan_bin_dir accepts any existing directory there without checking it holds
+# the binary, so plan_exec_compiled_binary_if_present's own executable check
+# fails and falls through -- so this regression stays exercised regardless of
+# which implementation a wider sweep has on PATH for everything else.
 stub_dir="$work/stub-bin"
 mkdir -p "$stub_dir"
 real_jq="$(command -v rjq)"
@@ -121,11 +132,13 @@ done
 exec "$real_jq" "\$@"
 STUB
 chmod +x "$stub_dir/rjq"
+no_bin_dir="$work/no-bin"
+mkdir -p "$no_bin_dir"
 
 empty_plan="$work/root/empty-write"
 "$scripts/create-plan.sh" "$empty_plan" 'Demo' >/dev/null 2>&1
 rc=0
-PATH="$stub_dir:$PATH" "$scripts/add-planning-bug.sh" "$empty_plan" --id PB-01 \
+PATH="$stub_dir:$PATH" AI_SKILLS_BIN_ROOT="$no_bin_dir" "$scripts/add-planning-bug.sh" "$empty_plan" --id PB-01 \
     --title t --reproduce r --observed o --expected e >"$work/stub.out" 2>"$work/stub.err" || rc=$?
 t_assert_eq 'a write that produced nothing is refused, not reported as success' "$rc" '70'
 t_assert_contains 'and the message names the register and the id' 'PB-01' "$(cat "$work/stub.err")"
@@ -141,11 +154,13 @@ t_assert_eq 'and it is empty, which is what went wrong' \
     "$(wc -c < "$empty_plan/planning-bugs.json" | tr -d ' ')" '0'
 
 # The seam has to be real, or the case above passes for the wrong reason: the
-# same call on a clean plan, without the stub, succeeds.
+# same call on a clean plan, without the stub, succeeds. Same forced-fallback
+# AI_SKILLS_BIN_ROOT as the case above, so this is a true before/after pair
+# with only the stub differing.
 control_plan="$work/root/control"
 "$scripts/create-plan.sh" "$control_plan" 'Demo' >/dev/null 2>&1
 rc=0
-"$scripts/add-planning-bug.sh" "$control_plan" --id PB-02 \
+AI_SKILLS_BIN_ROOT="$no_bin_dir" "$scripts/add-planning-bug.sh" "$control_plan" --id PB-02 \
     --title t --reproduce r --observed o --expected e >/dev/null 2>&1 || rc=$?
 t_assert_eq 'the same call without the stub succeeds' "$rc" '0'
 

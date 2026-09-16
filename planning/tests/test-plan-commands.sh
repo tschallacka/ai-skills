@@ -792,6 +792,38 @@ if ! grep -Fq 'still contains a registered placeholder' "$temporary_root/fresh-c
     cat "$temporary_root/fresh-complete.log" >&2
     exit 1
 fi
+# find --in all/--in stories must not crash on a plan with no ui-user-stories.md
+# (most plans, since it's only created when UI is affected). A bare `[ -f FILE ]
+# && CMD` guard under set -euo pipefail propagates the false test's exit status
+# as a real failure, unwinding through every caller; the EXIT trap holding the
+# local matches_file variable then fires at the top level, where set -u finds
+# it unbound. $fresh_plan never gained a ui-user-stories.md.
+if [ -f "$fresh_plan/ui-user-stories.md" ]; then
+    echo 'test fixture assumption broken: fresh_plan unexpectedly has ui-user-stories.md.' >&2
+    exit 1
+fi
+if ! "$script_dir/plan-content.sh" find "$fresh_plan" 'Fresh goal' --in all \
+    >"$temporary_root/find-all-no-stories.log" 2>&1; then
+    echo 'find --in all crashed on a plan with no ui-user-stories.md.' >&2
+    cat "$temporary_root/find-all-no-stories.log" >&2
+    exit 1
+fi
+if grep -Fq 'unbound variable' "$temporary_root/find-all-no-stories.log"; then
+    echo 'find --in all surfaced an unbound-variable error.' >&2
+    cat "$temporary_root/find-all-no-stories.log" >&2
+    exit 1
+fi
+if "$script_dir/plan-content.sh" find "$fresh_plan" 'anything' --in stories \
+    >"$temporary_root/find-stories-no-stories.log" 2>&1; then
+    echo 'find --in stories on a plan with no ui-user-stories.md unexpectedly matched.' >&2
+    cat "$temporary_root/find-stories-no-stories.log" >&2
+    exit 1
+fi
+if grep -Fq 'unbound variable' "$temporary_root/find-stories-no-stories.log"; then
+    echo 'find --in stories surfaced an unbound-variable error instead of a clean no-match.' >&2
+    cat "$temporary_root/find-stories-no-stories.log" >&2
+    exit 1
+fi
 # retargeting a unit lists the verification units that grade it.
 retarget_output="$("$script_dir/update-work-unit.sh" "$plan_dir" W10 '#order_history' app/design/frontend/FakeTheme/templates/order/history.phtml 2>&1)"
 case "$retarget_output" in
