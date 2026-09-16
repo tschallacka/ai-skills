@@ -390,6 +390,7 @@ tests/test-discovery-unit-target.sh
 tests/test-document-id-parity.sh
 tests/test-document-sections.sh
 tests/test-duplication-ratchet.sh
+tests/test-exec-compiled-binary-preference.sh
 tests/test-fix-keys.sh
 tests/test-flag-coverage.sh
 tests/test-flag-form-equivalence.sh
