@@ -516,14 +516,21 @@ mod tests {
     }
 
     fn tempdir() -> PathBuf {
+        // A monotonic counter alongside the nanosecond timestamp: on a
+        // coarser-than-nanosecond clock (some virtualized CI runners), two
+        // of this file's six tempdir() calls can otherwise land on the same
+        // path in the same process, and one test then sees another's real
+        // fixture content spliced into its own supposedly-isolated directory.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let mut path = std::env::temp_dir();
         let unique = format!(
-            "build-plan-libs-test-{}-{:?}",
+            "build-plan-libs-test-{}-{:?}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
         path.push(unique);
         fs::create_dir_all(&path).unwrap();

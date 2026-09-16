@@ -58,21 +58,36 @@ fn planning_skill_root_env_overrides_a_broken_ancestor_walk() {
     let binary = relocated_binary("success");
     let outside_cwd = binary.parent().unwrap().to_path_buf();
 
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("crate is two levels under the repo root")
-        .to_path_buf();
-    assert!(repo_root.join("planning/scripts").is_dir());
+    // A synthetic root, not the real repository: skill_root() only checks
+    // that <root>/planning/scripts is a directory (main.rs's own
+    // skill_root_from), so a bare empty one is a sufficient env override.
+    // The real repo's own planning/scripts is NOT a safe substitute here --
+    // CI's native job runs this suite against a sparse checkout that omits
+    // planning/scripts entirely (only planning/rust-migration.tsv and
+    // planning/binaries.tsv are fetched), so relying on it made this test
+    // fail identically on every native leg, not on a broken assumption
+    // about the binary under test.
+    let synthetic_root = env::temp_dir().join(format!(
+        "build-plan-libs-flow-root-{}-{:?}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(synthetic_root.join("planning/scripts")).expect("create synthetic root");
 
     let output = Command::new(&binary)
         .current_dir(&outside_cwd)
-        .env("PLANNING_SKILL_ROOT", &repo_root)
+        .env("PLANNING_SKILL_ROOT", &synthetic_root)
         .arg("--check")
         .output()
         .expect("run the relocated binary with PLANNING_SKILL_ROOT set");
-    // Exit code is either 0 (up to date) or 1 (stale); both mean skill_root()
-    // resolved and the real check ran -- 69 would mean resolution failed.
+    // Exit code is either 0/1 (a real check ran) or 65 (render_library found
+    // no lib/<group> directories under this bare synthetic root -- also
+    // "resolution succeeded"); 69 would mean resolution failed, which is the
+    // only outcome this test rules out.
     assert_ne!(output.status.code(), Some(69));
     fs::remove_dir_all(&outside_cwd).ok();
+    fs::remove_dir_all(&synthetic_root).ok();
 }
