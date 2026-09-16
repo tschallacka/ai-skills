@@ -98,11 +98,17 @@ pub fn extract_state_as(tree: &PlanTree, generated_by: &str) -> Result<String, S
         .unwrap_or("no")
         .trim()
         .to_string();
+    // B343: the real line is `- Status: \`✅ approved\`` (or `💤 pending`) --
+    // a backtick-fenced code span, not a bare value. Only stripping the
+    // leading "- Status: `" left the closing backtick in the extracted
+    // value ("✅ approved`"), which then never matched derive_mode's
+    // literal comparison either.
     let review_status = review
         .and_then(|doc| {
-            doc.contents
-                .lines()
-                .find_map(|line| line.strip_prefix("- Status: `"))
+            doc.contents.lines().find_map(|line| {
+                line.strip_prefix("- Status: `")
+                    .and_then(|rest| rest.strip_suffix('`'))
+            })
         })
         .unwrap_or_default()
         .to_string();
@@ -162,17 +168,33 @@ pub fn extract_state_as(tree: &PlanTree, generated_by: &str) -> Result<String, S
             })
             .unwrap_or("unknown")
             .to_string();
+        let companion_doc = document(tree, &companion_path);
         steps.push(Step {
             goal,
             step,
             unit: field(&doc.contents, "Work unit"),
             kind: field(&doc.contents, "Type"),
             target: field(&doc.contents, "File"),
-            companion: document(tree, &companion_path).map(|_| {
+            companion: companion_doc.map(|_| {
                 companion_path
                     .file_name()
                     .unwrap()
                     .to_string_lossy()
+                    .to_string()
+            }),
+            // The companion's own real content (every "## " verification
+            // section: Automated tests, and Browser/Backend/Manual when
+            // present), not merely its filename -- companion above only
+            // records THAT one exists, which previously stood in for the
+            // actual procedure text on the rendered test/unit pages.
+            testing_procedure: companion_doc.map(|companion| {
+                companion
+                    .contents
+                    .lines()
+                    .skip_while(|line| !line.starts_with("## "))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .trim()
                     .to_string()
             }),
             status,
@@ -285,6 +307,50 @@ pub fn extract_state_as(tree: &PlanTree, generated_by: &str) -> Result<String, S
                 });
             }
         }
+    }
+    // Every prior cycle's own findings, archived in adversarial-review-
+    // history.md under its own "## Cycle N" heading, in the same five-column
+    // shape as the live table above. An id recurs across cycles as it is
+    // found, refined, and resolved -- the LAST (highest-numbered) cycle's own
+    // text is kept per id, since that is the finding's final, resolved
+    // account, not each intermediate restatement. Skips any id the live
+    // table above already carries, so a currently-open finding is shown once,
+    // from its authoritative live row, not also from wherever it was first
+    // raised.
+    if let Some(history) = tree.document("adversarial-review-history.md") {
+        let mut by_id: std::collections::BTreeMap<String, Finding> =
+            std::collections::BTreeMap::new();
+        let mut cycle_label = String::new();
+        for line in history.contents.lines() {
+            if let Some(rest) = line.strip_prefix("## ") {
+                cycle_label = rest.trim().to_string();
+                continue;
+            }
+            if !line.starts_with("| AR") {
+                continue;
+            }
+            let row = cells(line);
+            if row.len() >= 5 {
+                by_id.insert(
+                    row[0].clone(),
+                    Finding {
+                        id: row[0].clone(),
+                        item: row[1].clone(),
+                        change: row[2].clone(),
+                        status: row[3].clone(),
+                        work_unit: row[4].clone(),
+                        cycle: cycle_label.clone(),
+                    },
+                );
+            }
+        }
+        let live_ids: std::collections::HashSet<String> =
+            findings.iter().map(|finding| finding.id.clone()).collect();
+        findings.extend(
+            by_id
+                .into_values()
+                .filter(|finding| !live_ids.contains(&finding.id)),
+        );
     }
     let cycles = tree
         .documents

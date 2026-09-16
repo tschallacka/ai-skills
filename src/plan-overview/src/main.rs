@@ -3,14 +3,13 @@
 use plan_overview::plan::extract::extract_state;
 use plan_overview::plan::state::parse_state;
 use plan_overview::plan::tree::read_plan_tree;
-use plan_overview::render::router::{route, Route};
-use plan_overview::render::shell::render_shell;
+use plan_overview::render::router::render_page;
 use plan_overview::watch::{coalesce_events, watch_plan_dir, ChangeEvent, DEBOUNCE_WINDOW};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "usage: plan-overview --plan-dir DIR [--out FILE] [--serve] [--port N] [--watch] [--refresh MS]";
+const USAGE: &str = "usage: plan-overview --plan-dir DIR [--out FILE] [--serve] [--host HOST] [--port N] [--watch] [--refresh MS]";
 
 #[derive(Debug, Default)]
 struct Args {
@@ -18,6 +17,7 @@ struct Args {
     plan_dir: PathBuf,
     out: Option<PathBuf>,
     serve: bool,
+    host: Option<String>,
     port: Option<u16>,
     watch: bool,
     refresh: Option<Duration>,
@@ -49,6 +49,7 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
             }
             "--watch" => args.watch = true,
             "--serve" => args.serve = true,
+            "--host" => args.host = Some(it.next().ok_or("--host needs a value")?),
             "--port" => {
                 args.port = Some(
                     it.next()
@@ -79,21 +80,10 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
     if args.refresh.is_some() && !args.watch {
         return Err("--refresh only applies together with --watch".into());
     }
+    if args.host.is_some() && !args.serve {
+        return Err("--host only applies together with --serve".into());
+    }
     Ok(args)
-}
-
-fn render_page(state: &plan_overview::plan::state::State, hash: &str) -> String {
-    let page = match route(hash, state) {
-        Route::Overview { .. } => plan_overview::pages::overview::render_overview(state),
-        Route::Goal { id } => plan_overview::pages::goal::render_goal(state, &id),
-        Route::Unit { id, .. } => plan_overview::pages::unit::render_unit(state, &id),
-        Route::Finding { id } => plan_overview::pages::findings::render_finding(state, &id),
-        Route::Test { id } => plan_overview::pages::tests::render_test(state, &id),
-        Route::Coverage => plan_overview::pages::coverage::render_coverage(state),
-        Route::History => plan_overview::pages::history::render_history(state),
-        Route::Graph => plan_overview::pages::graph::render_graph(state),
-    };
-    render_shell(state, &page)
 }
 
 // Re-extracts and re-serializes plan state from disk, the same first two
@@ -111,7 +101,7 @@ fn rerender_state_json(plan_dir: &Path) -> Result<String, String> {
 fn rerender_artifact(plan_dir: &Path) -> Result<String, String> {
     let state_json = rerender_state_json(plan_dir)?;
     let state = parse_state(&state_json).map_err(|error| error.to_string())?;
-    Ok(render_page(&state, "#overview"))
+    Ok(render_page(&state, "/overview"))
 }
 
 // Blocks for the next change, then drains anything else that arrives within
@@ -148,8 +138,6 @@ fn wait_for_batch(events: &Receiver<ChangeEvent>, window: Duration) -> bool {
 fn run(args: Args) -> Result<(), String> {
     let tree = read_plan_tree(&args.plan_dir).map_err(|error| error.to_string())?;
     let state_json = extract_state(&tree)?;
-    let state = parse_state(&state_json).map_err(|error| error.to_string())?;
-    let artifact = render_page(&state, "#overview");
     let window = args.refresh.unwrap_or(DEBOUNCE_WINDOW);
 
     if args.serve {
@@ -170,13 +158,17 @@ fn run(args: Args) -> Result<(), String> {
                 }
             });
         }
-        let _server = plan_overview::serve::serve_on_port(artifact, stream, args.port.unwrap_or(0))
-            .map_err(|error| error.to_string())?;
+        let host = args.host.as_deref().unwrap_or("127.0.0.1");
+        let _server =
+            plan_overview::serve::serve_on_host_port(stream, host, args.port.unwrap_or(0))
+                .map_err(|error| error.to_string())?;
         loop {
             std::thread::park();
         }
     }
 
+    let state = parse_state(&state_json).map_err(|error| error.to_string())?;
+    let artifact = render_page(&state, "/overview");
     let output = args
         .out
         .unwrap_or_else(|| args.plan_dir.join("overview.html"));

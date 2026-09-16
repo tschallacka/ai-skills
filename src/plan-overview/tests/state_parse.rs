@@ -1,5 +1,6 @@
 // MODE: DEV
 use plan_overview::plan::derive::{derive_counts, derive_geometry};
+use plan_overview::plan::extract::extract_state;
 use plan_overview::plan::state::parse_state;
 use plan_overview::plan::tree::read_plan_tree;
 
@@ -51,6 +52,27 @@ fn counts_and_geometry_are_zero_safe_and_consistent() {
     assert_eq!(geometry.donut_offset, geometry.donut_circumference);
     assert_eq!(geometry.work_offset, geometry.ring_circumference);
     assert!(geometry.donut_offset.is_finite());
+}
+
+// B343: the real adversarial-review.md line is a backtick-fenced code span
+// (`- Status: \`✅ approved\``), not a bare value -- extract_state must strip
+// BOTH backticks and preserve the emoji prefix, since derive_mode compares
+// against that exact literal.
+#[test]
+fn extract_state_strips_both_backticks_from_the_verdict_status_line() {
+    let root = std::env::temp_dir().join(format!("plan-overview-b343-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("plan-description.md"), "# Plan: demo\n").unwrap();
+    std::fs::write(
+        root.join("adversarial-review.md"),
+        "# Adversarial review: demo\n\n## Verdict\n\n- Status: `✅ approved`\n",
+    )
+    .unwrap();
+    let tree = read_plan_tree(&root).unwrap();
+    let state_json = extract_state(&tree).unwrap();
+    let state = parse_state(&state_json).unwrap();
+    assert_eq!(state.identity.review_status, "✅ approved");
+    std::fs::remove_dir_all(root).ok();
 }
 
 #[test]

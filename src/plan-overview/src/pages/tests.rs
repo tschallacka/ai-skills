@@ -13,8 +13,9 @@ pub fn render_test(state: &State, id: &str) -> String {
         None => return "<article><h1>Test not found</h1></article>".into(),
     };
     let procedure = step
-        .companion
+        .testing_procedure
         .as_deref()
+        .filter(|text| !text.is_empty())
         .unwrap_or("No testing companion procedure recorded.");
     format!(
         "<article><h1>Test {}</h1>{}{}{} </article>",
