@@ -49,11 +49,28 @@ pub fn sweep_stale_worktrees(src: &Path, own_wt: &Path) {
 fn live_owner(parent: &Path) -> Option<i32> {
     let contents = fs::read_to_string(parent.join("harness.pid")).ok()?;
     let pid: i32 = contents.trim().parse().ok()?;
-    if unsafe { libc::kill(pid, 0) } == 0 {
+    if is_live(pid) {
         Some(pid)
     } else {
         None
     }
+}
+
+// This script's own verify-both-shells.sh has no meaningful bash-comparison
+// workflow on Windows (no bash to compare), but the crate still has to
+// compile there since ci-subjects.sh's own planning_commands catch-all
+// builds every workspace member on every platform. `kill(pid, 0)` is POSIX
+// only; there is no signalable-pid check on offer here, so a non-unix build
+// always answers "not live" -- the same safe default a missing/malformed
+// harness.pid already gets above.
+#[cfg(unix)]
+fn is_live(pid: i32) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn is_live(_pid: i32) -> bool {
+    false
 }
 
 #[cfg(test)]
