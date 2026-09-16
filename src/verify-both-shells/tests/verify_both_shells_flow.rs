@@ -6,7 +6,9 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
+#[cfg(unix)]
+use std::process::Stdio;
 #[cfg(unix)]
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
