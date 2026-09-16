@@ -9,12 +9,14 @@
 //! `EXIT INT TERM HUP`, one signal wider than the run-tests precedent
 //! covers.
 
-use std::sync::atomic::AtomicI32;
 #[cfg(unix)]
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicI32, Ordering};
+#[cfg(unix)]
 use std::sync::OnceLock;
 
+#[cfg(unix)]
 static SIGNAL_PIPE_WRITE: OnceLock<i32> = OnceLock::new();
+#[cfg(unix)]
 static RECEIVED_SIGNAL: AtomicI32 = AtomicI32::new(0);
 
 #[cfg(unix)]
