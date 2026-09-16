@@ -1,0 +1,19 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "MCP adapter for planning-server, exposing its seven MVP operations as MCP tools"
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "planning-mcp"
+path = "src/main.rs"
+
+[dependencies]
+planning-server = { path = "../planning-server" }
+serde_json.workspace = true
