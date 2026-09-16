@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 // Integration coverage for the verify-both-shells crate: library-level
 // orchestration tests driving `run()` directly with fake Leg values (no
 // real flake.nix/nix develop needed), plus real spawned-subprocess tests

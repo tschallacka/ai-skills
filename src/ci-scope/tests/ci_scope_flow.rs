@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 // Real-subprocess integration coverage for the compiled ci-scope binary:
 // scratch git repos and synthetic cargo workspaces for the branches this
 // crate's own logic decides, plus a real-tree parity test running every one

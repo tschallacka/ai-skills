@@ -31,8 +31,15 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # directory level down, matching pre-push-check.sh/setup-dev-env.sh's own
 # precedent.
 gp_script_dir="$repo_root"
-source "$gp_script_dir/planning/scripts/plan-core-lib.sh"
-plan_exec_compiled_binary_if_present generate-portability "$gp_script_dir" "$@"
+# plan-core-lib.sh is generated (gitignored) by build-plan-libs.sh, so it does
+# not exist on a genuinely fresh checkout -- guard the source+exec on it
+# already being present, unconditionally falling through to this script's own
+# bash implementation when it is not, matching B346's fix for
+# build-plan-libs.sh's own self-referential case.
+if [ -f "$gp_script_dir/planning/scripts/plan-core-lib.sh" ]; then
+    source "$gp_script_dir/planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present generate-portability "$gp_script_dir" "$@"
+fi
 unset gp_script_dir
 
 rules="$repo_root/portability-rules.json"

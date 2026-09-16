@@ -53,8 +53,15 @@ export LC_ALL=C
 # immediately below, matching this plan's own established fix for that class
 # of caller.
 cs_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$cs_repo_root/planning/scripts/plan-core-lib.sh"
-plan_exec_compiled_binary_if_present ci-subjects "$cs_repo_root" "$@"
+# plan-core-lib.sh is generated (gitignored) by build-plan-libs.sh, so it does
+# not exist on a genuinely fresh checkout -- guard the source+exec on it
+# already being present, unconditionally falling through to this script's own
+# bash implementation when it is not, matching B346's fix for
+# build-plan-libs.sh's own self-referential case.
+if [ -f "$cs_repo_root/planning/scripts/plan-core-lib.sh" ]; then
+    source "$cs_repo_root/planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present ci-subjects "$cs_repo_root" "$@"
+fi
 unset cs_repo_root
 set +e
 set -uo pipefail

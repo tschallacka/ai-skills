@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 // Real-subprocess integration coverage for the compiled blast-radius binary,
 // against a scratch git repo (WITH `git init` -- unlike goal 17's
 // generate-portability, this crate is fundamentally git-dependent since its

@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 // Real-subprocess integration coverage for the compiled generate-portability
 // binary, mirroring goal 16's own Repo-fixture harness shape -- but WITHOUT
 // git init, since this script has no git dependency at all.

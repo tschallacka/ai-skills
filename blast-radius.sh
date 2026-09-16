@@ -88,9 +88,16 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 # computing repo_root, so by this point "$@" is empty and would silently
 # strip every argument from the compiled binary's own invocation.
 br_script_dir="$repo_root"
-source "$br_script_dir/planning/scripts/plan-core-lib.sh"
-plan_exec_compiled_binary_if_present blast-radius "$br_script_dir" \
-    ${br_original_args[@]+"${br_original_args[@]}"}
+# plan-core-lib.sh is generated (gitignored) by build-plan-libs.sh, so it does
+# not exist on a genuinely fresh checkout -- guard the source+exec on it
+# already being present, unconditionally falling through to this script's own
+# bash implementation when it is not, matching B346's fix for
+# build-plan-libs.sh's own self-referential case.
+if [ -f "$br_script_dir/planning/scripts/plan-core-lib.sh" ]; then
+    source "$br_script_dir/planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present blast-radius "$br_script_dir" \
+        ${br_original_args[@]+"${br_original_args[@]}"}
+fi
 unset br_script_dir br_original_args
 
 cd "$repo_root"

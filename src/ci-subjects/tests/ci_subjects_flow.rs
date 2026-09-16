@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 // Real-subprocess integration coverage for the compiled ci-subjects binary.
 //
 // AR-82: every spawned invocation below explicitly controls its own

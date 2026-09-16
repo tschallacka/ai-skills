@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 // Real-subprocess integration coverage for the compiled ci-test-scope
 // binary: scratch git repos with a synthetic `run-tests.sh --list-only`
 // stub for the branches this crate's own logic decides, plus a real-tree

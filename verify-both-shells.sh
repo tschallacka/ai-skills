@@ -48,8 +48,15 @@ src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # prior goal's own precedent. Nothing before this point consumes "$@" via
 # shift, so it is safe to forward unmodified.
 vb_script_dir="$src"
-source "$vb_script_dir/planning/scripts/plan-core-lib.sh"
-plan_exec_compiled_binary_if_present verify-both-shells "$vb_script_dir" "$@"
+# plan-core-lib.sh is generated (gitignored) by build-plan-libs.sh, so it does
+# not exist on a genuinely fresh checkout that has never bootstrapped -- guard
+# the source+exec on it already being present, unconditionally falling
+# through to this script's own bash implementation when it is not, matching
+# B346's fix for build-plan-libs.sh's own self-referential case.
+if [ -f "$vb_script_dir/planning/scripts/plan-core-lib.sh" ]; then
+    source "$vb_script_dir/planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present verify-both-shells "$vb_script_dir" "$@"
+fi
 unset vb_script_dir
 set +e
 set -uo pipefail

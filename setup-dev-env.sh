@@ -57,8 +57,16 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # planning/scripts, so the relative path to plan-core-lib.sh crosses one
 # directory level down, matching pre-push-check.sh's own precedent exactly.
 sde_script_dir="$repo_root"
-source "$sde_script_dir/planning/scripts/plan-core-lib.sh"
-plan_exec_compiled_binary_if_present setup-dev-env "$sde_script_dir" "$@"
+# plan-core-lib.sh is generated (gitignored) by build-plan-libs.sh, so it does
+# not exist on a genuinely fresh checkout -- guard the source+exec on it
+# already being present, unconditionally falling through to this script's own
+# bash implementation (which itself builds plan-core-lib.sh, among other
+# things, via build-plan-libs.sh) when it is not, matching B346's fix for
+# build-plan-libs.sh's own self-referential case.
+if [ -f "$sde_script_dir/planning/scripts/plan-core-lib.sh" ]; then
+    source "$sde_script_dir/planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present setup-dev-env "$sde_script_dir" "$@"
+fi
 unset sde_script_dir
 
 # shellcheck source=setup-dev-env-lib.sh
