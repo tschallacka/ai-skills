@@ -370,12 +370,22 @@ run_script pr/47 --bogus
 [ "$RUN_RC" -eq 64 ] || note_fail "an unknown option exited $RUN_RC, expected 64"
 
 # ── missing rjq is a named, non-zero refusal ────────────────────────────────
+# rjq is a dependency of the BASH fallback only -- the compiled ci-failures
+# binary parses JSON with native serde_json and has no rjq dependency at all,
+# so this assertion is only true on the bash path. Force that path the same
+# way test-add-planning-bug.sh does for its own bash-fallback-only regression:
+# an AI_SKILLS_BIN_ROOT that exists but is empty makes plan_bin_dir succeed
+# while plan_exec_compiled_binary_if_present's executable check still fails,
+# so the wiring block always falls through here regardless of what a wider
+# sweep has staged on PATH or AI_SKILLS_BIN_ROOT for everything else.
 no_rjq_bin="$work/no-rjq-bin"
 mkdir -p "$no_rjq_bin"
 ln -s "$stub_bin/gh" "$no_rjq_bin/gh"
 ln -s "$stub_bin/glab" "$no_rjq_bin/glab"
+no_bin_root="$work/no-bin-root"
+mkdir -p "$no_bin_root"
 set +e
-( cd "$repo_work" && PATH="$no_rjq_bin:/usr/bin:/bin" "$BASH" "$script" pr/47 ) \
+( cd "$repo_work" && PATH="$no_rjq_bin:/usr/bin:/bin" AI_SKILLS_BIN_ROOT="$no_bin_root" "$BASH" "$script" pr/47 ) \
     >"$work/out" 2>"$work/err"
 RUN_RC=$?
 set -e

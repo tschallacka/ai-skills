@@ -59,6 +59,21 @@
 set -euo pipefail
 export LC_ALL=C
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
+# hoist one, so there is no hoist ordering to preserve; placed immediately
+# after both anchor lines above. ci-failures/ is a top-level skill directory,
+# not under planning/, so the relative path to plan-core-lib.sh crosses two
+# directory levels up from ci-failures/scripts.
+cif_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$cif_script_dir/../../planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present ci-failures "$cif_script_dir" "$@"
+unset cif_script_dir
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=ci-failures/scripts/ci-failures-glab-lib.sh
 source "$script_dir/ci-failures-glab-lib.sh"
