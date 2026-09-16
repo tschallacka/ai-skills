@@ -876,6 +876,28 @@ jobs:
         if: contains(matrix.target, 'linux-musl')
         run: sudo apt-get install -y -qq musl-tools
 
+      - name: Build rjq and put it on PATH for the workspace test step below
+        # ci-scope.sh's own bash implementation (exercised directly by
+        # ci-scope's real-tree-parity test, further down in "Format, lint
+        # and test the whole workspace") shells out to `rjq` to parse cargo
+        # metadata's JSON -- the compiled ci-scope binary parses it with
+        # serde_json instead and never touches rjq, so this is bash's own
+        # dependency alone. `cargo test --workspace` DOES compile rjq's own
+        # binary as a side effect (every workspace member's [[bin]] targets
+        # are built), but never onto PATH, so a nested `Command::new("bash")`
+        # subprocess inside the test cannot find it -- observed as a
+        # deterministic, real-CI-only failure ("cannot read the workspace
+        # graph from cargo metadata") on every non-Windows leg. The later
+        # "Build rjq and prove it answers a query" step below only runs when
+        # rjq itself is in this run's scope, which is not the same condition:
+        # the workspace-wide test step runs on every leg regardless of scope,
+        # so rjq needs to be ready before it, unconditionally.
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p rjq --target "${{ matrix.target }}"
+          echo "$GITHUB_WORKSPACE/target/${{ matrix.target }}/debug" >> "$GITHUB_PATH"
+
       # ---- one workspace-wide gate, not one per subject -------------------
       # fmt, clippy and test cover every member of the workspace in a single
       # pass. The per-subject steps below therefore only BUILD and EXECUTE;
