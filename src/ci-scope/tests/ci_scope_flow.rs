@@ -500,19 +500,24 @@ fn real_repo_root() -> PathBuf {
 }
 
 /// Real CI's own `cargo test --workspace --target ...` runs this test AS
-/// one of the workspace's own test binaries, so bash's own nested
-/// `cargo metadata` subprocess call (inside .github/ci-scope.sh) is
-/// launched from a process tree that a sibling cargo build/link step may
-/// still be using -- observed as a deterministic, real-CI-only failure of
-/// exactly the first scenario in this file that reaches cargo metadata
-/// ("a leaf crate"), never reproducible running this test in isolation
-/// locally. `decide()`'s own "cannot read the workspace graph from cargo
-/// metadata" is the one, exact, distinctive reason string that class of
-/// failure prints (see .github/ci-scope.sh), so retrying only on that
-/// literal text -- never on any other output difference -- cannot mask a
-/// genuine bash-vs-compiled-binary behavioral divergence.
+/// one of the workspace's own ~90 test binaries, all competing for the
+/// runner's memory/CPU at once, so bash's own nested `cargo metadata`
+/// subprocess call (inside .github/ci-scope.sh) can be resource-starved
+/// by sibling crates still building or running their own tests --
+/// observed as a deterministic, real-CI-only failure of exactly the first
+/// scenario in this file that reaches cargo metadata ("a leaf crate"),
+/// never reproducible running this test in isolation locally. A first,
+/// short-backoff retry attempt (3x200ms) did not clear it, meaning the
+/// contention window is longer than milliseconds -- this backs off
+/// exponentially up to several seconds to actually outlast it.
+/// `decide()`'s own "cannot read the workspace graph from cargo metadata"
+/// is the one, exact, distinctive reason string that class of failure
+/// prints (see .github/ci-scope.sh), so retrying only on that literal
+/// text -- never on any other output difference -- cannot mask a genuine
+/// bash-vs-compiled-binary behavioral divergence.
 fn real_bash_scope(repo_root: &Path, files_from: &Path) -> Output {
-    for attempt in 0..3 {
+    let mut backoff_ms = 200u64;
+    for attempt in 0..8 {
         let output = Command::new("bash")
             .arg(repo_root.join(".github/ci-scope.sh"))
             .arg("--files-from")
@@ -522,10 +527,11 @@ fn real_bash_scope(repo_root: &Path, files_from: &Path) -> Output {
             .output()
             .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if attempt == 2 || !stdout.contains("cannot read the workspace graph from cargo metadata") {
+        if attempt == 7 || !stdout.contains("cannot read the workspace graph from cargo metadata") {
             return output;
         }
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+        backoff_ms = (backoff_ms * 2).min(5000);
     }
     unreachable!()
 }
