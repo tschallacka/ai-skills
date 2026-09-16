@@ -170,7 +170,7 @@ test_rust_migration_registry() {
         "$repo_dir/planning/rust-migration.tsv")"
     excluded="$(awk -F '\t' '$2 == "runtime-binary" && $3 == "render-plans-board" { n++ } END { print n + 0 }' \
         "$repo_dir/planning/rust-migration.tsv")"
-    registry_count_is runtime-binary "$runtime" 48
+    registry_count_is runtime-binary "$runtime" 50
     registry_count_is build-generator "$generator" 1
     # Zero: register-rebuild.sh's row (the last dev-binary one) is gone
     # entirely now, not just recategorized -- its shell original was deleted

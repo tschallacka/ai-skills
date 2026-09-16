@@ -263,6 +263,32 @@ jobs:
         # missing; building here keeps that off the suite's clock.
         run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
 
+      - name: Place the compiled run-tests binary so it actually runs in CI
+        # Without it, plan_exec_compiled_binary_if_present finds no binary
+        # (this job's own AI_SKILLS_BIN_ROOT names a scratch directory
+        # containing only this one binary, so it can never coincidentally
+        # shadow-match anything else) and run-tests.sh silently falls
+        # through to its bash implementation on every CI run -- the same gap
+        # goal 15's own adversarial review (AR-51) found: this is the one
+        # script this plan has wired that CI itself invokes directly, so a
+        # CI run that never stages the compiled binary would never actually
+        # exercise it, in either matrix leg. Built on whichever OS this job
+        # is running as (no runner.os restriction), so both matrix legs
+        # (ubuntu-latest and macos-latest, each under its own "default
+        # bash") get the real, native-for-that-OS binary. Placed before the
+        # step below reclaims target/release/deps -- building after that
+        # reclaim would force a full rebuild here for no reason. The
+        # separate "macOS system bash 3.2 (portability floor)" job is a
+        # different job entirely and is not touched by this step -- it
+        # exists specifically to keep proving the bash fallback itself
+        # still works under bash 3.2, which staging a compiled binary there
+        # too would silently stop testing.
+        run: |
+          cargo build --release --manifest-path src/run-tests/Cargo.toml
+          mkdir -p .ci-bin/run-tests
+          cp "$GITHUB_WORKSPACE/target/release/run-tests" .ci-bin/run-tests/run-tests
+          echo "AI_SKILLS_BIN_ROOT=$PWD/.ci-bin/run-tests" >> "$GITHUB_ENV"
+
       - name: Build and stage every migrated planning command (T116)
         # T116: sharding a single job into several means a shell test needing
         # one of these binaries can now land in a DIFFERENT job than whichever

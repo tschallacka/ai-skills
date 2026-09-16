@@ -22,6 +22,7 @@ planning/scripts/create-ui-story-run-cache.sh	runtime-binary	create-ui-story-run
 planning/scripts/create-ui-validation.sh	runtime-binary	create-ui-validation	preserve CLI and observable behavior
 planning/scripts/create-work-unit-inventory.sh	runtime-binary	create-work-unit-inventory	preserve CLI and observable behavior
 planning/scripts/generate-reviewer.sh	build-generator	generate-reviewer	inventory projection contract; choose Cargo tool or dev binary
+planning/scripts/generate-skill-docs.sh	runtime-binary	generate-skill-docs	preserve CLI and observable behavior
 planning/scripts/lib/core/00-state.sh	library-crate	core-00-state	map functions, shared state, consumers, and failure behavior
 planning/scripts/lib/core/plan_atomic_write.sh	library-crate	core-plan_atomic_write	map functions, shared state, consumers, and failure behavior
 planning/scripts/lib/core/plan_awk_trim.sh	library-crate	core-plan_awk_trim	map functions, shared state, consumers, and failure behavior
@@ -136,4 +137,5 @@ planning/scripts/validate-plan-stale-lib.sh	library-crate	validate-plan-stale-li
 planning/scripts/validate-plan-ui-lib.sh	library-crate	validate-plan-ui-lib	map exports and consumers before choosing crate boundary
 planning/scripts/validate-plan.sh	runtime-binary	validate-plan	preserve CLI and observable behavior
 planning/scripts/verify-fix-keys.sh	runtime-binary	verify-fix-keys	preserve CLI and observable behavior
+planning/scripts/verify-skill-load.sh	runtime-binary	verify-skill-load	preserve CLI and observable behavior
 planning/scripts/verify-target.sh	runtime-binary	verify-target	preserve CLI and observable behavior

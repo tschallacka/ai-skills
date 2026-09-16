@@ -188,5 +188,13 @@ update-ui-story	update-ui-story
 rjq	rjq
 bug-report	bugs
 todo	todo
+generate-skill-docs	generate-skill-docs
+verify-skill-load	verify-skill-load
+ci-failures	ci-failures
+pre-push-check	pre-push-check
+run-tests	run-tests
+planning-server	planning-server
+planning-server	planning-client
+planning-mcp	planning-mcp
 PLAN
 }

@@ -211,6 +211,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-plan-libs"
+version = "0.1.0"
+
+[[package]]
 name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -272,6 +276,15 @@ dependencies = [
  "rustls-pki-types",
  "stale-lock",
  "tempfile",
+]
+
+[[package]]
+name = "ci-failures"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -513,6 +526,13 @@ dependencies = [
 
 [[package]]
 name = "generate-reviewer"
+version = "0.1.0"
+dependencies = [
+ "plan-crypt",
+]
+
+[[package]]
+name = "generate-skill-docs"
 version = "0.1.0"
 dependencies = [
  "plan-crypt",
@@ -1108,6 +1128,14 @@ name = "planning-map"
 version = "0.1.0"
 
 [[package]]
+name = "planning-mcp"
+version = "0.1.0"
+dependencies = [
+ "planning-server",
+ "serde_json",
+]
+
+[[package]]
 name = "planning-progress"
 version = "0.1.0"
 dependencies = [
@@ -1119,6 +1147,19 @@ name = "planning-register"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "planning-server"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "libc",
+ "plan-context-core",
+ "planning-core",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -1248,6 +1289,13 @@ name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
+
+[[package]]
+name = "pre-push-check"
+version = "0.1.0"
+dependencies = [
+ "regex",
+]
 
 [[package]]
 name = "proc-macro2"
@@ -1432,6 +1480,13 @@ name = "run-adversary-probe"
 version = "0.1.0"
 dependencies = [
  "planning-validator-inventory",
+]
+
+[[package]]
+name = "run-tests"
+version = "0.1.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -2012,6 +2067,10 @@ version = "0.1.0"
 dependencies = [
  "plan-crypt",
 ]
+
+[[package]]
+name = "verify-skill-load"
+version = "0.1.0"
 
 [[package]]
 name = "verify-target"

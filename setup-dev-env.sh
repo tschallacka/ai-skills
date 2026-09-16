@@ -241,6 +241,15 @@ if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then
         printf 'setup-dev-env: generate-reviewer.sh failed; the reviewer contract is missing\n' >&2
     fi
 fi
+# PORTABILITY.md is untracked (MAINTAINER.md section 2.16), cheap to rebuild,
+# and unlike the artifacts above it is a live catalogue rather than a
+# load-bearing dependency -- regenerated unconditionally, every run, so it is
+# never more than one setup-dev-env.sh away from matching the tree exactly.
+if "$repo_root/generate-portability.sh" >/dev/null 2>&1; then
+    printf 'setup-dev-env: regenerated PORTABILITY.md\n'
+else
+    printf 'setup-dev-env: generate-portability.sh failed; the portability catalogue may be stale\n' >&2
+fi
 [ "$generated" -eq 0 ] && printf 'setup-dev-env: generated artifacts already present\n'
 
 # Wire the repo's pre-push gate (./pre-push-check.sh) as the pre-push hook.
