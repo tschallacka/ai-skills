@@ -39,6 +39,7 @@ contains, it does not belong here.
 | [agent-identity-across-harnesses.md](agent-identity-across-harnesses.md) | Which agent is calling? What each harness tells an MCP server and a skill binary, and what it refuses to tell either. |
 | [claude-code-grep-shim.md](claude-code-grep-shim.md) | Why does `grep` warn "stray \ before -" on patterns already in this repo's own tests, and is it a real bug? |
 | [opencode-plugin-loading-and-advisory-injection.md](opencode-plugin-loading-and-advisory-injection.md) | Can an opencode plugin ship as a local file, and can a hook add text a model will read? |
+| [compiled-binary-preference-fresh-checkout.md](compiled-binary-preference-fresh-checkout.md) | Why does a freshly-wired script fail outright on a clean checkout instead of falling through to bash? |
 ## Format
 
 One file per question, named for the subject rather than the occasion. Open

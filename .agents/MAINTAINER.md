@@ -162,6 +162,37 @@ this file holds what applies to the repository as a whole.
   summary. A skipped test still prints `PASS` (`BUGS.json` B268), so a green
   summary does not by itself prove every test ran.
 
+### 1.13 Compiled-binary wiring must survive a fresh, unbootstrapped checkout
+- Wiring a script onto `plan_exec_compiled_binary_if_present` means sourcing
+  `planning/scripts/plan-core-lib.sh` first — a **generated, gitignored**
+  file that does not exist on a clone that has never run
+  `build-plan-libs.sh`. Guard the `source` + exec call on that file's own
+  existence, falling through unconditionally to the script's plain bash body
+  when it is absent, rather than let a bare `bash <script>.sh` fail outright
+  on a fresh checkout. See
+  `.agents/knowledge/compiled-binary-preference-fresh-checkout.md` for how
+  this was found (real CI, not local testing — a stale local
+  `plan-core-lib.sh` masks the bug) and which scripts are already fixed.
+- A local `run-tests.sh` sweep cannot catch this class of bug by itself: the
+  dev tree's own `plan-core-lib.sh` persists across sessions. Test the guard
+  directly by moving the file aside and re-running the affected script.
+
+### 1.14 `BUGS.json` and `TODO.json` are edited only on the `registers` branch
+- `pre-push-check.sh` refuses any push that touches either register from a
+  non-`registers` branch: `git switch registers` (or `git switch -c
+  registers origin/master` if it does not exist locally yet), file the entry
+  with the shipped `bugs`/`todo` CLI (never hand-edit the JSON — see below),
+  then push; the entry reaches `master` from there. A fix's resolution keys
+  (`fix`, `verification`, `status`) go the same way, after the code lands.
+- **Always mint the id through the CLI (`bugs add`, `todo add`), never by
+  hand.** The CLI resolves the next free id against the register's own
+  current state; a hand-assigned id can silently collide with one already
+  filed on `registers` that a feature branch's own stale local copy does not
+  yet know about — found the hard way on 2026-09-16, when three
+  hand-numbered bugs (meant to be B336-B338) collided with three real,
+  differently-titled bugs already on `registers` at those exact ids. The
+  branch-boundary check catches the write; it does not catch the collision.
+
 ## 2. Change checklist (minimum, per change)
 
 1. Identify every consumer (parser/validator, other helpers, tests, manifest/map,
