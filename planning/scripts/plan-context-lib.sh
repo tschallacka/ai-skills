@@ -201,18 +201,20 @@ context_entry_inputs() {
     esac
 }
 
-# Identity of everything an entry serves. A single-input entry keeps the plain
-# file hash so existing entries and tokens are untouched; a multi-input entry
-# hashes the ordered per-input hashes, so editing any input invalidates it.
+# Identity of everything an entry serves. The entry id itself is always the
+# first hashed line: two entries that resolve to the SAME backing file (e.g.
+# `inventory` and `coverage`, both served from work-unit-inventory.md) must
+# still get distinct hashes, or a token minted for one is wrongly accepted as
+# fresh for the other -- context_read_resolve's staleness check compares only
+# the hash and view, not the entry id, so a same-file entry pair collided
+# silently (B340) until this line was added. Editing any input still
+# invalidates every entry it serves, since each input's own hash still feeds
+# in unchanged.
 context_hash_entry() {
-    local plan_dir="$1" entry="$2" inputs count file
+    local plan_dir="$1" entry="$2" inputs file
     inputs="$(context_entry_inputs "$plan_dir" "$entry")" || return "$?"
-    count="$(printf '%s\n' "$inputs" | grep -c . || true)"
-    if [ "$count" -le 1 ]; then
-        context_hash_file "$inputs"
-        return 0
-    fi
     {
+        printf 'entry:%s\n' "$entry"
         while IFS= read -r file; do
             [ -n "$file" ] || continue
             [ -f "$file" ] && context_hash_file "$file" || printf 'absent\n'

@@ -12,6 +12,22 @@
 # Exit codes: 64 bad invocation, 66 missing plan directory.
 
 set -euo pipefail
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed before this script's own plan-dir
+# hoist call below: that call rewrites a --plan-dir flag into a positional
+# argument, and the compiled binary must receive the caller's true original
+# argv, not the already-hoisted form. The compiled binary itself was extended
+# to parse --plan-dir/--plan-dir= directly (src/plan-overview/src/bin/overview-state.rs).
+os_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$os_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present overview-state "$os_script_dir" "$@"
+unset os_script_dir
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=planning/scripts/plan-document-lib.sh
 source "$script_dir/plan-document-lib.sh"
@@ -224,7 +240,12 @@ item="$(plan_table_cell "$line" 3)"
 change="$(plan_table_cell "$line" 4)"
 status="$(plan_table_cell "$line" 5)"
 wu="$(plan_table_cell "$line" 6)"
-        cycle="$(sed -n '/^## Cycle [0-9]/,$p' "$plan_dir/adversarial-review-history.md" 2>/dev/null | grep -qF "| $fid |" && echo archived || echo current)"
+        # PORTABILITY(pipefail-grep-q): grep -c drains the pipe instead of
+        # exiting on the first match, so sed never gets SIGPIPE when a match
+        # falls early in a large history file (B341: grep -q here reported
+        # "current" instead of "archived" whenever the exceeded-pipe-buffer
+        # write raced sed's own exit).
+        cycle="$(sed -n '/^## Cycle [0-9]/,$p' "$plan_dir/adversarial-review-history.md" 2>/dev/null | grep -cF "| $fid |" >/dev/null && echo archived || echo current)"
         [ $ffirst = 1 ] && ffirst=0 || printf ','
         printf '{"id":%s,"item":%s,"change":%s,"status":%s,"workUnit":%s,"cycle":%s}' \
             "$(jstr "$fid")" "$(jstr "$item")" "$(jstr "$change")" "$(jstr "$status")" "$(jstr "$wu")" "$(jstr "$cycle")"

@@ -60,6 +60,9 @@ fn main() {
                 index += 1;
                 plan_option = Some(args.get(index).cloned().unwrap_or_else(|| usage(64)));
             }
+            value if value.starts_with("--plan-dir=") => {
+                plan_option = Some(value["--plan-dir=".len()..].to_string());
+            }
             "--status" => {
                 index += 1;
                 status = args.get(index).cloned().unwrap_or_else(|| usage(64));

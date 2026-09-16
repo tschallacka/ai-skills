@@ -33,6 +33,19 @@
 set -euo pipefail
 export LC_ALL=C
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. This script's own plan_hoist_plan_dir call
+# runs after both of the anchor lines above, not between them, so the
+# standard after-both-anchors placement is already correct here too.
+uus_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$uus_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present update-ui-story "$uus_script_dir" "$@"
+unset uus_script_dir
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=planning/scripts/plan-document-lib.sh
 source "$script_dir/plan-document-lib.sh"

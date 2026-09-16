@@ -29,6 +29,19 @@
 set -euo pipefail
 export LC_ALL=C
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
+# hoist one, so there is no hoist ordering to preserve; placed immediately
+# after both anchor lines above.
+vsl_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$vsl_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present verify-skill-load "$vsl_script_dir" "$@"
+unset vsl_script_dir
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
@@ -63,7 +76,14 @@ part_file="$skill_dir/parts/$part.md"
     exit 66
 }
 
-actual="$(grep -oE "SKILL-LOAD-PROOF part=$part token=[0-9a-f]+" "$part_file" \
+# PORTABILITY(pipefail-grep-q): grep -oE exits 1 when no line matches, which
+# under set -euo pipefail would abort this whole script (via the assignment's
+# own exit status) before the "carries no load-proof line" check below ever
+# runs (B342: a part file missing its load-sanity line silently exited 1 with
+# no message instead of exit 65). Wrapping it with || true keeps the pipe's
+# exit status at 0 regardless of whether grep found a match, so the intended
+# emptiness check downstream is what decides the outcome.
+actual="$( { grep -oE "SKILL-LOAD-PROOF part=$part token=[0-9a-f]+" "$part_file" || true; } \
     | sed 's/.*token=//' | head -1)"
 [ -n "$actual" ] || {
     printf '%s carries no load-proof line; run generate-skill-docs.sh\n' "$part_file" >&2

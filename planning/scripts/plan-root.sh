@@ -25,6 +25,17 @@
 set -euo pipefail
 export LC_ALL=C
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism.
+pr_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$pr_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present plan-root "$pr_script_dir" "$@"
+unset pr_script_dir
+
 usage() {
     local rc="${1:-64}"
     cat <<USAGE

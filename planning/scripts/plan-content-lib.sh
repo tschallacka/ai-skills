@@ -190,26 +190,30 @@ content_find_scope_goals_and_steps() { # <matches-file>
 content_find_scope_units_and_stories() { # <matches-file>
     case "$scope" in
         units|inventory|all)
-            [ -f "$plan_dir/work-unit-inventory.md" ] \
-                && content_find_scan_unit_rows "$plan_dir/work-unit-inventory.md" "$pattern" "$full" >> "$1"
+            if [ -f "$plan_dir/work-unit-inventory.md" ]; then
+                content_find_scan_unit_rows "$plan_dir/work-unit-inventory.md" "$pattern" "$full" >> "$1"
+            fi
             ;;
     esac
     case "$scope" in
         coverage|all)
-            [ -f "$plan_dir/work-unit-inventory.md" ] \
-                && content_find_scan_coverage_rows "$plan_dir/work-unit-inventory.md" coverage "$pattern" "$full" >> "$1"
+            if [ -f "$plan_dir/work-unit-inventory.md" ]; then
+                content_find_scan_coverage_rows "$plan_dir/work-unit-inventory.md" coverage "$pattern" "$full" >> "$1"
+            fi
             ;;
     esac
     case "$scope" in
         stories|all)
-            [ -f "$plan_dir/ui-user-stories.md" ] && awk -v docid="stories" -v pattern="$pattern" -v full="$full" '
-                /^## / { section = $0 }
-                index($0, pattern) && $0 !~ /^# / {
-                    line = $0; sub(/^[[:space:]]*/, "", line)
-                    if (full != "true" && length(line) > 120) line = substr(line, 1, 120) "..."
-                    print docid "\t" (section ? section : "-") "\t" line
-                }
-            ' "$plan_dir/ui-user-stories.md" >> "$1"
+            if [ -f "$plan_dir/ui-user-stories.md" ]; then
+                awk -v docid="stories" -v pattern="$pattern" -v full="$full" '
+                    /^## / { section = $0 }
+                    index($0, pattern) && $0 !~ /^# / {
+                        line = $0; sub(/^[[:space:]]*/, "", line)
+                        if (full != "true" && length(line) > 120) line = substr(line, 1, 120) "..."
+                        print docid "\t" (section ? section : "-") "\t" line
+                    }
+                ' "$plan_dir/ui-user-stories.md" >> "$1"
+            fi
             ;;
     esac
 }

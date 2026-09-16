@@ -16,6 +16,17 @@
 set -euo pipefail
 export LC_ALL=C
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism.
+pm_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$pm_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present plan-mutate "$pm_script_dir" "$@"
+unset pm_script_dir
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The verb list is data, not a hand-maintained heredoc: one place, read by

@@ -27,6 +27,17 @@
 set -euo pipefail
 export LC_ALL=C
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism.
+mr_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$mr_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present monitor-read "$mr_script_dir" "$@"
+unset mr_script_dir
+
 FRAME_BUDGET="${FRAME_BUDGET:-2048}"
 
 # PORTABILITY(readlink-f): a symlinked skill dir (~/.claude/skills/planning)

@@ -38,39 +38,14 @@ export LC_ALL=C
 # ─────────────────────────────────────────────────────────────────────────────
 # Compiled-binary preference
 # ─────────────────────────────────────────────────────────────────────────────
-# Exec the compiled update-plan-content binary when this installation has one
-# (a dev tree after ./setup-dev-env.sh, or a packaged release with rjq and
-# friends shipped alongside it) with the exact, unshifted "$@" this script
-# itself received; otherwise fall through to the bash implementation below,
-# completely unchanged. Mirrors the resolve-then-fall-through shape
-# plan_crypt_resolve.sh already established for plan-crypt: nothing breaks
-# when no binary is present.
-#
-# plan-document-lib.sh (sourced further below, once dispatch_mode has been
-# read off "$@") already carries plan_bin_dir transitively via its own
-# `source .../plan-crypt-lib.sh` line, but that happens too late for this
-# early-exit check, so the same file is sourced here too -- sourcing it twice
-# is a no-op (it only (re)defines functions, nothing readonly) -- and every
-# name it introduced is unset again in the fall-through branch so the rest of
-# this script runs with nothing extra in scope beyond what it already sources
-# itself. Uniquely prefixed (upc_bin_pref_*) so nothing here can collide with
-# a later variable of the same short name.
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism and why PLANNING_SKILL_ROOT is exported
+# unconditionally.
 upc_bin_pref_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=planning/scripts/plan-crypt-lib.sh
-source "$upc_bin_pref_script_dir/plan-crypt-lib.sh"
-if upc_bin_pref_dir="$(plan_bin_dir)" && [ -x "$upc_bin_pref_dir/update-plan-content" ]; then
-    exec "$upc_bin_pref_dir/update-plan-content" "$@"
-fi
-unset -f plan_bin_dir plan_crypt_bin plan_crypt_resolve plan_crypt_target_triple \
-    plan_fix_key plan_random_hex plan_sha256_chain plan_sha256_hex
-# PLAN_CRYPT_LIB_LOADED is plan-crypt-lib.sh's own idempotency guard (`[ -z
-# "${PLAN_CRYPT_LIB_LOADED:-}" ] || return 0`); left set, the legitimate
-# `source plan-crypt-lib.sh` inside plan-document-lib.sh (sourced further
-# below) would see it already "loaded" and return immediately without
-# redefining the functions this block just unset -- leaving plan_bin_dir
-# undefined for the rest of the script.
-unset PLAN_CRYPT_LIB_LOADED
-unset upc_bin_pref_script_dir upc_bin_pref_dir
+source "$upc_bin_pref_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present update-plan-content "$upc_bin_pref_script_dir" "$@"
+unset upc_bin_pref_script_dir
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Usage and flag translation
@@ -568,7 +543,26 @@ case "$dispatch_mode" in
         case "$requested_status" in
             pending) review_status='`💤 pending`'; description_status='💤 pending' ;;
             approved)
-                if grep -Eq '^\|[[:space:]]*AR-[0-9]+[[:space:]]*\|.*\|[[:space:]]*(💤 open|⏳ in progress)[[:space:]]*\|' "$review"; then
+                # The Status cell's own convention varies by writer:
+                # add-adversarial-finding's compiled binary emoji-prefixes it
+                # ("💤 open", "⏳ in progress"), but update-adversarial-review.sh
+                # (the tool part-3.md's review protocol actually tells a fresh
+                # reviewer to use) passes a CSV's Status column through
+                # unprefixed ("open", "in-progress"). Matching only the
+                # emoji-prefixed spellings here meant this gate never once
+                # refused a real open finding recorded the second way -- caught
+                # by direct reproduction, not by inspection. Column 5 by
+                # position (plan_table_cell), not a substring grep across the
+                # whole row, so free text in an earlier cell that happens to
+                # contain the word "open" cannot trip this.
+                unresolved=0
+                while IFS= read -r finding_line; do
+                    status_cell="$(plan_table_cell "$finding_line" 5 | tr '[:upper:]' '[:lower:]')"
+                    case "$status_cell" in
+                        *open | *"in-progress" | *"in progress") unresolved=1 ;;
+                    esac
+                done < <(grep -E '^\|[[:space:]]*AR-[0-9]+[[:space:]]*\|' "$review")
+                if [ "$unresolved" -eq 1 ]; then
                     plan_die "Cannot approve a review with unresolved findings"
                 fi
                 if [ -f "$plan_dir/fix-keys.json" ]; then

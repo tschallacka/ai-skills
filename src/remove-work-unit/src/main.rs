@@ -202,6 +202,9 @@ fn main() {
                 index += 1;
                 plan = Some(args.get(index).cloned().unwrap_or_else(|| usage(64)));
             }
+            value if value.starts_with("--plan-dir=") => {
+                plan = Some(value["--plan-dir=".len()..].to_string());
+            }
             "--" => {
                 positional.extend(args.iter().skip(index + 1).cloned());
                 break;

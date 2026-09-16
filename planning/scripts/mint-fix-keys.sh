@@ -18,6 +18,22 @@
  # source is available.
 
 set -euo pipefail
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed before this script's own
+# plan_hoist_plan_dir call below: that call rewrites a --plan-dir flag into a
+# positional argument, and the compiled binary must receive the caller's true
+# original argv, not the already-hoisted form. Per AR-11, the compiled binary
+# itself was extended to parse --plan-dir/--plan-dir= directly (src/mint-fix-keys/src/main.rs).
+mfk_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$mfk_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present mint-fix-keys "$mfk_script_dir" "$@"
+unset mfk_script_dir
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=planning/scripts/plan-document-lib.sh
 source "$script_dir/plan-document-lib.sh"

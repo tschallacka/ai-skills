@@ -47,6 +47,8 @@ fn main() {
                 i += 1;
                 repo = Some(args.get(i).cloned().unwrap_or_else(|| usage(64)))
             }
+            v if v.starts_with("--plan-dir=") => plan = Some(v["--plan-dir=".len()..].to_string()),
+            v if v.starts_with("--repo=") => repo = Some(v["--repo=".len()..].to_string()),
             "--" => {
                 break;
             }

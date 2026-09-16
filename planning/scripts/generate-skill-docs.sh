@@ -46,6 +46,19 @@
 set -euo pipefail
 export LC_ALL=C
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
+# hoist one, so there is no hoist ordering to preserve; placed immediately
+# after both anchor lines above.
+gsd_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$gsd_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present generate-skill-docs "$gsd_script_dir" "$@"
+unset gsd_script_dir
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=planning/scripts/plan-crypt-lib.sh
 source "$script_dir/plan-crypt-lib.sh"

@@ -205,6 +205,9 @@ fn main() {
                 }
             }
             "--check" => check = true,
+            value if value.starts_with("--plan-dir=") => {
+                plan = Some(value["--plan-dir=".len()..].to_string());
+            }
             "--" => usage(64),
             value if value.starts_with('-') => {
                 eprintln!("{COMMAND}: unknown option: {value}");
