@@ -817,7 +817,21 @@ jobs:
           # A full checkout, where the four predecessors each sparse-checked out
           # their own overlapping subset. One job needs the union, and the union
           # of those four subsets was most of the tree anyway.
+          #
+          # .github and planning/scripts: real-tree parity tests (blast-radius,
+          # verify-both-shells, generate-portability, setup-dev-env, ci-scope,
+          # ci-subjects, ci-test-scope) shell out to the real bash original
+          # they ported, to diff it against the compiled binary -- .github/*.sh
+          # for the three CI selectors, planning/scripts for
+          # plan-core-lib.sh (needed by every wired script's own
+          # compiled-binary-preference block; guarded to fall through when
+          # absent, but a real parity check needs the real bash path to
+          # actually execute, not just fail open). Cone-mode sparse-checkout
+          # already includes every root-level file (the *.sh scripts
+          # themselves) without being listed.
           sparse-checkout: |
+            .github
+            planning/scripts
             planning/rust-migration.tsv
             planning/binaries.tsv
             ai-text-editor/ai-text-editor.1

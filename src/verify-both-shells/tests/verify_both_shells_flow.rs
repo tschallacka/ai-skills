@@ -7,7 +7,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 use verify_both_shells::process::Leg;
 
 fn unique_dir(tag: &str) -> PathBuf {
@@ -266,7 +268,13 @@ fn an_unknown_argument_exits_64() {
 /// Signal delivery needs a real, separately spawned process; leg 1 always
 /// runs before leg 2's real `nix develop` call, so a signal delivered
 /// during a deliberately slow fixture `run-tests.sh` never reaches leg 2.
-/// Shared by the SIGINT/SIGTERM/SIGHUP tests below.
+/// Shared by the SIGINT/SIGTERM/SIGHUP tests below. Unix only: SIGINT/
+/// SIGTERM/SIGHUP and libc::kill have no Windows equivalent, and
+/// verify-both-shells.sh itself has no meaningful bash-comparison workflow
+/// there anyway (no bash to compare) -- the crate still builds and its
+/// other tests still run on every platform, matching src/verify-both-shells
+/// own #[cfg(unix)] signal-handling split.
+#[cfg(unix)]
 fn assert_signal_removes_worktree(tag: &str, signal: libc::c_int, expected_exit: i32) {
     let repo = Repo::new(tag);
     repo.write("run-tests.sh", "#!/usr/bin/env bash\nsleep 30\n");
@@ -324,16 +332,19 @@ fn assert_signal_removes_worktree(tag: &str, signal: libc::c_int, expected_exit:
     repo.cleanup();
 }
 
+#[cfg(unix)]
 #[test]
 fn sigint_mid_run_removes_the_worktree_and_exits_128_plus_2() {
     assert_signal_removes_worktree("sigint", libc::SIGINT, 128 + 2);
 }
 
+#[cfg(unix)]
 #[test]
 fn sigterm_mid_run_removes_the_worktree_and_exits_128_plus_15() {
     assert_signal_removes_worktree("sigterm", libc::SIGTERM, 128 + 15);
 }
 
+#[cfg(unix)]
 #[test]
 fn sighup_mid_run_removes_the_worktree_and_exits_128_plus_1() {
     assert_signal_removes_worktree("sighup", libc::SIGHUP, 128 + 1);
