@@ -221,5 +221,6 @@ verify-both-shells	verify-both-shells
 ci-subjects	ci-subjects
 ci-scope	ci-scope
 ci-test-scope	ci-test-scope
+test-mermaid-accuracy	test-mermaid-accuracy
 PLAN
 }

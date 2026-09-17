@@ -121,6 +121,9 @@ const SECONDARY: &[Row] = &[
     // Goal 22: appended after ci-scope, matching setup-dev-env-lib.sh's own
     // real plan_secondary() row order exactly.
     ("ci-test-scope", "ci-test-scope"),
+    // Goal 26: appended after ci-test-scope, matching setup-dev-env-lib.sh's
+    // own real plan_secondary() row order exactly.
+    ("test-mermaid-accuracy", "test-mermaid-accuracy"),
 ];
 
 const HARDCODED: &[Row] = &[
