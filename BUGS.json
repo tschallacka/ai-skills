@@ -4894,6 +4894,28 @@
       "updated_at": "2026-09-16T20:14:40Z"
     },
     {
+      "id": "B353",
+      "title": "update-adversarial-review archives each cycle's scope-preamble alongside the WRONG findings table (off-by-one pairing)",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Build the current binaries (post a37bc068). On a fresh plan, run 4 real review cycles through create-adversarial-review/update-adversarial-review using the normal human workflow (write the Review-scope block's Reviewer session/Elapsed/Cost signal/Tokens fields describing the reviewer who just finished, write their findings to the incoming file, then run update-adversarial-review to land them). Inspect the resulting adversarial-review-history.md.",
+      "observed": "Cycle N's archived block pairs that cycle's scope-preamble text (session/elapsed/cost-signal/tokens) with the PRIOR cycle's findings table, not the findings the preamble describes. Concretely: Cycle 1's archived scope-preamble says 'Cost signal: 6 findings this cycle' but Cycle 1's own archived Findings table is still the original 1-row seed placeholder ('No finding recorded yet') -- the actual 6 findings land instead in Cycle 2's table, next to Cycle 2's own (different) preamble. This repeats every cycle: each archived block's prose describes the NEXT cycle's own findings, not the ones physically archived beside it.",
+      "expected": "The scope-preamble text archived under 'Cycle N' should describe the same findings table archived under that same 'Cycle N' heading -- a reader (or an automated postmortem generator) should be able to trust that a cycle's own session id/elapsed/cost-signal/tokens describes the work that produced the findings shown right below it.",
+      "mechanism": "src/update-adversarial-review/src/main.rs archive() call site (~lines 279-318): both prior_rows (the outgoing Findings table) and scope_preamble (the current Review-scope block) are extracted from the SAME pre-rewrite 'review' string read once at the top of the function, then archived together in one archive() call. But by the time a coordinator runs update-adversarial-review, the live Review-scope block has already been overwritten by the reviewer who produced the NEW incoming findings (which are about to replace prior_rows, not accompany it into the archive) -- so the preamble being archived describes the reviewer who is about to supersede the very table it is filed next to, not the reviewer who produced that table. The bash fallback (planning/scripts/update-adversarial-review.sh) mirrors the same call-site ordering and has the identical bug. This shipped as part of T69 goal 1 (a37bc068) and was not caught across 4 rounds of adversarial review, since every review checked ordering/formatting (preamble appears before the table, dedup works) rather than which cycle's findings the preamble prose semantically describes.",
+      "surfaces": [
+        "src/update-adversarial-review/src/main.rs",
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T69 goal 2 exploration -- generating real sample data on a throwaway plan (/tmp/sample-postmortem-plan, since cleaned up) to inform postmortem-generator design",
+      "notes": null,
+      "created_at": "2026-09-17T09:42:43Z",
+      "updated_at": "2026-09-17T09:42:43Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
