@@ -81,7 +81,7 @@ history_auto="$plan_auto/adversarial-review-history.md"
 assert_headings "$history_auto" '1 2 3' 'three automatic runs'
 assert_count 1 '| AR-91 |' "$history_auto" 'automatic runs'
 assert_count 1 '| AR-92 |' "$history_auto" 'automatic runs'
-assert_count 0 '| AR-93 |' "$history_auto" 'automatic runs archived the live table'
+assert_count 1 '| AR-93 |' "$history_auto" 'automatic runs archive the cycle they land, including the most recent'
 
 # --- an explicit --cycle must not renumber the automatic runs after it ---
 plan_mixed="$temporary_root/plan-mixed"
@@ -107,7 +107,7 @@ run_update "$plan_same" 20 || rc=$?
 run_update "$plan_same" 20 || rc=$?
 [ "$rc" -eq 0 ] || note_fail "an identical re-run failed (rc=$rc)"
 history_same="$plan_same/adversarial-review-history.md"
-assert_headings "$history_same" '1 2' 'identical re-runs'
+assert_headings "$history_same" '1' 'identical re-runs'
 assert_count 1 '| AR-20 |' "$history_same" 'identical re-runs'
 
 # --- a differing table whose number collides is refused, never discarded ---
@@ -134,22 +134,12 @@ cmp -s "$temporary_root/history-before.md" "$plan_clash/adversarial-review-histo
     || note_fail 'a refused run still wrote to the history file'
 assert_count 1 '| AR-30 |' "$plan_clash/adversarial-review.md" 'the refused run'
 
-# --- the no-rows path still records a marker ---
-plan_empty="$temporary_root/plan-empty"
-seed_plan "$plan_empty"
-awk '
-    /^## Findings$/ { in_findings = 1; print; next }
-    in_findings && /^## Verdict$/ { in_findings = 0; print; next }
-    in_findings && /^\|/ { next }
-    { print }
-' "$plan_empty/adversarial-review.md" > "$temporary_root/empty-findings.md"
-mv "$temporary_root/empty-findings.md" "$plan_empty/adversarial-review.md"
-rc=0
-run_update "$plan_empty" 40 || rc=$?
-[ "$rc" -eq 0 ] || note_fail "the no-rows run failed (rc=$rc)"
-history_empty="$plan_empty/adversarial-review-history.md"
-assert_headings "$history_empty" '1' 'the no-rows run'
-assert_count 1 '_No row-level findings were recorded for this cycle._' "$history_empty" 'the no-rows run'
+# archive()'s "_No row-level findings were recorded for this cycle._"
+# placeholder (used when the landed rows are empty) has no black-box test
+# here: it archives the freshly-rendered table for THIS cycle (B353), and
+# both the CSV shape gate and render() refuse an empty submission before
+# archive() is ever reached, so the CLI cannot produce an empty landed table
+# to exercise it with.
 
 # T69: the Review-scope block's four self-reported fields (Reviewer
 # session/Elapsed/Cost signal/Tokens) are archived alongside the Findings
@@ -162,11 +152,11 @@ set_scope_field() { # <review-file> <label> <value>
     ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
 }
 
-# Two identical-content runs are needed to get a KNOWN row set (AR-60) into
-# history at all (the first run archives the seed's own placeholder row and
-# makes AR-60 the new live table; the second archives AR-60 itself) --
-# mirroring the existing "identical re-run" case above, which needs three
-# calls for the same reason.
+# One run lands AR-60 alongside the scope block that describes it (B353: a
+# reviewer fills in Reviewer session/Elapsed/Cost signal/Tokens to describe
+# their OWN findings before submitting them, so the archived cycle must pair
+# the two by that same authorship, not by whichever table was live at call
+# time).
 plan_preamble="$temporary_root/plan-preamble"
 seed_plan "$plan_preamble"
 review_preamble="$plan_preamble/adversarial-review.md"
@@ -176,54 +166,53 @@ set_scope_field "$review_preamble" "Cost signal" "sentinel-cost-1"
 set_scope_field "$review_preamble" "Tokens" "sentinel-tokens-1"
 rc=0
 run_update "$plan_preamble" 60 || rc=$?
-run_update "$plan_preamble" 60 || rc=$?
-[ "$rc" -eq 0 ] || note_fail "the sentinel-preamble runs failed (rc=$rc)"
+[ "$rc" -eq 0 ] || note_fail "the sentinel-preamble run failed (rc=$rc)"
 history_preamble="$plan_preamble/adversarial-review-history.md"
-assert_headings "$history_preamble" '1 2' 'the sentinel-preamble runs'
-cycle2="$(awk '/^## Cycle 2$/{f=1;next} /^## Cycle /{f=0} f' "$history_preamble")"
-case "$cycle2" in
+assert_headings "$history_preamble" '1' 'the sentinel-preamble run'
+cycle1="$(awk '/^## Cycle 1$/{f=1;next} /^## Cycle /{f=0} f' "$history_preamble")"
+case "$cycle1" in
     *'sentinel-session-42'*) : ;;
-    *) note_fail "cycle 2's own section is missing the archived Reviewer session" ;;
+    *) note_fail "cycle 1's own section is missing the archived Reviewer session" ;;
 esac
-case "$cycle2" in
+case "$cycle1" in
     *'sentinel-elapsed-1'*) : ;;
-    *) note_fail "cycle 2's own section is missing the archived Elapsed" ;;
+    *) note_fail "cycle 1's own section is missing the archived Elapsed" ;;
 esac
-case "$cycle2" in
+case "$cycle1" in
     *'sentinel-cost-1'*) : ;;
-    *) note_fail "cycle 2's own section is missing the archived Cost signal" ;;
+    *) note_fail "cycle 1's own section is missing the archived Cost signal" ;;
 esac
-case "$cycle2" in
+case "$cycle1" in
     *'sentinel-tokens-1'*) : ;;
-    *) note_fail "cycle 2's own section is missing the archived Tokens" ;;
+    *) note_fail "cycle 1's own section is missing the archived Tokens" ;;
 esac
-case "$cycle2" in
-    *'Repository/context inspected'*) note_fail "cycle 2's own section archived a non-tracked field" ;;
+case "$cycle1" in
+    *'Repository/context inspected'*) note_fail "cycle 1's own section archived a non-tracked field" ;;
     *) : ;;
 esac
-preamble_pos="$(printf '%s\n' "$cycle2" | grep -n 'sentinel-session-42' | head -1 | cut -d: -f1)"
-findings_pos="$(printf '%s\n' "$cycle2" | grep -n '| AR-60 |' | head -1 | cut -d: -f1)"
+preamble_pos="$(printf '%s\n' "$cycle1" | grep -n 'sentinel-session-42' | head -1 | cut -d: -f1)"
+findings_pos="$(printf '%s\n' "$cycle1" | grep -n '| AR-60 |' | head -1 | cut -d: -f1)"
 [ -n "$preamble_pos" ] && [ -n "$findings_pos" ] && [ "$preamble_pos" -lt "$findings_pos" ] \
-    || note_fail "cycle 2's own archived preamble did not land before its Findings table"
+    || note_fail "cycle 1's own archived preamble did not land before its Findings table"
 
-# A third, otherwise-identical run (same AR-60 content) but with a corrected
-# scope value must still archive a NEW cycle, not be silently skipped by a
-# dedup check keyed only on the Findings rows -- the exact regression this
-# work unit's own dedup fix (mirroring the Rust archive()'s own fix) guards.
+# A second run with the SAME AR-60 findings but a corrected scope value must
+# still archive a NEW cycle, not be silently skipped by a dedup check keyed
+# only on the Findings rows -- the exact regression this work unit's own
+# dedup fix (mirroring the Rust archive()'s own fix) guards.
 set_scope_field "$review_preamble" "Elapsed" "sentinel-elapsed-2"
 set_scope_field "$review_preamble" "Tokens" "sentinel-tokens-2"
 rc=0
 run_update "$plan_preamble" 60 || rc=$?
 [ "$rc" -eq 0 ] || note_fail "the corrected-preamble re-run failed (rc=$rc)"
-assert_headings "$history_preamble" '1 2 3' 'the corrected-preamble re-run'
-cycle3="$(awk '/^## Cycle 3$/{f=1;next} /^## Cycle /{f=0} f' "$history_preamble")"
-case "$cycle3" in
+assert_headings "$history_preamble" '1 2' 'the corrected-preamble re-run'
+cycle2="$(awk '/^## Cycle 2$/{f=1;next} /^## Cycle /{f=0} f' "$history_preamble")"
+case "$cycle2" in
     *'sentinel-elapsed-2'*) : ;;
-    *) note_fail "cycle 3 does not carry the corrected Elapsed value" ;;
+    *) note_fail "cycle 2 does not carry the corrected Elapsed value" ;;
 esac
-case "$cycle3" in
+case "$cycle2" in
     *'sentinel-tokens-2'*) : ;;
-    *) note_fail "cycle 3 does not carry the corrected Tokens value" ;;
+    *) note_fail "cycle 2 does not carry the corrected Tokens value" ;;
 esac
 
 [ "$(t_failures)" -eq 0 ] || exit 1

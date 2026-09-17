@@ -26,12 +26,13 @@
 # against a throwaway copy first, so a gated-row or openssl refusal leaves
 # every plan file byte-identical.
 #
-# The previous Findings table is archived into adversarial-review-history.md
-# under a `## Cycle N` heading (--cycle numbers it; otherwise the highest
-# recorded number plus one) so reviewers of later cycles can see what earlier
-# ones found. Archiving the same rows twice is a no-op; a --cycle that names an
-# already-recorded cycle while holding different rows is refused rather than
-# dropping them.
+# This cycle's own newly-landed Findings table is archived into
+# adversarial-review-history.md under a `## Cycle N` heading (--cycle numbers
+# it; otherwise the highest recorded number plus one), paired with the
+# Review-scope preamble that describes it, so reviewers of later cycles can
+# see what earlier ones found. Archiving the same rows twice is a no-op; a
+# --cycle that names an already-recorded cycle while holding different rows is
+# refused rather than dropping them.
 #
 # Exit codes: 64 bad invocation, 65 unusable CSV, 66 the plan or its review file
 # is missing, 73 --cycle collides with a recorded cycle holding other findings.
@@ -264,14 +265,15 @@ if [ "$check_only" -eq 1 ]; then
     exit 0
 fi
 
-# Archive the prior Findings rows (if any) into adversarial-review-history.md
-# so reviewers of later cycles can see what earlier ones found.
+# Archive this cycle's own landed Findings rows into adversarial-review-history.md
+# so reviewers of later cycles can see what earlier ones found. Archived
+# alongside the scope-preamble that describes THESE rows (the reviewer fills in
+# Reviewer session/Elapsed/Cost signal/Tokens to describe their own findings
+# before submitting them) rather than the outgoing table this call is about to
+# replace (B353) -- history_rows is therefore the freshly-rendered table, not
+# a re-scrape of the pre-rewrite review file's own "## Findings" section.
 history_file="$plan_dir/adversarial-review-history.md"
-history_rows="$(awk '
-    /^## Findings$/ { in_findings = 1; next }
-    in_findings && /^## Verdict$/ { exit }
-    in_findings && /^\|/ { print }
-' "$review_file")"
+history_rows="$(cat "$rendered_file")"
 scope_preamble="$(current_scope_preamble "$review_file")"
 # Record a cycle entry on every rewrite, even with no rows to archive: the marker
 # itself is the history a later reviewer needs. Comparing the last archived row
@@ -300,7 +302,7 @@ else
             printf '%s\n' '_No row-level findings were recorded for this cycle._'
         fi
     } >> "$history_file"
-    printf 'Archived previous Findings table to %s (Cycle %s)\n' "$history_file" "$cycle_number" >&2
+    printf "Archived this cycle's Findings table to %s (Cycle %s)\n" "$history_file" "$cycle_number" >&2
 fi
 
 mv "$temporary_file" "$review_file"

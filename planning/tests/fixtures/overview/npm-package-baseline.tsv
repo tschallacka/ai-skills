@@ -219,7 +219,7 @@ package/planning/scripts/resolve-finding.sh	7680
 package/planning/scripts/role-context.sh	11963
 package/planning/scripts/run-adversary-probe.sh	6322
 package/planning/scripts/supervision-frame.sh	7174
-package/planning/scripts/update-adversarial-review.sh	15580
+package/planning/scripts/update-adversarial-review.sh	15937
 package/planning/scripts/update-plan-content.sh	36091
 package/planning/scripts/update-plan-progress.sh	4474
 package/planning/scripts/update-progress.sh	3125

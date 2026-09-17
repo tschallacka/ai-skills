@@ -160,11 +160,11 @@ fn is_scope_field_line(line: &str) -> bool {
     PREFIXES.iter().any(|prefix| line.starts_with(prefix))
 }
 
-fn archive(history: &Path, scope_preamble: &str, prior_rows: &str, explicit: Option<i64>) {
+fn archive(history: &Path, scope_preamble: &str, landed_rows: &str, explicit: Option<i64>) {
     let number = cycle_number(history, explicit);
     let existing = fs::read_to_string(history).unwrap_or_default();
-    if !prior_rows.is_empty()
-        && prior_rows == history_rows(history)
+    if !landed_rows.is_empty()
+        && landed_rows == history_rows(history)
         && scope_preamble == history_scope_preamble(history)
     {
         eprintln!(
@@ -185,16 +185,16 @@ fn archive(history: &Path, scope_preamble: &str, prior_rows: &str, explicit: Opt
         append.push_str(scope_preamble);
         append.push('\n');
     }
-    if prior_rows.is_empty() {
+    if landed_rows.is_empty() {
         append.push_str("_No row-level findings were recorded for this cycle._\n");
     } else {
-        append.push_str(prior_rows);
+        append.push_str(landed_rows);
     }
     let mut result = existing;
     result.push_str(&append);
     atomic_write(history, result.as_bytes()).unwrap_or_else(|error| die(error, 70));
     eprintln!(
-        "Archived previous Findings table to {} (Cycle {number})",
+        "Archived this cycle's Findings table to {} (Cycle {number})",
         history.display()
     );
 }
@@ -287,9 +287,7 @@ fn main() {
         return;
     }
     let history_file = plan.join("adversarial-review-history.md");
-    let mut prior_rows = String::new();
     let mut scope_preamble = String::new();
-    let mut in_findings = false;
     let mut in_scope = false;
     for line in review.lines() {
         if line == "## Review scope" {
@@ -303,19 +301,13 @@ fn main() {
             scope_preamble.push_str(line);
             scope_preamble.push('\n');
         }
-        if line == "## Findings" {
-            in_findings = true;
-            continue;
-        }
-        if in_findings && line == "## Verdict" {
-            break;
-        }
-        if in_findings && line.starts_with('|') {
-            prior_rows.push_str(line);
-            prior_rows.push('\n');
-        }
     }
-    archive(&history_file, &scope_preamble, &prior_rows, cycle);
+    // scope_preamble describes the findings this call is landing (table), not
+    // the outgoing ones it is about to replace (B353): a reviewer fills in
+    // Reviewer session/Elapsed/Cost signal/Tokens to describe their OWN
+    // findings before submitting them, so archiving must pair the two by that
+    // same authorship, not by which table happened to be live at call time.
+    archive(&history_file, &scope_preamble, &table, cycle);
     atomic_write(&review_file, rewritten.as_bytes()).unwrap_or_else(|error| die(error, 70));
     if consumed_incoming {
         let _ = fs::remove_file(plan.join("adversarial-review-incoming.md"));
