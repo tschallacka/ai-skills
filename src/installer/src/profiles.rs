@@ -197,6 +197,35 @@ mod tests {
         assert!(spec.instructions.starts_with("You are the nitpicker."));
     }
 
+    fn real_chris_spec() -> ProfileSpec {
+        let text = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.agents/profiles/chris.json"),
+        )
+        .unwrap();
+        ProfileSpec::from_json(&text).unwrap()
+    }
+
+    #[test]
+    fn the_real_chris_profile_json_parses() {
+        let spec = real_chris_spec();
+        assert_eq!(spec.name, "chris");
+        assert!(!spec.description.is_empty());
+        assert!(!spec.instructions.is_empty());
+    }
+
+    #[test]
+    fn chris_profile_round_trips_through_opencode_translator_for_real() {
+        let spec = real_chris_spec();
+        let home = tempfile::tempdir().unwrap();
+        let dest = install_profile(&spec, &OpencodeTranslator, home.path()).unwrap();
+        let written = fs::read_to_string(&dest).unwrap();
+        assert!(written.contains(&spec.description), "{written}");
+        assert!(
+            written.ends_with(&format!("{}\n", spec.instructions)),
+            "{written}"
+        );
+    }
+
     #[test]
     fn a_missing_field_is_refused_by_name() {
         let error = ProfileSpec::from_json(r#"{"name":"x","description":"y"}"#).unwrap_err();

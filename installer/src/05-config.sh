@@ -217,7 +217,7 @@ SKILL_NAMES=(planning project-specifics resource-limited-testing brainstorm post
 # skill_files() -- a separate list because a profile is not a skill (no
 # directory of its own, no install-time selection; every profile installs
 # unconditionally, translated per agent kind).
-PROFILE_NAMES=(nitpicker)
+PROFILE_NAMES=(nitpicker benny chris christian christoph dana frank maintainer installer oracle eve)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'

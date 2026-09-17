@@ -49,10 +49,52 @@ pub struct Profile {
     pub source: &'static str,
 }
 
-pub const PROFILES: &[Profile] = &[Profile {
-    name: "nitpicker",
-    source: ".agents/profiles/nitpicker.json",
-}];
+pub const PROFILES: &[Profile] = &[
+    Profile {
+        name: "nitpicker",
+        source: ".agents/profiles/nitpicker.json",
+    },
+    Profile {
+        name: "benny",
+        source: ".agents/profiles/benny.json",
+    },
+    Profile {
+        name: "chris",
+        source: ".agents/profiles/chris.json",
+    },
+    Profile {
+        name: "christian",
+        source: ".agents/profiles/christian.json",
+    },
+    Profile {
+        name: "christoph",
+        source: ".agents/profiles/christoph.json",
+    },
+    Profile {
+        name: "dana",
+        source: ".agents/profiles/dana.json",
+    },
+    Profile {
+        name: "frank",
+        source: ".agents/profiles/frank.json",
+    },
+    Profile {
+        name: "maintainer",
+        source: ".agents/profiles/maintainer.json",
+    },
+    Profile {
+        name: "installer",
+        source: ".agents/profiles/installer.json",
+    },
+    Profile {
+        name: "oracle",
+        source: ".agents/profiles/oracle.json",
+    },
+    Profile {
+        name: "eve",
+        source: ".agents/profiles/eve.json",
+    },
+];
 
 /// The reason `skill` cannot be installed on the running host, or `None`
 /// when this platform supports it. interactive-shell was the only skill
@@ -245,5 +287,21 @@ mod tests {
     fn known_agent_finds_an_existing_kind_and_rejects_an_unknown_one() {
         assert_eq!(known_agent("claude").unwrap().home_suffix, ".claude/skills");
         assert!(known_agent("not-a-real-agent").is_none());
+    }
+
+    /// A copy-paste typo in one of the 11 near-identical `Profile{}` literals
+    /// must fail `cargo test`, not silently no-op at real install time.
+    #[test]
+    fn every_profile_entry_resolves_to_a_real_parseable_matching_file() {
+        for profile in PROFILES {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join(profile.source);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            let spec = crate::profiles::ProfileSpec::from_json(&text)
+                .unwrap_or_else(|error| panic!("{}: {error}", profile.source));
+            assert_eq!(spec.name, profile.name, "{}", profile.source);
+        }
     }
 }

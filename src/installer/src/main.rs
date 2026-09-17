@@ -993,7 +993,21 @@ fn run_profiles_post_install(roots: &[(&Path, &str)], source: &Path) {
     }
     println!();
     println!("== agent profiles ==");
-    for profile in manifest::PROFILES {
+    install_profiles_leniently(manifest::PROFILES, source, &supported);
+}
+
+/// Installs each of `profiles` into every one of `supported`'s targets,
+/// skipping (never aborting on) a profile whose source cannot be read or
+/// parsed -- the automatic post-install hook's own documented lenient
+/// behavior. Takes an injectable slice, rather than reading
+/// `manifest::PROFILES` directly, so this behavior is testable against a
+/// deliberately-mixed real/bad list without mutating the real const (AR-127).
+fn install_profiles_leniently(
+    profiles: &[manifest::Profile],
+    source: &Path,
+    supported: &[(&Path, &dyn profiles::ProfileTranslator)],
+) {
+    for profile in profiles {
         let text = match std::fs::read_to_string(source.join(profile.source)) {
             Ok(text) => text,
             Err(e) => {
@@ -1008,7 +1022,7 @@ fn run_profiles_post_install(roots: &[(&Path, &str)], source: &Path) {
                 continue;
             }
         };
-        for (target, translator) in &supported {
+        for (target, translator) in supported {
             match profiles::install_profile(&spec, *translator, target) {
                 Ok(destination) => println!(
                     "Installed: {} (agent profile \"{}\" -- restart {} before it is available, \
@@ -2139,20 +2153,46 @@ fn run_install_profiles(argv: &[String]) -> Result<ExitCode, String> {
     let translator = profiles::translator_for(&agent).ok_or_else(|| {
         format!("install-profiles: no known profile translator for --agent {agent}")
     })?;
-    for profile in manifest::PROFILES {
-        let text = std::fs::read_to_string(args.source.join(profile.source))
+    install_profiles_or_abort(
+        manifest::PROFILES,
+        &args.source,
+        translator,
+        &target,
+        &agent,
+    )?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Installs each of `profiles` in order, aborting the WHOLE call with an
+/// `Err` on the first one whose source cannot be read, parsed, or installed
+/// -- the explicit `install-profiles` CLI subcommand's own documented
+/// fail-fast behavior, deliberately the opposite of the automatic
+/// post-install hook's lenient skip-and-continue (see
+/// `install_profiles_leniently`). Takes an injectable slice, rather than
+/// reading `manifest::PROFILES` directly, so this behavior is testable
+/// against a deliberately-mixed real/bad list without mutating the real
+/// const (AR-127).
+fn install_profiles_or_abort(
+    profiles: &[manifest::Profile],
+    source: &Path,
+    translator: &dyn profiles::ProfileTranslator,
+    target: &Path,
+    agent: &str,
+) -> Result<(), String> {
+    for profile in profiles {
+        let text = std::fs::read_to_string(source.join(profile.source))
             .map_err(|e| format!("{}: cannot read {}: {e}", profile.name, profile.source))?;
         let spec = profiles::ProfileSpec::from_json(&text)
             .map_err(|e| format!("{}: {e}", profile.name))?;
         let destination =
-            profiles::install_profile(&spec, translator, &target).map_err(|e| e.to_string())?;
+            profiles::install_profile(&spec, translator, target).map_err(|e| e.to_string())?;
         println!(
             "Installed: {} (agent profile \"{}\" -- restart {agent} before it is available)",
             destination.display(),
             spec.name
         );
     }
-    Ok(ExitCode::SUCCESS)
+    Ok(())
 }
 
 fn run_set_claude_env(argv: &[String]) -> Result<ExitCode, String> {
@@ -2477,5 +2517,66 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             }
             Ok(ExitCode::SUCCESS)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_real_chris_json(root: &Path) {
+        std::fs::create_dir_all(root.join(".agents/profiles")).unwrap();
+        let text = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.agents/profiles/chris.json"),
+        )
+        .unwrap();
+        std::fs::write(root.join(".agents/profiles/chris.json"), text).unwrap();
+    }
+
+    #[test]
+    fn install_profiles_leniently_installs_the_good_entry_despite_a_bad_one() {
+        let source = tempfile::tempdir().unwrap();
+        write_real_chris_json(source.path());
+        let mixed = [
+            manifest::Profile {
+                name: "missing",
+                source: ".agents/profiles/does-not-exist.json",
+            },
+            manifest::Profile {
+                name: "chris",
+                source: ".agents/profiles/chris.json",
+            },
+        ];
+        let target = tempfile::tempdir().unwrap();
+        let translator: &dyn profiles::ProfileTranslator = &profiles::ClaudeTranslator;
+        let supported = [(target.path(), translator)];
+
+        install_profiles_leniently(&mixed, source.path(), &supported);
+
+        assert!(target.path().join(".claude/agents/chris.md").is_file());
+    }
+
+    #[test]
+    fn install_profiles_or_abort_installs_none_after_the_first_bad_entry() {
+        let source = tempfile::tempdir().unwrap();
+        write_real_chris_json(source.path());
+        let mixed = [
+            manifest::Profile {
+                name: "missing",
+                source: ".agents/profiles/does-not-exist.json",
+            },
+            manifest::Profile {
+                name: "chris",
+                source: ".agents/profiles/chris.json",
+            },
+        ];
+        let target = tempfile::tempdir().unwrap();
+        let translator: &dyn profiles::ProfileTranslator = &profiles::ClaudeTranslator;
+
+        let result =
+            install_profiles_or_abort(&mixed, source.path(), translator, target.path(), "claude");
+
+        assert!(result.is_err(), "{result:?}");
+        assert!(!target.path().join(".claude/agents/chris.md").exists());
     }
 }

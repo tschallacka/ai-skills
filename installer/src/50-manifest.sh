@@ -755,6 +755,36 @@ profile_files() {
         nitpicker)
             printf '%s\n' nitpicker.json
             ;;
+        benny)
+            printf '%s\n' benny.json
+            ;;
+        chris)
+            printf '%s\n' chris.json
+            ;;
+        christian)
+            printf '%s\n' christian.json
+            ;;
+        christoph)
+            printf '%s\n' christoph.json
+            ;;
+        dana)
+            printf '%s\n' dana.json
+            ;;
+        frank)
+            printf '%s\n' frank.json
+            ;;
+        maintainer)
+            printf '%s\n' maintainer.json
+            ;;
+        installer)
+            printf '%s\n' installer.json
+            ;;
+        oracle)
+            printf '%s\n' oracle.json
+            ;;
+        eve)
+            printf '%s\n' eve.json
+            ;;
     esac
 }
 
