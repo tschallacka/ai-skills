@@ -99,12 +99,124 @@ fn rust_verbs() -> &'static [(&'static str, &'static str)] {
 
 fn shell_verbs() -> &'static [(&'static str, &'static str)] {
     &[
-        ("add-progress", "plan-mutate.sh"),
-        ("rebuild-progress", "plan-mutate.sh"),
         ("content", "update-plan-content.sh"),
         ("cleanup-plans", "cleanup-plans.sh"),
         ("validate", "validate-plan.sh"),
     ]
+}
+
+/// add-progress and rebuild-progress are implemented natively rather than
+/// dispatched to planning/scripts/plan-mutate.sh: that script's own
+/// compiled-binary-preference wiring execs back into THIS binary, so routing
+/// either verb through it here would be a direct, unbounded exec/spawn cycle
+/// -- the compiled binary would forever re-dispatch to the very script that
+/// prefers it. This mirrors plan-mutate.sh's own bash implementation, which
+/// documents the same two verbs as "implemented inline rather than exec'd"
+/// for its own, unrelated reasons (rebuild-progress must overwrite in place
+/// and tolerate an empty steps/ directory).
+fn die(message: impl AsRef<str>, code: i32) -> ! {
+    eprintln!("plan-mutate: {}", message.as_ref());
+    process::exit(code)
+}
+
+fn require_directory(path: &Path) -> Result<(), String> {
+    if path.is_dir() {
+        Ok(())
+    } else {
+        Err(format!("Plan directory not found: {}", path.display()))
+    }
+}
+
+fn add_progress_step(args: &[String]) -> Result<(), String> {
+    let [goal_dir, step_name, description] = args else {
+        return Err("add-progress needs exactly 3 arguments".into());
+    };
+    let goal_dir = Path::new(goal_dir);
+    require_directory(goal_dir)?;
+    // Matches ^[0-9][0-9]-step-[a-z0-9-]+$: two digits, literal "-step-",
+    // then one or more lowercase/digit/hyphen characters (minimum length 9,
+    // e.g. "01-step-a").
+    let valid_step_name = step_name.len() > 8
+        && step_name.as_bytes()[0].is_ascii_digit()
+        && step_name.as_bytes()[1].is_ascii_digit()
+        && step_name[2..].starts_with("-step-")
+        && step_name[8..]
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !valid_step_name {
+        return Err("Step name must use 01-step-kebab-case".into());
+    }
+    planning_core::require_safe_value("description", description)?;
+    let progress_file = goal_dir.join("progress.md");
+    if !progress_file.is_file() {
+        return Err(format!(
+            "Progress file not found: {}",
+            progress_file.display()
+        ));
+    }
+    if let Some(parent) = goal_dir.parent() {
+        planning_core::git_snapshot(parent);
+    }
+    let content = std::fs::read_to_string(&progress_file).map_err(|e| e.to_string())?;
+    let row_marker = format!("| {step_name} |");
+    if content.contains(&row_marker) {
+        return Err(format!("Progress row already exists: {step_name}"));
+    }
+    let mut updated = content;
+    if !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(&format!(
+        "| {} | {step_name} | {description} | 💤 incomplete |\n",
+        goal_dir.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    planning_core::atomic_write(&progress_file, updated.as_bytes())
+}
+
+fn rebuild_progress(args: &[String]) -> Result<(), String> {
+    let [goal_dir] = args else {
+        return Err("rebuild-progress needs exactly 1 argument".into());
+    };
+    let goal_dir = Path::new(goal_dir);
+    require_directory(goal_dir)?;
+    let goal_name = goal_dir.file_name().unwrap_or_default().to_string_lossy();
+    let progress_file = goal_dir.join("progress.md");
+    if let Some(parent) = goal_dir.parent() {
+        planning_core::git_snapshot(parent);
+    }
+    let mut out = String::new();
+    out.push_str(&format!("# Progress: {goal_name}\n\n"));
+    // Glyphs and spacing are pinned by test-progress-bar-shape.sh; do not reflow.
+    out.push_str("**Progress:** `0%  #### ----------------  100%` 💤\n\n");
+    out.push_str("| Goalname | Stepname | Description | Completion status |\n|---|---|---|---|\n");
+    let mut step_files: Vec<PathBuf> = std::fs::read_dir(goal_dir.join("steps"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path.extension().is_some_and(|ext| ext == "md")
+                && !path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .ends_with("-testing.md")
+        })
+        .collect();
+    step_files.sort();
+    for step_file in step_files {
+        let step_name = step_file
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let step_desc = planning_progress::step_objective(&step_file, &step_name)?;
+        out.push_str(&format!(
+            "| {goal_name} | {step_name} | {step_desc} | 💤 incomplete |\n"
+        ));
+    }
+    planning_core::atomic_write(&progress_file, out.as_bytes())
 }
 
 fn dispatch(root: &Path, command: &str, args: &[String]) -> ! {
@@ -174,11 +286,17 @@ fn main() {
     }
     let command = args.first().cloned().unwrap_or_else(|| usage(64));
     args.remove(0);
-    let root = skill_root().unwrap_or_else(|| {
-        eprintln!("plan-mutate.sh: could not locate the planning skill root");
-        process::exit(69)
-    });
-    dispatch(&root, &command, &args)
+    match command.as_str() {
+        "add-progress" => add_progress_step(&args).unwrap_or_else(|e| die(e, 64)),
+        "rebuild-progress" => rebuild_progress(&args).unwrap_or_else(|e| die(e, 64)),
+        _ => {
+            let root = skill_root().unwrap_or_else(|| {
+                eprintln!("plan-mutate.sh: could not locate the planning skill root");
+                process::exit(69)
+            });
+            dispatch(&root, &command, &args)
+        }
+    }
 }
 
 #[cfg(test)]

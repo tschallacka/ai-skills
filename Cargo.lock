@@ -1123,6 +1123,10 @@ dependencies = [
 [[package]]
 name = "plan-mutate"
 version = "0.1.0"
+dependencies = [
+ "planning-core",
+ "planning-progress",
+]
 
 [[package]]
 name = "plan-overview"
