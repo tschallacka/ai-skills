@@ -69,7 +69,10 @@ fn main() {
         )
     }
     let skill = PathBuf::from(args.first().cloned().unwrap_or_else(|| "planning".into()));
-    let source = skill.join("SKILL.md");
+    // T87: the source moved from SKILL.md to skill-source.txt when SKILL.md
+    // became a generated index (generate-skill-docs.sh); the
+    // REVIEWER_SECTION markers themselves did not move or change shape.
+    let source = skill.join("skill-source.txt");
     let output = PathBuf::from(
         args.get(1)
             .cloned()
@@ -82,7 +85,7 @@ fn main() {
     let hash = digest(&bytes);
     let mut result = String::new();
     result.push_str("<!-- MODE: PROD -->\n# Reviewer contract\n\n");
-    result.push_str(&format!("> Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.\n> Reviewer profile contract: `1.4.2`\n> Source SHA-256: `{hash}`\n\nThis file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.\n\n## Generated sections\n\n- `mandatory-review`\n- `bounded-context`\n\n"));
+    result.push_str(&format!("> Generated from `skill-source.txt` by `scripts/generate-reviewer.sh`.\n> Reviewer profile contract: `1.4.2`\n> Source SHA-256: `{hash}`\n\nThis file is a review-scoped projection of the skill source; the tagged skill remains authoritative.\n\n## Generated sections\n\n- `mandatory-review`\n- `bounded-context`\n\n"));
     let source_text =
         String::from_utf8(bytes).unwrap_or_else(|_| die("source skill is not UTF-8", 66));
     for name in ["mandatory-review", "bounded-context"] {
