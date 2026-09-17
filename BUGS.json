@@ -7263,6 +7263,28 @@
       "updated_at": "2026-09-17T16:11:45Z"
     },
     {
+      "id": "B357",
+      "title": "resolve-finding.sh cannot mark an ungated (no-work-unit) adversarial-review finding resolved",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": "B354",
+      "reproduce": "File a finding in a plan's adversarial-review.md with an empty/N/A Work unit cell (a real, sanctioned shape per the Findings table's own mandatory-with-blank-allowed convention — e.g. a finding about plan-description.md itself, not tied to any implementation work unit). Fix the underlying issue, then try planning/scripts/resolve-finding.sh <plan> AR-NN --status resolved (or the equivalent CLI) to mark it resolved.",
+      "observed": "Refused: resolve-finding.sh hard-requires a WNN work-unit cell to look up a gated fix key, with no path for an ungated finding. add-adversarial-finding.sh is add-only (no upsert), so there is also no way to re-add the row with an updated Status. The finding's row is stuck at 'open' even though the actual required plan change has genuinely been applied and is independently verifiable.",
+      "expected": "A finding with no work unit (a real, sanctioned shape) should still be markable resolved once its required change lands -- ungated findings need no fix-key verification at all (per fix-keys.json's own documented behavior for ungated rows), so there is no self-certification reason to block this the way gated findings are.",
+      "mechanism": "resolve-finding.sh's own row-rewrite logic (planning/scripts/resolve-finding.sh) looks up a fix key via the finding's Work-unit cell before allowing a status change; an empty/N/A cell has no key to look up and the script has no branch for 'ungated, no key needed, just rewrite the Status cell'. This is the third distinct instance this session of the same underlying gap class (no CLI writer exists for a specific, legitimate adversarial-review.md Findings-table cell transition) after B42 (fixed: atomicity checkboxes were unwritable) and B354 (open: update-step.sh's --since auto-tick false-positives on a batched multi-unit commit) -- each a different mechanism hitting the same shape of missing-writer problem.",
+      "surfaces": [
+        "planning/scripts/resolve-finding.sh",
+        "planning/scripts/add-adversarial-finding.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T69 goal 2's own review-finding-resolution work (AR-03, a plan-description.md-only finding with no work unit) this session",
+      "notes": null,
+      "created_at": "2026-09-17T19:43:23Z",
+      "updated_at": "2026-09-17T19:43:23Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
