@@ -90,33 +90,19 @@ planning_commands=false
 editor=false
 installer=false
 
-case "$scope" in
-    none)
-        : # every subject stays false
-        ;;
-    selective)
-        for crate in $crates; do
-            case "$crate" in
-                rjq)              rjq=true ;;
-                plan-crypt)       plan_crypt=true ;;
-                chat-*)           chat=true ;;
-                ai-text-editor*)  editor=true ;;
-                installer*)       installer=true ;;
-                # Anything else belongs to the planning command registry.
-                ?*)               planning_commands=true ;;
-            esac
-        done
-        ;;
-    *)
-        # full, empty, or anything unrecognised: build everything.
-        rjq=true
-        chat=true
-        plan_crypt=true
-        planning_commands=true
-        editor=true
-        installer=true
-        ;;
-esac
+# Reached only once the wiring block above has already fallen through (no
+# compiled ci-subjects binary found) -- no decision logic is left to compute
+# one, so this degrades into the same "build everything" case the compiled
+# binary itself uses for full, empty, or anything unrecognised. Diagnosed on
+# stderr only: this script's own output contract is exactly six subject=bool
+# lines with no reason field to extend.
+printf 'ci-subjects binary not found; run ./setup-dev-env.sh to build it\n' >&2
+rjq=true
+chat=true
+plan_crypt=true
+planning_commands=true
+editor=true
+installer=true
 
 emit() {
     printf 'rjq=%s\n' "$rjq"

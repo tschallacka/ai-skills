@@ -140,6 +140,24 @@ else
     printf '  ok    an unknown flag is rejected\n'
 fi
 
+echo "ci-scope: no compiled binary falls back to the scope=full safe default"
+# AR-100: never mutate the real, shared planning/scripts/plan-core-lib.sh in
+# place -- copy ci-scope.sh into this test's own scratch work dir, whose
+# planning/scripts/ has no plan-core-lib.sh, so the wiring's own
+# [ -f .../plan-core-lib.sh ] check is false there with zero shared mutable
+# state touched.
+missing_binary_root="$work/missing-binary"
+mkdir -p "$missing_binary_root/.github" "$missing_binary_root/planning/scripts"
+cp "$scope_sh" "$missing_binary_root/.github/ci-scope.sh"
+got="$(cd "$missing_binary_root" && ./.github/ci-scope.sh --files-from /dev/null)"
+if grep -qF 'scope=full' <<<"$got" \
+    && grep -qF 'reason=ci-scope binary not found; run ./setup-dev-env.sh to build it' <<<"$got"; then
+    printf '  ok    a missing compiled binary falls back to scope=full\n'
+else
+    printf '  FAIL  a missing compiled binary should fall back to scope=full\n         got: %s\n' "$got"
+    failures=$((failures + 1))
+fi
+
 echo
 if [ "$failures" -eq 0 ]; then
     echo "test-ci-scope: PASS"

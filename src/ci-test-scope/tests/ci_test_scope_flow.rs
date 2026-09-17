@@ -548,9 +548,12 @@ fn an_unwritable_github_output_still_exits_zero() {
     repo.cleanup();
 }
 
-// ---- real-tree parity: every scenario the authoritative black-box harness
-// (.github/tests/test-ci-test-scope.sh) exercises, bash vs the compiled
-// binary --
+// ---- real-tree exec fidelity and the missing-binary fallback (W124: the
+// bash reimplementation body is gone, so there is nothing left to compare it
+// against -- what remains to prove is that invoking .github/ci-test-scope.sh,
+// which execs the compiled binary via its own wiring block, produces
+// byte-identical output to invoking the compiled binary directly, and that
+// the wiring's own safe-default fires when no compiled binary can be found) --
 
 fn real_repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -561,17 +564,38 @@ fn real_repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn real_bash_scope(repo_root: &Path, args: &[&str]) -> Output {
+/// The staged `bin/<triple>` directory holding this repo's own compiled
+/// ci-test-scope, whatever the host triple is -- found by content, not a
+/// hardcoded triple string. Pinned onto AI_SKILLS_BIN_ROOT (tier 1) for the
+/// wrapper invocation below, so a stale or partial shared install under
+/// ~/.config/tsch-ai-skills/bin (tier 2, checked first) cannot shadow the
+/// very binary this test just built and is asserting fidelity against.
+fn staged_bin_dir(repo_root: &Path) -> PathBuf {
+    let bin = repo_root.join("bin");
+    for entry in fs::read_dir(&bin).expect("bin/ directory (run ./setup-dev-env.sh)") {
+        let dir = entry.unwrap().path();
+        if dir.is_dir() && dir.join("ci-test-scope").is_file() {
+            return dir;
+        }
+    }
+    panic!(
+        "no bin/<triple>/ci-test-scope found under {}; run ./setup-dev-env.sh",
+        bin.display()
+    );
+}
+
+fn wrapper_scope(repo_root: &Path, args: &[&str]) -> Output {
     Command::new("bash")
         .arg(repo_root.join(".github/ci-test-scope.sh"))
         .args(args)
         .current_dir(repo_root)
+        .env("AI_SKILLS_BIN_ROOT", staged_bin_dir(repo_root))
         .env_remove("GITHUB_OUTPUT")
         .output()
         .unwrap()
 }
 
-fn real_compiled_scope(repo_root: &Path, args: &[&str]) -> Output {
+fn direct_scope(repo_root: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ci-test-scope"))
         .args(args)
         .current_dir(repo_root)
@@ -582,9 +606,9 @@ fn real_compiled_scope(repo_root: &Path, args: &[&str]) -> Output {
 }
 
 #[test]
-fn real_tree_parity_matches_bash_for_every_test_ci_test_scope_scenario() {
+fn exec_fidelity_matches_the_compiled_binary_for_every_test_ci_test_scope_scenario() {
     let repo_root = real_repo_root();
-    let work = unique_dir("parity");
+    let work = unique_dir("exec-fidelity");
     fs::create_dir_all(&work).unwrap();
 
     let scenarios: &[(&str, &[&str])] = &[
@@ -595,14 +619,10 @@ fn real_tree_parity_matches_bash_for_every_test_ci_test_scope_scenario() {
         ("the selector itself", &[".github/ci-test-scope.sh"]),
         ("run-tests.sh", &["run-tests.sh"]),
         ("lib-test.sh", &["planning/tests/lib-test.sh"]),
-        // Deliberately NOT included here: a `src/ci-test-scope/*` scenario.
-        // That is the self-protection arm THIS goal adds (see the dedicated
-        // scratch-repo test `the_new_self_protection_arm_forces_full_for_its_own_source`
-        // above), and the real bash `.github/ci-test-scope.sh` on disk does
-        // not gain the matching case arm until step 03 wires it -- comparing
-        // against bash here, before that edit lands, would be a genuine
-        // mismatch (bash still says selective) rather than a real defect.
-        // Matches goal 21's own identical precedent for `ci-scope.sh`.
+        (
+            "its own compiled-binary source",
+            &["src/ci-test-scope/src/main.rs"],
+        ),
         ("no files at all", &[]),
         ("a doc-only change", &["README.md"]),
         (
@@ -621,12 +641,11 @@ fn real_tree_parity_matches_bash_for_every_test_ci_test_scope_scenario() {
         }
         fs::write(&list_path, content).unwrap();
 
-        let bash_out = real_bash_scope(&repo_root, &["--files-from", list_path.to_str().unwrap()]);
-        let rust_out =
-            real_compiled_scope(&repo_root, &["--files-from", list_path.to_str().unwrap()]);
+        let wrapper_out = wrapper_scope(&repo_root, &["--files-from", list_path.to_str().unwrap()]);
+        let direct_out = direct_scope(&repo_root, &["--files-from", list_path.to_str().unwrap()]);
         assert_eq!(
-            stdout_of(&bash_out),
-            stdout_of(&rust_out),
+            stdout_of(&wrapper_out),
+            stdout_of(&direct_out),
             "scenario: {label}"
         );
     }
@@ -635,67 +654,85 @@ fn real_tree_parity_matches_bash_for_every_test_ci_test_scope_scenario() {
     let huge_list = work.join("huge.txt");
     let huge_content: String = (0..101).map(|i| format!("docs/file-{i}.md\n")).collect();
     fs::write(&huge_list, huge_content).unwrap();
-    let bash_huge = real_bash_scope(&repo_root, &["--files-from", huge_list.to_str().unwrap()]);
-    let rust_huge = real_compiled_scope(&repo_root, &["--files-from", huge_list.to_str().unwrap()]);
+    let wrapper_huge = wrapper_scope(&repo_root, &["--files-from", huge_list.to_str().unwrap()]);
+    let direct_huge = direct_scope(&repo_root, &["--files-from", huge_list.to_str().unwrap()]);
     assert_eq!(
-        stdout_of(&bash_huge),
-        stdout_of(&rust_huge),
+        stdout_of(&wrapper_huge),
+        stdout_of(&direct_huge),
         "scenario: a huge change set"
     );
 
     // The unknown-flag-rejection scenario.
-    let bash_unknown_flag = real_bash_scope(&repo_root, &["--nonsense"]);
-    let rust_unknown_flag = real_compiled_scope(&repo_root, &["--nonsense"]);
+    let wrapper_unknown_flag = wrapper_scope(&repo_root, &["--nonsense"]);
+    let direct_unknown_flag = direct_scope(&repo_root, &["--nonsense"]);
     assert_eq!(
-        stdout_of(&bash_unknown_flag),
-        stdout_of(&rust_unknown_flag),
+        stdout_of(&wrapper_unknown_flag),
+        stdout_of(&direct_unknown_flag),
         "scenario: an unknown flag"
     );
     assert_eq!(
-        bash_unknown_flag.status.code(),
-        rust_unknown_flag.status.code(),
+        wrapper_unknown_flag.status.code(),
+        direct_unknown_flag.status.code(),
         "scenario: an unknown flag, exit code"
     );
+
+    for branch in ["master", "nextupdate"] {
+        let wrapper_out = wrapper_scope(&repo_root, &["--push-to", branch]);
+        let direct_out = direct_scope(&repo_root, &["--push-to", branch]);
+        assert_eq!(
+            stdout_of(&wrapper_out),
+            stdout_of(&direct_out),
+            "branch: {branch}"
+        );
+    }
+    let wrapper_out = wrapper_scope(
+        &repo_root,
+        &["--push-to", "master", "--files-from", "/dev/null"],
+    );
+    let direct_out = direct_scope(
+        &repo_root,
+        &["--push-to", "master", "--files-from", "/dev/null"],
+    );
+    assert_eq!(stdout_of(&wrapper_out), stdout_of(&direct_out));
+
+    let wrapper_help = wrapper_scope(&repo_root, &["--help"]);
+    let direct_help = direct_scope(&repo_root, &["--help"]);
+    assert_eq!(stdout_of(&wrapper_help), stdout_of(&direct_help));
 
     let _ = fs::remove_dir_all(&work);
 }
 
+// AR-100: this must not mutate the real, shared planning/scripts/plan-core-lib.sh
+// in place -- copy ci-test-scope.sh into a per-test scratch tree whose
+// planning/scripts/ has no plan-core-lib.sh, so the wiring's own
+// [ -f .../plan-core-lib.sh ] check is false there with zero shared mutable
+// state touched.
 #[test]
-fn real_tree_parity_push_to_matches_bash() {
-    let repo_root = real_repo_root();
-    for branch in ["master", "nextupdate"] {
-        let bash_out = real_bash_scope(&repo_root, &["--push-to", branch]);
-        let rust_out = real_compiled_scope(&repo_root, &["--push-to", branch]);
-        assert_eq!(
-            stdout_of(&bash_out),
-            stdout_of(&rust_out),
-            "branch: {branch}"
-        );
-    }
-    // And it must win over an empty change set.
-    let bash_out = real_bash_scope(
-        &repo_root,
-        &["--push-to", "master", "--files-from", "/dev/null"],
-    );
-    let rust_out = real_compiled_scope(
-        &repo_root,
-        &["--push-to", "master", "--files-from", "/dev/null"],
-    );
-    assert_eq!(stdout_of(&bash_out), stdout_of(&rust_out));
-}
+fn missing_binary_falls_back_to_the_scope_full_safe_default() {
+    let real_repo_root = real_repo_root();
+    let scratch = unique_dir("missing-binary");
+    fs::create_dir_all(scratch.join(".github")).unwrap();
+    fs::create_dir_all(scratch.join("planning/scripts")).unwrap();
+    fs::copy(
+        real_repo_root.join(".github/ci-test-scope.sh"),
+        scratch.join(".github/ci-test-scope.sh"),
+    )
+    .unwrap();
 
-#[test]
-fn real_tree_parity_help_matches_bash() {
-    let repo_root = real_repo_root();
-    let bash_out = Command::new("bash")
-        .arg(repo_root.join(".github/ci-test-scope.sh"))
-        .arg("--help")
-        .current_dir(&repo_root)
+    let output = Command::new("bash")
+        .arg(scratch.join(".github/ci-test-scope.sh"))
+        .arg("--files-from")
+        .arg("/dev/null")
+        .current_dir(&scratch)
+        .env_remove("GITHUB_OUTPUT")
         .output()
         .unwrap();
-    let rust_out = Command::new(env!("CARGO_BIN_EXE_ci-test-scope"))
-        .arg("--help")
-        .output()
-        .unwrap();
-    assert_eq!(stdout_of(&bash_out), stdout_of(&rust_out));
+
+    assert!(output.status.success());
+    assert_eq!(
+        stdout_of(&output),
+        "scope=full\nreason=ci-test-scope binary not found; run ./setup-dev-env.sh to build it\ntests=\n"
+    );
+
+    let _ = fs::remove_dir_all(&scratch);
 }

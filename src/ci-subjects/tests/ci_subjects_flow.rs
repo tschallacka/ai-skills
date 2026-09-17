@@ -106,18 +106,46 @@ fn an_unwritable_github_output_still_exits_zero() {
     );
 }
 
-/// Read-only against the actual ai-skills repository, never mutating it:
-/// reproduces every scenario `.github/tests/test-ci-subjects.sh`'s own
-/// `check()` calls exercise.
-#[test]
-fn matches_the_real_bash_original_for_every_real_test_scenario() {
-    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+fn real_repo_root() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(|p| p.parent())
         .expect("src/ci-subjects is two levels below the repo root")
-        .to_path_buf();
+        .to_path_buf()
+}
+
+/// The staged `bin/<triple>` directory holding this repo's own compiled
+/// ci-subjects, whatever the host triple is -- found by content, not a
+/// hardcoded triple string. Pinned onto AI_SKILLS_BIN_ROOT (tier 1) for the
+/// wrapper invocation below, so a stale or partial shared install under
+/// ~/.config/tsch-ai-skills/bin (tier 2, checked first) cannot shadow the
+/// very binary this test just built and is asserting fidelity against.
+fn staged_bin_dir(repo_root: &Path) -> std::path::PathBuf {
+    let bin = repo_root.join("bin");
+    for entry in fs::read_dir(&bin).expect("bin/ directory (run ./setup-dev-env.sh)") {
+        let dir = entry.unwrap().path();
+        if dir.is_dir() && dir.join("ci-subjects").is_file() {
+            return dir;
+        }
+    }
+    panic!(
+        "no bin/<triple>/ci-subjects found under {}; run ./setup-dev-env.sh",
+        bin.display()
+    );
+}
+
+// ---- real-tree exec fidelity and the missing-binary fallback (W123: the
+// bash reimplementation body is gone, so there is nothing left to compare it
+// against -- what remains to prove is that invoking .github/ci-subjects.sh,
+// which execs the compiled binary via its own wiring block, produces
+// byte-identical output to invoking the compiled binary directly, and that
+// the wiring's own safe-default fires when no compiled binary can be found) --
+#[test]
+fn exec_fidelity_matches_the_compiled_binary_for_every_real_test_scenario() {
+    let repo_root = real_repo_root();
     let script = repo_root.join(".github/ci-subjects.sh");
     assert!(script.is_file(), "{} not found", script.display());
+    let bin_dir = staged_bin_dir(&repo_root);
 
     let scenarios: Vec<Vec<&str>> = vec![
         vec!["--scope", "full"],
@@ -153,27 +181,73 @@ fn matches_the_real_bash_original_for_every_real_test_scenario() {
     ];
 
     for args in scenarios {
-        let bash_output = Command::new("bash")
+        let wrapper_output = Command::new("bash")
             .arg(&script)
             .args(&args)
+            .env("AI_SKILLS_BIN_ROOT", &bin_dir)
             .env_remove("GITHUB_OUTPUT")
             .current_dir(&repo_root)
             .output()
             .unwrap();
-        let binary_output = Command::new(env!("CARGO_BIN_EXE_ci-subjects"))
+        let direct_output = Command::new(env!("CARGO_BIN_EXE_ci-subjects"))
             .args(&args)
             .env_remove("GITHUB_OUTPUT")
             .output()
             .unwrap();
         assert_eq!(
-            bash_output.status.code(),
-            binary_output.status.code(),
+            wrapper_output.status.code(),
+            direct_output.status.code(),
             "exit codes differ for {args:?}"
         );
         assert_eq!(
-            combined_of(&bash_output),
-            combined_of(&binary_output),
+            combined_of(&wrapper_output),
+            combined_of(&direct_output),
             "output differs for {args:?}"
         );
     }
+}
+
+// AR-100: this must not mutate the real, shared planning/scripts/plan-core-lib.sh
+// in place -- copy ci-subjects.sh into a per-test scratch tree whose
+// planning/scripts/ has no plan-core-lib.sh, so the wiring's own
+// [ -f .../plan-core-lib.sh ] check is false there with zero shared mutable
+// state touched.
+#[test]
+fn missing_binary_falls_back_to_the_all_true_safe_default() {
+    let real_repo_root = real_repo_root();
+    let scratch = std::env::temp_dir().join(format!(
+        "ci-subjects-flow-missing-binary-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&scratch);
+    fs::create_dir_all(scratch.join(".github")).unwrap();
+    fs::create_dir_all(scratch.join("planning/scripts")).unwrap();
+    fs::copy(
+        real_repo_root.join(".github/ci-subjects.sh"),
+        scratch.join(".github/ci-subjects.sh"),
+    )
+    .unwrap();
+
+    let output = Command::new("bash")
+        .arg(scratch.join(".github/ci-subjects.sh"))
+        .arg("--scope")
+        .arg("full")
+        .current_dir(&scratch)
+        .env_remove("GITHUB_OUTPUT")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", combined_of(&output));
+    let out = stdout_of(&output);
+    assert_eq!(
+        out, "rjq=true\nchat=true\nplan_crypt=true\nplanning_commands=true\neditor=true\ninstaller=true\n",
+        "stdout: {out}"
+    );
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        err.contains("ci-subjects binary not found; run ./setup-dev-env.sh to build it"),
+        "stderr: {err}"
+    );
+
+    let _ = fs::remove_dir_all(&scratch);
 }
