@@ -7117,6 +7117,25 @@
       "updated_at": "2026-09-17T01:07:12Z"
     },
     {
+      "id": "B350",
+      "title": "plan-content.sh find fails with 'matches_file: unbound variable' via compiled binary",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cd /home/tschallacka/git/ai-skills; export PATH=\"bin/x86_64-unknown-linux-musl:$PATH\"; PLANNING_SKILL_DIR=/home/tschallacka/.claude/skills/planning; $PLANNING_SKILL_DIR/scripts/plan-content.sh find .plans/persona-profile-migration REVIEWER.md --in all",
+      "observed": "plan-content-lib.sh: line 1: matches_file: unbound variable -- the command fails immediately with no results, regardless of --full or scope flags.",
+      "expected": "find should return matching paragraphs across the plan's documents, the same way it does when planning/scripts/plan-content.sh (the bash script) is invoked directly instead of via the compiled binary on PATH.",
+      "mechanism": "Worked around by invoking bash planning/scripts/plan-content.sh directly (bypassing whatever compiled-binary wiring or PATH resolution normally intercepts the call) -- that path works correctly. Root cause not investigated further this session; the compiled plan-content binary (or its wiring block) likely fails to properly initialize or export a variable named matches_file that the bash implementation expects, only surfacing when reached through the compiled path. Discovered while sweeping a plan for stale wording during T148's persona-profile-migration goal-1 review-fix cycle.",
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "",
+      "notes": null,
+      "created_at": "2026-09-17T05:01:19Z",
+      "updated_at": "2026-09-17T05:01:19Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
