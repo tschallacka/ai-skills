@@ -128,12 +128,14 @@ jobs:
           fi
 
       - name: Install GNU nano, because macOS answers `nano` with Pico
-        # test-interactive-shell drives GNU nano's own bindings -- META-RIGHT,
-        # CTRL-E, CTRL-O -- to prove the PTY wrapper can operate a full-screen
-        # program. Stock macOS ships UW Pico under that name (the runner
-        # reported "UW PICO 5.09" in its title bar), which shares neither the
-        # title nor the keys, so the test skips itself there rather than
-        # asserting against a different program.
+        # cargo test -p interactive-shell --test pty_orchestration (T145 goal
+        # 25; formerly the bash test-interactive-shell.sh) drives GNU nano's
+        # own bindings -- META-RIGHT, CTRL-E, CTRL-O -- to prove the PTY
+        # wrapper can operate a full-screen program. Stock macOS ships UW Pico
+        # under that name (the runner reported "UW PICO 5.09" in its title
+        # bar), which shares neither the title nor the keys, so the test
+        # skips itself there rather than asserting against a different
+        # program.
         #
         # Installing it keeps the assertions strict instead of widening them to
         # cover two editors: the subject is the wrapper, so pinning the program
@@ -445,12 +447,14 @@ jobs:
           fi
 
       - name: Install GNU nano, because macOS answers `nano` with Pico
-        # test-interactive-shell drives GNU nano's own bindings -- META-RIGHT,
-        # CTRL-E, CTRL-O -- to prove the PTY wrapper can operate a full-screen
-        # program. Stock macOS ships UW Pico under that name (the runner
-        # reported "UW PICO 5.09" in its title bar), which shares neither the
-        # title nor the keys, so the test skips itself there rather than
-        # asserting against a different program.
+        # cargo test -p interactive-shell --test pty_orchestration (T145 goal
+        # 25; formerly the bash test-interactive-shell.sh) drives GNU nano's
+        # own bindings -- META-RIGHT, CTRL-E, CTRL-O -- to prove the PTY
+        # wrapper can operate a full-screen program. Stock macOS ships UW Pico
+        # under that name (the runner reported "UW PICO 5.09" in its title
+        # bar), which shares neither the title nor the keys, so the test
+        # skips itself there rather than asserting against a different
+        # program.
         #
         # Installing it keeps the assertions strict instead of widening them to
         # cover two editors: the subject is the wrapper, so pinning the program

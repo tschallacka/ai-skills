@@ -12,11 +12,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-pub const SUITES: [&str; 8] = [
+pub const SUITES: [&str; 6] = [
     "tests",
     "planning/tests",
-    "chat/tests",
-    "interactive-shell/tests",
     "editor-gate-plugin/tests",
     "tui-hint-plugin/tests",
     "agent-identity-plugin/tests",

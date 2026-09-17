@@ -132,14 +132,12 @@ impl Repo {
             "#!/usr/bin/env bash\nsleep 30\n",
         );
 
-        // The other seven suite directories + benchmark suite must exist as
+        // The other five suite directories + benchmark suite must exist as
         // real (even if empty) directories, or `find` on a missing path
         // just yields nothing -- matching the bash original's own behavior,
         // not a special case this test needs to construct.
         for suite in [
             "planning/tests",
-            "chat/tests",
-            "interactive-shell/tests",
             "editor-gate-plugin/tests",
             "tui-hint-plugin/tests",
             "agent-identity-plugin/tests",

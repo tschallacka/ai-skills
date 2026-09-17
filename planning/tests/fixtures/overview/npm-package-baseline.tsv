@@ -34,13 +34,6 @@ package/chat/binaries.tsv	1876
 package/chat/docs/README.md	1927
 package/chat/integration.tsv	1652
 package/chat/requires.tsv	467
-package/chat/tests/test-chat-broadcast-stall.sh	13620
-package/chat/tests/test-chat-cap-negotiation.sh	10379
-package/chat/tests/test-chat-descriptor-leak.sh	9487
-package/chat/tests/test-chat-owner-socket.sh	13730
-package/chat/tests/test-chat-resolution.sh	8572
-package/chat/tests/test-chat-tail-msgid-cursor.sh	5325
-package/chat/tests/test-chat.sh	37601
 package/ci-failures/SKILL.md	4151
 package/ci-failures/docs/README.md	1146
 package/ci-failures/requires.tsv	1641
@@ -129,8 +122,6 @@ package/interactive-shell/appprofiles/write.md	2257
 package/interactive-shell/binaries.tsv	2461
 package/interactive-shell/docs/README.md	6143
 package/interactive-shell/requires.tsv	2032
-package/interactive-shell/tests/test-interactive-shell-exploration.sh	5492
-package/interactive-shell/tests/test-interactive-shell.sh	7688
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296

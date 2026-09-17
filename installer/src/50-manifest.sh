@@ -640,16 +640,6 @@ CHATEOF
                     printf 'skill_files: no chat artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
             esac
-            [ "$package" = dev ] || return 0
-            cat <<'CHATEOF'
-tests/test-chat.sh
-tests/test-chat-resolution.sh
-tests/test-chat-broadcast-stall.sh
-tests/test-chat-descriptor-leak.sh
-tests/test-chat-owner-socket.sh
-tests/test-chat-cap-negotiation.sh
-tests/test-chat-tail-msgid-cursor.sh
-CHATEOF
             ;;
         interactive-shell)
             cat <<'ISHEOF'
@@ -739,8 +729,6 @@ ISHEOF
             esac
             [ "$package" = dev ] || return 0
             cat <<'ISHEOF'
-tests/test-interactive-shell.sh
-tests/test-interactive-shell-exploration.sh
 TODO.json
 ISHEOF
             ;;

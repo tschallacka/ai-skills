@@ -209,9 +209,12 @@
               # broadcast -- it FETCH-polls and discards PRIVMSG -- so an
               # `openssl s_client` speaking the wire by hand is the only thing
               # in the repository that proves a broadcast reaches a subscriber
-              # (chat/tests/test-chat-broadcast-stall.sh). Undeclared, that
-              # assertion ran only while some other package's closure happened
-              # to put openssl on PATH, and skipped silently otherwise (B272).
+              # (src/chat-server-rs/tests/resource_robustness.rs and
+              # message_tags.rs, migrated from chat/tests/test-chat-broadcast-stall.sh
+              # and test-chat-cap-negotiation.sh in T145 goal 25). Undeclared,
+              # that assertion ran only while some other package's closure
+              # happened to put openssl on PATH, and skipped silently
+              # otherwise (B272).
               #
               # This does not reopen the digest chain it was once excluded for:
               # plan-crypt owns digests, and no shipped script calls openssl any

@@ -180,14 +180,13 @@ discover_crates() {
 suites=(
     tests
     planning/tests
-    # chat/tests was never discovered here, so every chat assertion — including
-    # the rung CI builds cargo for specifically "so its assertions run" (T62) —
-    # was dead weight: a green suite proved nothing about the chat skill.
-    chat/tests
-    # Registered with the suite dir, not after it: an interactive-shell/tests
-    # that nothing discovers is the same dead weight chat/tests was.
-    interactive-shell/tests
-    # Same reasoning: editor-gate-plugin/tests covers the pattern-matching and
+    # T145 goal 25: chat/tests and interactive-shell/tests are retired -- their
+    # own bash test files were migrated into src/chat-server-rs/tests/,
+    # src/chat-client-rs/tests/, and src/interactive-shell/tests/, run through
+    # the per-crate `cargo test` gate below, not this suite discovery loop.
+    #
+    # Same reasoning as those two former entries here: editor-gate-plugin/tests
+    # covers the pattern-matching and
     # token mint/consume logic its Bash hard gate and Edit/Write soft
     # reminder both depend on.
     editor-gate-plugin/tests
@@ -200,9 +199,9 @@ suites=(
     # .github/tests covers ci-scope.sh and ci-subjects.sh, which decide how much
     # of the workspace CI compiles, and registers-guard.sh, which decides
     # whether a registers push may reach master WITHOUT review. Undiscovered
-    # they would be the same dead weight as chat/tests was: the scripts that can
-    # silently narrow every run or widen who writes master, with nothing
-    # asserting they only do so on grounds.
+    # they would be dead weight: the scripts that can silently narrow every
+    # run or widen who writes master, with nothing asserting they only do so
+    # on grounds.
     .github/tests
     benchmark/planning/tests
 )

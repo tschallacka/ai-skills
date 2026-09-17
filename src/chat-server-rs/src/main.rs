@@ -2247,7 +2247,8 @@ mod outbox_tests {
 // T133 (CAP negotiation) and T134 (message-tags on broadcast PRIVMSG). Like
 // membership_relay_tests above, the live parts (LS/REQ/END over a real
 // connection, registration actually held) need a socket and are covered by
-// chat/tests/test-chat-cap-negotiation.sh; what is pure here is tested here.
+// tests/message_tags.rs (migrated from chat/tests/test-chat-cap-negotiation.sh
+// in T145 goal 25); what is pure here is tested here.
 #[cfg(test)]
 mod cap_negotiation_tests {
     use super::{negotiate_req, Hub, Peer, CAPABILITIES};
