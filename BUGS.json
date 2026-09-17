@@ -4896,7 +4896,7 @@
     {
       "id": "B353",
       "title": "update-adversarial-review archives each cycle's scope-preamble alongside the WRONG findings table (off-by-one pairing)",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -4908,12 +4908,12 @@
         "src/update-adversarial-review/src/main.rs",
         "planning/scripts/update-adversarial-review.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "src/update-adversarial-review/src/main.rs's archive() call (main(), ~line 289) now archives the freshly-rendered table it is about to land (the same variable used to build the new live findings section) instead of re-scraping the outgoing/pre-rewrite findings table. This pairs each archived cycle's scope-preamble with the findings it actually describes, matching the field's own documented meaning ('findings this cycle', 'the run that made it'). archive()'s third parameter renamed prior_rows -> landed_rows for clarity; its log message updated from 'Archived previous Findings table' to \"Archived this cycle's Findings table\". Mirrored identically in the bash fallback (planning/scripts/update-adversarial-review.sh): history_rows now reads $rendered_file (the freshly-rendered new table) instead of re-scraping the pre-rewrite review file's own Findings section; header comment and archive log message updated to match.",
+      "verification": "Reproduced the original bug against a scratch plan using the real sentinel workflow that first surfaced it (session-a1b2c3/9min/6-findings/148000-tokens scope block, submitted alongside 2 real findings via a fresh create-adversarial-review + update-adversarial-review run): the archived Cycle 1 block now correctly shows session-a1b2c3's own metadata alongside the AR-01/AR-02 findings that reviewer actually produced, not the prior seed placeholder. Updated planning/tests/test-adversarial-review-cycles.sh's sentinel-preamble case (now 1 run instead of 2 to reach the first real archived cycle, since every landing self-archives; the correction re-run becomes Cycle 2 instead of Cycle 3) and its 3 other affected assertions (every landed cycle -- including the most recent -- now appears in history, so an identical 3x re-run now produces exactly 1 archived cycle instead of 2, and the no-rows placeholder path is provably unreachable via the CLI now that archive() always receives the freshly-rendered, non-empty table -- render()/the CSV shape gate refuse empty input first). Updated test-adversarial-review-sources.sh's stale-message and stale-row assertions (AR-30->AR-31, matching what the second call actually lands). Ran every affected test both against the compiled binary and with AI_SKILLS_BIN_ROOT pointed at an empty directory to force the bash fallback -- all pass identically both ways. cargo fmt/clippy -D warnings/test clean for update-adversarial-review and create-adversarial-review. Full nix develop . --command ./pre-push-check.sh: 1 unrelated pre-existing failure (cargo test: verify-both-shells), confirmed a transient flake by re-running that crate's tests in isolation (14+12 passed, 0 failed) -- matches this session's already-documented resource-contention-flake pattern, unrelated to this change. Updated the npm-package-baseline row for planning/scripts/update-adversarial-review.sh's new byte size (15580 -> 15937).",
       "found_by": "T69 goal 2 exploration -- generating real sample data on a throwaway plan (/tmp/sample-postmortem-plan, since cleaned up) to inform postmortem-generator design",
       "notes": null,
       "created_at": "2026-09-17T09:42:43Z",
-      "updated_at": "2026-09-17T09:42:43Z"
+      "updated_at": "2026-09-17T10:04:58Z"
     },
     {
       "id": "B6",
