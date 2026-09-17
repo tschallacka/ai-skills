@@ -7285,6 +7285,27 @@
       "updated_at": "2026-09-17T19:43:23Z"
     },
     {
+      "id": "B358",
+      "title": "csv_to_markdown's pipe-escape check validates the input but never sanitizes the rendered output",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Submit a findings CSV row (via update-adversarial-review.sh or --check) whose field contains a backslash-escaped pipe, e.g. a Required-plan-change field containing the literal text 'claude\\|opencode\\|codex'. The CSV shape/mint check passes (no UnescapedPipe error). Land it for real, then read the rendered ## Findings table in adversarial-review.md, or try mint-fix-keys.sh/resolve-finding.sh against that row.",
+      "observed": "The rendered markdown table cell still contains the literal two characters backslash and pipe (csv_to_markdown's own output.push_str(field) pushes the ORIGINAL field text, not a sanitized version -- only a separately-computed 'cleaned' copy with \\| stripped is used for the validity check, then discarded). Since markdown tables use bare '|' as the column delimiter, this literal pipe character inside one cell is indistinguishable from a real column boundary to any downstream '|'-splitting parser. Confirmed concretely: mint-fix-keys.sh's own column-scan (mint_scan_gated) then misreads the row, printing a WARN naming the wrong 'work unit' -- it showed the entire adjacent 'Required plan change' cell's text as the work-unit value, because the stray pipe shifted every column index after it by one.",
+      "expected": "A field that passes the pipe-escape validity check should render to a table cell that is actually safe for every consumer that reads adversarial-review.md's Findings table by splitting on '|' -- either by converting the escaped \\| sequence to something that survives as one literal pipe glyph without being column-delimiter-shaped (e.g. an HTML entity &#124;, or a Unicode look-alike character), or by refusing escaped pipes entirely (since nothing downstream can currently represent one) rather than accepting them as if they were safe.",
+      "mechanism": "src/planning-table/src/lib.rs's csv_to_markdown(): 'let cleaned = field.replace(\"\\\\|\", \"\"); if cleaned.contains('|') { return Err(...) }' computes a STRIPPED copy purely for the emptiness/safety check, but the very next lines ('output.push_str(field)') write the ORIGINAL, unstripped field -- so an escaped pipe reaches the rendered table completely unconverted, defeating the whole point of the escape convention. The same class of bug likely exists in this crate's bash-fallback sibling if one exists with its own equivalent pipe-escaping logic (not yet checked).",
+      "surfaces": [
+        "src/planning-table/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "An independent adversarial reviewer's findings CSV for T148 goal 3 (AR-125), which legitimately needed to quote a real CLI usage string containing --agent claude|opencode|codex",
+      "notes": null,
+      "created_at": "2026-09-17T21:44:26Z",
+      "updated_at": "2026-09-17T21:44:26Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
