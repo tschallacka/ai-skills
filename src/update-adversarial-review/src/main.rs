@@ -133,10 +133,40 @@ fn history_rows(history: &Path) -> String {
     rows
 }
 
-fn archive(history: &Path, prior_rows: &str, explicit: Option<i64>) {
+fn history_scope_preamble(history: &Path) -> String {
+    let mut preamble = String::new();
+    let mut in_cycle = false;
+    for line in fs::read_to_string(history).unwrap_or_default().lines() {
+        if line.starts_with("## Cycle ") {
+            in_cycle = true;
+            preamble.clear();
+        } else if in_cycle && is_scope_field_line(line) {
+            preamble.push_str(line);
+            preamble.push('\n');
+        }
+    }
+    preamble
+}
+
+/// Matches only the four known Review-scope fields this goal archives --
+/// never Request/Repository-context-inspected, which stay live-only.
+fn is_scope_field_line(line: &str) -> bool {
+    const PREFIXES: [&str; 4] = [
+        "- Reviewer session:",
+        "- Elapsed:",
+        "- Cost signal:",
+        "- Tokens:",
+    ];
+    PREFIXES.iter().any(|prefix| line.starts_with(prefix))
+}
+
+fn archive(history: &Path, scope_preamble: &str, prior_rows: &str, explicit: Option<i64>) {
     let number = cycle_number(history, explicit);
     let existing = fs::read_to_string(history).unwrap_or_default();
-    if !prior_rows.is_empty() && prior_rows == history_rows(history) {
+    if !prior_rows.is_empty()
+        && prior_rows == history_rows(history)
+        && scope_preamble == history_scope_preamble(history)
+    {
         eprintln!(
             "Findings table is already the last entry in {}; not archiving it twice",
             history.display()
@@ -151,6 +181,10 @@ fn archive(history: &Path, prior_rows: &str, explicit: Option<i64>) {
     }
     let mut append = String::new();
     append.push_str(&format!("\n## Cycle {number}\n\n"));
+    if !scope_preamble.is_empty() {
+        append.push_str(scope_preamble);
+        append.push('\n');
+    }
     if prior_rows.is_empty() {
         append.push_str("_No row-level findings were recorded for this cycle._\n");
     } else {
@@ -254,8 +288,21 @@ fn main() {
     }
     let history_file = plan.join("adversarial-review-history.md");
     let mut prior_rows = String::new();
+    let mut scope_preamble = String::new();
     let mut in_findings = false;
+    let mut in_scope = false;
     for line in review.lines() {
+        if line == "## Review scope" {
+            in_scope = true;
+            continue;
+        }
+        if in_scope && line == "## Findings" {
+            in_scope = false;
+        }
+        if in_scope && is_scope_field_line(line) {
+            scope_preamble.push_str(line);
+            scope_preamble.push('\n');
+        }
         if line == "## Findings" {
             in_findings = true;
             continue;
@@ -268,7 +315,7 @@ fn main() {
             prior_rows.push('\n');
         }
     }
-    archive(&history_file, &prior_rows, cycle);
+    archive(&history_file, &scope_preamble, &prior_rows, cycle);
     atomic_write(&review_file, rewritten.as_bytes()).unwrap_or_else(|error| die(error, 70));
     if consumed_incoming {
         let _ = fs::remove_file(plan.join("adversarial-review-incoming.md"));

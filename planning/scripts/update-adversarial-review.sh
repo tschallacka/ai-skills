@@ -108,6 +108,31 @@ last_archived_rows() {
     ' "$history"
 }
 
+# The four self-reported Review-scope fields (Reviewer session/Elapsed/Cost
+# signal/Tokens) archived under the last heading -- compared alongside
+# last_archived_rows so a preamble-only correction on an otherwise-unchanged
+# cycle still gets archived, matching the compiled binary's own archive().
+last_archived_scope_preamble() {
+    local history="$1"
+    [ -f "$history" ] || return 0
+    awk '
+        /^## Cycle [0-9]+$/ { preamble = ""; next }
+        /^- Reviewer session:/ || /^- Elapsed:/ || /^- Cost signal:/ || /^- Tokens:/ { preamble = preamble $0 "\n" }
+        END { printf "%s", preamble }
+    ' "$history"
+}
+
+# The same four fields from the CURRENT (pre-rewrite) review file, to archive
+# alongside its Findings rows. Never Request/Repository-context-inspected.
+current_scope_preamble() {
+    local review="$1"
+    awk '
+        /^## Review scope$/ { in_scope = 1; next }
+        in_scope && /^## Findings$/ { exit }
+        in_scope && (/^- Reviewer session:/ || /^- Elapsed:/ || /^- Cost signal:/ || /^- Tokens:/) { print }
+    ' "$review"
+}
+
 cycle_already_recorded() {
     local history="$1" wanted="$2"
     [ -f "$history" ] || return 1
@@ -247,19 +272,28 @@ history_rows="$(awk '
     in_findings && /^## Verdict$/ { exit }
     in_findings && /^\|/ { print }
 ' "$review_file")"
+scope_preamble="$(current_scope_preamble "$review_file")"
 # Record a cycle entry on every rewrite, even with no rows to archive: the marker
 # itself is the history a later reviewer needs. Comparing the last archived row
-# set stops a double archive; an unarchived set is never dropped for a number.
+# set AND the last archived scope preamble stops a double archive while still
+# catching a preamble-only correction (a reviewer fixing Elapsed/Tokens after
+# the fact) on an otherwise-unchanged cycle; an unarchived set is never
+# dropped for a number.
 if [ -z "$cycle_number" ]; then
     cycle_number=$(($(highest_cycle_number "$history_file") + 1))
 fi
-if [ -n "$history_rows" ] && [ "$history_rows" = "$(last_archived_rows "$history_file")" ]; then
+if [ -n "$history_rows" ] \
+    && [ "$history_rows" = "$(last_archived_rows "$history_file")" ] \
+    && [ "$scope_preamble" = "$(last_archived_scope_preamble "$history_file")" ]; then
     printf 'Findings table is already the last entry in %s; not archiving it twice\n' "$history_file" >&2
 elif cycle_already_recorded "$history_file" "$cycle_number"; then
     plan_die "Cycle $cycle_number is already recorded in $history_file with other findings; archiving would discard them (choose a free --cycle number)" 73
 else
     {
         printf '\n## Cycle %s\n\n' "$cycle_number"
+        if [ -n "$scope_preamble" ]; then
+            printf '%s\n\n' "$scope_preamble"
+        fi
         if [ -n "$history_rows" ]; then
             printf '%s\n' "$history_rows"
         else

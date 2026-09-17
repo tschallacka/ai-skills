@@ -56,7 +56,7 @@ fn main() {
         std::process::exit(73)
     }
     let n = plan.file_name().unwrap().to_string_lossy();
-    let output=format!("# Adversarial review: {n}\n\n## Review scope\n\n§ 1.1\n- Request: <verbatim or precise summary>\n- Repository/context inspected: <what was checked>\n- Reviewer session: <session id, so a claim can be traced to the run that made it>\n- Elapsed: <wall time for the cycle>\n- Cost signal: <findings this cycle; falling counts mean converging, flat means the plan is not the problem>\n\n## Findings\n\n| ID | Missing or over-broad item | Required plan change | Status | Work unit |\n|---|---|---|---|---|\n| AR-01 | No finding recorded yet. | N/A | ✅ resolved | N/A |\n\n## Verdict\n\n- Status: `💤 pending`\n- Rationale: <why no unresolved work remains>\n");
+    let output=format!("# Adversarial review: {n}\n\n## Review scope\n\n§ 1.1\n- Request: <verbatim or precise summary>\n- Repository/context inspected: <what was checked>\n- Reviewer session: <session id, so a claim can be traced to the run that made it>\n- Elapsed: <wall time for the cycle>\n- Cost signal: <findings this cycle; falling counts mean converging, flat means the plan is not the problem>\n- Tokens: <total tokens spent this cycle, self-reported; leave the placeholder if not tracked>\n\n## Findings\n\n| ID | Missing or over-broad item | Required plan change | Status | Work unit |\n|---|---|---|---|---|\n| AR-01 | No finding recorded yet. | N/A | ✅ resolved | N/A |\n\n## Verdict\n\n- Status: `💤 pending`\n- Rationale: <why no unresolved work remains>\n");
     let temp = review.with_extension(format!("md.tmp.{}", std::process::id()));
     fs::write(&temp, output).unwrap_or_else(|e| {
         eprintln!("{e}");

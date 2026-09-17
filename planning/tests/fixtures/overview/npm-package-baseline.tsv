@@ -154,7 +154,7 @@ package/planning/goal-tables.json	984
 package/planning/never-executable-extensions.json	245
 package/planning/parts/part-1.md	16803
 package/planning/parts/part-2.md	20390
-package/planning/parts/part-3.md	32950
+package/planning/parts/part-3.md	33165
 package/planning/parts/part-4.md	24344
 package/planning/placeholders.json	4713
 package/planning/references/comment-discipline-contract.md	2622
@@ -175,7 +175,7 @@ package/planning/scripts/add-ui-story.sh	5939
 package/planning/scripts/add-work-unit.sh	11851
 package/planning/scripts/cleanup-plans.sh	5411
 package/planning/scripts/configure-ui-story-cache.sh	5914
-package/planning/scripts/create-adversarial-review.sh	3717
+package/planning/scripts/create-adversarial-review.sh	3832
 package/planning/scripts/create-plan-progress.sh	3390
 package/planning/scripts/create-plan.sh	11171
 package/planning/scripts/create-progress.sh	3212
@@ -219,7 +219,7 @@ package/planning/scripts/resolve-finding.sh	7680
 package/planning/scripts/role-context.sh	11963
 package/planning/scripts/run-adversary-probe.sh	6322
 package/planning/scripts/supervision-frame.sh	7174
-package/planning/scripts/update-adversarial-review.sh	14099
+package/planning/scripts/update-adversarial-review.sh	15580
 package/planning/scripts/update-plan-content.sh	36091
 package/planning/scripts/update-plan-progress.sh	4474
 package/planning/scripts/update-progress.sh	3125
@@ -244,7 +244,7 @@ package/planning/scripts/validate-plan.sh	11781
 package/planning/scripts/verify-fix-keys.sh	10626
 package/planning/scripts/verify-skill-load.sh	4613
 package/planning/scripts/verify-target.sh	10667
-package/planning/skill-source.txt	92622
+package/planning/skill-source.txt	92837
 package/planning/state-change-registry.json	1096
 package/planning/telemetry-schema.json	888
 package/post-implementation-review/SKILL.md	11079

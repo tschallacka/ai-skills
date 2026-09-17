@@ -151,5 +151,80 @@ history_empty="$plan_empty/adversarial-review-history.md"
 assert_headings "$history_empty" '1' 'the no-rows run'
 assert_count 1 '_No row-level findings were recorded for this cycle._' "$history_empty" 'the no-rows run'
 
+# T69: the Review-scope block's four self-reported fields (Reviewer
+# session/Elapsed/Cost signal/Tokens) are archived alongside the Findings
+# table, but Request/Repository-context-inspected are not.
+set_scope_field() { # <review-file> <label> <value>
+    local file="$1" label="$2" value="$3"
+    awk -v label="- $label:" -v value="$value" '
+        index($0, label) == 1 { print label " " value; next }
+        { print }
+    ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+}
+
+# Two identical-content runs are needed to get a KNOWN row set (AR-60) into
+# history at all (the first run archives the seed's own placeholder row and
+# makes AR-60 the new live table; the second archives AR-60 itself) --
+# mirroring the existing "identical re-run" case above, which needs three
+# calls for the same reason.
+plan_preamble="$temporary_root/plan-preamble"
+seed_plan "$plan_preamble"
+review_preamble="$plan_preamble/adversarial-review.md"
+set_scope_field "$review_preamble" "Reviewer session" "sentinel-session-42"
+set_scope_field "$review_preamble" "Elapsed" "sentinel-elapsed-1"
+set_scope_field "$review_preamble" "Cost signal" "sentinel-cost-1"
+set_scope_field "$review_preamble" "Tokens" "sentinel-tokens-1"
+rc=0
+run_update "$plan_preamble" 60 || rc=$?
+run_update "$plan_preamble" 60 || rc=$?
+[ "$rc" -eq 0 ] || note_fail "the sentinel-preamble runs failed (rc=$rc)"
+history_preamble="$plan_preamble/adversarial-review-history.md"
+assert_headings "$history_preamble" '1 2' 'the sentinel-preamble runs'
+cycle2="$(awk '/^## Cycle 2$/{f=1;next} /^## Cycle /{f=0} f' "$history_preamble")"
+case "$cycle2" in
+    *'sentinel-session-42'*) : ;;
+    *) note_fail "cycle 2's own section is missing the archived Reviewer session" ;;
+esac
+case "$cycle2" in
+    *'sentinel-elapsed-1'*) : ;;
+    *) note_fail "cycle 2's own section is missing the archived Elapsed" ;;
+esac
+case "$cycle2" in
+    *'sentinel-cost-1'*) : ;;
+    *) note_fail "cycle 2's own section is missing the archived Cost signal" ;;
+esac
+case "$cycle2" in
+    *'sentinel-tokens-1'*) : ;;
+    *) note_fail "cycle 2's own section is missing the archived Tokens" ;;
+esac
+case "$cycle2" in
+    *'Repository/context inspected'*) note_fail "cycle 2's own section archived a non-tracked field" ;;
+    *) : ;;
+esac
+preamble_pos="$(printf '%s\n' "$cycle2" | grep -n 'sentinel-session-42' | head -1 | cut -d: -f1)"
+findings_pos="$(printf '%s\n' "$cycle2" | grep -n '| AR-60 |' | head -1 | cut -d: -f1)"
+[ -n "$preamble_pos" ] && [ -n "$findings_pos" ] && [ "$preamble_pos" -lt "$findings_pos" ] \
+    || note_fail "cycle 2's own archived preamble did not land before its Findings table"
+
+# A third, otherwise-identical run (same AR-60 content) but with a corrected
+# scope value must still archive a NEW cycle, not be silently skipped by a
+# dedup check keyed only on the Findings rows -- the exact regression this
+# work unit's own dedup fix (mirroring the Rust archive()'s own fix) guards.
+set_scope_field "$review_preamble" "Elapsed" "sentinel-elapsed-2"
+set_scope_field "$review_preamble" "Tokens" "sentinel-tokens-2"
+rc=0
+run_update "$plan_preamble" 60 || rc=$?
+[ "$rc" -eq 0 ] || note_fail "the corrected-preamble re-run failed (rc=$rc)"
+assert_headings "$history_preamble" '1 2 3' 'the corrected-preamble re-run'
+cycle3="$(awk '/^## Cycle 3$/{f=1;next} /^## Cycle /{f=0} f' "$history_preamble")"
+case "$cycle3" in
+    *'sentinel-elapsed-2'*) : ;;
+    *) note_fail "cycle 3 does not carry the corrected Elapsed value" ;;
+esac
+case "$cycle3" in
+    *'sentinel-tokens-2'*) : ;;
+    *) note_fail "cycle 3 does not carry the corrected Tokens value" ;;
+esac
+
 [ "$(t_failures)" -eq 0 ] || exit 1
 printf 'test-adversarial-review-cycles.sh passed.\n'

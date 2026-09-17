@@ -935,9 +935,12 @@ comparable run made five interpretations that were only written down afterwards,
 in a postmortem, once they had already shaped the plan.
 
 **A reviewer report records what the cycle cost.** The review-scope block carries
-the reviewer's session id, the wall time, and the number of findings this cycle
-produced. The session id is what lets a claim be traced to the run that made it;
-the other two are the only signal anyone has that a review is converging.
+the reviewer's session id, the wall time, the number of findings this cycle
+produced, and the tokens it spent. The session id is what lets a claim be traced
+to the run that made it; the other three are the only signal anyone has that a
+review is converging. Tokens, like the wall time, is self-reported prose — there
+is no mechanical measurement for a reviewing session to report through, so it is
+only as accurate as the session that fills it in.
 
 A falling findings count across cycles means the plan is improving. A flat one
 means the cycles are not finding less, and the plan may not be the thing at
