@@ -216,6 +216,7 @@ scripts/create-step-testing
 scripts/create-ui-story-run-cache
 scripts/create-ui-validation
 scripts/create-work-unit-inventory
+scripts/generate-postmortem
 scripts/generate-reviewer
 scripts/mint-fix-keys
 scripts/monitor-read

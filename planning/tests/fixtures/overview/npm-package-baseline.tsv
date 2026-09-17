@@ -137,7 +137,7 @@ package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
 package/package.json	2038
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
-package/planning/PACKAGE-MANIFEST.tsv	19826
+package/planning/PACKAGE-MANIFEST.tsv	20054
 package/planning/REVIEWER.md	25279
 package/planning/ROLES.md	4355
 package/planning/RUST-ARTIFACT-MANIFEST.md	716

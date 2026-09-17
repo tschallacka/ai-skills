@@ -64,6 +64,7 @@ planning/scripts/role-context.sh	scripts/role-context.sh	installer	review-approv
 planning/scripts/update-work-unit.sh	scripts/update-work-unit.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/update-ui-story.sh	scripts/update-ui-story.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/remove-work-unit.sh	scripts/remove-work-unit.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/generate-postmortem.sh	scripts/generate-postmortem.sh	W09	review-approved	backup-then-replace	false
 planning/scripts/generate-reviewer.sh	scripts/generate-reviewer.sh	reviewer	review-approved	backup-then-replace	false
 planning/scripts/verify-skill-load.sh	scripts/verify-skill-load.sh	T86	review-approved	backup-then-replace	false
 planning/scripts/plan-core-lib.sh	scripts/plan-core-lib.sh	installer	review-approved	backup-then-replace	false
@@ -136,6 +137,7 @@ planning/scripts/create-step-testing	scripts/create-step-testing	rustification	r
 planning/scripts/create-ui-story-run-cache	scripts/create-ui-story-run-cache	rustification	review-approved	backup-then-replace	false
 planning/scripts/create-ui-validation	scripts/create-ui-validation	rustification	review-approved	backup-then-replace	false
 planning/scripts/create-work-unit-inventory	scripts/create-work-unit-inventory	rustification	review-approved	backup-then-replace	false
+planning/scripts/generate-postmortem	scripts/generate-postmortem	W09	review-approved	backup-then-replace	false
 planning/scripts/generate-reviewer	scripts/generate-reviewer	rustification	review-approved	backup-then-replace	false
 planning/scripts/mint-fix-keys	scripts/mint-fix-keys	rustification	review-approved	backup-then-replace	false
 planning/scripts/monitor-read	scripts/monitor-read	rustification	review-approved	backup-then-replace	false
