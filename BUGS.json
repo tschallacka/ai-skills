@@ -7240,6 +7240,29 @@
       "updated_at": "2026-09-17T10:46:31Z"
     },
     {
+      "id": "B356",
+      "title": "package.json's wholesale .agents inclusion ships every .agents/profiles/*.json despite .npmignore listing them as excluded",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "On nextupdate at commit 30bd3446 (T148 goal 1, benny/chris/christian/christoph shipped) or later: run 'npm pack --dry-run --json | jq -r .[0].files[].path' (or planning/tests/test-npm-package.sh, the slow authoritative packaging test) and grep for .agents/profiles/.",
+      "observed": "Every persona profile file under .agents/profiles/ is included in the real npm package -- benny.json, chris.json, christian.json, christoph.json (goal 1) and, confirmed again this session, dana.json/frank.json/maintainer.json/installer.json/oracle.json/eve.json (goal 2) -- even though .npmignore explicitly lists all of them (installer/build-release.sh --npmignore correctly derives and writes these lines, since none of these files carry a 'MODE: PROD' marker). test-profile-files-manifest.sh also fails for the same underlying reason: 'every tracked profile file is declared by profile_files(): expected \"\", got \"benny.json chris.json christian.json christoph.json\"' even before goal 2's own additions. Confirmed via git-stash comparison that this predates goal 2 entirely: the identical shape of failure (fewer files) already existed at goal 1's own shipped commit 30bd3446, so this has been silently shipping unwired, dev-only profile files in every real npm package cut since goal 1 landed, undetected because pre-push-check.sh's own fast npm-baseline check only compares EXISTING baseline rows against the tree and explicitly does not catch a newly-shipped file with no baseline row yet (documented in its own comment), and the slow, authoritative planning/tests/test-npm-package.sh was not run to completion after goal 1 shipped.",
+      "expected": "A file .npmignore lists as ignored should not appear in a real npm-pack output, OR (if the actual intent is these should not ship until goal 3's own installer wiring makes them reachable) package.json's own 'files' array should carry explicit negation entries for .agents/profiles/*.json the same way it already does for .agents/knowledge/**, .agents/skill-loading-experiment/**, and .agents/skill-loading-findings.md.",
+      "mechanism": "package.json's 'files' array includes '.agents' wholesale as a directory entry with only three negation sub-patterns (!.agents/knowledge/**, !.agents/skill-loading-experiment/**, !.agents/skill-loading-findings.md). npm's own packaging semantics: once a directory is swept in via an explicit 'files' entry, .npmignore/.gitignore patterns for files inside it are NOT re-applied unless package.json's own 'files' array carries a matching negation pattern for that specific path -- .npmignore's own per-file exclusion lines for .agents/profiles/benny.json etc. have no effect here since nothing in package.json's 'files' array negates that path. installer/build-release.sh --npmignore correctly derives .npmignore from git-tracked files lacking a MODE:PROD marker, but nobody has confirmed .npmignore's own entries are still capable of taking effect under every 'files'-array shape this repo currently ships.",
+      "surfaces": [
+        "package.json",
+        ".npmignore",
+        "installer/build-release.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T148 goal 2's own implementation fork, running the full run-tests.sh sweep after adding 6 more profile files and finding test-profile-files-manifest and test-npm-package both red",
+      "notes": null,
+      "created_at": "2026-09-17T16:11:45Z",
+      "updated_at": "2026-09-17T16:11:45Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
