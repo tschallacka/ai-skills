@@ -110,7 +110,11 @@ fn a_zero_fence_document_fails_by_name_distinct_from_the_blocks_cross_check() {
         std::fs::create_dir_all(dir).unwrap();
     }
     // No mermaid fence at all in this one.
-    std::fs::write(scratch.join("planning/ARCHITECTURE.md"), "# no diagrams here\n").unwrap();
+    std::fs::write(
+        scratch.join("planning/ARCHITECTURE.md"),
+        "# no diagrams here\n",
+    )
+    .unwrap();
     std::fs::write(
         scratch.join("benchmark/planning/ARCHITECTURE.md"),
         "```mermaid\nflowchart TD\n    A[x]-->B[y]\n```\n",
