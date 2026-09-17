@@ -138,7 +138,7 @@ package/merge-request-etiquette/requires.tsv	1296
 package/package.json	2038
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	19826
-package/planning/REVIEWER.md	24557
+package/planning/REVIEWER.md	25279
 package/planning/ROLES.md	4355
 package/planning/RUST-ARTIFACT-MANIFEST.md	716
 package/planning/SKILL.md	1831
@@ -155,7 +155,7 @@ package/planning/goal-tables.json	984
 package/planning/never-executable-extensions.json	245
 package/planning/parts/part-1.md	16803
 package/planning/parts/part-2.md	20390
-package/planning/parts/part-3.md	33165
+package/planning/parts/part-3.md	33887
 package/planning/parts/part-4.md	24344
 package/planning/placeholders.json	4713
 package/planning/references/comment-discipline-contract.md	2622
@@ -184,6 +184,7 @@ package/planning/scripts/create-step-testing.sh	7555
 package/planning/scripts/create-ui-story-run-cache.sh	3966
 package/planning/scripts/create-ui-validation.sh	4184
 package/planning/scripts/create-work-unit-inventory.sh	3992
+package/planning/scripts/generate-postmortem.sh	1622
 package/planning/scripts/generate-reviewer.sh	5321
 package/planning/scripts/generate-skill-docs.sh	11336
 package/planning/scripts/mint-fix-keys.sh	11542
@@ -245,7 +246,7 @@ package/planning/scripts/validate-plan.sh	11781
 package/planning/scripts/verify-fix-keys.sh	10626
 package/planning/scripts/verify-skill-load.sh	4613
 package/planning/scripts/verify-target.sh	10667
-package/planning/skill-source.txt	92837
+package/planning/skill-source.txt	93559
 package/planning/state-change-registry.json	1096
 package/planning/telemetry-schema.json	888
 package/post-implementation-review/SKILL.md	11079

@@ -554,6 +554,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "generate-postmortem"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "generate-reviewer"
 version = "0.1.0"
 dependencies = [

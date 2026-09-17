@@ -21,6 +21,7 @@ planning/scripts/create-step-testing.sh	runtime-binary	create-step-testing	prese
 planning/scripts/create-ui-story-run-cache.sh	runtime-binary	create-ui-story-run-cache	preserve CLI and observable behavior
 planning/scripts/create-ui-validation.sh	runtime-binary	create-ui-validation	preserve CLI and observable behavior
 planning/scripts/create-work-unit-inventory.sh	runtime-binary	create-work-unit-inventory	preserve CLI and observable behavior
+planning/scripts/generate-postmortem.sh	runtime-binary	generate-postmortem	Rust-first tool with no bash predecessor; oracle fails clearly if the compiled binary is absent
 planning/scripts/generate-reviewer.sh	build-generator	generate-reviewer	inventory projection contract; choose Cargo tool or dev binary
 planning/scripts/generate-skill-docs.sh	runtime-binary	generate-skill-docs	preserve CLI and observable behavior
 planning/scripts/lib/core/00-state.sh	library-crate	core-00-state	map functions, shared state, consumers, and failure behavior

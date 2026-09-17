@@ -949,6 +949,17 @@ before anyone asked that question, because no cycle recorded what it had cost.
 Nothing enforces a ceiling; the point is that the number is visible when someone
 decides whether to run another.
 
+Once a plan has real cycles archived in `adversarial-review-history.md`, run
+`"$PLANNING_SKILL_DIR/scripts/generate-postmortem.sh" <plan-directory>
+[--output PATH]` to render a per-cycle cost/findings summary — cycle count and
+findings count are always exact (mechanically counted from the archived
+Findings tables), and any self-reported Reviewer-session/Elapsed/Tokens field
+renders as "not reported" when a cycle's own reviewer never filled it in,
+rather than a silent zero. The default output path is
+`<plan-directory>/../postmortems/<plan-directory's-own-basename>.md`. Run it
+once a plan's review history is worth summarizing — after closing it out, or
+whenever its own cost so far is worth seeing at a glance.
+
 **A reviewer runs `--check` on its own rows before handing them over.** The shape
 gate and the mint preview already run on the write path, so a malformed row can
 never land — but it fails at *consumption*, which is after the reviewer has

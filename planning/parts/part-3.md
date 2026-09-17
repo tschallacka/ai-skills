@@ -304,6 +304,17 @@ before anyone asked that question, because no cycle recorded what it had cost.
 Nothing enforces a ceiling; the point is that the number is visible when someone
 decides whether to run another.
 
+Once a plan has real cycles archived in `adversarial-review-history.md`, run
+`"$PLANNING_SKILL_DIR/scripts/generate-postmortem.sh" <plan-directory>
+[--output PATH]` to render a per-cycle cost/findings summary — cycle count and
+findings count are always exact (mechanically counted from the archived
+Findings tables), and any self-reported Reviewer-session/Elapsed/Tokens field
+renders as "not reported" when a cycle's own reviewer never filled it in,
+rather than a silent zero. The default output path is
+`<plan-directory>/../postmortems/<plan-directory's-own-basename>.md`. Run it
+once a plan's review history is worth summarizing — after closing it out, or
+whenever its own cost so far is worth seeing at a glance.
+
 **A reviewer runs `--check` on its own rows before handing them over.** The shape
 gate and the mint preview already run on the write path, so a malformed row can
 never land — but it fails at *consumption*, which is after the reviewer has
@@ -460,6 +471,9 @@ core (`git make docker sh bash zsh env sudo npx`). Those are the only entry
 points — arguments strengthen a candidate but never qualify a span on their
 own. Data/markup extensions (the rjq-matched list in
 `never-executable-extensions.json` — e.g. `.xml`, `.sql`, `.php`, `.md`),
+
+<!-- SKILL-LOAD-PROOF part=part-3 token=2f5c243e6588949c -->
+
 `:line`/`#Lnn` citation suffixes, and route/prose shapes (a leading `/`
 without a bin-like segment) never flag. Each registered command's first token
 teaches the detector that tool word, so registering `pytest -q` makes
@@ -491,9 +505,6 @@ Beyond structure, propagation, the advisory wording sweep, and the placeholder
 registry, the validator checks two more things. The **serve check** WARNs when a goal
 that changes module state, schema, or configuration (per
 `state-change-registry.json`) has no verification acceptance condition
-
-<!-- SKILL-LOAD-PROOF part=part-3 token=e603f8a0d08558de -->
-
 mentioning a request or health check. The **command registry** WARNs on any
 command literal in a step or testing companion that is not registered in the
 plan's `commands.json` with its "when" context (and FAILs under
