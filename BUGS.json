@@ -7306,6 +7306,31 @@
       "updated_at": "2026-09-17T21:44:26Z"
     },
     {
+      "id": "B359",
+      "title": "T69 goal 2's generate-postmortem shipping was only half-wired: missing from 50-manifest.sh's compiled-binary list, PACKAGE-MANIFEST.tsv, PACKAGE-MAP.tsv, and the npm baseline",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "On nextupdate at commit 34565beb (T69 goal 2, generate-postmortem implemented) or later: run nix develop . --command bash planning/tests/test-installer-manifest.sh, or nix develop . --command ./pre-push-check.sh.",
+      "observed": "test-installer-manifest.sh's test_skill_files_matches_manifest failed: skill_files() (installer/src/50-manifest.sh) listed planning/scripts/generate-postmortem.sh as a destination (added correctly) but never added the matching bare planning/scripts/generate-postmortem entry that every other compiled-binary sibling (create-adversarial-review, generate-reviewer, etc.) has alongside its own .sh wrapper. Once that was fixed, test_rust_migration_registry then failed on a stale hardcoded count (registry_count_is runtime-binary ... 50, now 51 real rows). Separately, planning/PACKAGE-MANIFEST.tsv and planning/PACKAGE-MAP.tsv (a second, git-tracked file that must be byte-identical to PACKAGE-MANIFEST.tsv's own source_only=false rows, per test_manifest_emission) both had zero rows for either generate-postmortem or generate-postmortem.sh at all, and the npm-package-baseline.tsv row for PACKAGE-MANIFEST.tsv's own byte size was stale once rows were added.",
+      "expected": "Adding a new planning command with a compiled-binary-preference wrapper (the pattern every other planning/scripts/*.sh entry point uses) should ship complete: the bare compiled-binary name added to skill_files()'s own heredoc alongside its .sh sibling, a matching row in both PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv for each of the two files, the rust-migration.tsv registry test's hardcoded row-count assertion bumped, and the npm-package-baseline row for any manifest file whose own byte size changed as a result.",
+      "mechanism": "This is a five-file synchronization the compiled-binary-preference convention requires (installer/src/50-manifest.sh's skill_files() heredoc, planning/PACKAGE-MANIFEST.tsv, planning/PACKAGE-MAP.tsv, planning/tests/test-installer-manifest.sh's own hardcoded rust-migration.tsv row count, and planning/tests/fixtures/overview/npm-package-baseline.tsv), with no single writer or generator that keeps them in sync automatically and no test that would have caught the gap until pre-push-check.sh or the full test suite actually ran end to end -- T69 goal 2's own implementation only got 2 of the 5 (the .sh wrapper's own row in 50-manifest.sh's heredoc, and rust-migration.tsv's own row for the compiled crate itself).",
+      "surfaces": [
+        "installer/src/50-manifest.sh",
+        "planning/PACKAGE-MANIFEST.tsv",
+        "planning/PACKAGE-MAP.tsv",
+        "planning/tests/test-installer-manifest.sh",
+        "planning/tests/fixtures/overview/npm-package-baseline.tsv"
+      ],
+      "fix": "Added the missing scripts/generate-postmortem (no extension) line to 50-manifest.sh's skill_files() heredoc; added matching rows for both generate-postmortem.sh and generate-postmortem to PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv (in the same relative position in both, since test_manifest_emission requires them byte-identical); bumped test_rust_migration_registry's hardcoded runtime-binary count from 50 to 51; updated the npm-package-baseline row for PACKAGE-MANIFEST.tsv's new byte size (19826 -> 20054).",
+      "verification": "Ran test-installer-manifest.sh directly: all 4 assertions (test_manifest_emission, test_skill_files_matches_manifest, test_windows_command_paths, test_rust_migration_registry) now PASS, confirmed via real exit code (not through a pipe, which had masked the failure once). Full nix develop . --command ./pre-push-check.sh: PASS (282 files, npm baseline matches).",
+      "found_by": "T148 goal 3's implementation fork's own regression sweep, which surfaced these as pre-existing failures via git-stash comparison and traced them to T69 goal 2",
+      "notes": null,
+      "created_at": "2026-09-17T23:07:07Z",
+      "updated_at": "2026-09-17T23:07:07Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
