@@ -4916,6 +4916,27 @@
       "updated_at": "2026-09-17T10:04:58Z"
     },
     {
+      "id": "B355",
+      "title": "compiled generate-reviewer binary reads SKILL.md, not skill-source.txt, and has been broken since T87's SKILL.md split",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "With the compiled generate-reviewer binary reachable (AI_SKILLS_BIN_ROOT pointed at a dir containing it, or otherwise resolved via plan_bin_dir()'s tiers), run: generate-reviewer planning <output-file>. On this machine the bug was masked because ~/.config/tsch-ai-skills/bin (plan_bin_dir()'s tier 2) exists but happens not to have generate-reviewer staged in it, so plan_exec_compiled_binary_if_present silently falls through to the correct bash implementation for this one binary -- it only reproduces when the compiled binary is genuinely the one reached.",
+      "observed": "Fails outright: 'invalid or missing reviewer section: mandatory-review' (exit 65), because planning/SKILL.md has been a short generated index with zero REVIEWER_SECTION markers since T87 (22fd60de); the markers moved into skill-source.txt (and from there into parts/part-3.md and part-4.md) and never changed shape, but the compiled binary's source path was never updated to follow them. Its own bash-fallback sibling (planning/scripts/generate-reviewer.sh) WAS correctly updated for T87 (reads skill-source.txt, per its own T87 comment) and works -- confirmed via test-reviewer-projection.sh passing when the bash path is exercised. Real-world impact: planning/REVIEWER.md (gitignored, machine-local, read by planning/scripts/role-context.sh for chris/christian/christoph's own REVIEWER.md-scoped content per role_docs()) had been stale on this machine since before this session's own T69 goal 1 edited skill-source.txt without anyone regenerating it, and the compiled binary being broken meant even a direct regeneration attempt failed rather than fixing it.",
+      "expected": "The compiled binary and its bash-fallback sibling must stay in parity, both reading skill-source.txt as the projection source per T87, exactly like generate-skill-docs.sh's own equivalent split.",
+      "mechanism": "src/generate-reviewer/src/main.rs line 72 (pre-fix) hardcoded 'let source = skill.join(\"SKILL.md\")' and the header text it writes said 'Generated from SKILL.md' / 'the tagged SKILL.md remains authoritative' -- both stale from before T87. The bash script's own contemporaneous comment (added in T87) already says 'the source moved from SKILL.md to skill-source.txt when SKILL.md became a generated index', confirming the compiled binary was simply never updated to match at that time and nothing caught it since (no unit tests in the crate; the black-box test-reviewer-projection.sh exercises the .sh entry point, which happened to still work via the bash fallback on every machine that tested it, purely because those machines' own plan_bin_dir() resolution never reached the broken compiled binary).",
+      "surfaces": [
+        "src/generate-reviewer/src/main.rs"
+      ],
+      "fix": "Changed the hardcoded source path from skill.join(\"SKILL.md\") to skill.join(\"skill-source.txt\"), and updated the two header strings ('Generated from', 'the tagged ... remains authoritative') to match the bash script's own already-correct wording.",
+      "verification": "Reproduced directly (generate-reviewer planning <out> failed with 'invalid or missing reviewer section: mandatory-review' before the fix, against the real repo). Rebuilt, staged the fixed binary, confirmed its output is byte-identical to the bash fallback's own output (cmp). Regenerated the real, previously-stale planning/REVIEWER.md with the fix (now pins the current skill-source.txt hash e3d68407...). Ran test-reviewer-projection.sh, test-adversary-probe-fixture.sh, test-portability-contract.sh, test-plan-commands.sh, test-skill-file-length.sh against both the compiled binary and (AI_SKILLS_BIN_ROOT forced empty) the bash fallback -- all pass both ways. cargo fmt/clippy -D warnings/build clean for the crate.",
+      "found_by": "T148 goal 1's implementation fork, blocked on role-context.sh serving REVIEWER.md's own stale-notice instead of real content for chris/christian/christoph",
+      "notes": null,
+      "created_at": "2026-09-17T10:56:54Z",
+      "updated_at": "2026-09-17T10:56:54Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
