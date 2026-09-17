@@ -15,6 +15,12 @@
 .agents/profiles/chris.json
 .agents/profiles/christian.json
 .agents/profiles/christoph.json
+.agents/profiles/dana.json
+.agents/profiles/eve.json
+.agents/profiles/frank.json
+.agents/profiles/installer.json
+.agents/profiles/maintainer.json
+.agents/profiles/oracle.json
 .agents/skill-loading-experiment/find-notice.py
 .agents/skill-loading-experiment/gen-marker-file.py
 .agents/skill-loading-experiment/gen-split-skill.py

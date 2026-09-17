@@ -1,7 +1,17 @@
 package_path	byte_size
 package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	13997
+package/.agents/profiles/benny.json	8915
+package/.agents/profiles/chris.json	31616
+package/.agents/profiles/christian.json	31656
+package/.agents/profiles/christoph.json	31612
+package/.agents/profiles/dana.json	7386
+package/.agents/profiles/eve.json	16069
+package/.agents/profiles/frank.json	5931
+package/.agents/profiles/installer.json	20672
+package/.agents/profiles/maintainer.json	25471
 package/.agents/profiles/nitpicker.json	12892
+package/.agents/profiles/oracle.json	16193
 package/LICENSE	1068
 package/README.md	18256
 package/agent-identity-plugin/.claude-plugin/plugin.json	405
