@@ -7196,6 +7196,29 @@
       "updated_at": "2026-09-17T08:10:46Z"
     },
     {
+      "id": "B354",
+      "title": "update-step.sh's --since atomicity auto-tick assumes one commit per work unit; a batched multi-unit commit reads every sibling unit's own files as a false-positive VIOLATION",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": "B42",
+      "reproduce": "Decompose a goal into several work units (each with its own declared file target), implement ALL of them, then commit and push everything in ONE commit (not one commit per unit -- this is the normal shape for a fork/agent that implements a whole goal in one sitting before ever committing). Run update-step.sh --repo-root <repo> --unit <WNN> --since <the commit before all the work> for each unit in turn.",
+      "observed": "For every work unit, the git diff against --since includes every OTHER unit's files too (since they all landed in the same commit), so the mechanical target-isolation check (grep -Fqx against the declared target) sees files the unit's own step never named and auto-ticks the atomicity box with a VIOLATION annotation, even though each individual unit's own change was in fact isolated to its declared target -- the batching is at the COMMIT level, not the unit's own diff. Hit three times this session on three different plans/goals (T69 goal 1, T145 goal 24, T148 goal 1), each independently landing its whole goal in one commit and each independently hitting the identical false-positive pattern, confirming this is not a one-off but the default outcome whenever a goal's work units are implemented before any commit.",
+      "expected": "A goal whose work units were each individually correct (touched only their own declared target) and were simply landed together in one commit should be able to tick clean, OR the tool should distinguish 'this unit's own hunks in the diff touch files outside its target' from 'the commit as a whole also contains unrelated units' hunks, rather than treating the presence of ANY foreign file in a shared commit as evidence against isolation.",
+      "mechanism": "update-step.sh's --since path (built on B42's own git-diff-based auto-tick) diffs the named ref against the working tree/HEAD as a whole and checks whether that diff's file set matches the unit's own declared target via grep -Fqx; it has no notion of per-work-unit hunk attribution within a shared commit, so it cannot tell 'my own change happened to be isolated but I share a commit with other isolated changes' apart from 'my change actually touched files it should not have'. There is also no alternative writer: update-plan-content.sh -ss <plan> <goal>/<step> atomicity-check -p 8.1: <text> refuses with 'Section is valid: atomicity-check' (exit 1) -- the atomicity-check section has no plan_section_spec paragraph entry the way narrative sections do, so there is no sanctioned manual path to record a correct, human-verified isolation claim when the mechanical --since check cannot express it.",
+      "surfaces": [
+        "planning/scripts/update-step.sh",
+        "src/update-step/src/main.rs",
+        "planning/scripts/plan-document-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T69 goal 1, T145 goal 24, and T148 goal 1 (in progress) each independently hit this while trying to satisfy validate-plan --complete's atomicity gate after implementing a whole goal in one commit",
+      "notes": null,
+      "created_at": "2026-09-17T10:46:31Z",
+      "updated_at": "2026-09-17T10:46:31Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
