@@ -96,6 +96,16 @@ pub fn run(repo_root: &Path, triple: &str, exe_suffix: &str) -> BuildOutcome {
             .arg("--target")
             .arg(triple)
             .current_dir(repo_root)
+            // built_artifact() below assumes cargo's output lands under
+            // repo_root/target/ -- true by cargo's own default, but an
+            // inherited CARGO_TARGET_DIR (an absolute path, set process-wide
+            // rather than per invocation; this repo's own CI workflow sets
+            // one for the outer build) overrides that regardless of
+            // current_dir, silently redirecting this nested build's output
+            // elsewhere and making the staging read below fail with "No
+            // such file or directory". Pin it explicitly so this build's
+            // output location cannot depend on the calling environment.
+            .env("CARGO_TARGET_DIR", repo_root.join("target"))
             .output();
         match status {
             Ok(output) if output.status.success() => {
