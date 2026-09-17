@@ -7155,6 +7155,25 @@
       "updated_at": "2026-09-17T05:01:19Z"
     },
     {
+      "id": "B352",
+      "title": "role-context.sh: --page/--page-size does not actually paginate",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ROLE_ID=maintainer bash planning/scripts/role-context.sh maintainer -p 1 --page-size 500, then the same with -p 2 -- see planning/tests/test-coverage-gaps.sh's own \"role-context --page paginates\" assertion for the exact invocation",
+      "observed": "page 1 and page 2 are identical (or otherwise fail the test's own check that page 1 is shorter than the full payload, ends with a 'more:' continuation marker, and differs from page 2)",
+      "expected": "with a page-size smaller than the full role-doc payload, page 1 should be truncated with a 'more:' continuation marker, and page 2 should show different content than page 1",
+      "mechanism": "Not yet investigated. Discovered indirectly: this assertion is part of planning/tests/test-coverage-gaps.sh, which could never reach it before this session's own B351 fix (a plan-mutate fork bomb earlier in the same test file hung the whole script indefinitely). Once B351 unblocked the test, this became the first newly-visible failure. Unrelated to any file this session touched (create-adversarial-review, update-adversarial-review, plan-mutate) -- role-context.sh itself was never edited.",
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "",
+      "notes": null,
+      "created_at": "2026-09-17T08:10:46Z",
+      "updated_at": "2026-09-17T08:10:46Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
