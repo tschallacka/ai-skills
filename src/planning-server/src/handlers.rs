@@ -352,9 +352,9 @@ mod tests {
     /// Walks up from this test binary's own path to the workspace's shared
     /// target/{debug,release} directory, where every workspace binary this
     /// crate delegates to (update-step, add-work-unit, update-plan-content,
-    /// validate-plan, create-plan, add-goal) already lands from being built
-    /// alongside this crate -- avoiding any PATH mutation (unsafe on this
-    /// toolchain) by resolving each program's full path explicitly instead.
+    /// validate-plan, create-plan, add-goal) lands once built -- avoiding
+    /// any PATH mutation (unsafe on this toolchain) by resolving each
+    /// program's full path explicitly instead.
     fn sibling_bin_dir() -> PathBuf {
         let mut dir = std::env::current_exe().expect("current test binary path");
         dir.pop(); // the test binary itself
@@ -364,8 +364,68 @@ mod tests {
         dir
     }
 
-    fn run(bin_dir: &Path, name: &str, args: &[&str]) {
+    /// Builds `name` into `bin_dir` if it is not there yet.
+    ///
+    /// This crate has no Cargo dependency edge on create-plan/add-goal/etc
+    /// (they are invoked as plain subprocesses, not linked), so `cargo test
+    /// --workspace` gives no ordering guarantee that they finish building
+    /// before this crate's own test binaries start running -- its scheduler
+    /// runs a package's tests as soon as THAT package is ready, in parallel
+    /// with unrelated packages still compiling. Observed for real in CI (13
+    /// passed, 8 failed, "No such file or directory" for create-plan) but
+    /// never locally, where a prior full build already left the binary
+    /// staged -- a scheduling race, not a environment difference.
+    fn ensure_built(bin_dir: &Path, name: &str) -> PathBuf {
         let program = bin_dir.join(name);
+        if program.is_file() {
+            return program;
+        }
+        let mut cmd = Command::new(env!("CARGO"));
+        cmd.arg("build").arg("-p").arg(name);
+        // bin_dir is target/debug (native) or target/<triple>/debug
+        // (cross-compiled); an explicit --target is required in the second
+        // case or this build would land in target/debug instead, right
+        // where bin_dir does NOT point. Either way, walk up from bin_dir
+        // past whatever sits above "target" -- one level native, two
+        // cross-compiled -- to find the workspace root cargo must run from
+        // for its own default output location to match bin_dir.
+        if let Some(triple) = bin_dir
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .filter(|name| *name != "target")
+        {
+            cmd.arg("--target").arg(triple);
+        }
+        let mut workspace_root = bin_dir.to_path_buf();
+        loop {
+            let popped = workspace_root.file_name().map(|n| n.to_os_string());
+            if !workspace_root.pop() {
+                panic!("bin_dir has no 'target' ancestor: {}", bin_dir.display());
+            }
+            if popped.as_deref() == Some(std::ffi::OsStr::new("target")) {
+                break;
+            }
+        }
+        let output = cmd
+            .current_dir(&workspace_root)
+            .output()
+            .unwrap_or_else(|error| panic!("could not build {name}: {error}"));
+        assert!(
+            output.status.success(),
+            "building {name} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            program.is_file(),
+            "{name} still missing at {} after building it",
+            program.display()
+        );
+        program
+    }
+
+    fn run(bin_dir: &Path, name: &str, args: &[&str]) {
+        let program = ensure_built(bin_dir, name);
         let output = Command::new(&program)
             .args(args)
             .output()
@@ -594,6 +654,7 @@ mod tests {
 
         let progress_path = copy_a.join("01-demo").join("progress.md");
         let (_, guard) = read_with_revision(&progress_path).unwrap();
+        ensure_built(&bin_dir, "update-step");
         let response = dispatch_with_bin_dir(
             Request::UpdateStep {
                 plan_dir: copy_a.to_string_lossy().into_owned(),
@@ -687,6 +748,7 @@ mod tests {
 
         let inventory_path = copy_a.join("work-unit-inventory.md");
         let (_, guard) = read_with_revision(&inventory_path).unwrap();
+        ensure_built(&bin_dir, "add-work-unit");
         let response = dispatch_with_bin_dir(
             Request::AddWorkUnit {
                 plan_dir: copy_a.to_string_lossy().into_owned(),
@@ -748,6 +810,7 @@ mod tests {
 
         let plan_description = copy_a.join("plan-description.md");
         let (_, guard) = read_with_revision(&plan_description).unwrap();
+        ensure_built(&bin_dir, "update-plan-content");
         let response = dispatch_with_bin_dir(
             Request::SetReviewStatus {
                 plan_dir: copy_a.to_string_lossy().into_owned(),
@@ -781,6 +844,7 @@ mod tests {
 
         let goal_path = copy_a.join("01-demo").join("goal.md");
         let (_, guard) = read_with_revision(&goal_path).unwrap();
+        ensure_built(&bin_dir, "update-plan-content");
         let response = dispatch_with_bin_dir(
             Request::SetTestingRequirement {
                 plan_dir: copy_a.to_string_lossy().into_owned(),
@@ -816,6 +880,7 @@ mod tests {
         let bin_dir = sibling_bin_dir();
         let scratch = TempDir::new();
         let plan_dir = setup_plan(&bin_dir, scratch.path());
+        ensure_built(&bin_dir, "validate-plan");
 
         let response = dispatch_with_bin_dir(
             Request::ValidatePlan {

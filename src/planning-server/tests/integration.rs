@@ -61,8 +61,71 @@ fn sibling_bin_dir() -> PathBuf {
     dir
 }
 
-fn run(bin_dir: &Path, name: &str, args: &[&str]) {
+/// Builds `name` into `bin_dir` if it is not there yet.
+///
+/// planning-mcp/create-plan/add-goal/create-adversarial-review/add-work-unit
+/// are separate packages with no Cargo dependency edge on this crate (they
+/// are invoked as plain subprocesses, not linked), so `cargo test
+/// --workspace` gives no ordering guarantee that they finish building
+/// before this crate's own test binaries start running -- its scheduler
+/// runs a package's tests as soon as THAT package is ready, in parallel
+/// with unrelated packages still compiling. Observed for real in CI ("No
+/// such file or directory" for a sibling binary) but never locally, where
+/// a prior full build already left it staged -- a scheduling race, not an
+/// environment difference. A no-op for planning-server/planning-client
+/// themselves, since cargo already guarantees this crate's own bin targets
+/// exist before an integration test of it runs.
+fn ensure_built(bin_dir: &Path, name: &str) -> PathBuf {
     let program = bin_dir.join(name);
+    if program.is_file() {
+        return program;
+    }
+    let mut cmd = Command::new(env!("CARGO"));
+    cmd.arg("build").arg("-p").arg(name);
+    // bin_dir is target/debug (native) or target/<triple>/debug
+    // (cross-compiled); an explicit --target is required in the second
+    // case or this build would land in target/debug instead, right where
+    // bin_dir does NOT point. Either way, walk up from bin_dir past
+    // whatever sits above "target" -- one level native, two
+    // cross-compiled -- to find the workspace root cargo must run from for
+    // its own default output location to match bin_dir.
+    if let Some(triple) = bin_dir
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .filter(|name| *name != "target")
+    {
+        cmd.arg("--target").arg(triple);
+    }
+    let mut workspace_root = bin_dir.to_path_buf();
+    loop {
+        let popped = workspace_root.file_name().map(|n| n.to_os_string());
+        if !workspace_root.pop() {
+            panic!("bin_dir has no 'target' ancestor: {}", bin_dir.display());
+        }
+        if popped.as_deref() == Some(std::ffi::OsStr::new("target")) {
+            break;
+        }
+    }
+    let output = cmd
+        .current_dir(&workspace_root)
+        .output()
+        .unwrap_or_else(|error| panic!("could not build {name}: {error}"));
+    assert!(
+        output.status.success(),
+        "building {name} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        program.is_file(),
+        "{name} still missing at {} after building it",
+        program.display()
+    );
+    program
+}
+
+fn run(bin_dir: &Path, name: &str, args: &[&str]) {
+    let program = ensure_built(bin_dir, name);
     let output = Command::new(&program)
         .args(args)
         .output()
@@ -176,7 +239,7 @@ fn client_ok(bin_dir: &Path, server: &ServerGuard, args: &[&str]) {
 }
 
 fn mcp_call(bin_dir: &Path, tool: &str, arguments: Value) -> Value {
-    let mut child = Command::new(bin_dir.join("planning-mcp"))
+    let mut child = Command::new(ensure_built(bin_dir, "planning-mcp"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
