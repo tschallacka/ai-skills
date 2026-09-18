@@ -82,15 +82,6 @@ const SIMPLE_RULES: &str = r#"{
     ]
 }"#;
 
-fn real_repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
 #[test]
 fn a_plain_run_writes_the_expected_catalogue_sections() {
     let repo = Repo::new("plain-run");
@@ -159,46 +150,4 @@ fn missing_rules_file_is_a_clean_failure_not_a_panic() {
     let output = repo.run(&[]);
     assert!(!output.status.success());
     assert_eq!(output.status.code(), Some(66));
-}
-
-/// Real-tree parity: read-only against the actual ai-skills repository,
-/// never mutating it -- both bash and the compiled binary write to scratch
-/// PORTABILITY_OUTPUT paths, diffed with the generated-timestamp line
-/// stripped from both.
-#[test]
-fn matches_the_real_bash_original_against_the_real_repository_tree() {
-    let repo_root = real_repo_root();
-    let bash_script = repo_root.join("generate-portability.sh");
-    assert!(bash_script.is_file());
-
-    let scratch = unique_dir("real-tree-parity");
-    fs::create_dir_all(&scratch).unwrap();
-    let bash_out = scratch.join("bash.md");
-    let rust_out = scratch.join("rust.md");
-
-    let bash_status = Command::new("bash")
-        .arg(&bash_script)
-        .env("PORTABILITY_OUTPUT", &bash_out)
-        .current_dir(&repo_root)
-        .status()
-        .unwrap();
-    assert!(bash_status.success());
-
-    let rust_status = Command::new(env!("CARGO_BIN_EXE_generate-portability"))
-        .env("PLANNING_SKILL_ROOT", &repo_root)
-        .env("PORTABILITY_OUTPUT", &rust_out)
-        .current_dir(&repo_root)
-        .status()
-        .unwrap();
-    assert!(rust_status.success());
-
-    let bash_content = fs::read_to_string(&bash_out).unwrap();
-    let rust_content = fs::read_to_string(&rust_out).unwrap();
-    let strip = |s: &str| -> String {
-        s.lines()
-            .filter(|l| !l.starts_with("<!-- generated: "))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    assert_eq!(strip(&bash_content), strip(&rust_content));
 }

@@ -48,7 +48,7 @@ package/ci-failures/SKILL.md	4151
 package/ci-failures/docs/README.md	1146
 package/ci-failures/requires.tsv	1641
 package/ci-failures/scripts/ci-failures-glab-lib.sh	7548
-package/ci-failures/scripts/ci-failures.sh	15840
+package/ci-failures/scripts/ci-failures.sh	4961
 package/editor-gate-plugin/.claude-plugin/plugin.json	367
 package/editor-gate-plugin/README.md	2162
 package/editor-gate-plugin/hooks/editor-token	1067

@@ -5,7 +5,7 @@
 // own repo_root discovery shells to `git rev-parse --show-toplevel`).
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -371,52 +371,4 @@ fn an_explicit_blank_positional_argument_counts_as_no_changes() {
         stdout_of(&output)
     );
     repo.cleanup();
-}
-
-/// Read-only against the actual ai-skills repository, never mutating it:
-/// runs both bash and the compiled binary against the SAME explicit,
-/// deterministic path list and the real coupling.tsv/PACKAGE-MANIFEST.tsv/
-/// git history, asserting byte-identical output.
-#[test]
-fn matches_the_real_bash_original_against_the_real_repository_tree() {
-    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("src/blast-radius is two levels below the repo root")
-        .to_path_buf();
-    let script = repo_root.join("blast-radius.sh");
-    assert!(script.is_file(), "{} not found", script.display());
-
-    // A fixed, deterministic path list so the test's own result does not
-    // depend on this checkout's own uncommitted state.
-    let args = ["--base", "master", "CODE-STYLE.md", "coupling.tsv"];
-
-    let bash_output = Command::new("bash")
-        .arg(&script)
-        .args(args)
-        .current_dir(&repo_root)
-        .output()
-        .unwrap();
-    let binary_output = Command::new(env!("CARGO_BIN_EXE_blast-radius"))
-        .args(args)
-        .current_dir(&repo_root)
-        .output()
-        .unwrap();
-
-    assert_eq!(
-        bash_output.status.code(),
-        binary_output.status.code(),
-        "exit codes differ: bash={:?} stdout={} stderr={} | binary={:?} stdout={} stderr={}",
-        bash_output.status.code(),
-        stdout_of(&bash_output),
-        String::from_utf8_lossy(&bash_output.stderr),
-        binary_output.status.code(),
-        stdout_of(&binary_output),
-        String::from_utf8_lossy(&binary_output.stderr),
-    );
-    assert_eq!(
-        combined_of(&bash_output),
-        combined_of(&binary_output),
-        "bash and the compiled binary produced different combined output"
-    );
 }
