@@ -42,8 +42,7 @@ predictable skeleton, one way of doing each job, and no platform surprises.
 
 Reference implementations to copy from, in order of how much they get right:
 `resource-limited-testing/scripts/limited-run.sh` (skeleton, `uname` dispatch,
-exit codes), `plan-context-lib.sh`'s `context_hash_file` (guarded optional
-dependency), `planning/scripts/plan-root.sh` (docblock, decision rules stated
+exit codes), `planning/scripts/plan-root.sh` (docblock, decision rules stated
 before the code).
 
 ---
@@ -248,9 +247,36 @@ Every script, in this order, no exceptions:
 set -euo pipefail
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "$(plan_resolve_symlink "${BASH_SOURCE[0]}")")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism.
+xyz_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$xyz_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present <name> "$xyz_script_dir" "$@"
+unset xyz_script_dir
+
+plan_die "<name>: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it" 69
 ```
+
+Every `planning/scripts/*.sh` entry point is this wiring block and nothing
+else: the compiled Rust binary is the only real implementation, and the shell
+file exists solely to find and exec it, or die loudly naming the missing
+binary if it isn't there. `<name>` is the script's own basename, and the
+`script_dir` variable is prefixed uniquely per file (`xyz_` above stands for a
+short, file-specific prefix) since the wiring block must run before any
+library is sourced and cannot rely on a bare `script_dir` not colliding with
+one a caller already set. There is no library sourced beyond `plan-core-lib.sh`
+here — a new capability is a Rust crate under `src/` (section 1b), never a
+new bash implementation grown behind this stub. `setup-dev-env.sh`,
+`pre-push-check.sh`, and `render-plans-board.sh` are the three permanent
+exceptions that still source their own full required library and keep real
+bash logic below the wiring block, each for a documented, load-bearing reason
+(bootstrapping a fresh clone with no binaries at all, surviving a scratch
+clone with zero build artifacts, and belonging to a separate migration,
+respectively) — no other script follows their shape.
 
 The docblock is at the top and starts at line 2 because `monitor-read.sh`,
 `supervision-frame.sh` and `role-context.sh` print it as their own `--help` via
@@ -269,20 +295,32 @@ text. That is nearly all of them, so just put it everywhere.
 
 | Unit | Limit | On exceeding |
 |---|---|---|
-| Executable script | 400 lines | extract a `*-lib.sh` sibling |
+| Executable script | 400 lines | see below — this now applies only to the three permanent bash-implementation exceptions |
 | Library | 500 lines | split by concern |
+
+Every `planning/scripts/*.sh` entry point is a wiring-only stub (section 2) far
+under this limit — there is no bash reimplementation left in any of them to
+grow past 400 lines. `*-lib.sh` extraction is a live pattern only for
+`setup-dev-env.sh`, `pre-push-check.sh`, and `render-plans-board.sh`, the three
+scripts that still carry real bash logic; **a new capability needing real
+logic is a Rust crate under `src/` (section 1b), never a bash file grown
+toward this ceiling.**
 
 **A library function lives in its own file, and the library is compiled.**
 `planning/scripts/lib/<group>/<function>.sh` holds one function, its comment, and
 nothing else. `planning/scripts/build-plan-libs.sh` concatenates each group into
 the `plan-*-lib.sh` that ships, so the runtime cost stays one file per library --
 sourcing 47 files measured 2.6x the cost of one, paid on every helper
-invocation -- while the maintained form is one function per file.
+invocation -- while the maintained form is one function per file. This
+mechanism remains fully live (`plan-core-lib.sh`'s own wiring functions and the
+three permanent exceptions' own real logic both still depend on it), but it is
+not where a NEW capability's logic goes — see above.
 
-Adding a function means creating one file in the right group directory and
-running the build. The directory is the registration; there is no list to
-update. Group state goes in `00-*.sh`, which sorts first, and anything that must
-run after every definition goes in `99-*.sh`, which sorts last.
+Adding a function to one of the still-live generated bundles means creating
+one file in the right group directory and running the build. The directory is
+the registration; there is no list to update. Group state goes in `00-*.sh`,
+which sorts first, and anything that must run after every definition goes in
+`99-*.sh`, which sorts last.
 
 Each file carries its own shebang so a test can source it alone, and the compiler
 strips the shebang and the `set` line so the output declares them once. Sourcing
@@ -302,7 +340,7 @@ question about.
 
 Split by **concern**, not by line count: each extracted file gets a docblock
 naming the one job it owns. Sibling libraries are named
-`<subject>-lib.sh` (`plan-document-lib.sh`, `plan-context-lib.sh`) and are
+`<subject>-lib.sh` (`plan-document-lib.sh`, `plan-core-lib.sh`) and are
 sourced, never executed.
 
 When a file in `planning/` is added, renamed, or removed, four places move
@@ -487,8 +525,15 @@ use site.
 
 ```bash
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
+source "$script_dir/plan-core-lib.sh"
 ```
+
+A wiring-only entry point (section 2) sources only `plan-core-lib.sh`, for
+`plan_exec_compiled_binary_if_present` and `plan_die`. `setup-dev-env.sh`,
+`pre-push-check.sh`, and `render-plans-board.sh` are the three exceptions:
+each sources its own fuller required library (e.g. `register-lib.sh` for
+`pre-push-check.sh`) because each keeps real bash logic below its wiring
+block.
 
 - Lowercase `script_dir` — it is script-local, not exported.
 - `${BASH_SOURCE[0]}`, never `$0` (wrong when sourced) and never
@@ -521,29 +566,32 @@ script_dir="$(cd "$(dirname "$self")" && pwd)"
 
 `monitor-read.sh` is the one script with that requirement today.
 
-Every executable script sources `plan-document-lib.sh` unconditionally. No
-`[ -f … ] && source …` — a missing library is a broken install, so fail loudly.
+Every executable script sources a library unconditionally — `plan-core-lib.sh`
+for a wiring-only stub, or the fuller library one of the three permanent
+exceptions still needs. No `[ -f … ] && source …` — a missing library is a
+broken install, so fail loudly.
 
-`plan-reconcile-lib.sh` requires `plan-document-lib.sh` first; a library that
-depends on another sources it itself rather than trusting the caller's order.
+A library that depends on another sources it itself rather than trusting the
+caller's order — still true of the generated bundles' own internal
+composition (`plan-document-lib.sh`'s own `99-facade.sh` sources
+`plan-map-lib.sh` and `plan-inventory-lib.sh` directly, rather than expecting
+whatever sources `plan-document-lib.sh` to have sourced them first).
 
 **Every function in a sourced file carries its file's prefix.** Bare names in a
 sourced file shadow the caller's functions. `usage`, `help` and `main` are the
 only bare names allowed, and only in files that are never sourced.
 
-The prefix is per-library and must be used consistently within it, not globally
-`plan_`: `plan-document-lib.sh` and `plan-reconcile-lib.sh` use `plan_`,
-`plan-context-lib.sh` uses `context_` (all 32 of its functions), and the
-`validate-plan-*-lib.sh` pass drivers use `plan_validate_`. Any of those
-prevents collision, which is the point of the rule. Match the file you are in
-rather than renaming a whole library to satisfy a global spelling.
+The prefix is per-library and must be used consistently within it, not
+globally `plan_`: the generated bundles (`plan-core-lib.sh`,
+`plan-document-lib.sh`, etc.) use `plan_`, while `register-lib.sh` (sourced by
+`pre-push-check.sh`) uses `reg_`. Either prevents collision, which is the
+point of the rule. Match the file you are in rather than renaming a whole
+library to satisfy a global spelling.
 
-Two known deviations, left deliberately because the churn outweighs the risk —
-neither file is sourced by anything today, so nothing can shadow:
-`validate-plan-*-lib.sh` keeps the pre-existing bare `fail`/`warn`/`trim`/
-`require_heading` and the command-detector helpers (~24 functions, ~200 call
-sites), and `plan-env.sh` keeps bare `die`/`usage`/`absolute_path` behind a
-`# Not sourced:` note. If either becomes sourceable, the rename comes first.
+One known deviation, left deliberately because the churn outweighs the risk:
+`plan-env.sh` keeps bare `die`/`usage`/`absolute_path` behind a
+`# Not sourced:` note, since nothing sources it today and nothing can shadow.
+If it becomes sourceable, the rename comes first.
 
 Before writing a helper, grep the libs — the five clusters below were each
 re-implemented between 3 and 26 times, and any new copy is a review finding:

@@ -25,22 +25,10 @@ the maintainer must behave going forward.
 | `roles/VOICES.md` | Per-role voice/stance identity preamble, keyed by canonical `ROLE_ID`, byte-budgeted (≤512 B). | Injected by `role-context.sh` `voice_for()`; asserted by `test-voice-artifact-drift.sh` + `test-persona-drift.sh`. |
 | `scripts/monitor-read.sh` | Maintainer-only monitor reader: bounded supervision frames, pull-on-exception, grant log (case+command). | Reads frames written by `supervision-frame.sh`; identity-gates to maintainer (fail closed). |
 | `scripts/supervision-frame.sh` | Bounded supervision-frame emitter + grant log (case+command, never reasoning); footer-overwrites. | Written by each subagent at end; read by `monitor-read.sh`; asserted by `test-supervision-frame.sh`. |
-| `scripts/plan-context.sh` | Bounded plan-context reader (init/read/check/refresh/checkpoint). | Gates per `ROLE_ID` via `plan-context-lib.sh`; context IDs tagged (`plan`, `goal:<id>`, `step:<goal>/<step>`, `unit:WNN`). |
-| `scripts/plan-context-lib.sh` | Shared bounded plan-context cache helper; owns per-role reader composition (`context_role_gate` / `context_role_reader_composition`). | Reads registry via `role-context.sh`; gates `plan-context.sh` per `ROLE_ID`. |
+| `scripts/plan-context.sh` | Bounded plan-context reader (init/read/check/refresh/checkpoint); wiring-only stub over the compiled `plan-context` binary (T145 goal 27/29). | Gates per `ROLE_ID` via `role_cap()` (`src/plan-context/src/main.rs`); context IDs tagged (`plan`, `goal:<id>`, `step:<goal>/<step>`, `unit:WNN`). |
 | `scripts/plan-document-lib.sh` | Shared document helpers (sections, paragraphs, replace, guard). | All mutating helpers. |
-| `scripts/plan-reconcile-lib.sh` | Shared reconciliation (coverage prune, owned-work-units rewrite, progress rebuild). | `add-work-unit.sh`, `remove-work-unit.sh`, `update-adversarial-review.sh`. |
-| `scripts/validate-plan.sh` | Plan gate entry point: flags, the skill-root path, the single EXIT cleanup, and the ORDER of the 13 validation passes. Owns no check itself. | Sources every `validate-plan-*-lib.sh`; the pass order is load-bearing (see the file's docblock). |
-| `scripts/validate-plan-common-lib.sh` | `fail`/`warn` finding vocabulary, `trim`, `require_heading`, `get_single_field` (returns via the `field_value` global). `warn` never touches `errors` — the `--complete`-promotes-WARN-to-FAIL pattern depends on it. | Required by every other `validate-plan-*-lib.sh`. |
-| `scripts/validate-plan-docs-lib.sh` | Existence gate, plan-description headings, `UI affected` verdict, adversarial-review gate and mirror, inventory section shape, hand-edit damage (helper-flag text, duplicate `§` labels, `$script_dir` fragments). | Publishes `ui_affected` and the `plan_docs` list the placeholder and stale passes iterate. |
-| `scripts/validate-plan-placeholders-lib.sh` | Registered-template-token sweep; the registry surface (authored/generated) decides WARN vs FAIL. | Reads `planning/placeholders.json` via `skill_root`. |
-| `scripts/validate-plan-stale-lib.sh` | `--stale` phrase sweep, including the `*-testing.md` companions; bundled case-count and byte-identical phrase list. | Registers its temp phrase file with the entry script's `cleanup_files`, never its own EXIT trap. |
-| `scripts/validate-plan-inventory-lib.sh` | Work-unit row parser and all row rules, definition-of-done cross-links, dependency-cycle walk, and the (KNOWN DEAD) proof-coverage rule. | Owns the `unit_*` / `goal_units` data model every later pass reads. |
-| `scripts/validate-plan-ui-lib.sh` | UI user stories, browser run caches, story status vocabulary, `bugs.md` linkage. | Runs only when `ui_affected` is `yes`. |
-| `scripts/validate-plan-goals-lib.sh` | `goal.md` headings, the testing-requirement table, goal-size band and exception, step-file/inventory agreement, step-file naming. | Only writer of `goal_testing_required`. Reads `planning/goal-tables.json` via `skill_root` for the sections whose first column may be `yes`/`no`; a table under any other heading is hand-edit damage and fails. |
-| `scripts/validate-plan-serve-lib.sh` | The "the application still serves" WARN for a goal that changes module state, schema, or configuration. | Reads `planning/state-change-registry.json` via `skill_root`. |
-| `scripts/validate-plan-commands-lib.sh` | Command-literal detector (rules 1-8) against the plan's `commands.json`. | Reads `planning/never-executable-extensions.json` via `skill_root`; registry maintained by `register-command.sh`. |
-| `scripts/validate-plan-propagation-lib.sh` | `--complete` progress gate plus propagation (a) unowned edit targets, (c) verifier reachability, (c2) companion references, (d) unverified graph leaves, (e) §9.x roster vs inventory. | Runs only when `--propagation` (the default) is on. |
-| `scripts/*.sh` | Thin, single-purpose helpers. | Source `plan-document-lib.sh` (+ `plan-reconcile-lib.sh`). |
+| `scripts/validate-plan.sh` | Plan gate entry point; wiring-only stub over the compiled `validate-plan` binary (T145 goal 27) — sources no `validate-plan-*-lib.sh` siblings any more; the 13 validation passes are implemented in the Rust binary. | -- |
+| `scripts/*.sh` | Thin, single-purpose helpers; every entry point is now a wiring-only stub (section 2, `CODE-STYLE.md`) preferring its own compiled binary. | Source `plan-core-lib.sh`; the three permanent bash-implementation exceptions (`setup-dev-env.sh`, `pre-push-check.sh` via `register-lib.sh`, `render-plans-board.sh` via `plans-board-lib.sh`) still source their own fuller library. |
 | `PACKAGE-MANIFEST.tsv` / `PACKAGE-MAP.tsv` | Ship manifest / source-destination map. | Every installed file must be registered here. |
 | `installer/src/50-manifest.sh` `skill_files()` | Installer file list. | Must match manifest + map. Every name must exist on disk and every tracked skill file must either be listed or parked in `../installer/unshipped-planning-files.txt` — asserted by `../tests/test-skill-files-manifest.sh`, which also runs as npm `prepack`. |
 | `../installer/unshipped-planning-files.txt` | Planning files no install delivers, awaiting a ship-or-not decision. | A ratchet: entries leave by being registered for shipping. Adding one is a decision, and a stale entry fails the test. |
@@ -79,7 +67,8 @@ the maintainer must behave going forward.
   progress trackers. Do not make an agent issue a follow-up call the tool
   knew it needed.
 - Keep helpers **small**; put shared logic in library files
-  (`plan-document-lib.sh`, `plan-reconcile-lib.sh`).
+  (`plan-document-lib.sh`) — or, for a new capability's own logic, in a Rust
+  crate under `src/` (CODE-STYLE.md section 1b), not a new bash library.
 
 ### 2.4 Deterministic command contracts
 - Every subcommand has one fixed, documented positional signature. An explicit
@@ -115,8 +104,13 @@ the maintainer must behave going forward.
 ### 2.7a `role-context.sh` is dual-natured
 
 - It is a CLI **and** a sourceable registry: the sourcing guard stops the CLI
-  main flow when the file is sourced, so `plan-context-lib.sh` can reuse
-  `resolve_id()` without the arg parsing, usage and exit firing in the caller.
+  main flow when the file is sourced. This let `plan-context-lib.sh` reuse
+  `resolve_id()` without the arg parsing, usage and exit firing in the caller;
+  that library was deleted in T145 goal 29 once `plan-context.sh` became a
+  wiring-only stub over a compiled binary with its own Rust role resolution
+  (`role_cap()`, `src/plan-context/src/main.rs`) — no script sources
+  `role-context.sh`'s registry form today, but the sourcing guard itself is
+  unchanged and still correct if a future caller needs it again.
 - `ROLES`, `resolve_id`, `canonical_name`, `role_docs`, `list_roles`,
   `voice_for` and `can_access` are the public surface of the sourced form.
   `ROLES` keeps its UPPER_CASE name and none of these carry the `plan_` prefix
@@ -214,7 +208,7 @@ library, and `test-plan-libs-build.sh` runs it.
 ### 2.9 Per-role reader composition
 - `role-context.sh` (persona scope) and `plan-context.sh` (bounded plan content)
   are two distinct gates; there is **no global composition rule**, only a
-  per-role allow-list (`plan-context-lib.sh` `context_role_reader_composition`).
+  per-role allow-list (`role_cap()`, `src/plan-context/src/main.rs`).
   `installer`/`oracle`/`eve` read no plan content; all other roles are capped
   per role.
 - Keep that function and the `ROLES.md` reader allow-list in sync; they must
@@ -243,8 +237,9 @@ library, and `test-plan-libs-build.sh` runs it.
 Every command literal in a step file or testing companion must be registered in
 the plan's `commands.json` (seeded empty by `create-plan.sh`, maintained with
 `register-command.sh`), so the "when" context travels with the command instead
-of being lost when steps are copied. `validate-plan-commands-lib.sh` decides
-what is a command literal with ordered rules, no language table:
+of being lost when steps are copied. `src/planning-validator-commands/src/lib.rs`
+(`command_candidate`/`command_disqualified`) decides what is a command literal
+with ordered rules, no language table:
 
 A span is a **candidate** when any of these holds —
 
@@ -425,7 +420,7 @@ before and after, and diff. `test-progress-bar-shape.sh` and
 5. If a doc changed: keep `SKILL.md` small, update the phase/role docs and their
    references, regenerate `REVIEWER.md` if a reviewer section changed. Keep
    `roles/VOICES.md` registry-aligned and keep `ROLES.md`'s persona doc matrix +
-   `plan-context-lib.sh` reader composition in sync with `role_docs()`/`ROLES=()`;
+   `role_cap()`'s reader composition (`src/plan-context/src/main.rs`) in sync with `role_docs()`/`ROLES=()`;
    re-run `test-persona-drift.sh` + `test-voice-artifact-drift.sh`.
 6. Register new files in `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv`,
    and `installer/src/50-manifest.sh`'s `skill_files()`. If the file is a benchmark capsule dependency
