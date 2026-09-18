@@ -112,13 +112,17 @@ fn main() {
         .find(|line| line.starts_with('|') && cell(line, 2) == *finding)
         .unwrap_or_else(|| die(format!("{finding} has no row in {}; add it with add-adversarial-finding.sh before resolving it", review_file.display()), 65));
     let work_unit = cell(target, 6);
-    if work_unit.is_empty() {
-        die(format!("{finding} has no row in {}; add it with add-adversarial-finding.sh before resolving it", review_file.display()), 65)
-    }
-    if !work_unit.starts_with('W') || !work_unit[1..].bytes().all(|byte| byte.is_ascii_digit()) {
-        die(format!("{finding} is not gated on a work unit (its cell reads '{work_unit}'), so it has no key to claim"), 65)
-    }
-    if !claimed_by.is_empty() && keys_file.is_file() {
+    // B357: a finding with a blank/N/A Work-unit cell is a real, sanctioned
+    // shape (e.g. a finding about plan-description.md itself, not tied to
+    // any implementation work unit) -- it needs no fix-key claim at all
+    // (fix-keys.json gates only WNN-tied findings), so it must still be
+    // resolvable by Status alone rather than refused outright.
+    let gated = !work_unit.is_empty()
+        && work_unit != "N/A"
+        && work_unit.starts_with('W')
+        && work_unit[1..].bytes().all(|byte| byte.is_ascii_digit())
+        && work_unit.len() > 1;
+    if gated && !claimed_by.is_empty() && keys_file.is_file() {
         let keys = fs::read_to_string(&keys_file).unwrap_or_default();
         let minted_by = serde_json::from_str::<Value>(&keys)
             .ok()
@@ -148,6 +152,10 @@ fn main() {
         output.push('\n');
     }
     atomic_write(&review_file, output.as_bytes()).unwrap_or_else(|error| die(error, 70));
+    if !gated {
+        println!("{finding}: status {before} -> {status} (ungated, no work unit -- no fix-key claim needed)");
+        return;
+    }
     println!("{finding}: status {before} -> {status} (gated on {work_unit})");
     if !keys_file.is_file() {
         eprintln!("{COMMAND}: no fix-keys.json yet; mint keys before claiming");

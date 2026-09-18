@@ -161,18 +161,20 @@ sequenceDiagram
     Frank->>DIR: removes scratch, regenerates .env, cleanup-plans.sh
 ```
 
-The registry behind every lane is `role-context.sh:63-75` (`ROLES=()`) with
-per-role scope at `:91-104`; `ROLES.md`'s persona matrix is a maintained mirror
-of that function, and `roles/VOICES.md` supplies the stance preamble through
-`voice_for()` (`role-context.sh:131-140`).
+The registry behind every lane is `role-context.sh`'s own compiled binary,
+`src/role-context/src/main.rs:9-21` (`ROLES`) with per-role scope at `:46-68`
+(`role_docs`); `ROLES.md`'s persona matrix is a maintained mirror of that
+function, and `roles/VOICES.md` supplies the stance preamble through
+`voice` (`src/role-context/src/main.rs:128-136`).
 
-Two gates are identity gates rather than content gates. `role-context.sh:207-234`
-refuses any content read without a resolvable `ROLE_ID` and prints
-`FAIL-CLOSED identity`, so a worker spawned without a persona cannot read its
-own instructions and must be respawned. `plan-context-lib.sh:261-269` decides
-per role whether the plan-content gate applies at all: `installer`, `oracle`
-and `eve` are refused plan content outright; every other role is capped at
-32768 bytes.
+Two gates are identity gates rather than content gates.
+`src/role-context/src/main.rs:219` refuses any content read without a
+resolvable `ROLE_ID` and prints `FAIL-CLOSED identity`, so a worker spawned
+without a persona cannot read its
+own instructions and must be respawned. `plan-context`'s own
+`role_cap` (`src/plan-context/src/main.rs:423-445`) decides per role whether
+the plan-content gate applies at all: `installer`, `oracle` and `eve` are
+refused plan content outright; every other role is capped at 32768 bytes.
 
 The monitor lane is deliberately thin. A subagent ends by writing one bounded
 frame (`supervision-frame.sh:70-90`, nine fixed fields, footer-overwriting) and

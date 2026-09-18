@@ -214,8 +214,18 @@ pub fn csv_to_markdown(columns: usize, csv: &str) -> Result<String, CsvError> {
             if field.contains('\r') {
                 return Err(CsvError::CarriageReturn(row_number));
             }
+            // B358: the check above only proves the field contains no BARE
+            // pipe; the escaped \| sequence it allowed through is still two
+            // literal characters (backslash, pipe), and a raw pipe byte in a
+            // rendered cell is indistinguishable from a real column boundary
+            // to any downstream '|'-splitting reader (mint-fix-keys.sh's own
+            // column scan misread a row this way). Render \| as the HTML
+            // entity for a pipe glyph instead of passing it through
+            // unconverted, so the escape convention's whole point (a safe
+            // literal pipe inside one cell) actually holds once rendered.
+            let rendered = field.replace("\\|", "&#124;");
             output.push(' ');
-            output.push_str(field);
+            output.push_str(&rendered);
             output.push_str(" |");
         }
         output.push('\n');
@@ -327,6 +337,25 @@ mod tests {
             csv_to_markdown(2, r#""Name","Value"\n"Status","He said \"go\"""#).unwrap(),
             "| Name | Value |\n|---|---|\n| Status | He said \"go\" |\n"
         );
+    }
+
+    /// B358 regression: an escaped pipe must render as a literal glyph that
+    /// survives a downstream '|'-splitting reader, not as the raw two-byte
+    /// backslash-pipe sequence the input carried.
+    #[test]
+    fn an_escaped_pipe_renders_as_a_safe_literal_not_the_raw_backslash_pipe() {
+        let rendered = csv_to_markdown(2, r#"a,claude\|opencode\|codex"#).unwrap();
+        assert!(
+            !rendered.contains('\\'),
+            "escaped pipe must not survive as a raw backslash: {rendered}"
+        );
+        let cells: Vec<&str> = rendered.lines().next().unwrap().split('|').collect();
+        assert_eq!(
+            cells.len(),
+            4,
+            "an escaped pipe must not be column-delimiter-shaped: {rendered}"
+        );
+        assert!(rendered.contains("claude&#124;opencode&#124;codex"));
     }
 
     #[test]

@@ -116,6 +116,25 @@ fn child_update_progress(goal_dir: &Path) -> Result<(), (i32, String)> {
     }
 }
 
+/// Every file any work unit in the inventory declares as its own target,
+/// across every row -- a multi-file target is one comma-separated cell (B354).
+fn all_declared_targets(inventory_text: &str) -> std::collections::HashSet<String> {
+    inventory_text
+        .lines()
+        .filter(|row| {
+            let id = table_cell(row, 2);
+            id.starts_with('W') && id[1..].chars().all(|c| c.is_ascii_digit()) && id.len() > 1
+        })
+        .map(|row| table_cell(row, 4))
+        .flat_map(|cell| {
+            cell.split(',')
+                .map(|part| part.trim().trim_matches('`').to_string())
+                .collect::<Vec<_>>()
+        })
+        .filter(|target| !target.is_empty() && target != "N/A")
+        .collect()
+}
+
 fn atomicity_check(
     goal_dir: &Path,
     repo_root: &Path,
@@ -129,12 +148,14 @@ fn atomicity_check(
         eprintln!("atomicity: no inventory at {}", inventory.display());
         return;
     }
-    let declared_target = fs::read_to_string(&inventory).ok().and_then(|content| {
-        content
-            .lines()
-            .find(|row| table_cell(row, 2) == unit_id)
-            .map(|row| table_cell(row, 4))
-    });
+    let Ok(inventory_text) = fs::read_to_string(&inventory) else {
+        eprintln!("atomicity: no inventory at {}", inventory.display());
+        return;
+    };
+    let declared_target = inventory_text
+        .lines()
+        .find(|row| table_cell(row, 2) == unit_id)
+        .map(|row| table_cell(row, 4));
     let Some(declared_target) = declared_target else {
         eprintln!("atomicity: {unit_id} has no file target; boxes left for manual confirmation");
         return;
@@ -143,6 +164,14 @@ fn atomicity_check(
         eprintln!("atomicity: {unit_id} has no file target; boxes left for manual confirmation");
         return;
     }
+    // B354: a goal implemented in one sitting is normally landed in one
+    // commit covering every one of its work units, not one commit per unit --
+    // `git diff --name-only since` then shows every sibling unit's own files
+    // too, not just this unit's own. A file is only a real isolation
+    // violation if NO work unit in the whole plan declares it; a file that
+    // some OTHER named unit owns is evidence of a batched-but-still-scoped
+    // commit, not evidence this unit's own change spilled outside its target.
+    let all_declared_targets = all_declared_targets(&inventory_text);
     let output = Command::new("git")
         .args(["-C"])
         .arg(repo_root)
@@ -168,7 +197,7 @@ fn atomicity_check(
         .collect();
     let extra: Vec<String> = changed
         .into_iter()
-        .filter(|path| path != &declared_target)
+        .filter(|path| !all_declared_targets.contains(path))
         .collect();
     let violation = if extra.is_empty() {
         String::new()
@@ -293,4 +322,33 @@ fn main() {
         step_name,
         requested_status
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::all_declared_targets;
+
+    /// B354 regression: a batched commit's own "extra" files must be checked
+    /// against every unit's own declared target, not just the current unit's.
+    #[test]
+    fn every_row_own_target_is_collected_including_multi_file_cells() {
+        let inventory = "\
+| ID | Type | File | Scope | Subscope | Change | Depends on | Goal | Step |
+|---|---|---|---|---|---|---|---|---|
+| W01 | source | `src/foo.rs` | scope | N/A | change | -- | goal | step |
+| W02 | source | `src/bar.rs,src/baz.rs` | scope | N/A | change | W01 | goal | step |
+| W03 | verification | N/A | scope | N/A | change | W01,W02 | goal | step |
+";
+        let targets = all_declared_targets(inventory);
+        assert!(targets.contains("src/foo.rs"));
+        assert!(targets.contains("src/bar.rs"));
+        assert!(targets.contains("src/baz.rs"));
+        assert!(!targets.contains("N/A"));
+        assert_eq!(targets.len(), 3);
+    }
+
+    #[test]
+    fn a_blank_inventory_yields_no_targets() {
+        assert!(all_declared_targets("").is_empty());
+    }
 }

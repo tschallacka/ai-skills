@@ -213,7 +213,7 @@ package/planning/scripts/remove-plan.sh	2023
 package/planning/scripts/remove-work-unit.sh	2395
 package/planning/scripts/render-plans-board.sh	20557
 package/planning/scripts/resolve-finding.sh	2883
-package/planning/scripts/role-context.sh	6470
+package/planning/scripts/role-context.sh	2374
 package/planning/scripts/run-adversary-probe.sh	1841
 package/planning/scripts/supervision-frame.sh	2505
 package/planning/scripts/update-adversarial-review.sh	3452

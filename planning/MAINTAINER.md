@@ -101,30 +101,29 @@ the maintainer must behave going forward.
   persona matrix only because scope-doc shipping requires every `ROLES=()` id to
   be present, but their authority is not defined there.
 
-### 2.7a `role-context.sh` is dual-natured
+### 2.7a `role-context.sh`'s registry logic lives in Rust now
 
-- It is a CLI **and** a sourceable registry: the sourcing guard stops the CLI
-  main flow when the file is sourced. This let `plan-context-lib.sh` reuse
-  `resolve_id()` without the arg parsing, usage and exit firing in the caller;
-  that library was deleted in T145 goal 29 once `plan-context.sh` became a
-  wiring-only stub over a compiled binary with its own Rust role resolution
-  (`role_cap()`, `src/plan-context/src/main.rs`) — no script sources
-  `role-context.sh`'s registry form today, but the sourcing guard itself is
-  unchanged and still correct if a future caller needs it again.
-- `ROLES`, `resolve_id`, `canonical_name`, `role_docs`, `list_roles`,
-  `voice_for` and `can_access` are the public surface of the sourced form.
-  `ROLES` keeps its UPPER_CASE name and none of these carry the `plan_` prefix
-  CODE-STYLE.md section 7 asks of a sourced file; renaming any of them is a
-  cross-file change. Everything script-local to the CLI half is lower-case.
+- `role-context.sh` used to be dual-natured (a CLI plus a sourceable registry:
+  `plan-context-lib.sh` sourced it directly to reuse `resolve_id()` without the
+  CLI's own arg parsing, usage and exit firing in the caller). That consumer
+  was deleted in T145 goal 29, and the sourceable bash body itself (the
+  `ROLES` array, `resolve_id`, `canonical_name`, `role_docs`, `list_roles`,
+  `voice_for`, `can_access`) was deleted in T145 goal 27's own die-loudly-stub
+  sweep once nothing sourced it any more (B360) — `role-context.sh` is now a
+  wiring-only stub like every other `planning/scripts/*.sh` entry point,
+  preferring the compiled `role-context` binary or dying loudly if it is
+  missing. All of the logic above now lives in `src/role-context/src/main.rs`.
 - Resolution accepts the canonical id and the canonical name
   (case-insensitive) plus id/name aliases (`willie`/`maintainer`,
   `pythia`/`oracle`, `benny-02` → `benny`). Unset or unknown `ROLE_ID` is a hard
   refusal and the worker is denied a persona; `--paths` is maintainer-only.
-  Shell gates are advisory, not a security boundary — the agent framework is
-  what confines the process.
-- `ROLES=()` and `role_docs()` are the machine source of the persona registry
-  and per-role scope; the `ROLES.md` matrix is a maintained mirror, and
-  scope-doc shipping is enforced by `tests/test-persona-drift.sh`.
+  These gates are enforced by the compiled binary itself now, not shell —
+  still advisory rather than a security boundary, since the agent framework is
+  what actually confines the process.
+- The compiled binary's own `ROLES` constant and `role_docs()` function are the
+  machine source of the persona registry and per-role scope; the `ROLES.md`
+  matrix is a maintained mirror, and scope-doc shipping is enforced by
+  `tests/test-persona-drift.sh`.
 
 ### 2.8 Review protocol invariants
 - Protocol 1.4.2: Reviewer A (`christian`) is handoff-only, never approves;
@@ -394,7 +393,7 @@ what keeps this table from rotting the way the comments did.
 | Duplicated logic | Sites | Canonical helper | State |
 |---|---|---|---|
 | Hand-rolled `"$f.tmp.$$"` + `trap` + `mv` | 7 in 2 files | `plan_atomic_write`, `plan_track_tmp` | helper exists; call sites not migrated. Fell 42 -> 13 with T145 goal 27: most of the remaining sites lived in planning/scripts/*.sh entry points whose whole bash reimplementation body (fallback code, now dead weight once the compiled binary is the production path) was deleted in that goal, taking their own copies of this pattern with them -- not a migration onto the helper, just the surrounding code going away. Fell further, 13 -> 7, with T145 goal 29's deletion of the now-orphaned hand-written `plan-content-lib.sh`/`plan-content-diff-lib.sh`, which carried their own copies. The 2 sites still standing (`plan-document-lib.sh`, `plan-table-lib.sh`) are the still-active generated bundles, out of goal 29's own scope. |
-| Inline `awk -F'\|'` inventory-row parsing with hard-coded field indices (`$2` ID … `$10` Step) | 4 in scripts/*.sh | `plan_inventory_row`, `plan_inventory_rows`, `plan_inventory_split` | helper exists in `scripts/plan-inventory-lib.sh`; the ten work-unit *readers* are migrated. What is left is not all inventory: the two `update-work-unit.sh` rewriters and `plan_prune_work_unit` edit rows in place (a writer helper, not this one), `plan-content.sh find` needs the raw row text rather than trimmed cells, and the rest parse other tables (coverage, `VOICES.md`, the progress trackers). The adversarial-review Findings table is no longer among them: `plan_review_gated_pairs` in `plan-document-lib.sh` owns it, and `mint-fix-keys.sh`, `verify-fix-keys.sh` and `add-fix-claim.sh` all call it — three copies of those field indices were three chances for the writer to accept a pair the verifier does not gate. The cap counts every literal `awk -F'|'` in `scripts/*.sh`, including docblock mentions and the helper's own parser, so its floor is 1, not 0. Two sites are admitted generic readers rather than migrated inventory parses: `render-plan-overview.sh` cells() (29th) and `remove-coverage.sh`'s outcome match (30th, T17) — a shared canonical-table reader that would absorb both is future work. After the harden-plan-data-parsing goal-03 batches (W09-W13, W26), the shared plan_table_cell/plan_table_set_cell/plan_table_cells helpers also own the plan-content find scanners, both update-work-unit rewriters, the update-step status rewrite, plan_prune_work_unit, the progress status carry, and the propagation/inventory validation readers; the cap fell 30 -> 23 with those batches, then to 21 with W22 (mint-fix-keys) and W25 (cleanup-plans reader), to 19 with W19 (render-plan-overview cells() and the NF probe), and to 15 with W21/W23/W24 (overview-state, both progress counters), then to 11 when B73's fix (test-duplication-ratchet.sh no longer counts a full-line comment naming the pattern) removed four comment-only hits, then to 6 with T145 goal 27's own planning/scripts/*.sh bash-body deletion sweep, which took some remaining docblock mentions and stub-adjacent sites down with the deleted bodies (no call site was migrated onto the helper by that goal), then to 4 with T145 goal 29's deletion of the now-orphaned `plan-context-lib.sh`, `plan-reconcile-lib.sh`, and the six `validate-plan-*-lib.sh` files, whose own docblocks and mentions of the pattern went with them. The admitted generic readers note is obsolete: cells() is now the shared-helper port. |
+| Inline `awk -F'\|'` inventory-row parsing with hard-coded field indices (`$2` ID … `$10` Step) | 3 in scripts/*.sh | `plan_inventory_row`, `plan_inventory_rows`, `plan_inventory_split` | helper exists in `scripts/plan-inventory-lib.sh`; the ten work-unit *readers* are migrated. What is left is not all inventory: the two `update-work-unit.sh` rewriters and `plan_prune_work_unit` edit rows in place (a writer helper, not this one), `plan-content.sh find` needs the raw row text rather than trimmed cells, and the rest parse other tables (coverage, `VOICES.md`, the progress trackers). The adversarial-review Findings table is no longer among them: `plan_review_gated_pairs` in `plan-document-lib.sh` owns it, and `mint-fix-keys.sh`, `verify-fix-keys.sh` and `add-fix-claim.sh` all call it — three copies of those field indices were three chances for the writer to accept a pair the verifier does not gate. The cap counts every literal `awk -F'|'` in `scripts/*.sh`, including docblock mentions and the helper's own parser, so its floor is 1, not 0. Two sites are admitted generic readers rather than migrated inventory parses: `render-plan-overview.sh` cells() (29th) and `remove-coverage.sh`'s outcome match (30th, T17) — a shared canonical-table reader that would absorb both is future work. After the harden-plan-data-parsing goal-03 batches (W09-W13, W26), the shared plan_table_cell/plan_table_set_cell/plan_table_cells helpers also own the plan-content find scanners, both update-work-unit rewriters, the update-step status rewrite, plan_prune_work_unit, the progress status carry, and the propagation/inventory validation readers; the cap fell 30 -> 23 with those batches, then to 21 with W22 (mint-fix-keys) and W25 (cleanup-plans reader), to 19 with W19 (render-plan-overview cells() and the NF probe), and to 15 with W21/W23/W24 (overview-state, both progress counters), then to 11 when B73's fix (test-duplication-ratchet.sh no longer counts a full-line comment naming the pattern) removed four comment-only hits, then to 6 with T145 goal 27's own planning/scripts/*.sh bash-body deletion sweep, which took some remaining docblock mentions and stub-adjacent sites down with the deleted bodies (no call site was migrated onto the helper by that goal), then to 4 with T145 goal 29's deletion of the now-orphaned `plan-context-lib.sh`, `plan-reconcile-lib.sh`, and the six `validate-plan-*-lib.sh` files, whose own docblocks and mentions of the pattern went with them, then to 3 with B360's deletion of role-context.sh's own now-dead `voice_for()` function, which held its own `awk -F'|'` VOICES.md parser (the same lookup now lives in src/role-context/src/main.rs's `voice()`, a plain Rust line scan with no awk involved). The admitted generic readers note is obsolete: cells() is now the shared-helper port. |
 | Seed progress-bar literal `` `0%  #### ----------------  100%` `` | 0 files | `plan_progress_bar` | helper exists; glyphs are pinned by `tests/test-progress-bar-shape.sh`, so any migration must stay byte-identical. `rebuild-plan-progress.sh` left the set in T5, which is why the cap was 3, not 4. Fell 3 -> 0 with T145 goal 27: `create-progress.sh`, `create-plan-progress.sh` and `plan-mutate.sh` -- the last three sites -- had this literal only in their now-deleted bash bodies. |
 | percent / bar / icon derivation | 1 file | `plan_progress_percent`, `plan_progress_bar`, `plan_progress_icon` | helper exists; `plan-progress-lib.sh` (the shared library, not one of the stripped entry points) now holds the one remaining copy, the helper's own arithmetic and glyphs. `update-progress.sh` was the canonical copy before T145 goal 27 deleted its bash body along with `update-plan-progress.sh`'s own derivation, falling the count 3 -> 1 (the library's own floor). Half-up rounding (`+ total / 2`) and the 20-column default width remain part of the byte-identical contract, now enforced from the library alone. |
 | Status `case` map (`incomplete`/`in-progress`/`completed` → glyph) | 1 file | `plan_status_label` | helper exists in `scripts/plan-document-lib.sh`; `update-step.sh` and `update-plan-progress.sh` are migrated. `rebuild-plan-progress.sh` is the remaining site and is a different shape — it derives the glyph from the goal's own progress file rather than from a requested status word, so it needs a second helper or a rewrite, not this one. The glyphs are the on-disk contract. |

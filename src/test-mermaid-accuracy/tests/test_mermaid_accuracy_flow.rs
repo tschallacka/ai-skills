@@ -39,11 +39,13 @@ fn the_real_live_tracked_documents_pass_with_no_findings() {
     // The real, live corpus reality this port was verified against (see
     // goal.md's own AR-133/AR-134 citations, updated by T145 goal 29's own
     // ARCHITECTURE.md pruning once plan-context-lib.sh/plan-reconcile-lib.sh/
-    // validate-plan-*-lib.sh were deleted): 51 scripts, 24 artifacts, 2
-    // function names -- confirming the four tracked documents actually got
-    // scanned, not merely that the process exited zero.
+    // validate-plan-*-lib.sh were deleted, and again when B360 removed the
+    // last two bash-shaped role_docs()/voice() call-site citations once
+    // role-context.sh's own dead bash body was deleted): 51 scripts, 24
+    // artifacts, 1 function name -- confirming the four tracked documents
+    // actually got scanned, not merely that the process exited zero.
     assert!(stdout.contains("51 scripts and 24 artifacts named in diagrams: PASS"));
-    assert!(stdout.contains("2 function names in the diagram documents: PASS"));
+    assert!(stdout.contains("1 function names in the diagram documents: PASS"));
     assert!(output.status.success());
 }
 

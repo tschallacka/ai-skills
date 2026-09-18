@@ -85,7 +85,7 @@ check_cap 'tests not sourcing lib-test.sh' 6 \
 # 30th site: remove-coverage.sh (T17) matches coverage rows by outcome cell --
 # a new distinct table, admitted on the same terms as the 29th. The shared
 # reader that would absorb both remains future work tracked in MAINTAINER §3.
-check_cap "inline awk -F'|' parsers" 4 \
+check_cap "inline awk -F'|' parsers" 3 \
     "$(count_in_code "awk -F'|'" "$scripts"/*.sh)"
 
 # The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a
