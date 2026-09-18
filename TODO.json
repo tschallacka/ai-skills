@@ -53,21 +53,6 @@
       "updated_at": "2026-09-14T19:04:10Z"
     },
     {
-      "id": "T69",
-      "title": "A postmortem template carrying token accounting and a reviewer-session table",
-      "status": "open",
-      "priority": "low",
-      "parent": null,
-      "detail": "The unbuilt half of T58, separated rather than folded into its close. codex's postmortem recommendation 10, and the artifact that made their run legible in the first place: seventeen cycles, 109 findings and 41.7 million tokens, with a per-cycle table of session id, elapsed time and findings count. That data existed only because they went and collected it by hand afterwards. T57 now seeds the per-cycle fields in the review-scope block, so a template would have something to read rather than asking someone to reconstruct it. It has no natural home in the plan documents — a postmortem is written after the plan is finished and describes the process rather than the work — so it needs a decision about where it lives before it is written.",
-      "blocked_on": null,
-      "refs": [
-        "planning/scripts/create-adversarial-review.sh"
-      ],
-      "note": null,
-      "created_at": "2026-08-28T15:33:14Z",
-      "updated_at": "2026-08-28T15:33:14Z"
-    },
-    {
       "id": "T56",
       "title": "Mark a review rationale superseded when a later cycle replaces it",
       "status": "blocked",
@@ -1185,6 +1170,21 @@
       "note": "Shipped: chat-mcp accepts an optional session/agent argument (mirroring ai-text-editor-mcp's ADAPTER_ARGUMENTS) on every connected tool (join/leave/send/read/wait/who/trigger_add/trigger_remove/trigger_toggle/triggers). held() (src/chat-mcp/src/lib.rs) is now a Mutex<HashMap<String, Held>> keyed by the resolved session, opened lazily per key with the same retry-on-dead-connection behavior the single-connection version had, just scoped per entry. resolved_session_key() resolves an explicit session/agent argument via chat_client_rs::resolve_session_key's own Explicit rung (session wins if both given), falling back to the process's existing session_key() static when neither is given -- so a caller that never declares an identity keeps today's exact behavior unchanged.\n\nchat-client-rs grew the keyed counterparts underneath: Session::load_with_key/save_with_key (src/chat-client-rs/src/lib.rs), apply_session_with_key, save_session_with_key. Session::load/save/apply_session/save_session now delegate to these under session_key().0, so every existing call site (the chat CLI itself) is unaffected.\n\nVerified: cargo test -p chat-client-rs -p chat-mcp (64 + 19 + 12 = 95 total, incl. 2 new chat-client-rs tests proving two keys keep separate sessions in one state dir, and 3 new chat-mcp end-to-end integration tests against a real chat-server-rs: distinct session overrides get distinct minted nicks and hold separate connections verified via a real 'who' and a message read back under the sender's own nick; the 'agent' argument is confirmed an alias for 'session'; an empty override falls back to the default identity rather than minting a nick from nothing). cargo fmt/clippy clean across both crates. Full pre-push-check.sh PASS. Full ./run-tests.sh 236/238 (same 2 pre-existing failures, unrelated). Committed feat/rust-installer 9ab984e3.\n\nMakes T122's chat instruction ('declare your id to chat') true rather than aspirational. B322: found and fixed while verifying T91c -- Held::open/Owner never threaded the resolved session_key into conn.rs's own cursor bookkeeping (join/leave/send/read/deliver all called the unkeyed Session::load/save_cursor), so two distinct identities' cursors cross-contaminated through one shared file even though their nick and connection were already correctly separated. Fixed on feat/rust-installer 6be90b14.",
       "created_at": "2026-09-12T14:28:40Z",
       "updated_at": "2026-09-12T18:29:06Z"
+    },
+    {
+      "id": "T69",
+      "title": "A postmortem template carrying token accounting and a reviewer-session table",
+      "status": "done",
+      "priority": "low",
+      "parent": null,
+      "detail": "The unbuilt half of T58, separated rather than folded into its close. codex's postmortem recommendation 10, and the artifact that made their run legible in the first place: seventeen cycles, 109 findings and 41.7 million tokens, with a per-cycle table of session id, elapsed time and findings count. That data existed only because they went and collected it by hand afterwards. T57 now seeds the per-cycle fields in the review-scope block, so a template would have something to read rather than asking someone to reconstruct it. It has no natural home in the plan documents — a postmortem is written after the plan is finished and describes the process rather than the work — so it needs a decision about where it lives before it is written.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/create-adversarial-review.sh"
+      ],
+      "note": "Both goals of .plans/postmortem-template shipped this session (goal 1: generate-postmortem crate implemented and wired; goal 2: installer manifest/package sync fixed as B359). Plan progress.md shows 100% complete.",
+      "created_at": "2026-08-28T15:33:14Z",
+      "updated_at": "2026-09-18T01:56:22Z"
     },
     {
       "id": "T84",
