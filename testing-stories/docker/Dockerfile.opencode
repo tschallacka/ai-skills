@@ -1,0 +1,56 @@
+# Testing-story image: OpenCode harness.
+#
+# Runs a fresh-context, non-interactive `opencode run` session with exactly
+# one (or a few) ai-skills skill(s) installed and nothing else -- see
+# entrypoint.sh for the full contract. Build once, reuse for every skill and
+# story; SKILLS/STORY_FILE are supplied at `docker run` time, not baked in.
+#
+# Build:  docker build -f testing-stories/docker/Dockerfile.opencode \
+#           -t ai-skills-testing-story-opencode testing-stories/docker
+# Run:    see testing-stories/run-story.sh (do not invoke `docker run` by hand
+#           unless you are debugging the image itself).
+#
+# opencode reads its model provider credentials from its own config/auth
+# store rather than a single universally-documented env var per provider; see
+# run-story.sh's OPENCODE_* passthrough and `opencode auth login --help` on
+# the host if a given provider needs more than an env var.
+
+FROM node:20-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash git curl ca-certificates gnupg gawk sed grep \
+    && rm -rf /var/lib/apt/lists/*
+
+# gh + glab: the ci-failures story needs a real forge CLI to inspect a real
+# run/pipeline. Installed here (not left for the story to discover missing)
+# so that story is actually runnable, not just documented as broken.
+# gh: GitHub's own apt repo, always current, no version to pin.
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+# glab: GitLab ships it as a generic package on GitLab itself, not a repo --
+# resolve the latest tag from its own release API and install that .deb.
+RUN glab_version="$(curl -fsSL --max-time 10 'https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases' | grep -o '"tag_name":"[^"]*"' | head -1 | cut -d'"' -f4 | sed 's/^v//')" \
+    && [ -n "$glab_version" ] || { echo 'could not resolve latest glab version' >&2; exit 1; } \
+    && curl -fsSL --max-time 30 -o /tmp/glab.deb \
+        "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/${glab_version}/glab_${glab_version}_linux_amd64.deb" \
+    && apt-get install -y --no-install-recommends /tmp/glab.deb \
+    && rm -f /tmp/glab.deb
+
+RUN npm install -g opencode-ai
+
+# Runs as root: this container is a throwaway, single-run test harness, not a
+# multi-tenant service, and running as root sidesteps UID/bind-mount
+# permission mismatches between the host and whatever /workspace the runner
+# hands in. HOME is still reset to a fresh, empty directory below (never the
+# real root's), which is the property that actually matters here.
+WORKDIR /workspace
+ENV AGENT=opencode
+
+COPY entrypoint.sh /usr/local/bin/testing-story-entrypoint
+RUN chmod +x /usr/local/bin/testing-story-entrypoint
+
+ENTRYPOINT ["/usr/local/bin/testing-story-entrypoint"]
