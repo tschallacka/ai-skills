@@ -242,6 +242,37 @@ fn atomicity_check(
     }
 }
 
+/// Reads progress.md's bytes, retrying briefly on a transient
+/// "file not found" instead of failing on the first read (B349): CI-only,
+/// never reproduced locally, has shown the file passing an immediately
+/// preceding `is_file()` check and then failing this read moments later,
+/// within the same process, with no code path here or in `git_snapshot`
+/// that removes the file itself -- consistent with a transient filesystem
+/// visibility lag under the heavy parallel I/O contention real CI runs
+/// under (many sibling `cargo test` binaries and delegated subprocesses
+/// touching the same scratch tree at once), not a logic error. A short
+/// bounded retry is the correct response to a transient I/O error
+/// regardless of the exact underlying mechanism, and costs nothing on the
+/// ordinary path where the file is simply there.
+fn read_progress_file(path: &Path) -> std::io::Result<String> {
+    const ATTEMPTS: u32 = 5;
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+    let mut last_error = None;
+    for attempt in 0..ATTEMPTS {
+        match fs::read_to_string(path) {
+            Ok(content) => return Ok(content),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                last_error = Some(error);
+                if attempt + 1 < ATTEMPTS {
+                    std::thread::sleep(RETRY_DELAY);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.expect("loop runs at least once"))
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     if matches!(
@@ -291,7 +322,7 @@ fn main() {
     }
     git_snapshot(goal_dir.parent().unwrap_or(&goal_dir));
     let content =
-        fs::read_to_string(&progress_file).unwrap_or_else(|error| die(error.to_string(), 66));
+        read_progress_file(&progress_file).unwrap_or_else(|error| die(error.to_string(), 66));
     let updated = rewrite_status(&content, step_name, status)
         .unwrap_or_else(|_| die(format!("Step row not found exactly once: {step_name}"), 1));
     atomic_write(&progress_file, updated.as_bytes()).unwrap_or_else(|error| die(error, 73));
@@ -326,7 +357,65 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::all_declared_targets;
+    use super::{all_declared_targets, read_progress_file};
+
+    #[test]
+    fn read_progress_file_succeeds_on_a_present_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "update-step-b349-present-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("progress.md");
+        std::fs::write(&path, "content").unwrap();
+        assert_eq!(read_progress_file(&path).unwrap(), "content");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// B349: a genuinely missing file still reports NotFound after the
+    /// retry budget is exhausted, rather than retrying forever.
+    #[test]
+    fn read_progress_file_reports_not_found_when_truly_absent() {
+        let dir = std::env::temp_dir().join(format!(
+            "update-step-b349-absent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("progress.md");
+        let error = read_progress_file(&path).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    /// B349: a file that appears only after a couple of retries (simulating
+    /// the observed transient CI disappearance) is still read successfully.
+    #[test]
+    fn read_progress_file_recovers_once_the_file_appears_mid_retry() {
+        let dir = std::env::temp_dir().join(format!(
+            "update-step-b349-delayed-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("progress.md");
+        let write_path = path.clone();
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            std::fs::write(&write_path, "late content").unwrap();
+        });
+        assert_eq!(read_progress_file(&path).unwrap(), "late content");
+        handle.join().unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     /// B354 regression: a batched commit's own "extra" files must be checked
     /// against every unit's own declared target, not just the current unit's.

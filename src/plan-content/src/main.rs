@@ -623,20 +623,35 @@ fn find_command(plan: &Path, args: &[String]) {
             results.extend(scan_file(&id, &path, pattern, full));
         }
     }
-    if matches!(scope, "steps" | "all") {
-        for (id, path) in all_documents(plan)
-            .into_iter()
-            .filter(|(id, _)| id.starts_with("step:") && !id.ends_with("-testing"))
-        {
-            results.extend(scan_file(&id, &path, pattern, full));
+    if matches!(scope, "steps" | "testing" | "all") {
+        let documents = all_documents(plan);
+        let step_ids: std::collections::HashSet<&str> = documents
+            .iter()
+            .filter(|(id, _)| id.starts_with("step:"))
+            .map(|(id, _)| id.as_str())
+            .collect();
+        let is_testing_id = |id: &str| {
+            id.rsplit_once('/').is_some_and(|(goal_prefixed, step)| {
+                planning_document::is_testing_companion(step, |base| {
+                    step_ids.contains(format!("{goal_prefixed}/{base}").as_str())
+                })
+            })
+        };
+        if matches!(scope, "steps" | "all") {
+            for (id, path) in documents
+                .iter()
+                .filter(|(id, _)| id.starts_with("step:") && !is_testing_id(id))
+            {
+                results.extend(scan_file(id, path, pattern, full));
+            }
         }
-    }
-    if matches!(scope, "testing" | "all") {
-        for (id, path) in all_documents(plan)
-            .into_iter()
-            .filter(|(id, _)| id.starts_with("step:") && id.ends_with("-testing"))
-        {
-            results.extend(scan_file(&id, &path, pattern, full));
+        if matches!(scope, "testing" | "all") {
+            for (id, path) in documents
+                .iter()
+                .filter(|(id, _)| id.starts_with("step:") && is_testing_id(id))
+            {
+                results.extend(scan_file(id, path, pattern, full));
+            }
         }
     }
     if matches!(scope, "units" | "inventory" | "all") {

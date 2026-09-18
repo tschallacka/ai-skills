@@ -133,9 +133,17 @@ pub fn extract_state_as(tree: &PlanTree, generated_by: &str) -> Result<String, S
     for doc in tree.documents.iter().filter(|doc| {
         let relative = doc.path.strip_prefix(&tree.root).unwrap_or(&doc.path);
         let components: Vec<_> = relative.components().collect();
-        components.len() >= 3
-            && components[components.len() - 2].as_os_str() == "steps"
-            && !doc.path.to_string_lossy().ends_with("-testing.md")
+        if components.len() < 3 || components[components.len() - 2].as_os_str() != "steps" {
+            return false;
+        }
+        let stem = doc
+            .path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_default();
+        !planning_document::is_testing_companion(&stem, |base| {
+            document(tree, &doc.path.with_file_name(format!("{base}.md"))).is_some()
+        })
     }) {
         let relative = doc.path.strip_prefix(&tree.root).unwrap_or(&doc.path);
         let mut parts = relative.components();

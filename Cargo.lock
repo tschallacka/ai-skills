@@ -1102,6 +1102,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 name = "plan-content"
 version = "0.1.0"
 dependencies = [
+ "planning-document",
  "planning-map",
  "planning-table",
 ]
@@ -1111,6 +1112,7 @@ name = "plan-context"
 version = "0.1.0"
 dependencies = [
  "plan-context-core",
+ "planning-document",
 ]
 
 [[package]]
@@ -1148,6 +1150,7 @@ dependencies = [
 name = "plan-overview"
 version = "0.1.0"
 dependencies = [
+ "planning-document",
  "serde",
  "serde_json",
 ]
@@ -1298,6 +1301,7 @@ dependencies = [
 name = "planning-validator-stale"
 version = "0.1.0"
 dependencies = [
+ "planning-document",
  "planning-validator-common",
 ]
 

@@ -264,14 +264,14 @@ fn build_index(plan: &Path) -> String {
         if let Ok(entries) = fs::read_dir(goal.join("steps")) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "md")
-                    && !path
-                        .file_stem()
-                        .unwrap()
-                        .to_string_lossy()
-                        .ends_with("-testing")
-                {
-                    steps.push(path);
+                if path.extension().is_some_and(|ext| ext == "md") {
+                    let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+                    let is_companion = planning_document::is_testing_companion(&stem, |base| {
+                        path.with_file_name(format!("{base}.md")).is_file()
+                    });
+                    if !is_companion {
+                        steps.push(path);
+                    }
                 }
             }
         }

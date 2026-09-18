@@ -2,7 +2,7 @@
 // PACKAGE: PROD
 use planning_core::{atomic_write, git_snapshot, require_safe_value};
 use planning_document::{
-    delete_paragraph, document_kind, insert_paragraph, replace_field, replace_paragraph,
+    delete_paragraph, document_kind_for_step, insert_paragraph, replace_field, replace_paragraph,
     replace_section, replace_title,
 };
 use planning_inventory::find;
@@ -194,8 +194,13 @@ fn document_path(plan: &Path, id: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn section_spec(id: &str, section: &str) -> Result<(&'static str, u8), String> {
-    let kind = document_kind(id)?;
+fn section_spec(plan: &Path, id: &str, section: &str) -> Result<(&'static str, u8), String> {
+    let steps_dir = id
+        .strip_prefix("step:")
+        .and_then(|rest| rest.split_once('/'))
+        .map(|(goal, _)| plan.join(goal).join("steps"))
+        .unwrap_or_else(|| plan.to_path_buf());
+    let kind = document_kind_for_step(id, &steps_dir)?;
     planning_document::section_spec(kind, section)
         .ok_or_else(|| {
             let kind_name = match kind {
@@ -769,7 +774,7 @@ fn main() {
             };
             let section_id = args.get(goal_or_section).unwrap_or_else(|| usage(64));
             let (heading, number) =
-                section_spec(&id, section_id).unwrap_or_else(|error| die(error, 1));
+                section_spec(&plan, &id, section_id).unwrap_or_else(|error| die(error, 1));
             let body = paragraph_args(&args[goal_or_section + 1..], number)
                 .unwrap_or_else(|error| die(error, 64));
             let file = document_path(&plan, &id).unwrap_or_else(|error| die(error, 64));
@@ -888,7 +893,8 @@ fn main() {
                     64,
                 );
             }
-            let (_, section) = section_spec(id, section_id).unwrap_or_else(|error| die(error, 1));
+            let (_, section) =
+                section_spec(&plan, id, section_id).unwrap_or_else(|error| die(error, 1));
             let file = document_path(&plan, id).unwrap_or_else(|error| die(error, 64));
             let text = fs::read_to_string(&file).unwrap_or_else(|error| die(error.to_string(), 66));
             let max = text

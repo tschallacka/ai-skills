@@ -147,11 +147,15 @@ pub fn validate_stale(
                 .flatten()
                 .map(|entry| entry.path())
                 .filter(|path| {
-                    path.is_file()
-                        && path
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .is_some_and(|name| name.ends_with("-testing.md"))
+                    if !path.is_file() {
+                        return false;
+                    }
+                    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                        return false;
+                    };
+                    planning_document::is_testing_companion(stem, |base| {
+                        path.with_file_name(format!("{base}.md")).is_file()
+                    })
                 })
                 .collect::<Vec<_>>()
         })
