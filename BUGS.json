@@ -7371,7 +7371,7 @@
     {
       "id": "B361",
       "title": "role-context's REVIEWER.md staleness check hashes the wrong source file, always reporting REVIEWER.md stale",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7380,12 +7380,12 @@
       "expected": "role-context's stale check should hash the same file generate-reviewer pinned (skill-source.txt), or generate-reviewer should pin SKILL.md's hash instead -- whichever is the actual intended freshness contract -- so a genuinely fresh REVIEWER.md is never reported stale.",
       "mechanism": "The two functions were likely written before or independently of T87's SKILL.md-index/skill-source.txt split, and nothing keeps their two hash targets in sync.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "src/role-context/src/main.rs payload(): the REVIEWER.md staleness check now hashes planning/skill-source.txt (matching what generate-reviewer.sh actually pins) instead of planning/SKILL.md; corrected both the comparison target and the two user-facing stale/missing messages that named SKILL.md.",
+      "verification": "2 new regression tests (reviewer_stale_check_hashes_skill_source_not_skill_md, reviewer_stale_check_still_fires_on_a_real_mismatch), both passing; cargo test -p role-context 6/6, cargo clippy clean; direct before/after comparison of ROLE_ID=maintainer role-context chris against a freshly-regenerated REVIEWER.md, confirmed it now returns real content instead of the stale placeholder.",
       "found_by": "T148 persona-profile-migration plan, goal 04-cutover-profile-dispatch's own W18 (regenerating chris/christian/christoph's profile content from a live role-context read) -- discovered because it is the first thing in a while to actually exercise this code path and notice REVIEWER.md is always reported stale",
       "notes": null,
       "created_at": "2026-09-18T05:55:14Z",
-      "updated_at": "2026-09-18T05:55:14Z"
+      "updated_at": "2026-09-18T06:08:37Z"
     },
     {
       "id": "B25",
