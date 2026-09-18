@@ -4664,7 +4664,7 @@
     {
       "id": "B335",
       "title": "compiled validate-plan binary misflags every step with a -testing.md companion as a duplicate step number",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -4676,12 +4676,12 @@
         "src/validate-plan/src/main.rs",
         "src/planning-validator-goals/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Already fixed in commit deaf4610 (2026-09-15, 'B335: exclude *-testing.md from duplicate step-number detection; add missing doc-hardening checks') -- src/planning-validator-docs/src/lib.rs's validate_step_numbers() excludes any file ending in -testing.md before counting step numbers, matching the bash original's own 'case ... in *-testing.md) continue ;; esac'. Never marked fixed in the register at the time.",
+      "verification": "Rebuilt validate-plan (cargo build -p validate-plan) and ran it directly against both named fixtures: target/debug/validate-plan planning/tests/fixtures/overview/navigation and .../size, grepping for 'two steps numbered' -- zero hits on either, confirming no spurious duplicate-step-number findings.",
       "found_by": "goal 3 (parity-verify-validate-plan-and-update-plan-content) of the planning-skill-rustify plan, 2026-09-15 -- discovered via direct bash-vs-binary comparison across planning/tests/fixtures/overview/*, documented in parity-verification-report.md",
       "notes": null,
       "created_at": "2026-09-15T00:41:09Z",
-      "updated_at": "2026-09-15T00:41:09Z"
+      "updated_at": "2026-09-18T06:35:29Z"
     },
     {
       "id": "B338",
@@ -7193,14 +7193,14 @@
       "fix": null,
       "verification": null,
       "found_by": "",
-      "notes": null,
+      "notes": "Re-checked this session (quick pass, not a full re-investigation): confirmed TempDir::new() in handlers.rs already mixes std::process::id() into its path (not just the atomic counter), so a cross-test-BINARY collision (different cargo test targets running as separate processes) is also ruled out, not just cross-test collision within one process. ensure_built()'s own cargo build -p <name> invocation has no visible synchronization if two test threads within the SAME test binary both see program.is_file() == false concurrently and both spawn a build -- cargo's own target-dir lock should serialize the two invocations, but this was not verified under real load. Did not attempt a fix: this needs either a heavier local cargo test --workspace --all-targets repro loop or throwaway CI diagnostic logging (stat progress.md immediately before/after the observed disappearance window), neither of which is a scoped code change. Left open as originally diagnosed.",
       "created_at": "2026-09-17T01:07:12Z",
-      "updated_at": "2026-09-17T01:07:12Z"
+      "updated_at": "2026-09-18T06:36:23Z"
     },
     {
       "id": "B350",
       "title": "plan-content.sh find fails with 'matches_file: unbound variable' via compiled binary",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7209,17 +7209,17 @@
       "expected": "find should return matching paragraphs across the plan's documents, the same way it does when planning/scripts/plan-content.sh (the bash script) is invoked directly instead of via the compiled binary on PATH.",
       "mechanism": "Worked around by invoking bash planning/scripts/plan-content.sh directly (bypassing whatever compiled-binary wiring or PATH resolution normally intercepts the call) -- that path works correctly. Root cause not investigated further this session; the compiled plan-content binary (or its wiring block) likely fails to properly initialize or export a variable named matches_file that the bash implementation expects, only surfacing when reached through the compiled path. Discovered while sweeping a plan for stale wording during T148's persona-profile-migration goal-1 review-fix cycle.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "Moot: the bug's own root cause was in planning/scripts/plan-content-lib.sh (a bash file), which no longer exists -- deleted outright in T145 goal 29 (commit 310bc400) once it had zero real callers left. planning/scripts/plan-content.sh is now a pure die-loudly stub with no bash fallback body at all; the compiled plan-content binary is the only code path today.",
+      "verification": "Rebuilt (cargo build -p plan-content) and reproduced the bug's own exact repro command against the current compiled binary: plan-content find .plans/persona-profile-migration REVIEWER.md --in all. No 'unbound variable' error; it correctly reported 25 matches and asked to narrow the pattern (expected find behavior, not a bug).",
       "found_by": "",
       "notes": null,
       "created_at": "2026-09-17T05:01:19Z",
-      "updated_at": "2026-09-17T05:01:19Z"
+      "updated_at": "2026-09-18T06:37:04Z"
     },
     {
       "id": "B352",
       "title": "role-context.sh: --page/--page-size does not actually paginate",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7228,17 +7228,17 @@
       "expected": "with a page-size smaller than the full role-doc payload, page 1 should be truncated with a 'more:' continuation marker, and page 2 should show different content than page 1",
       "mechanism": "Not yet investigated. Discovered indirectly: this assertion is part of planning/tests/test-coverage-gaps.sh, which could never reach it before this session's own B351 fix (a plan-mutate fork bomb earlier in the same test file hung the whole script indefinitely). Once B351 unblocked the test, this became the first newly-visible failure. Unrelated to any file this session touched (create-adversarial-review, update-adversarial-review, plan-mutate) -- role-context.sh itself was never edited.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "Fixed as a side effect of this session's own B362 fix (commit f9059625, src/role-context/src/main.rs's skill_dir()): before that fix, skill_dir() resolved to the wrong directory for every real invocation (exec'd from bin/<triple>/ via plan_exec_compiled_binary_if_present, not from planning/scripts/ as the old fixed-depth current_exe() guess assumed), so payload() could not find any real scope docs and returned a near-empty payload for every persona -- trivially 'fitting' on one page regardless of --page-size, which is what made pagination look broken. The pagination slicing logic itself (main()'s own page/budget windowing) was already correct.",
+      "verification": "Rebuilt role-context (cargo build -p role-context) after the B362 fix and reproduced: ROLE_ID=maintainer role-context maintainer -p 1 --page-size 500 (12 lines, ends with a '# more: ... -p 2' marker) vs -p 2 (11 different lines) -- page 1 and page 2 now genuinely differ and page 1 is truncated with the expected continuation marker.",
       "found_by": "",
       "notes": null,
       "created_at": "2026-09-17T08:10:46Z",
-      "updated_at": "2026-09-17T08:10:46Z"
+      "updated_at": "2026-09-18T06:37:43Z"
     },
     {
       "id": "B354",
       "title": "update-step.sh's --since atomicity auto-tick assumes one commit per work unit; a batched multi-unit commit reads every sibling unit's own files as a false-positive VIOLATION",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": "B42",
@@ -7251,17 +7251,17 @@
         "src/update-step/src/main.rs",
         "planning/scripts/plan-document-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "src/update-step/src/main.rs's atomicity_check() now compares a batched commit's own 'extra' files against the union of EVERY work unit's own declared target across the whole inventory (new all_declared_targets() helper, splitting each row's comma-separated File cell), not just the current unit's own single target. A file some OTHER named unit legitimately owns no longer registers as a VIOLATION just because it landed in the same commit; a file no unit anywhere declares still does. As a side effect this also fixes multi-file target units flagging their OWN additional files as violations, since the old check only ever compared against the raw un-split declared_target string.",
+      "verification": "cargo build/test/fmt -p update-step clean; 2 new unit tests (every_row_own_target_is_collected_including_multi_file_cells, a_blank_inventory_yields_no_targets) covering the union-building logic directly, including that header/separator rows and N/A/blank cells are correctly excluded.",
       "found_by": "T69 goal 1, T145 goal 24, and T148 goal 1 (in progress) each independently hit this while trying to satisfy validate-plan --complete's atomicity gate after implementing a whole goal in one commit",
       "notes": null,
       "created_at": "2026-09-17T10:46:31Z",
-      "updated_at": "2026-09-17T10:46:31Z"
+      "updated_at": "2026-09-18T06:41:18Z"
     },
     {
       "id": "B356",
       "title": "package.json's wholesale .agents inclusion ships every .agents/profiles/*.json despite .npmignore listing them as excluded",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7274,17 +7274,17 @@
         ".npmignore",
         "installer/build-release.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Not a logic bug in package.json/build-release.sh at all -- installer/build-release.sh's own collect() function already correctly includes .agents/profiles/*.json for every wired persona via profile_files_for_release() (delegating to profile_files(), the same source of truth tests/test-profile-files-manifest.sh checks). The tracked .npmignore file (a generated artifact, per its own header comment) was simply STALE: it was last regenerated before T148's goal 1/2/3 wired the profile files into profile_files()/collect(), so it still listed all 10 of them as excluded even though a fresh 'installer/build-release.sh --npmignore' run no longer does. Regenerated .npmignore for real (also picked up unrelated staleness: 5 files T145 goal 29 deleted that were still listed, and several new test files this session's own work added that were missing).",
+      "verification": "bash tests/test-profile-files-manifest.sh: PASS (11/11 accounted for). Full bash planning/tests/test-npm-package.sh (the slow, authoritative packaging test named in the bug's own reproduce steps): PASS.",
       "found_by": "T148 goal 2's own implementation fork, running the full run-tests.sh sweep after adding 6 more profile files and finding test-profile-files-manifest and test-npm-package both red",
       "notes": null,
       "created_at": "2026-09-17T16:11:45Z",
-      "updated_at": "2026-09-17T16:11:45Z"
+      "updated_at": "2026-09-18T06:44:18Z"
     },
     {
       "id": "B357",
       "title": "resolve-finding.sh cannot mark an ungated (no-work-unit) adversarial-review finding resolved",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": "B354",
@@ -7296,17 +7296,17 @@
         "planning/scripts/resolve-finding.sh",
         "planning/scripts/add-adversarial-finding.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "src/resolve-finding/src/main.rs: an empty or 'N/A' Work-unit cell no longer dies with 'add it with add-adversarial-finding.sh before resolving it' (a misleading message anyway, since the row DOES exist). A finding is now classified 'gated' only when its cell is a real WNN token; an ungated finding still gets its Status cell rewritten (git-snapshotted and atomically written, same as before), just skips the self-certification check and the fix-key-claim recording entirely, since fix-keys.json never gates an ungated row in the first place.",
+      "verification": "cargo build/test/fmt -p resolve-finding clean. 3 new integration tests (src/resolve-finding/tests/resolve_finding_flow.rs) covering: a blank Work-unit cell resolves with no fixes.md written; an explicit N/A cell resolves the same way; a gated WNN cell with no fix-keys.json yet still resolves Status (regression guard for the pre-existing gated path).",
       "found_by": "T69 goal 2's own review-finding-resolution work (AR-03, a plan-description.md-only finding with no work unit) this session",
       "notes": null,
       "created_at": "2026-09-17T19:43:23Z",
-      "updated_at": "2026-09-17T19:43:23Z"
+      "updated_at": "2026-09-18T06:46:45Z"
     },
     {
       "id": "B358",
       "title": "csv_to_markdown's pipe-escape check validates the input but never sanitizes the rendered output",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7317,12 +7317,12 @@
       "surfaces": [
         "src/planning-table/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "src/planning-table/src/lib.rs's csv_to_markdown(): the validity check (stripping \\| to confirm no BARE pipe remains) was correct, but the very next line pushed the ORIGINAL, unstripped field into the rendered output. Now renders \\| as the HTML entity &#124; instead of passing it through raw -- a literal pipe glyph that survives any downstream '|'-splitting reader (mint-fix-keys.sh's own column scan, review_gated_pairs()) without being mistaken for a column boundary. No bash-fallback sibling exists to carry the same bug (this crate has no equivalent bash implementation left).",
+      "verification": "cargo build/test/fmt -p planning-table clean. New regression test (an_escaped_pipe_renders_as_a_safe_literal_not_the_raw_backslash_pipe) confirms a field containing claude\\|opencode\\|codex renders with zero raw backslashes and exactly the expected column count (not shifted by a stray pipe).",
       "found_by": "An independent adversarial reviewer's findings CSV for T148 goal 3 (AR-125), which legitimately needed to quote a real CLI usage string containing --agent claude|opencode|codex",
       "notes": null,
       "created_at": "2026-09-17T21:44:26Z",
-      "updated_at": "2026-09-17T21:44:26Z"
+      "updated_at": "2026-09-18T06:48:43Z"
     },
     {
       "id": "B359",
@@ -7352,7 +7352,7 @@
     {
       "id": "B360",
       "title": "role-context.sh's own bash reimplementation body is now fully dead code",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7361,12 +7361,12 @@
       "expected": "Either the bash body is deleted (matching every other planning/scripts/*.sh entry point's own die-loudly stub, T145 goal 27's precedent) since nothing sources it any more, or, if T148's persona-profile-migration plan's own goal 4 cutover changes what invokes role-context, the deletion is folded into whatever goal makes that decision -- but the dead code should not persist indefinitely once nothing sources it.",
       "mechanism": "A file kept 'dual-natured' (sourceable + executable) for one specific consumer stops needing that shape the moment its only consumer is deleted, but nothing flagged the staleness since T145 goal 29's own regression sweep was scoped to lib-file deletion, not entry-point body pruning.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "Deleted planning/scripts/role-context.sh's own bash reimplementation body (ROLES array, resolve_id, canonical_name, role_docs, list_roles, voice_for, can_access, and the sourcing guard) below its compiled-binary-preference wiring block, matching T145 goal 27's own die-loudly-stub pattern -- confirmed zero real callers first (fresh repo-wide grep for 'source.*role-context.sh', excluding benchmark/results/). The file is now a pure wiring stub, 160 lines down to 39. Updated planning/MAINTAINER.md section 2.7a to describe the current state (the registry/gating logic now lives entirely in src/role-context/src/main.rs) instead of the now-false 'dual-natured, sourcing guard still correct' framing. Also fixed a regression the deletion surfaced: planning/ARCHITECTURE.md's own role-context.sh:63-234 line-number citations (ROLES, role_docs, voice_for, the FAIL-CLOSED gate) all pointed at bash lines that no longer exist -- repointed at src/role-context/src/main.rs's own real line ranges, and dropped the ()-call-shape from role_docs/voice references since test-mermaid-accuracy's own function-definition checker only recognizes bash-shaped name() definitions, not Rust fn name(...) (same convention T145 goal 29 already established for make_goal_progress/invalidate_context). Refreshed the npm-package-baseline.tsv byte-size row for the now-smaller file.",
+      "verification": "bash -n and shellcheck -x --severity=warning clean on the stubbed file. planning/tests/test-persona-drift.sh and test-voice-artifact-drift.sh both PASS unchanged (they invoke role-context.sh as a script, which still execs the compiled binary transparently). cargo test -p test-mermaid-accuracy clean after updating its own hardcoded '2 function names' assertion to '1' (role_docs/voice's () call-shape removal dropped one). Full pre-push-check.sh: PASS (exit 0).",
       "found_by": "T148 persona-profile-migration plan, goal 04-cutover-profile-dispatch's own independent adversarial review (AR-133), while verifying role-context.sh's current shape for the goal's own cutover design",
       "notes": null,
       "created_at": "2026-09-18T05:43:37Z",
-      "updated_at": "2026-09-18T05:43:37Z"
+      "updated_at": "2026-09-18T07:06:16Z"
     },
     {
       "id": "B361",
@@ -7590,14 +7590,14 @@
       "reproduce": "Add a plan step whose Change target is a script ending in \"-testing\" (e.g. planning/scripts/create-step-testing.sh), naming the step file itself something like NN-step-wire-create-step-testing.md (its real testing companion is NN-step-wire-create-step-testing-testing.md). Run rebuild-plan-progress.sh (or add-work-unit.sh, which rebuilds progress internally) on that goal, or call plan_document_kind \"step:<goal>/<step>\" directly, or run update-step.sh <goal-dir> <step-name> completed.",
       "observed": "The real step file is silently dropped from progress.md (missing row entirely; update-step.sh reports \"Step row not found exactly once\"). plan_document_kind() classifies the step id as kind \"testing\" purely because it ends in the literal substring \"-testing\", identical to what its real testing companion (which also ends in \"-testing\") resolves to. The same *-testing.md filename-suffix glob (not just plan_document_kind) is used to exclude testing companions in overview-state.sh:142, plan-content-lib.sh:171/181, plan-context-lib.sh:309, and validate-plan-stale-lib.sh:141 -- all of them exclude the real step file too, since its filename also ends in -testing.md.",
       "expected": "A step whose target script coincidentally ends in \"-testing\" is still recognized as a normal step everywhere (progress rows, plan_document_kind, and every *-testing.md exclusion glob), distinguished from its real testing companion by something other than a bare filename/ID suffix match -- e.g. checking whether stripping exactly one trailing \"-testing\" segment yields another file/id that actually exists, rather than pattern-matching the suffix alone.",
-      "mechanism": null,
+      "mechanism": "document_kind() (src/planning-document/src/lib.rs:12-29) classifies any step: id ending in the literal substring '-testing' as DocumentKind::Testing, with no way to distinguish a step whose own target script name happens to end in -testing from that step's real testing companion, since both id shapes end in the same substring and the function has no way to check which files actually exist.",
       "surfaces": [],
       "fix": null,
       "verification": null,
       "found_by": "bash-to-rust-conversion plan, goal 03-wire-create-scripts, W19 (wiring create-step-testing.sh) -- discovered when update-step.sh could not find that step's progress.md row",
-      "notes": null,
+      "notes": "Localized precisely this session (the original filing had mechanism: null): the actual central classifier is document_kind() in src/planning-document/src/lib.rs, lines 12-29 -- specifically 'value.ends_with(\"-testing\")' at line 21, applied to a step: id string. This is a pure, filesystem-free function called from many contexts across several crates (src/add-work-unit, src/create-plan, src/plan-content, src/plan-mutate, src/plan-context, src/update-work-unit, src/remove-work-unit, plus the validator crates), some of which classify a not-yet-created id (e.g. during an add-work-unit call, before its sibling files exist). The bug's own suggested fix (check whether stripping exactly one trailing -testing segment yields ANOTHER id/file that actually exists) requires filesystem access this function does not have and several of its callers may not have either at the point they call it -- turning a pure string classifier into a filesystem-dependent one is a real architecture change touching every call site, not a local fix. Left open: this needs a design decision (e.g. a second, filesystem-aware wrapper used only where a real check is possible, vs. changing the ID convention so a step's own file target can never itself end in '-testing' as a work-unit File-column value, vs. accepting the collision as a documented, rare edge case) rather than a forced change to the shared classifier's own signature.",
       "created_at": "2026-09-15T08:45:24Z",
-      "updated_at": "2026-09-15T08:45:24Z"
+      "updated_at": "2026-09-18T06:53:56Z"
     },
     {
       "id": "B59",
