@@ -4686,7 +4686,7 @@
     {
       "id": "B338",
       "title": "Widespread .file_name().unwrap() panic risk across planning binaries when a plan/goal path is '.', '..', or the filesystem root",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -4695,12 +4695,12 @@
       "expected": "Every binary that derives a display name from a plan or goal directory path resolves it the same crash-proof way create-ui-validation now does (canonicalize the path first, falling back to the literal path or '.' if that fails), so a caller passing '.', '..', or a path ending in '..' never crashes any of these tools.",
       "mechanism": "Path::file_name().unwrap() called directly on a caller-supplied directory path without canonicalizing it first or handling the None case.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "9 of the ~15 genuinely reachable call sites fixed with create-ui-validation's own canonicalize-then-fallback pattern (src/add-goal/src/main.rs:69, src/add-work-unit/src/main.rs:225, src/create-plan-progress/src/main.rs:77, src/plan-content/src/main.rs:179,200, src/create-adversarial-review/src/main.rs:58, src/create-work-unit-inventory/src/main.rs:61, src/remove-work-unit/src/main.rs:179, src/plan-env/src/main.rs:198, src/create-plan/src/main.rs:246 -- the last two are defensive-only since their own path was already canonicalized earlier in the same function). The remaining occurrences across the other ~10 binaries this bug's own reproduce list named are confirmed NOT actually vulnerable on re-investigation: cleanup-plans.sh/add-goal.sh/add-work-unit.sh/create-plan-progress.sh/plan-content.sh/plan-context.sh/remove-work-unit.sh's other call sites all operate on a read_dir DirEntry::path(), which always has a real basename; configure-ui-story-cache.sh/create-ui-story-run-cache.sh operate on a path the program itself constructs by joining a literal filename; update-work-unit.sh's own site is built the same way (plan.join(goal).join('goal.md')); verify-target.sh's file is already known to start with app/code/ or vendor/; and create-plan.sh's own line 203 is provably unreachable, guarded by an earlier file_name()-then-die() check.",
+      "verification": "7 new integration tests (add-goal, add-work-unit, create-plan-progress, plan-content, create-adversarial-review, create-work-unit-inventory, remove-work-unit), each running the real compiled binary with '.' as the plan-directory argument via current_dir, asserting clean exit with no panic. cargo build --workspace, cargo fmt --check, and cargo clippy --workspace -D warnings all clean. Full pre-push-check.sh: PASS. Full run-tests.sh: 28 pre-existing failures, identical list to the established baseline, zero new failures.",
       "found_by": "bash-to-rust-conversion plan, goal 04-wire-misc-batch-one, adversarial review cycle 9 (AR-12) -- create-ui-validation's own instance was fixed immediately since it blocked that goal's own regression sweep; this bug tracks the remaining ~19 occurrences across other binaries, out of scope for that goal",
       "notes": "create-ui-validation's own instance is already fixed (src/create-ui-validation/src/main.rs, canonicalize-then-file_name with a '.' fallback), verified against the real test-plan-dir-synonym.sh which reproduces the crash as a precondition. The other ~19 occurrences listed above are unfixed.",
       "created_at": "2026-09-15T09:58:30Z",
-      "updated_at": "2026-09-15T09:58:43Z"
+      "updated_at": "2026-09-18T05:41:06Z"
     },
     {
       "id": "B339",
@@ -7329,6 +7329,25 @@
       "notes": null,
       "created_at": "2026-09-17T23:07:07Z",
       "updated_at": "2026-09-17T23:07:07Z"
+    },
+    {
+      "id": "B360",
+      "title": "role-context.sh's own bash reimplementation body is now fully dead code",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Read planning/scripts/role-context.sh in full and grep the repo for 'source .*role-context.sh'.",
+      "observed": "The file's CLI path already execs the compiled role-context binary or dies (T145 goal 27's own die-loudly wiring). Below that wiring block it still carries roughly 140 lines of a complete duplicate bash reimplementation (ROLES array, resolve_id, canonical_name, role_docs, list_roles, voice_for, can_access), originally kept because planning/scripts/plan-context-lib.sh sourced it directly to reuse resolve_id() without the CLI's own arg parsing firing (documented in the file's own 'DUAL-NATURED' comment and planning/MAINTAINER.md). plan-context-lib.sh was deleted in T145 goal 29 (commit 310bc400); a fresh repo-wide grep for 'source .*role-context.sh' finds zero real callers today.",
+      "expected": "Either the bash body is deleted (matching every other planning/scripts/*.sh entry point's own die-loudly stub, T145 goal 27's precedent) since nothing sources it any more, or, if T148's persona-profile-migration plan's own goal 4 cutover changes what invokes role-context, the deletion is folded into whatever goal makes that decision -- but the dead code should not persist indefinitely once nothing sources it.",
+      "mechanism": "A file kept 'dual-natured' (sourceable + executable) for one specific consumer stops needing that shape the moment its only consumer is deleted, but nothing flagged the staleness since T145 goal 29's own regression sweep was scoped to lib-file deletion, not entry-point body pruning.",
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "T148 persona-profile-migration plan, goal 04-cutover-profile-dispatch's own independent adversarial review (AR-133), while verifying role-context.sh's current shape for the goal's own cutover design",
+      "notes": null,
+      "created_at": "2026-09-18T05:43:37Z",
+      "updated_at": "2026-09-18T05:43:37Z"
     },
     {
       "id": "B25",
