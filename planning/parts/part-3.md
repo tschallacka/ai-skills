@@ -64,22 +64,29 @@ wholesale file read of a plan artifact is a context-overflow violation. If the
 gate cannot give you something, report it as a limitation — do not bypass it."
 
 The fresh adversary assumes the **chris placeholder persona** (oriented scout):
-spawn it with `ROLE_ID=chris`, have it load its scoped role docs and voice via
-`"<PLANNING_SKILL_DIR>/scripts/role-context.sh" chris` (which injects its
-stance preamble), and require it to state its persona id in the returned
-findings. The adversary forms its own findings from the bounded-read gate and
-its scoped role docs; it never receives the planning agent's conclusions. A
-spawn that cannot resolve ROLE_ID=chris fails closed (the reader refuses) and
-must be respawned with a valid identity.
+spawn it as the installed `chris` subagent, using whatever native
+subagent-launch mechanism the coordinator's own tool surface offers (e.g. an
+Agent-style tool with a `subagent_type` matching the profile name) — the
+installed profile already carries chris's own scoped bootstrap instructions
+and voice, baked in at install time from `.agents/profiles/chris.json`, so no
+further identity setup is needed at dispatch — and require it to state its
+persona id in the returned findings. The adversary forms its own findings
+from the bounded-read gate and its scoped role docs; it never receives the
+planning agent's conclusions. A spawn that cannot resolve the chris identity
+fails closed (the reader refuses) and must be respawned with a valid
+identity.
 
 **Scope note: the persona, capsule, and Reviewer A/B machinery describe the
-review harness.** When the role-context/capsule tooling (`role-context.sh`, a
-capsule workspace) is present in the environment, use it as described. When it
-is not — an ordinary plan in a generic environment — the requirement reduces
-to: use a **fresh secondary agent with a new session and no prior conclusions**
-(bounded-read locked and skill-locked as above) to produce the adversarial
-review; the persona, capsule manifest, and two-reviewer A/B split are
-harness-specific and OPTIONAL.
+review harness.** When the installed `chris`/`christian`/`christoph` profiles
+are present, use them as described. When they are not — the current harness
+offers no named-subagent launch mechanism, or the profiles were never
+installed, an ordinary plan in a generic environment — the requirement
+reduces to: use a **fresh secondary agent with a new session and no prior
+conclusions** (bounded-read locked and skill-locked as above), pasting the
+persona's own instructions content directly into its spawn prompt if the
+profile file (`.agents/profiles/chris.json`) is reachable, to produce the
+adversarial review; the persona, capsule manifest, and two-reviewer A/B split
+are harness-specific and OPTIONAL.
 
 Do not hand the adversary a command that dumps a plan file or directory in
 full. Require the adversary's returned findings to state that all plan reads
@@ -471,9 +478,6 @@ core (`git make docker sh bash zsh env sudo npx`). Those are the only entry
 points — arguments strengthen a candidate but never qualify a span on their
 own. Data/markup extensions (the rjq-matched list in
 `never-executable-extensions.json` — e.g. `.xml`, `.sql`, `.php`, `.md`),
-
-<!-- SKILL-LOAD-PROOF part=part-3 token=2f5c243e6588949c -->
-
 `:line`/`#Lnn` citation suffixes, and route/prose shapes (a leading `/`
 without a bin-like segment) never flag. Each registered command's first token
 teaches the detector that tool word, so registering `pytest -q` makes
@@ -559,6 +563,9 @@ proof when its rationale records why testing is not meaningful or possible.
 Do not use `no` to avoid testing observable behavior.
 
 Create plan and goal progress trackers with the bundled creation helpers;
+
+<!-- SKILL-LOAD-PROOF part=part-3 token=76619d78cea4059b -->
+
 they enforce the table shape and initialize every item as `💤 incomplete`.
 
 Use these statuses consistently:

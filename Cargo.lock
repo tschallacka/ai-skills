@@ -563,6 +563,10 @@ dependencies = [
 [[package]]
 name = "generate-profile-content"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "generate-reviewer"
