@@ -571,10 +571,11 @@ maintenance trap rather than a feature:
   `plan-context.sh checkpoint` (`plan-context.sh:165-184`), which validates its
   phase, state and two SHA-256 hashes carefully. No shipped script consumes the
   result.
-- `validation-report.md` is never written by anything, yet `plan-env.sh` writes
-  its path into every plan manifest as `PLAN_VALIDATION_FILE`
-  (`plan-env.sh:125`) and `check_manifests` requires the key to be present
-  (`:137`, `:167`). `validate-plan.sh` reports to stdout only.
+- `validation-report.md` is never written by anything, yet `plan-env.sh`'s
+  compiled binary writes its path into every plan manifest as
+  `PLAN_VALIDATION_FILE` (`src/plan-env/src/main.rs:214`) and `manifest_check`
+  requires the key to be present (`:371`, `:404`). `validate-plan.sh` reports
+  to stdout only.
 
 Two files are agent-authored with no helper and no validator coverage:
 `working-context.md` (`SKILL.md` §2.4) and `fixes.md`. Both are durable state

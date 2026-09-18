@@ -10,9 +10,14 @@
 //! benchmark/results, .plans, .claude (AR-125: never excludes the test
 //! script's own path -- that exclusion belongs only to corpus 2).
 //!
-//! Corpus 2 (script-text): the concatenated text of every `.sh` file in
-//! corpus 1, excluding only the real bash original's own source path
-//! (AR-125).
+//! Corpus 2 (script-text): the concatenated text of every `.sh` and `.rs`
+//! file in corpus 1, excluding only the real bash original's own source path
+//! (AR-125). `.rs` joined T145 goal 27: once a script's bash reimplementation
+//! body is stripped down to a die-loudly missing-binary stub, an identifier
+//! or artifact path the bash body used to mention (and a diagram or doc still
+//! names) survives only in the compiled binary's own Rust source -- the same
+//! real implementing code the checks exist to verify against, just no longer
+//! bash.
 //!
 //! Corpus 3 (markdown-text): the concatenated text of every `.md` file in
 //! corpus 1, with each of the four tracked documents' own path individually
@@ -81,7 +86,11 @@ pub fn build_corpora(repo_root: &Path, self_path: &Path, tracked_docs: &[&Path])
 
     let script_text = all_files
         .iter()
-        .filter(|p| p.extension().map(|e| e == "sh").unwrap_or(false))
+        .filter(|p| {
+            p.extension()
+                .map(|e| e == "sh" || e == "rs")
+                .unwrap_or(false)
+        })
         .filter(|p| p.as_path() != self_path)
         .filter_map(|p| std::fs::read_to_string(p).ok())
         .collect::<Vec<_>>()
@@ -185,5 +194,44 @@ mod tests {
         let text = "echo hi > out/foo.sh\n";
         assert!(script_writes(text, "foo.sh"));
         assert!(!script_writes(text, "bar.sh"));
+    }
+
+    #[test]
+    fn build_corpora_script_text_includes_rs_alongside_sh() {
+        let scratch = std::env::temp_dir().join(format!(
+            "test-mermaid-accuracy-discovery-{}-{}",
+            std::process::id(),
+            "rs-corpus"
+        ));
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(scratch.join("src/plan-env/src")).unwrap();
+        std::fs::create_dir_all(scratch.join("planning/scripts")).unwrap();
+        std::fs::write(
+            scratch.join("src/plan-env/src/main.rs"),
+            "fn manifest_check() { let _ = \"validation-report.md\"; }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            scratch.join("planning/scripts/other.sh"),
+            "echo bash_only_marker\n",
+        )
+        .unwrap();
+        std::fs::write(scratch.join("notes.md"), "check_manifests\n").unwrap();
+
+        let self_path = scratch.join("nonexistent-self.rs");
+        let corpora = build_corpora(&scratch, &self_path, &[]);
+
+        // A stripped bash entry point's own die-loudly stub no longer mentions
+        // the identifiers and artifact paths it used to -- those now live only
+        // in the compiled binary's Rust source, so the corpus that backs the
+        // reference/identifier checks must include it too (T145 goal 27).
+        assert!(corpora.script_text.contains("manifest_check"));
+        assert!(corpora.script_text.contains("validation-report.md"));
+        assert!(corpora.script_text.contains("bash_only_marker"));
+        // The markdown corpus stays markdown-only: a name that appears only in
+        // a doc must not silently satisfy the check via the wrong corpus.
+        assert!(!corpora.script_text.contains("check_manifests"));
+
+        let _ = std::fs::remove_dir_all(&scratch);
     }
 }

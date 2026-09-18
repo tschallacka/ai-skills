@@ -50,8 +50,12 @@ mkdir -p "$tmp/src" && printf 'one\n' > "$tmp/src/target.txt" \
 git -C "$tmp" add -A && git -C "$tmp" commit -qm base
 
 # ---- W06 pin: creation template is unticked ------------------------------
+# T145 goal 27 deleted add-work-unit.sh's own bash body (the step-file
+# template literal lived there) in favor of a die-loudly missing-binary stub;
+# the template is now generated only by the compiled binary's own Rust
+# source, so that is where this pin now checks.
 t_assert_contains "add-work-unit emits unticked boxes" \
-  "$(grep -c '\- \[ \] This step owns exactly one' "$scripts/add-work-unit.sh")" "1"
+  "$(grep -c '\- \[ \] This step owns exactly one' "$root/src/add-work-unit/src/main.rs")" "1"
 
 run_complete() { # runs the completion flow against the current tree
     "$scripts/update-step.sh" "$tmp/pl/01-evidence" 01-step-one completed \

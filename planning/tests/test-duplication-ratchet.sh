@@ -60,7 +60,7 @@ check_cap() {
 }
 
 # Hand-rolled `"$f.tmp.$$"` temp files, which plan_atomic_write/plan_track_tmp own.
-check_cap 'hand-rolled .tmp.$$ temp sites' 42 \
+check_cap 'hand-rolled .tmp.$$ temp sites' 13 \
     "$(count_in_code '\.tmp\.\$\$' "$scripts"/*.sh)"
 
 # Tests that do not source lib-test.sh, and so cannot record a finding that
@@ -85,16 +85,16 @@ check_cap 'tests not sourcing lib-test.sh' 6 \
 # 30th site: remove-coverage.sh (T17) matches coverage rows by outcome cell --
 # a new distinct table, admitted on the same terms as the 29th. The shared
 # reader that would absorb both remains future work tracked in MAINTAINER §3.
-check_cap "inline awk -F'|' parsers" 11 \
+check_cap "inline awk -F'|' parsers" 6 \
     "$(count_in_code "awk -F'|'" "$scripts"/*.sh)"
 
 # The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a
 # migration must stay byte-identical.
-check_cap 'seed progress-bar literal copies' 3 \
+check_cap 'seed progress-bar literal copies' 0 \
     "$(files_with_in_code '0%%  #### ' "$scripts"/*.sh | wc -l | tr -d ' ')"
 
 # percent/bar/icon derivation; update-progress.sh is the canonical copy.
-check_cap 'percent/bar/icon derivation copies' 3 \
+check_cap 'percent/bar/icon derivation copies' 1 \
     "$(files_with_in_code 'completed \* 100 + total / 2' "$scripts"/*.sh | wc -l | tr -d ' ')"
 
 # Repo-wide, not just $scripts: two `# DEDUPE:` markers once survived in

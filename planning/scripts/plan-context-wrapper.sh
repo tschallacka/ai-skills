@@ -27,25 +27,4 @@ source "$pcw_script_dir/plan-core-lib.sh"
 plan_exec_compiled_binary_if_present plan-context-wrapper "$pcw_script_dir" "$@"
 unset pcw_script_dir
 
-usage() {
-    local rc="${1:-64}"
-    cat <<USAGE
-Usage: ${0##*/} <variables-file> <plan-context.sh arguments...>
-       ${0##*/} --help
-USAGE
-    exit "$rc"
-}
-
-case "${1:-}" in -h|--help) usage 0 ;; esac
-[ "$#" -ge 2 ] || usage
-
-variables_file="$1"
-shift
-[ -f "$variables_file" ] || { printf 'variables file not found: %s\n' "$variables_file" >&2; exit 66; }
-
-# The caller owns this short-lived per-worker file; it carries only benign
-# context defaults, and this wrapper writes no shared state.
-# shellcheck disable=SC1090
-source "$variables_file"
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$script_dir/plan-context.sh" "$@"
+plan_die "plan-context-wrapper: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it" 69

@@ -59,15 +59,24 @@ run_without_jq() {
 plan_dir="$temporary_root/plan"
 PLANS_ROOT="$temporary_root" "$scripts/create-plan.sh" "$plan_dir" 'Dependency guard' >/dev/null
 
-# validate-plan.sh: refuses with 69 and names rjq.
+# validate-plan.sh: refuses with 69 and names either rjq or the missing
+# compiled binary.
+#
+# T145 goal 27 deleted this script's own bash reimplementation body (the code
+# that used to shell out to rjq and guard its own absence) in favor of a
+# die-loudly missing-binary stub. jqless_bin has no compiled binary either, so
+# the stub -- not the old rjq guard -- is what fires here; it still refuses
+# loudly with exit 69, just naming the missing compiled binary instead of rjq.
+# The safety property this test exists to check (refuse, never quietly do
+# less) holds either way.
 set +e
 output="$(run_without_jq "$runtime_scripts/validate-plan.sh" "$plan_dir")"
 rc=$?
 set -e
 [ "$rc" -eq 69 ] || note_fail "validate-plan.sh without rjq exited $rc, expected 69"
 case "$output" in
-    *rjq*) ;;
-    *) note_fail "validate-plan.sh without rjq did not mention rjq: $output" ;;
+    *rjq*|*"compiled binary"*) ;;
+    *) note_fail "validate-plan.sh without rjq did not mention rjq or a missing compiled binary: $output" ;;
 esac
 # It must refuse rather than report findings, or a caller cannot tell a broken
 # install from a bad plan.
@@ -75,15 +84,16 @@ case "$output" in
     *FAIL:*) note_fail 'validate-plan.sh without rjq reported findings instead of refusing' ;;
 esac
 
-# register-command.sh: same contract.
+# register-command.sh: same contract (also migrated by T145 goal 27; see the
+# validate-plan.sh comment above).
 set +e
 output="$(run_without_jq "$runtime_scripts/register-command.sh" "$plan_dir" build 'make all' 'when building')"
 rc=$?
 set -e
 [ "$rc" -eq 69 ] || note_fail "register-command.sh without rjq exited $rc, expected 69"
 case "$output" in
-    *rjq*) ;;
-    *) note_fail "register-command.sh without rjq did not mention rjq: $output" ;;
+    *rjq*|*"compiled binary"*) ;;
+    *) note_fail "register-command.sh without rjq did not mention rjq or a missing compiled binary: $output" ;;
 esac
 
 # With rjq present the same commands must work, so the guard cannot be a
