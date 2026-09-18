@@ -4937,6 +4937,25 @@
       "updated_at": "2026-09-17T10:56:54Z"
     },
     {
+      "id": "B362",
+      "title": "role-context.sh's own wrapper invocation resolved the wrong skill directory, silently dropping every persona's scope docs",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "export AI_SKILLS_BIN_ROOT=<repo>/bin/x86_64-unknown-linux-musl; ROLE_ID=chris bash planning/scripts/role-context.sh chris -p1",
+      "observed": "role-context's own skill_dir() (src/role-context/src/main.rs) computed the planning skill directory as env::current_exe()'s own two-parents-up ancestor, assuming the running binary sits at planning/scripts/<name>. But planning/scripts/role-context.sh's own wiring block (plan_exec_compiled_binary_if_present) always execs the binary from plan_bin_dir()'s own resolved location (AI_SKILLS_BIN_ROOT, the shared install dir, or bin/<triple> in a dev tree) -- never from planning/scripts/ itself. Two parents up from bin/<triple>/role-context lands on the repo root's own bin/ directory, not planning/, so every scope doc (ROLES.md, roles/*.md, SKILL.md, MAINTAINER-STYLE-CONTRACT.md, REVIEWER.md) came back '# (missing: ...)' for every persona invoked through the documented wrapper path, and voice() (which reads roles/VOICES.md the same way) silently returned no voice line either. Confirmed directly: invoking the bare planning/scripts/role-context copy (which happens to sit at the right depth) worked correctly and returned real content, while the exact same command through planning/scripts/role-context.sh did not. Discovered because it made planning/tests/test-voice-artifact-drift.sh fail on the very first registry id (alex) once the test's own generate-profile-content dependency (T148 goal 4) started exercising this path for real.",
+      "expected": "Every persona invoked via the documented ROLE_ID=<id> bash planning/scripts/role-context.sh <id> pattern -- the exact instruction part-3.md gave a coordinator for reviewer dispatch until this same session's own T148 goal 4 rewrote it -- returns its real scoped content, regardless of where plan_bin_dir() resolves the compiled binary from.",
+      "mechanism": "skill_dir() never read PLANNING_SKILL_ROOT, the environment variable plan_exec_compiled_binary_if_present already exports specifically to solve this exact problem, and which every other wired Rust binary in this repo (build-plan-libs, generate-portability, generate-skill-docs, plan-mutate, run-adversary-probe, test-mermaid-accuracy, verify-skill-load, validate-plan) already reads first, falling back to an ancestor walk. role-context was the one binary that reinvented this with a fixed-depth current_exe() guess instead.",
+      "surfaces": [],
+      "fix": "src/role-context/src/main.rs: replaced the fixed-depth skill_dir() with skill_root_from(), matching verify-skill-load.rs's own precedent exactly -- PLANNING_SKILL_ROOT first, then an ancestor walk of both the running binary's path and the current working directory for the nearest ancestor containing planning/scripts. 2 new regression tests. Rebuilt and restaged both the bin/<triple> and planning/scripts/ copies; confirmed the wrapper-invoked path now returns real content, and re-ran planning/tests/test-voice-artifact-drift.sh and test-persona-drift.sh clean.",
+      "verification": "cargo test -p role-context (6/6 passing, 2 new); cargo clippy -p role-context --all-targets -D warnings clean; direct comparison of ROLE_ID=chris bash planning/scripts/role-context.sh chris -p1 before (missing docs) and after (real content) the fix; planning/tests/test-voice-artifact-drift.sh and test-persona-drift.sh both PASS against the fixed binary.",
+      "found_by": "T148 persona-profile-migration plan, goal 04-cutover-profile-dispatch's own W20 (rewriting the persona drift tests) -- test-voice-artifact-drift.sh's own injection-proof check failed on the very first registry id once it exercised the real wrapper-invoked binary for the first time in a while",
+      "notes": null,
+      "created_at": "2026-09-18T06:07:56Z",
+      "updated_at": "2026-09-18T06:07:56Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
@@ -7348,6 +7367,25 @@
       "notes": null,
       "created_at": "2026-09-18T05:43:37Z",
       "updated_at": "2026-09-18T05:43:37Z"
+    },
+    {
+      "id": "B361",
+      "title": "role-context's REVIEWER.md staleness check hashes the wrong source file, always reporting REVIEWER.md stale",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run planning/scripts/generate-reviewer planning planning/REVIEWER.md to produce a freshly-pinned REVIEWER.md, then run ROLE_ID=maintainer planning/scripts/role-context chris --page-size 10000000 and read its REVIEWER.md section.",
+      "observed": "role-context's payload() function (src/role-context/src/main.rs) reads REVIEWER.md's own 'Source SHA-256' pin line and compares it against a fresh sha256 of planning/SKILL.md; if they differ it substitutes a stale-warning placeholder instead of REVIEWER.md's real content. But generate-reviewer (src/generate-reviewer/src/main.rs) pins the hash of planning/skill-source.txt, not SKILL.md -- confirmed directly: after regenerating REVIEWER.md fresh, sha256sum planning/SKILL.md and REVIEWER.md's own printed pin do not match, and generate-skill-docs --check planning independently confirms SKILL.md is genuinely up to date with skill-source.txt at the same time. The two hashes are of two different files by design (SKILL.md is a short generated index per T87; skill-source.txt is the full authored source), so role-context's check can never pass even when nothing is actually stale.",
+      "expected": "role-context's stale check should hash the same file generate-reviewer pinned (skill-source.txt), or generate-reviewer should pin SKILL.md's hash instead -- whichever is the actual intended freshness contract -- so a genuinely fresh REVIEWER.md is never reported stale.",
+      "mechanism": "The two functions were likely written before or independently of T87's SKILL.md-index/skill-source.txt split, and nothing keeps their two hash targets in sync.",
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "T148 persona-profile-migration plan, goal 04-cutover-profile-dispatch's own W18 (regenerating chris/christian/christoph's profile content from a live role-context read) -- discovered because it is the first thing in a while to actually exercise this code path and notice REVIEWER.md is always reported stale",
+      "notes": null,
+      "created_at": "2026-09-18T05:55:14Z",
+      "updated_at": "2026-09-18T05:55:14Z"
     },
     {
       "id": "B25",
