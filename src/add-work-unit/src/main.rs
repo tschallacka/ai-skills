@@ -222,7 +222,20 @@ fn make_plan_progress(plan: &Path) -> Result<(), String> {
     } else {
         "💤"
     };
-    let mut output = format!("# Progress: {}\n\n**Overall progress:** `{percent}%  {bar}  100%` {icon}\n\n| Goalname | Description | Completion status |\n|---|---|---|\n", plan.file_name().unwrap().to_string_lossy());
+    // file_name() is None for a path that is exactly "." or ".." (or the
+    // filesystem root), which a caller can legitimately pass -- canonicalize
+    // resolves those to a real absolute path first (B338).
+    let plan_name = plan
+        .canonicalize()
+        .ok()
+        .and_then(|resolved| {
+            resolved
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+        .or_else(|| plan.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| ".".to_string());
+    let mut output = format!("# Progress: {plan_name}\n\n**Overall progress:** `{percent}%  {bar}  100%` {icon}\n\n| Goalname | Description | Completion status |\n|---|---|---|\n");
     for (name, description, status) in goals {
         output.push_str(&format!("| {name} | {description} | {status} |\n"));
     }

@@ -58,3 +58,34 @@ fn the_review_scope_block_carries_all_six_bullets_in_order() {
 
     let _ = fs::remove_dir_all(&plan);
 }
+
+#[test]
+fn a_dot_plan_directory_does_not_panic_b338() {
+    let plan = unique_dir("dot-arg");
+    let output = Command::new(env!("CARGO_BIN_EXE_create-adversarial-review"))
+        .arg(".")
+        .current_dir(&plan)
+        .output()
+        .expect("run create-adversarial-review");
+    assert!(
+        output.status.success(),
+        "create-adversarial-review failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("panicked"),
+        "create-adversarial-review panicked: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let review = fs::read_to_string(plan.join("adversarial-review.md")).unwrap();
+    let expected_name = plan
+        .canonicalize()
+        .unwrap()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(review.contains(&format!("# Adversarial review: {expected_name}")));
+
+    let _ = fs::remove_dir_all(&plan);
+}

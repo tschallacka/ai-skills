@@ -243,7 +243,14 @@ fn main() {
             ("PLAN_ROOT", plan_root.display().to_string()),
             (
                 "PLAN_NAME",
-                plan_root.file_name().unwrap().to_string_lossy().into(),
+                // file_name() is None if plan_root resolves to the
+                // filesystem root; plan_root is already canonicalized above,
+                // but this stays defensive rather than assuming that can
+                // never happen (B338).
+                plan_root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| ".".to_string()),
             ),
             (
                 "GLOBAL_PLANS_ENV_FILE",

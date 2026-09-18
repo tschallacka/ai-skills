@@ -195,7 +195,15 @@ fn write_plan(plan: &Path, root_arg: Option<&str>, snapshot_arg: Option<&str>) {
             value("PLAN_SNAPSHOT_REPO", snapshot),
             value("PLANS_ROOT", root.display().to_string()),
             value("PLAN_ROOT", plan.display().to_string()),
-            value("PLAN_NAME", plan.file_name().unwrap().to_string_lossy()),
+            value(
+                "PLAN_NAME",
+                // file_name() is None if plan resolves to the filesystem
+                // root; plan is already canonicalized above, but this stays
+                // defensive rather than assuming that can never happen (B338).
+                plan.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| ".".to_string()),
+            ),
             value("GLOBAL_PLANS_ENV_FILE", global.display().to_string()),
             value("PLAN_ENV_FILE", manifest.display().to_string()),
             value(
