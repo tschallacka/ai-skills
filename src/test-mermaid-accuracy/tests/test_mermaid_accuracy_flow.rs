@@ -37,11 +37,13 @@ fn the_real_live_tracked_documents_pass_with_no_findings() {
         String::from_utf8_lossy(&output.stderr)
     );
     // The real, live corpus reality this port was verified against (see
-    // goal.md's own AR-133/AR-134 citations): 54 scripts, 24 artifacts, 3
+    // goal.md's own AR-133/AR-134 citations, updated by T145 goal 29's own
+    // ARCHITECTURE.md pruning once plan-context-lib.sh/plan-reconcile-lib.sh/
+    // validate-plan-*-lib.sh were deleted): 51 scripts, 24 artifacts, 2
     // function names -- confirming the four tracked documents actually got
     // scanned, not merely that the process exited zero.
-    assert!(stdout.contains("54 scripts and 24 artifacts named in diagrams: PASS"));
-    assert!(stdout.contains("3 function names in the diagram documents: PASS"));
+    assert!(stdout.contains("51 scripts and 24 artifacts named in diagrams: PASS"));
+    assert!(stdout.contains("2 function names in the diagram documents: PASS"));
     assert!(output.status.success());
 }
 

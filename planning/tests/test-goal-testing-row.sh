@@ -118,29 +118,8 @@ assert_eq "$authored" "$(testing_row "$goal")" 'rationale after remove-work-unit
 add_unit "$plan" W03 03-step-emit
 add_unit "$plan" W04 04-step-flush
 assert_eq "$authored" "$(testing_row "$goal")" 'rationale after consecutive add-work-unit calls'
-# shellcheck source=planning/scripts/plan-document-lib.sh
-source "$scripts/plan-document-lib.sh"
-# shellcheck source=planning/scripts/plan-reconcile-lib.sh
-source "$scripts/plan-reconcile-lib.sh"
-inventory="$plan/work-unit-inventory.md"
-plan_rewrite_owned_work_units "$goal" "$inventory" 01-first-goal
-cp "$goal" "$work/once.md"
-plan_rewrite_owned_work_units "$goal" "$inventory" 01-first-goal
-cmp -s "$work/once.md" "$goal" || note_fail 'a second rewrite changed the goal file'
-headings="$(grep -c '^## Testing requirement' "$goal" || true)"
-assert_eq 1 "$headings" 'testing-requirement heading count after two rewrites'
 
-# 3. No row in the section: the default is written and nothing fails.
-plan="$(make_plan default no-row)"
-goal="$plan/01-first-goal/goal.md"
-add_unit "$plan" W01 01-step-render
-if plan_rewrite_owned_work_units "$goal" "$plan/work-unit-inventory.md" 01-first-goal; then
-    assert_eq '| no | <rationale> |' "$(testing_row "$goal")" 'default row with no row present'
-else
-    note_fail 'plan_rewrite_owned_work_units failed on a goal with no testing row'
-fi
-
-# 4/5. The validation pass: the decoy table is reported, the plain goal is not.
+# 3/4. The validation pass: the decoy table is reported, the plain goal is not.
 if ! command -v rjq >/dev/null 2>&1; then
     printf 'goal-testing-row: UNCONFIGURED (rjq) — validation assertions skipped\n'
     [ "$(t_failures)" -eq 0 ] || exit 1

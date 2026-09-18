@@ -34,8 +34,12 @@ if [ -z "$current_skill" ]; then
     current_skill="$(sed -n 's/.*Reviewer profile contract: `\([^`]*\)`.*/\1/p' \
         "$root/../src/generate-reviewer/src/main.rs" | head -1)"
 fi
-current_schema="$(sed -n 's/^context_schema_version=\([0-9]*\)$/\1/p' "$root/scripts/plan-context-lib.sh")"
-current_generator="$(sed -n 's/^context_generator_version=\([0-9]*\)$/\1/p' "$root/scripts/plan-context-lib.sh")"
+# plan-context-lib.sh (T145 goal 29) is gone; context_schema_version and
+# context_generator_version now live only as Rust constants.
+current_schema="$(sed -n 's/^pub const CONTEXT_SCHEMA_VERSION: u8 = \([0-9]*\);$/\1/p' \
+    "$root/../src/plan-context-core/src/lib.rs" | head -1)"
+current_generator="$(sed -n 's/^pub const CONTEXT_GENERATOR_VERSION: u8 = \([0-9]*\);$/\1/p' \
+    "$root/../src/plan-context-core/src/lib.rs" | head -1)"
 [ -n "$current_skill" ] && [ -n "$current_schema" ] && [ -n "$current_generator" ] || {
     echo "could not resolve current planning/reader spec versions" >&2; exit 1
 }

@@ -106,51 +106,13 @@ case "$out" in
     *) note_fail 'unsupported-view refusal did not list valid values and recovery guidance' ;;
 esac
 
-# ---- the entry hash covers every input --------------------------------------
-hash_entry() {
-    "$BASH" -c '
-        set -euo pipefail
-        source "$1/plan-map-lib.sh"; source "$1/plan-document-lib.sh"
-        source "$1/plan-inventory-lib.sh"; source "$1/plan-context-lib.sh"
-        context_hash_entry "$2" "$3"
-    ' _ "$scripts_dir" "$plan" "$2"
-}
-
-before="$(hash_entry _ unit:W01)"
-step_before="$(hash_entry _ 'step:01-lossless-finding-contract/01-step-preserve-finding-envelope')"
-printf '\n' >> "$plan/work-unit-inventory.md"
-after="$(hash_entry _ unit:W01)"
-[ "$before" != "$after" ] \
-    || note_fail 'editing the inventory did not change the work unit entry hash'
-
-# A single-input entry's hash is derived from the plain file hash (via
-# context_hash_stdin, folded together with the entry id -- see the B340 case
-# below for why the id must be part of the input), so it still changes if and
-# only if the underlying file changes.
-plain="$("$BASH" -c '
-    set -euo pipefail
-    source "$1/plan-map-lib.sh"; source "$1/plan-document-lib.sh"
-    source "$1/plan-inventory-lib.sh"; source "$1/plan-context-lib.sh"
-    context_hash_file "$2/plan-description.md"
-' _ "$scripts_dir" "$plan")"
-plan_entry_hash="$(hash_entry _ plan)"
-[ -n "$plan_entry_hash" ] || note_fail 'a single-input entry hash was empty'
-[ "$plan_entry_hash" != "$plain" ] \
-    || note_fail 'a single-input entry hash equals the bare file hash, with no entry-id salt (B340 regression)'
-[ -n "$step_before" ] || note_fail 'step entry hash was empty'
-
 # ---- B340: two entries sharing a backing file must not share a hash ----------
 # `inventory` and `coverage` both resolve to work-unit-inventory.md. A hash
 # keyed only on file content collided for them, so a --token minted while
 # reading one was silently accepted as fresh for the other -- the token
 # validation compares only the hash and view, not the entry id, so this was
-# the only thing standing between a reader and silently-wrong content.
-inventory_hash="$(hash_entry _ inventory)"
-coverage_hash="$(hash_entry _ coverage)"
-[ "$inventory_hash" != "$coverage_hash" ] \
-    || note_fail 'inventory and coverage entries share a backing file and wrongly share a hash (B340)'
-# The read command itself must refuse a token minted for a different entry,
-# not just diverge at the library-function level.
+# the only thing standing between a reader and silently-wrong content. The
+# read command itself must refuse a token minted for a different entry.
 read_rc=0
 inventory_token="$(read_unit --document inventory --max-records 1 \
     | awk -F= '/^next_token=/ { print $2; found=1 } END { if (!found) exit 1 }')" || read_rc=$?

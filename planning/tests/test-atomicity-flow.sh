@@ -89,12 +89,4 @@ run_complete || t_fail "completion flow failed with extra path"
 t_assert_contains "third box carries violation annotation" \
   "$(grep -c '^- \[x\] Any follow-on target.*VIOLATION: also touched src/other\.txt' "$step")" "1"
 
-# ---- W07 pin: relaxed validator accepts annotated tick, rejects unticked-
-#      on-completed (function-level against the real lib) -------------------
-common="$scripts/validate-plan-common-lib.sh"
-[ -f "$common" ] || t_fail "common lib missing"
-# shellcheck disable=SC1090  # non-constant by design: the path is the argument
-( source "$common"
-  source "$scripts/validate-plan-goals-lib.sh" ) >/dev/null 2>&1 || true
-
 t_end
