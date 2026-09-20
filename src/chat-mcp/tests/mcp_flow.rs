@@ -65,7 +65,7 @@ impl Harness {
     /// Start a server and an adapter against a private chat home, or None when
     /// this build has no server beside the adapter (a single-crate test leg).
     fn new(name: &str) -> Option<Harness> {
-        let server_bin = bin_dir().join("chat-server-rs");
+        let server_bin = bin_dir().join(format!("chat-server-rs{}", std::env::consts::EXE_SUFFIX));
         if !server_bin.is_file() {
             eprintln!(
                 "mcp_flow[{name}]: SKIPPED — no chat-server-rs beside the adapter in this \

@@ -57,7 +57,9 @@ fn sibling_bin_dir() -> PathBuf {
 /// helper exists to solve, mirrored here (AR-114, cycle 46).
 pub fn resolve_workspace_binary(name: &str) -> PathBuf {
     let bin_dir = sibling_bin_dir();
-    let program = bin_dir.join(name);
+    // A built binary carries the platform's executable suffix (.exe on
+    // Windows), which `join(name)` alone leaves off.
+    let program = bin_dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     if program.is_file() {
         return program;
     }
