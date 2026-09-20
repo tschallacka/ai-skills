@@ -199,13 +199,34 @@ fn archive(history: &Path, scope_preamble: &str, landed_rows: &str, explicit: Op
     );
 }
 
+// A bare `Command::new("mint-fix-keys")` relies on the OS resolving the name
+// through $PATH, but nothing in this repo's install or exec path ever puts a
+// skill's own scripts/bin directory on $PATH (confirmed live: this failed
+// with a raw ENOENT even though a working mint-fix-keys sat right next to
+// this very binary). MINT_FIX_KEYS_BIN keeps working as an explicit override;
+// otherwise resolve the sibling in this binary's own directory first, the
+// same directory plan_exec_compiled_binary_if_present.sh execs THIS binary
+// from -- mirroring run-adversary-probe's own sibling() helper -- and only
+// fall back to the bare name (still $PATH-dependent) if current_exe() can't
+// be read at all.
+fn mint_fix_keys_binary() -> PathBuf {
+    if let Some(path) = env::var_os("MINT_FIX_KEYS_BIN") {
+        return PathBuf::from(path);
+    }
+    env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join("mint-fix-keys")))
+        .unwrap_or_else(|| PathBuf::from("mint-fix-keys"))
+}
+
 fn mint(_plan: &Path, review: &str) -> Result<(), String> {
     let temporary = env::temp_dir().join(format!("adversarial-review-mint-{}", std::process::id()));
     fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
     let review_file = temporary.join("adversarial-review.md");
     fs::write(&review_file, review).map_err(|error| error.to_string())?;
-    let binary = env::var_os("MINT_FIX_KEYS_BIN").unwrap_or_else(|| "mint-fix-keys".into());
-    let result = Command::new(binary).arg(&temporary).output();
+    let result = Command::new(mint_fix_keys_binary())
+        .arg(&temporary)
+        .output();
     let _ = fs::remove_dir_all(&temporary);
     match result {
         Ok(output) if output.status.success() => Ok(()),
@@ -312,8 +333,7 @@ fn main() {
     if consumed_incoming {
         let _ = fs::remove_file(plan.join("adversarial-review-incoming.md"));
     }
-    let binary = env::var_os("MINT_FIX_KEYS_BIN").unwrap_or_else(|| "mint-fix-keys".into());
-    let output = Command::new(binary)
+    let output = Command::new(mint_fix_keys_binary())
         .arg(&plan)
         .output()
         .unwrap_or_else(|error| die(error.to_string(), 70));
