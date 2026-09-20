@@ -188,7 +188,7 @@ jobs:
       - name: Build every compiled helper into bin/<triple>
         shell: bash
         run: |
-          ./setup-dev-env.sh
+          SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
           triple="$(./setup-dev-env.sh --list | sed -n 's/^host target: //p')"
           [ -n "$triple" ] || { echo "::error::setup-dev-env.sh --list named no host target"; exit 1; }
           echo "AI_SKILLS_BIN_ROOT=$PWD/bin/$triple" >> "$GITHUB_ENV"
