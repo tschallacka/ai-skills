@@ -76,6 +76,19 @@ fn sibling_bin_dir() -> PathBuf {
 /// themselves, since cargo already guarantees this crate's own bin targets
 /// exist before an integration test of it runs.
 fn ensure_built(bin_dir: &Path, name: &str) -> PathBuf {
+    // Some commands run a sibling binary from their own directory (update-step
+    // hands the progress rewrite to update-progress, update-plan-content
+    // verifies fix keys with verify-fix-keys), and `cargo test --workspace`
+    // builds neither as a side effect: without them the command fails with a
+    // bare "No such file or directory" on a fresh checkout.
+    let siblings: &[&str] = match name {
+        "update-step" => &["update-progress"],
+        "update-plan-content" => &["verify-fix-keys"],
+        _ => &[],
+    };
+    for sibling in siblings {
+        ensure_built(bin_dir, sibling);
+    }
     let program = bin_dir.join(name);
     if program.is_file() {
         return program;
@@ -191,7 +204,25 @@ impl ServerGuard {
     fn start(bin_dir: &Path, scratch: &Path, tag: &str) -> Self {
         let runtime_dir = scratch.join(format!("runtime-{tag}"));
         fs::create_dir_all(&runtime_dir).unwrap();
+        // The server runs these as plain subprocesses, and a fresh
+        // `cargo test --workspace` has built none of them yet (see
+        // ensure_built).
+        for command in [
+            "update-step",
+            "add-work-unit",
+            "update-plan-content",
+            "validate-plan",
+        ] {
+            ensure_built(bin_dir, command);
+        }
+        // ...and looks them up on PATH, so the directory they were built into
+        // has to be on it rather than merely happening to be.
+        let mut search = vec![bin_dir.to_path_buf()];
+        search.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
         let child = Command::new(bin_dir.join("planning-server"))
+            .env("PATH", std::env::join_paths(search).unwrap())
             .env("XDG_RUNTIME_DIR", &runtime_dir)
             .stdout(Stdio::null())
             .stderr(Stdio::null())

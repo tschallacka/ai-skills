@@ -376,6 +376,18 @@ mod tests {
     /// never locally, where a prior full build already left the binary
     /// staged -- a scheduling race, not a environment difference.
     fn ensure_built(bin_dir: &Path, name: &str) -> PathBuf {
+        // Some commands run a sibling binary from their own directory
+        // (update-step hands the progress rewrite to update-progress,
+        // update-plan-content verifies fix keys with verify-fix-keys), and
+        // `cargo test --workspace` builds neither as a side effect.
+        let siblings: &[&str] = match name {
+            "update-step" => &["update-progress"],
+            "update-plan-content" => &["verify-fix-keys"],
+            _ => &[],
+        };
+        for sibling in siblings {
+            ensure_built(bin_dir, sibling);
+        }
         let program = bin_dir.join(name);
         if program.is_file() {
             return program;

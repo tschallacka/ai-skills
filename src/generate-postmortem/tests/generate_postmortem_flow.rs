@@ -59,6 +59,15 @@ fn assert_matches_real_history(relative_plan_dir: &str) {
     let root = repo_root();
     let plan_dir = root.join(relative_plan_dir);
     let history_file = plan_dir.join("adversarial-review-history.md");
+    // These plans live under .plans/, which is git-ignored, so they exist only
+    // on the maintainer's machine; a fresh checkout has nothing to compare.
+    if !history_file.is_file() {
+        eprintln!(
+            "skipping: {} is a local-only plan, absent from this checkout",
+            history_file.display()
+        );
+        return;
+    }
     let history_text = fs::read_to_string(&history_file)
         .unwrap_or_else(|error| panic!("reading {}: {error}", history_file.display()));
     let expected_cycles = count_cycle_headings(&history_text);
@@ -95,11 +104,21 @@ fn matches_the_real_persona_profile_migration_history() {
 fn the_wired_shell_oracle_matches_the_compiled_binary_directly() {
     let root = repo_root();
     let oracle = root.join("planning/scripts/generate-postmortem.sh");
-    // Pinned explicitly: an existing-but-incomplete shared install directory
-    // (~/.config/tsch-ai-skills/bin) can shadow this repo's own staged
-    // bin/<triple> via plan_bin_dir()'s tier-2 lookup even when it lacks this
-    // specific binary, since that tier only checks the directory exists.
-    let bin_root = root.join("bin/x86_64-unknown-linux-musl");
+    // Pinned explicitly to a scratch directory holding exactly the binary
+    // under test. An existing-but-incomplete shared install directory
+    // (~/.config/tsch-ai-skills/bin) would otherwise shadow it via
+    // plan_bin_dir()'s tier-2 lookup even when it lacks this specific binary,
+    // since that tier only checks the directory exists -- and reading the
+    // repo's own bin/<triple> would need a triple hardcoded here and a
+    // `./setup-dev-env.sh` run a fresh checkout does not have.
+    let staged = tempfile::tempdir().expect("tempdir");
+    let bin_root = staged.path().join("bin");
+    fs::create_dir_all(&bin_root).unwrap();
+    fs::copy(
+        env!("CARGO_BIN_EXE_generate-postmortem"),
+        bin_root.join("generate-postmortem"),
+    )
+    .unwrap();
 
     let help = Command::new(&oracle)
         .arg("--help")
@@ -108,8 +127,14 @@ fn the_wired_shell_oracle_matches_the_compiled_binary_directly() {
         .expect("oracle runs");
     assert!(help.status.success(), "{help:?}");
 
-    let plan_dir = root.join(".plans/persona-profile-migration");
     let scratch = tempfile::tempdir().expect("tempdir");
+    let plan_dir = scratch.path().join("plan");
+    fs::create_dir_all(&plan_dir).unwrap();
+    fs::write(
+        plan_dir.join("adversarial-review-history.md"),
+        "\n## Cycle 1\n\n- Reviewer session: sess-a1\n- Elapsed: 5min\n- Cost signal: 2 findings this cycle\n- Tokens: 1200\n\n| ID | Missing or over-broad item | Required plan change | Status | Work unit |\n|---|---|---|---|---|\n| AR-01 | x | y | resolved | W01 |\n| AR-02 | x | y | resolved | W01 |\n\n## Cycle 2\n\n| ID | Missing or over-broad item | Required plan change | Status | Work unit |\n|---|---|---|---|---|\n| AR-03 | x | y | resolved | W02 |\n",
+    )
+    .unwrap();
     let via_oracle = scratch.path().join("via-oracle.md");
     let via_binary = scratch.path().join("via-binary.md");
 
