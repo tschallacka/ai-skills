@@ -32,7 +32,12 @@ trap 'rm -rf "$work"' EXIT
 # An installed copy is the skill without a git directory, plus the .version the
 # installer writes. Built from the real tree so the test exercises the shipped
 # scripts rather than a stand-in.
-install="$work/installed"
+# It keeps the real install layout, <skills>/planning/{scripts,.version}: the
+# compiled create-plan finds its skill directory from the PLANNING_SKILL_ROOT
+# the wrapper exports (the ancestor holding planning/scripts), not from a path
+# relative to the script.
+skills="$work/installed"
+install="$skills/planning"
 mkdir -p "$install"
 cp -r "$root/planning/scripts" "$install/"
 cp "$root"/planning/*.json "$install/" 2>/dev/null || true

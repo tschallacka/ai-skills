@@ -1,6 +1,7 @@
 // MODE: DEV
 // PACKAGE: PROD
 use planning_core::{project_root_for, require_safe_value, write_env_manifest};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,22 +43,140 @@ fn git_value(directory: &Path, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+fn git_succeeds(directory: &Path, args: &[&str]) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(directory)
+        .args(args)
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+/// The planning skill directory this run belongs to. The wrapper exports
+/// PLANNING_SKILL_ROOT (the directory that CONTAINS `planning/scripts`), which
+/// is what makes an installed copy report itself rather than the tree this
+/// binary happened to be compiled in; the compile-time path is the fallback for
+/// a binary run directly.
+fn skill_dir() -> PathBuf {
+    if let Some(root) = env::var_os("PLANNING_SKILL_ROOT").filter(|value| !value.is_empty()) {
+        let dir = PathBuf::from(root).join("planning");
+        if dir.join("scripts").is_dir() {
+            return dir;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../planning")
+}
+
+/// The commit an installer recorded in `.version` (`source_version=branch:x
+/// commit:abc123`): the last `commit:` on the first line carrying one.
+fn version_commit(marker: &str) -> String {
+    marker
+        .lines()
+        .find_map(|line| {
+            line.rfind("commit:")
+                .map(|at| &line[at + "commit:".len()..])
+        })
+        .map(|rest| {
+            rest.chars()
+                .take_while(|character| matches!(character, '0'..='9' | 'a'..='f'))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// One line naming which build of the planning skill is running. A checkout
+/// reports its commit, which is exact; an installed copy reports what the
+/// installer recorded at install time, worded so it is not mistaken for a
+/// statement about what the canonical checkout holds now (T52).
+fn skill_provenance(skill: &Path) -> Option<String> {
+    if let Some(commit) = git_value(skill, &["rev-parse", "--short", "HEAD"]) {
+        return Some(format!("planning skill: checkout at {commit}"));
+    }
+    let marker = fs::read_to_string(skill.join(".version")).ok()?;
+    let package = marker
+        .lines()
+        .find_map(|line| line.strip_prefix("package_version="))
+        .unwrap_or("");
+    let commit = version_commit(&marker);
+    if package.is_empty() && commit.is_empty() {
+        return None;
+    }
+    let or_unknown = |value: &str| if value.is_empty() { "unknown" } else { value }.to_string();
+    Some(format!(
+        "planning skill: installed build {}, from commit {}",
+        or_unknown(package),
+        or_unknown(&commit)
+    ))
+}
+
+/// Warn on stderr when the running skill is an installed copy built from a
+/// commit that a reachable canonical checkout (AI_SKILLS_REPO) does not contain
+/// or has moved past. Silent when it cannot tell, which is most of the time:
+/// without a named checkout there is nothing to compare against, and a wrong
+/// staleness warning sends someone to reinstall for nothing.
+fn warn_skill_drift(skill: &Path) {
+    let Some(repo) = env::var_os("AI_SKILLS_REPO")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    else {
+        return;
+    };
+    if !repo.join(".git").exists() || git_succeeds(skill, &["rev-parse", "--git-dir"]) {
+        return;
+    }
+    let commit = fs::read_to_string(skill.join(".version"))
+        .map(|marker| version_commit(&marker))
+        .unwrap_or_default();
+    if commit.is_empty() {
+        return;
+    }
+    if !git_succeeds(&repo, &["cat-file", "-e", &format!("{commit}^{{commit}}")]) {
+        eprintln!(
+            "planning: this skill was installed from commit {commit}, which {} does not contain; reinstall before trusting it",
+            repo.display()
+        );
+        return;
+    }
+    if !git_succeeds(&repo, &["merge-base", "--is-ancestor", &commit, "HEAD"]) {
+        return;
+    }
+    let behind = git_value(&repo, &["rev-list", "--count", &format!("{commit}..HEAD")])
+        .and_then(|count| count.parse::<u64>().ok())
+        .unwrap_or(0);
+    if behind > 0 {
+        eprintln!(
+            "planning: this skill was installed from {commit}, {behind} commit(s) behind {}",
+            repo.display()
+        );
+    }
+}
+
 fn duplicate_steps(root: &Path) -> Vec<String> {
     let mut collisions = Vec::new();
     let Ok(plans) = fs::read_dir(root) else {
         return collisions;
     };
-    for plan in plans.flatten().filter(|entry| entry.path().is_dir()) {
+    let mut plans: Vec<_> = plans
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .collect();
+    plans.sort_by_key(|entry| entry.file_name());
+    for plan in plans {
         let plan_name = plan.file_name().to_string_lossy().into_owned();
         let Ok(goals) = fs::read_dir(plan.path()) else {
             continue;
         };
-        for goal in goals.flatten().filter(|entry| entry.path().is_dir()) {
+        let mut goals: Vec<_> = goals
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
+            .collect();
+        goals.sort_by_key(|entry| entry.file_name());
+        for goal in goals {
             let steps = goal.path().join("steps");
             let Ok(entries) = fs::read_dir(&steps) else {
                 continue;
             };
-            let mut seen = Vec::new();
+            let mut by_number: BTreeMap<String, Vec<String>> = BTreeMap::new();
             for entry in entries.flatten() {
                 let file = entry.file_name().to_string_lossy().into_owned();
                 if !file.ends_with(".md") || file.ends_with("-testing.md") {
@@ -69,13 +188,19 @@ fn duplicate_steps(root: &Path) -> Vec<String> {
                 if !number.bytes().all(|byte| byte.is_ascii_digit()) {
                     continue;
                 }
-                if seen.iter().any(|(n, _): &(String, String)| n == number) {
+                by_number.entry(number.to_string()).or_default().push(file);
+            }
+            // One line per collision, naming the files that share the number:
+            // the caller has to rename one of them, so the report is useless
+            // without them.
+            for (number, mut files) in by_number {
+                if files.len() > 1 {
+                    files.sort();
                     collisions.push(format!(
-                        "{plan_name}: goal {}: {number}",
-                        goal.file_name().to_string_lossy()
+                        "{plan_name}: goal {} {number} {}",
+                        goal.file_name().to_string_lossy(),
+                        files.join(" ")
                     ));
-                } else {
-                    seen.push((number.to_string(), file));
                 }
             }
         }
@@ -107,13 +232,6 @@ fn initialise_git(plan: &Path, plans_root: &Path, bare_name: bool) {
             top.clone()
         }
     });
-    if repo.is_none() {
-        let init_root = if bare_name { plans_root } else { plan };
-        let _ = Command::new("git")
-            .args(["init", "-q"])
-            .arg(init_root)
-            .status();
-    }
     let repo = repo.unwrap_or_else(|| {
         if bare_name {
             plans_root.to_path_buf()
@@ -121,6 +239,14 @@ fn initialise_git(plan: &Path, plans_root: &Path, bare_name: bool) {
             plan.to_path_buf()
         }
     });
+    // Always `git init` the chosen repository: a git-ignored plan under a
+    // project's work tree is committed into its OWN repository at the plans
+    // root, and without this the `add` below runs against the enclosing
+    // project's repository, refuses the ignored path, and leaves the plan with
+    // no history for any later pre-mutation snapshot. Re-initialising an
+    // existing repository is a no-op.
+    let _ = fs::create_dir_all(&repo);
+    let _ = Command::new("git").args(["init", "-q"]).arg(&repo).status();
     let _ = Command::new("git")
         .args(["-C"])
         .arg(&repo)
@@ -157,7 +283,7 @@ fn main() {
     let plan_arg = &args[0];
     let title = &args[1];
     let bare_name = !plan_arg.contains('/');
-    let planning_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../planning");
+    let planning_root = skill_dir();
     let (plan_dir, plans_root) = if plan_arg.contains('/') {
         let path = PathBuf::from(plan_arg);
         let root = path
@@ -207,8 +333,19 @@ fn main() {
     let skill = fs::canonicalize(&planning_root).unwrap_or_else(|error| die(error.to_string(), 64));
     let snapshot = match git_value(&plan_root, &["rev-parse", "--show-toplevel"]) {
         Some(top) => {
+            // The repository that will hold this plan's history, decided the
+            // way `initialise_git` decides it: a plan git-ignores under some
+            // enclosing work tree (a project's `.plans`) gets its own
+            // repository at the plans root, so that repository is what is
+            // snapshotted; a plan tracked in the user's tree is theirs, and
+            // stays unpinned.
             let top = PathBuf::from(top);
-            if git_ignored(&top, &plan_root) && top == root {
+            let repo = if git_ignored(&top, &plan_root) {
+                root.clone()
+            } else {
+                top
+            };
+            if repo == root {
                 root.display().to_string()
             } else {
                 String::new()
@@ -292,7 +429,62 @@ fn main() {
     .unwrap_or_else(|error| die(error, 66));
     initialise_git(&plan_root, &root, bare_name);
     println!("Created {}", plan_dir.display());
-    if let Some(commit) = git_value(&skill, &["rev-parse", "--short", "HEAD"]) {
-        println!("planning skill: checkout at {commit}");
+    if let Some(line) = skill_provenance(&skill) {
+        println!("{line}");
+    }
+    warn_skill_drift(&skill);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_commit_reads_the_last_commit_marker_on_the_line() {
+        assert_eq!(
+            version_commit("package_version=1\nsource_version=branch:x commit:4a5f1a35\n"),
+            "4a5f1a35"
+        );
+        assert_eq!(version_commit("source_version=branch:x\n"), "");
+    }
+
+    #[test]
+    fn an_installed_copy_reports_its_recorded_build_and_never_claims_a_checkout() {
+        let dir = env::temp_dir().join(format!("create-plan-provenance-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(".version"),
+            "package_version=9.9.9\nsource_version=branch:x commit:deadbee\n",
+        )
+        .unwrap();
+        // Skip the assertion if the scratch directory sits inside a git tree:
+        // that is the "checkout" shape by definition.
+        if git_value(&dir, &["rev-parse", "--short", "HEAD"]).is_none() {
+            assert_eq!(
+                skill_provenance(&dir).as_deref(),
+                Some("planning skill: installed build 9.9.9, from commit deadbee")
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_duplicate_step_number_is_reported_with_the_files_that_share_it() {
+        let root = env::temp_dir().join(format!("create-plan-dup-{}", std::process::id()));
+        let steps = root.join("broken/02-research/steps");
+        fs::create_dir_all(&steps).unwrap();
+        for name in [
+            "01-step-a.md",
+            "01-step-collision.md",
+            "01-step-a-testing.md",
+            "02-step-b.md",
+        ] {
+            fs::write(steps.join(name), "x\n").unwrap();
+        }
+        assert_eq!(
+            duplicate_steps(&root),
+            vec!["broken: goal 02-research 01 01-step-a.md 01-step-collision.md".to_string()]
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -65,11 +65,15 @@ assert_eq "1" "$(claims_for AR-02)" "re-resolving does not duplicate the claim"
 #    cite nine findings that no row carried, and the gate reported passed.
 assert_rc 65 "$scripts/resolve-finding.sh" "$plan" AR-99
 
-# 4. An ungated finding has no key, so claiming one is refused rather than
-#    silently skipped.
+# 4. An ungated finding (blank or N/A work-unit cell: a finding about the plan
+#    documents themselves) has no key, so it resolves by status alone and no
+#    claim is recorded for it (B357). It used to be refused with 65, which forced
+#    a hand edit of the Status cell.
 "$scripts/add-adversarial-finding.sh" "$plan" AR-03 "ungated" "fix" \
     --status open >/dev/null 2>&1
-assert_rc 65 "$scripts/resolve-finding.sh" "$plan" AR-03
+assert_rc 0 "$scripts/resolve-finding.sh" "$plan" AR-03
+assert_eq "resolved" "$(status_of AR-03)" "an ungated finding resolves by status alone"
+assert_eq "0" "$(claims_for AR-03)" "and records no claim, having no key"
 
 # 5. The session that minted the keys cannot claim them. The gate refuses this
 #    too, but refusing at the claim puts the error where the mistake is made.

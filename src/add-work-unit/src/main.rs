@@ -69,6 +69,7 @@ fn insert_owned(goal: &str, unit: &str, intended: &str) -> Result<String, &'stat
     }
     let lines: Vec<&str> = goal.lines().collect();
     let mut max = 0usize;
+    let mut found = false;
     let mut in_owned = false;
     let mut testing = None;
     for (index, line) in lines.iter().enumerate() {
@@ -85,10 +86,14 @@ fn insert_owned(goal: &str, unit: &str, intended: &str) -> Result<String, &'stat
                 .and_then(|value| value.parse().ok())
             {
                 max = max.max(number);
+                found = true;
             }
         }
     }
-    let Some(testing_index) = testing else {
+    // A roster whose `## Owned work units` heading survives but whose numbered
+    // paragraphs are gone is unusable: appending would invent `§ 9.1` under a
+    // section nothing else recognises. Refuse before any of the three writes.
+    let Some(testing_index) = testing.filter(|_| found) else {
         return Err("Goal has no numbered Owned work units section");
     };
     let mut insertion = testing_index;

@@ -12,6 +12,30 @@ use std::process::Command;
 /// several of which are no longer in the tree at all (B223).
 const TOOL: &str = env!("CARGO_BIN_NAME");
 
+/// Whether the register lives in a linked git worktree rather than the main
+/// checkout: git's own dir differs from the common dir only in a linked one.
+/// False when git is absent or the file is not in a repository.
+fn in_linked_worktree(register: &std::path::Path) -> bool {
+    let dir = register
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let git = |flag: &str| {
+        Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["rev-parse", flag])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+    };
+    match (git("--git-dir"), git("--git-common-dir")) {
+        (Some(own), Some(common)) => own != common,
+        _ => false,
+    }
+}
+
 fn usage(code: i32) -> ! {
     println!("Usage: {TOOL} <bug|todo> show <ID>");
     println!(
@@ -192,6 +216,20 @@ fn main() {
                 })
                 .max()
                 .unwrap_or(0);
+            // B78: in a linked git worktree the register is that worktree's own
+            // copy, so this is the max it has seen, not the max across every
+            // worktree that will eventually merge. Advisory only, on stderr:
+            // stdout stays the bare id every caller already parses.
+            if in_linked_worktree(&path) {
+                eprintln!(
+                    "{TOOL}: {} is a linked git worktree; {prefix}{} is local to this copy of the register and may collide with an id minted concurrently in another worktree -- resolve a post-merge collision with bugs/todo resolve",
+                    path.parent()
+                        .filter(|dir| !dir.as_os_str().is_empty())
+                        .unwrap_or_else(|| std::path::Path::new("."))
+                        .display(),
+                    max + 1
+                );
+            }
             println!("{}", max + 1);
         }
         "report" => {
