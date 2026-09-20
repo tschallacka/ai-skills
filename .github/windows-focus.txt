@@ -1,2 +1,0 @@
-test --no-fail-fast -p chat-server-rs --test end_to_end --test message_tags -- --nocapture
-cargo test --no-fail-fast -p chat-client-rs --test owner_socket -- --nocapture

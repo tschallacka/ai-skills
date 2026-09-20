@@ -450,6 +450,13 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
     let mut tail2_guard = tail2_guard;
     let _ = tail2_guard.0.kill();
     let _ = tail2_guard.0.wait();
+    // The server frees the dead owner's nick when it next sees that
+    // connection close. A unix kill closes the socket before this line runs;
+    // on Windows TerminateProcess returns first and the server notices a
+    // moment later, and a send in that gap registers a second time under the
+    // still-held nick and arrives as "owner-2". What is under test is that the
+    // send falls back at all, so give the server the moment it needs.
+    thread::sleep(Duration::from_millis(1500));
     let after_crash = client(&["send", "--chan", chan, "--text", "after the crash"]);
     assert!(
         after_crash.status.success(),
