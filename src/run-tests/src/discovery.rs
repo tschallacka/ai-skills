@@ -5,11 +5,14 @@
 //! own find+sort shelling exactly -- including its own deliberate collation
 //! choices (no locale override for shell-test discovery, LC_ALL=C pinned
 //! only for crate discovery, per B203) -- rather than reimplementing find or
-//! sort as Rust logic.
+//! sort as Rust logic. The one exception is Windows, which has no find or
+//! sort that mean what these arguments say: there the same two listings are
+//! read straight from the directories and sorted by bytes.
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::process::{Command, Stdio};
 
 pub const SUITES: [&str; 6] = [
@@ -23,6 +26,7 @@ pub const SUITES: [&str; 6] = [
 
 pub const BENCHMARK_SUITE: &str = "benchmark/planning/tests";
 
+#[cfg(not(windows))]
 fn find_piped_to_sort(find: Command, sort: Command) -> Vec<String> {
     let mut find = find;
     let Ok(mut find_child) = find.stdout(Stdio::piped()).spawn() else {
@@ -45,9 +49,65 @@ fn find_piped_to_sort(find: Command, sort: Command) -> Vec<String> {
     }
 }
 
+/// The names directly inside `dir`, byte-sorted, for which `keep` is true.
+///
+/// Windows has no `find` or `sort` worth shelling out to: `Command::new`
+/// resolves those names to System32's `find.exe` and `sort.exe`, which are
+/// unrelated tools that reject GNU arguments, so discovery is done here.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn sorted_children(dir: &Path, keep: impl Fn(&Path, &str) -> bool) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            keep(&entry.path(), &name).then_some(name)
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+/// Discover test scripts in one suite directory. Returned with forward
+/// slashes, like everything else this module hands to the work-item list.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn discover_native(dir: &Path) -> Vec<String> {
+    sorted_children(dir, |path, name| {
+        name.starts_with("test-") && name.ends_with(".sh") && path.is_file()
+    })
+    .into_iter()
+    .map(|name| format!("{}/{name}", dir.to_string_lossy().replace('\\', "/")))
+    .collect()
+}
+
+/// Every workspace crate directory (repo-relative, e.g. "src/foo"),
+/// byte-sorted, which is the C-locale order the unix path pins (B203).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn discover_crates_native(repo_root: &Path) -> Vec<String> {
+    sorted_children(&repo_root.join("src"), |path, _| {
+        path.join("Cargo.toml").is_file()
+    })
+    .into_iter()
+    .map(|name| format!("src/{name}"))
+    .collect()
+}
+
+#[cfg(windows)]
+pub fn discover(dir: &Path) -> Vec<String> {
+    discover_native(dir)
+}
+
+#[cfg(windows)]
+pub fn discover_crates(repo_root: &Path) -> Vec<String> {
+    discover_crates_native(repo_root)
+}
+
 /// Discover test scripts in one suite directory, sorted with NO locale
 /// override -- the original's own `discover()` relies on ambient collation,
 /// stable per host, not pinned to C the way crate discovery is.
+#[cfg(not(windows))]
 pub fn discover(dir: &Path) -> Vec<String> {
     let find = {
         let mut c = Command::new("find");
@@ -68,6 +128,7 @@ pub fn discover(dir: &Path) -> Vec<String> {
 /// Discover every workspace crate directory (repo-relative, e.g. "src/foo"),
 /// sorted under LC_ALL=C (B203: an ambient UTF-8 locale reorders
 /// src/ai-text-editor-mcp vs src/ai-text-editor/ relative to a C locale).
+#[cfg(not(windows))]
 pub fn discover_crates(repo_root: &Path) -> Vec<String> {
     let find = {
         let mut c = Command::new("find");
@@ -108,7 +169,9 @@ pub fn build_work_items(repo_root: &Path) -> Vec<String> {
         for path in discover(&repo_root.join(suite)) {
             let relative = Path::new(&path)
                 .strip_prefix(repo_root)
-                .map(|p| p.to_string_lossy().into_owned())
+                // Work items are always written with forward slashes, the
+                // form --select-file lines and the shard logic compare.
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
                 .unwrap_or(path);
             items.push(relative);
         }
@@ -182,6 +245,47 @@ pub fn parse_shard(program: &str, spec: &str) -> Result<(usize, usize), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch_tree(tag: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("run-tests-native-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("tests")).unwrap();
+        for name in ["test-b.sh", "test-a.sh", "helper.sh", "test-c.txt"] {
+            fs::write(root.join("tests").join(name), "").unwrap();
+        }
+        fs::create_dir_all(root.join("tests/test-dir.sh")).unwrap();
+        for krate in ["zed", "alpha", "alpha-mcp"] {
+            fs::create_dir_all(root.join("src").join(krate)).unwrap();
+            fs::write(root.join("src").join(krate).join("Cargo.toml"), "").unwrap();
+        }
+        fs::create_dir_all(root.join("src/not-a-crate")).unwrap();
+        root
+    }
+
+    #[test]
+    fn native_discovery_lists_only_sorted_test_scripts_with_forward_slashes() {
+        let root = scratch_tree("scripts");
+        let found = discover_native(&root.join("tests"));
+        let names: Vec<&str> = found
+            .iter()
+            .map(|path| path.rsplit('/').next().unwrap())
+            .collect();
+        assert_eq!(names, vec!["test-a.sh", "test-b.sh"]);
+        assert!(found.iter().all(|path| !path.contains('\\')), "{found:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn native_crate_discovery_is_byte_sorted_and_needs_a_manifest() {
+        let root = scratch_tree("crates");
+        // The C-locale order B203 pins: "alpha" before "alpha-mcp" before "zed".
+        assert_eq!(
+            discover_crates_native(&root),
+            vec!["src/alpha", "src/alpha-mcp", "src/zed"]
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn select_file_keeps_only_listed_items() {

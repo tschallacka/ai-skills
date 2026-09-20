@@ -12,6 +12,7 @@
 mod generated;
 mod markers;
 mod plan;
+mod platform;
 mod reexec;
 mod stage;
 mod triple;

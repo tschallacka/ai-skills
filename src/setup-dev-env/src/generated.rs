@@ -10,6 +10,7 @@
 //! core.hooksPath hooks`, the one legitimate git invocation anywhere in
 //! this crate.
 
+use crate::platform::script_command;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -40,8 +41,8 @@ pub fn build_if_missing(repo_root: &Path) -> u32 {
         .iter()
         .any(|lib| !repo_root.join("planning/scripts").join(lib).is_file());
     if missing_lib {
-        if silent(Command::new(
-            repo_root.join("planning/scripts/build-plan-libs.sh"),
+        if silent(script_command(
+            &repo_root.join("planning/scripts/build-plan-libs.sh"),
         ))
         .current_dir(repo_root)
         .status()
@@ -55,8 +56,8 @@ pub fn build_if_missing(repo_root: &Path) -> u32 {
         }
     }
     if !repo_root.join("planning/REVIEWER.md").is_file() {
-        if silent(Command::new(
-            repo_root.join("planning/scripts/generate-reviewer.sh"),
+        if silent(script_command(
+            &repo_root.join("planning/scripts/generate-reviewer.sh"),
         ))
         .current_dir(repo_root)
         .status()
@@ -71,7 +72,7 @@ pub fn build_if_missing(repo_root: &Path) -> u32 {
             );
         }
     }
-    if silent(Command::new(repo_root.join("generate-portability.sh")))
+    if silent(script_command(&repo_root.join("generate-portability.sh")))
         .current_dir(repo_root)
         .status()
         .map(|s| s.success())

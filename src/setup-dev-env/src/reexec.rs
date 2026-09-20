@@ -24,12 +24,7 @@ use std::os::unix::process::CommandExt;
 
 pub const SELF_BINARY_NAME: &str = "setup-dev-env";
 
-fn which(program: &str) -> bool {
-    let Some(path_var) = env::var_os("PATH") else {
-        return false;
-    };
-    env::split_paths(&path_var).any(|dir| dir.join(program).is_file())
-}
+use crate::platform::which;
 
 /// Prints the require_nix-style message and exits 69 if nix is required and
 /// absent; execs into `nix develop` and never returns if a re-exec is
@@ -37,6 +32,13 @@ fn which(program: &str) -> bool {
 /// or a marker is already set).
 pub fn maybe_reexec(program: &str, repo_root: &Path, triple: &str) {
     if env::var_os("SETUP_DEV_ENV_IN_NIX").is_some() || env::var_os("IN_NIX_SHELL").is_some() {
+        return;
+    }
+    // nix does not run natively on Windows, so there is no shell to enter and
+    // requiring one would refuse every Windows host. The toolchain there is
+    // the rustup one CI and a developer both install, pinned by
+    // rust-toolchain.toml.
+    if cfg!(windows) {
         return;
     }
     if !which("nix") {

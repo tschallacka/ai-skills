@@ -14,6 +14,17 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// `bash_program()`: on Windows a bare `Command::new("bash")` finds System32's
+// WSL launcher before Git for Windows' bash.
+#[path = "../../../tests/rust-support/script_stub.rs"]
+mod script_stub;
+
+/// A binary's file name in the staged tree: the crate's binary plus the
+/// platform's executable suffix (`.exe` on Windows).
+fn staged_name(binary: &str) -> String {
+    format!("{binary}{}", std::env::consts::EXE_SUFFIX)
+}
+
 fn write_file(path: &Path, contents: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
@@ -233,7 +244,11 @@ fn a_full_run_builds_and_stages_the_dummy_crate_binary() {
     let output = repo.run(&[]);
     assert!(output.status.success(), "{}", stderr_of(&output));
     let triple = host_triple_of_check(&repo);
-    let staged = repo.dir.join("bin").join(&triple).join(OK_CRATE);
+    let staged = repo
+        .dir
+        .join("bin")
+        .join(&triple)
+        .join(staged_name(OK_CRATE));
     assert!(staged.is_file(), "binary was not staged at {staged:?}");
     assert!(repo.dir.join(".setup-dev-env.finished").is_file());
 }
@@ -285,7 +300,11 @@ fn a_failing_crate_is_reported_and_the_run_still_processes_the_rest() {
     );
 
     let triple = host_triple_of_check(&repo);
-    let ok_staged = repo.dir.join("bin").join(&triple).join(OK_CRATE);
+    let ok_staged = repo
+        .dir
+        .join("bin")
+        .join(&triple)
+        .join(staged_name(OK_CRATE));
     assert!(
         ok_staged.is_file(),
         "the other, valid crate should still have built and staged"
@@ -340,7 +359,11 @@ fn rebuilding_and_restaging_the_same_crate_succeeds_via_write_then_rename() {
     assert!(second.status.success(), "{}", stderr_of(&second));
 
     let triple = host_triple_of_check(&repo);
-    let staged = repo.dir.join("bin").join(&triple).join(OK_CRATE);
+    let staged = repo
+        .dir
+        .join("bin")
+        .join(&triple)
+        .join(staged_name(OK_CRATE));
     assert!(staged.is_file());
 }
 
@@ -355,11 +378,12 @@ fn the_embedded_plan_table_matches_the_real_bash_plan_function() {
     let lib = repo_root.join("setup-dev-env-lib.sh");
     assert!(lib.is_file(), "expected {lib:?} to exist");
 
+    // Forward slashes: bash does not reliably read a backslash path.
     let script = format!(
         "set -euo pipefail\nsource {:?}\nplan\n",
-        lib.to_string_lossy()
+        lib.to_string_lossy().replace('\\', "/")
     );
-    let output = Command::new("bash")
+    let output = Command::new(script_stub::bash_program())
         .arg("-c")
         .arg(&script)
         .output()
@@ -396,7 +420,13 @@ fn the_embedded_plan_table_matches_the_real_bash_plan_function() {
             if dest.starts_with("planning/scripts/") {
                 return None; // the sibling-copy line, not a plan row of its own
             }
-            let binary = dest.rsplit('/').next()?.to_string();
+            // The plan's own rows name the binary without the platform's
+            // suffix; --list prints the staged name.
+            let staged = dest.rsplit('/').next()?;
+            let binary = staged
+                .strip_suffix(std::env::consts::EXE_SUFFIX)
+                .unwrap_or(staged)
+                .to_string();
             Some((crate_name, binary))
         })
         .collect();

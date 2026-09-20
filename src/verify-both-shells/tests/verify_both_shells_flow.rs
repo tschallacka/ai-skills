@@ -71,15 +71,37 @@ impl Repo {
     }
 }
 
+// A bash resolved the way a shell would, not the WSL launcher a bare
+// `Command::new("bash")` finds first on Windows.
+use verify_both_shells::platform;
+
+/// A child that has already exited, and its pid: by whatever the platform
+/// calls "exit at once".
+fn dead_pid() -> u32 {
+    let mut child = if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "exit 0"]);
+        c
+    } else {
+        Command::new("true")
+    }
+    .spawn()
+    .unwrap();
+    let pid = child.id();
+    let _ = child.wait();
+    pid
+}
+
 fn passing_leg(label: &'static str) -> Leg {
     Leg {
         label,
         build: Box::new(|_wt| {
-            let mut c = Command::new("bash");
+            let mut c = platform::bash();
             c.arg("-c")
                 .arg("printf 'Total ran: 1   Passed: 1   Failed: 0\\n'");
             c
         }),
+        skip_reason: None,
     }
 }
 
@@ -87,13 +109,47 @@ fn failing_leg(label: &'static str) -> Leg {
     Leg {
         label,
         build: Box::new(|_wt| {
-            let mut c = Command::new("bash");
+            let mut c = platform::bash();
             c.arg("-c").arg(
                 "printf 'Total ran: 1   Passed: 0   Failed: 1\\nFailed: test-a\\n  test-a  FAIL\\n    boom\\n'",
             );
             c
         }),
+        skip_reason: None,
     }
+}
+
+/// A leg the host cannot have (bash 3.2 on Windows): never built, never run.
+fn unavailable_leg(label: &'static str) -> Leg {
+    Leg {
+        label,
+        build: Box::new(|_wt| panic!("a skipped leg must not be built")),
+        skip_reason: Some("not available on this host"),
+    }
+}
+
+#[test]
+fn a_skipped_leg_is_reported_as_skipped_and_is_not_a_failure() {
+    let repo = Repo::new("skipped-leg");
+    repo.write("marker.txt", "baseline\n");
+    repo.commit_all("baseline");
+
+    let legs = [passing_leg("bash 5.3"), unavailable_leg("bash 3.2")];
+    let outcome = verify_both_shells::run(&repo.dir, false, legs);
+    assert_eq!(outcome.status, 0);
+    repo.cleanup();
+}
+
+#[test]
+fn a_skipped_leg_does_not_hide_the_other_legs_failure() {
+    let repo = Repo::new("skipped-leg-failure");
+    repo.write("marker.txt", "baseline\n");
+    repo.commit_all("baseline");
+
+    let legs = [failing_leg("bash 5.3"), unavailable_leg("bash 3.2")];
+    let outcome = verify_both_shells::run(&repo.dir, false, legs);
+    assert_eq!(outcome.status, 1);
+    repo.cleanup();
 }
 
 #[test]
@@ -185,10 +241,7 @@ fn a_stale_leftover_worktree_from_a_dead_pid_is_swept() {
         wt.to_str().unwrap(),
         "HEAD",
     ]);
-    let mut child = Command::new("true").spawn().unwrap();
-    let dead_pid = child.id();
-    let _ = child.wait();
-    fs::write(parent.join("harness.pid"), dead_pid.to_string()).unwrap();
+    fs::write(parent.join("harness.pid"), dead_pid().to_string()).unwrap();
 
     let legs = [passing_leg("bash 5.3"), passing_leg("bash 3.2")];
     let outcome = verify_both_shells::run(&repo.dir, false, legs);

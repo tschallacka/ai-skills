@@ -47,7 +47,34 @@ pub fn write_then_rename(dest: &Path, contents: &[u8], executable: bool) -> std:
     if executable {
         set_executable(&temp)?;
     }
-    std::fs::rename(&temp, dest)
+    match std::fs::rename(&temp, dest) {
+        Ok(()) => Ok(()),
+        Err(error) => replace_running_binary(&temp, dest, error),
+    }
+}
+
+/// Windows refuses to replace an executable while a process is running from
+/// it, which is exactly the case when this crate rebuilds itself. It does
+/// allow such a file to be RENAMED, so the running image is moved aside and
+/// the new file takes its name; the old one is removed on a later run, when
+/// nothing holds it. Anywhere else the original error stands.
+fn replace_running_binary(temp: &Path, dest: &Path, error: std::io::Error) -> std::io::Result<()> {
+    if !cfg!(windows) || !dest.is_file() {
+        let _ = std::fs::remove_file(temp);
+        return Err(error);
+    }
+    let name = dest.file_name().unwrap_or_default().to_string_lossy();
+    let aside = dest.with_file_name(format!(".{name}.old-{}", std::process::id()));
+    let moved = std::fs::rename(dest, &aside).and_then(|()| std::fs::rename(temp, dest));
+    if moved.is_ok() {
+        let _ = std::fs::remove_file(&aside);
+        return Ok(());
+    }
+    let _ = std::fs::remove_file(temp);
+    if !dest.is_file() && aside.is_file() {
+        let _ = std::fs::rename(&aside, dest);
+    }
+    moved
 }
 
 #[cfg(unix)]

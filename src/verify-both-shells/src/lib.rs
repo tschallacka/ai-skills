@@ -12,6 +12,7 @@
 
 pub mod git;
 pub mod overlay;
+pub mod platform;
 pub mod process;
 pub mod report;
 pub mod signal;
@@ -149,7 +150,7 @@ pub struct RunOutcome {
 }
 
 pub fn run(src: &Path, keep: bool, legs: [process::Leg; 2]) -> RunOutcome {
-    let base = env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
+    let base = platform::tmp_base();
     let Some(parent) = worktree::mktemp_scratch_dir(&base) else {
         eprintln!("{PROGRAM}: mktemp -d failed");
         return RunOutcome {
@@ -207,15 +208,20 @@ pub fn run(src: &Path, keep: bool, legs: [process::Leg; 2]) -> RunOutcome {
         };
     };
 
-    let mut command5 = (legs[0].build)(&wt);
-    let _ = process::run_leg_to_file(&mut command5, &log5);
-    let mut command3 = (legs[1].build)(&wt);
-    let _ = process::run_leg_to_file(&mut command3, &log3);
-
-    let text5 = fs::read_to_string(&log5).unwrap_or_default();
-    let text3 = fs::read_to_string(&log3).unwrap_or_default();
-    let r5 = report::report(legs[0].label, &text5);
-    let r3 = report::report(legs[1].label, &text3);
+    let results: Vec<report::ReportResult> = legs
+        .iter()
+        .zip([&log5, &log3])
+        .map(|(leg, log)| {
+            if let Some(reason) = leg.skip_reason {
+                return report::skipped(leg.label, reason);
+            }
+            let mut command = (leg.build)(&wt);
+            let _ = process::run_leg_to_file(&mut command, log);
+            let text = fs::read_to_string(log).unwrap_or_default();
+            report::report(leg.label, &text)
+        })
+        .collect();
+    let (r5, r3) = (&results[0], &results[1]);
     print!("{}", r5.text);
     print!("{}", r3.text);
     let status_value = if r5.is_failure || r3.is_failure { 1 } else { 0 };

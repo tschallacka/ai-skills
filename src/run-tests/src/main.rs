@@ -3,6 +3,7 @@
 mod bootstrap;
 mod discovery;
 mod lock;
+mod platform;
 mod runner;
 mod scratch;
 
@@ -10,20 +11,13 @@ use runner::{run_cargo_one, run_one, Counts, RunConfig};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // The bash original derives its own name from `${0##*/}`, which in every
 // real invocation is "run-tests.sh" -- the literal file name, not the
 // compiled binary's own bare name (matching the fix goal 14's own
 // pre-push-check crate needed, AR-52).
 const PROGRAM: &str = "run-tests.sh";
-
-fn which(program: &str) -> bool {
-    let Some(path_var) = env::var_os("PATH") else {
-        return false;
-    };
-    env::split_paths(&path_var).any(|dir| dir.join(program).is_file())
-}
 
 fn discover_repo_root() -> PathBuf {
     Command::new("git")
@@ -106,7 +100,9 @@ fn resolve_wrapper(repo_root: &Path) -> Option<PathBuf> {
         Ok("0") => None,
         Ok("1") => Some(default_wrapper),
         _ => {
-            if env::var_os("GITHUB_ACTIONS").is_some() {
+            // No resource cap on Windows either: the wrapper caps memory with
+            // a systemd scope or memlimit, neither of which exists there.
+            if env::var_os("GITHUB_ACTIONS").is_some() || cfg!(windows) {
                 None
             } else {
                 Some(default_wrapper)
@@ -136,11 +132,14 @@ fn run() -> i32 {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(600);
-    let timeout_cmd = if which("timeout") {
-        Some("timeout")
+    // GNU timeout(1) bounds a test where there is one. Windows has a
+    // `timeout.exe` of its own that merely waits N seconds, so it is never
+    // used there; and a host with none (a stock macOS) gets the bound
+    // enforced by this process instead of no bound at all.
+    let (timeout_cmd, native_timeout) = if !cfg!(windows) && platform::which("timeout") {
+        (Some("timeout"), None)
     } else {
-        eprintln!("{PROGRAM}: no timeout(1) here, so a hanging test will not be bounded");
-        None
+        (None, Some(Duration::from_secs(test_timeout_seconds)))
     };
 
     // ---- discovery: needs no lock, no bootstrap --------------------------
@@ -172,7 +171,7 @@ fn run() -> i32 {
 
     // ---- one run at a time, machine-wide ----------------------------------
     let allow_concurrent = env::var("AI_SKILLS_ALLOW_CONCURRENT").as_deref() == Ok("1");
-    let lock_path = PathBuf::from(lock::LOCK_PATH);
+    let lock_path = lock::lock_path();
     let (_lock, acquire_result) = lock::Lock::acquire(&lock_path, &repo_root, allow_concurrent);
     match acquire_result {
         lock::AcquireResult::Bypassed => {
@@ -204,7 +203,7 @@ fn run() -> i32 {
     // ---- per-run scratch root ----------------------------------------------
     let tmp_base = env::var_os("TMPDIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
+        .unwrap_or_else(platform::system_tmp);
     let pid = std::process::id();
     let unix_time = unix_time_now();
     let scratch = match scratch::ScratchRoot::create(&tmp_base, &repo_root, pid, unix_time) {
@@ -246,7 +245,9 @@ fn run() -> i32 {
     };
     let extra_path = bootstrap::effective_path(extra_dir.as_deref());
 
-    let bash = env::var("RUN_TESTS_BASH").unwrap_or_else(|_| "bash".to_string());
+    let bash = platform::bash_program(&platform::bash_from_env())
+        .to_string_lossy()
+        .into_owned();
     let context_cache_set = env::var("PLANNING_CONTEXT_CACHE")
         .map(|v| !v.is_empty())
         .unwrap_or(false);
@@ -257,6 +258,7 @@ fn run() -> i32 {
         repo_root: &repo_root,
         timeout_cmd,
         test_timeout_seconds,
+        native_timeout,
         wrapper: wrapper.as_deref().and_then(|p| p.to_str()),
         bash: &bash,
         verbose: args.verbose,
@@ -275,7 +277,7 @@ fn run() -> i32 {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        utc_timestamp()
+        platform::utc_stamp()
     );
     println!("Runner order: sorted test files under planning/tests then benchmark/planning/tests");
     println!();
@@ -315,15 +317,6 @@ fn run() -> i32 {
     } else {
         1
     }
-}
-
-fn utc_timestamp() -> String {
-    Command::new("date")
-        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
-        .output()
-        .ok()
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .unwrap_or_default()
 }
 
 fn main() {

@@ -80,7 +80,11 @@ fn repo_root() -> PathBuf {
 /// (`bin/` instead of `planning/`) and silently reports every scope doc
 /// missing (confirmed by direct testing, not a hypothetical).
 fn role_context_binary(root: &Path) -> PathBuf {
-    let candidate = root.join("planning/scripts/role-context");
+    // `.exe` on Windows, where setup-dev-env stages `role-context.exe`.
+    let candidate = root.join(format!(
+        "planning/scripts/role-context{}",
+        std::env::consts::EXE_SUFFIX
+    ));
     if candidate.is_file() {
         return candidate;
     }
@@ -225,10 +229,18 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+// Stands a bash script in for a program on Windows, where a script cannot be
+// started; see the module's own header.
+#[cfg(test)]
+#[path = "../../../tests/rust-support/script_stub.rs"]
+mod script_stub;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A fake `role-context` in `dir`; the path returned is the one to run:
+    /// the script itself on unix, the shim installed beside it on Windows.
     fn write_fake_role_context(dir: &Path, payload: &str) -> PathBuf {
         let script = dir.join("role-context");
         let body = format!(
@@ -242,7 +254,8 @@ mod tests {
             perms.set_mode(0o755);
             fs::set_permissions(&script, perms).unwrap();
         }
-        script
+        crate::script_stub::install(dir, "role-context");
+        dir.join(format!("role-context{}", std::env::consts::EXE_SUFFIX))
     }
 
     fn scratch(name: &str) -> PathBuf {

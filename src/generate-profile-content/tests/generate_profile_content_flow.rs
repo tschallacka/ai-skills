@@ -4,6 +4,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+// `install`: a bash script cannot be started on Windows, so an executable
+// that runs it is installed beside it.
+#[path = "../../../tests/rust-support/script_stub.rs"]
+mod script_stub;
+
 fn unique_dir(tag: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let mut dir = std::env::temp_dir();
@@ -33,6 +38,9 @@ fn write_fake_role_context(dir: &Path, payload: &str) -> PathBuf {
         perms.set_mode(0o755);
         fs::set_permissions(&script, perms).unwrap();
     }
+    // The binary the tool looks for is `role-context` + the platform's
+    // executable suffix, which on Windows is the shim in front of the script.
+    script_stub::install(&dir.join("planning/scripts"), "role-context");
     script
 }
 

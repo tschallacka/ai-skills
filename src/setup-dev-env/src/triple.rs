@@ -8,6 +8,7 @@
 //! resolver), not just `MINGW*`/`MSYS*`/`CYGWIN*`.
 
 use std::env;
+#[cfg(not(windows))]
 use std::process::Command;
 
 /// Pure branch logic, split out from the real `uname` call so every branch
@@ -48,11 +49,22 @@ pub fn resolve_triple(os: &str, arch: &str) -> Result<String, String> {
 /// `uname -s 2>/dev/null || printf 'unknown'` fallback shape) and resolves
 /// the result via `resolve_triple`.
 pub fn host_triple() -> Result<String, String> {
-    let os = uname_field("-s");
-    let arch = uname_field("-m");
-    resolve_triple(&os, &arch)
+    // A Windows host is told by the compiler, not asked: `uname` is only there
+    // when Git for Windows' usr/bin happens to be on PATH, and a plain cmd or
+    // PowerShell session has none.
+    #[cfg(windows)]
+    {
+        resolve_triple("Windows_NT", std::env::consts::ARCH)
+    }
+    #[cfg(not(windows))]
+    {
+        let os = uname_field("-s");
+        let arch = uname_field("-m");
+        resolve_triple(&os, &arch)
+    }
 }
 
+#[cfg(not(windows))]
 fn uname_field(flag: &str) -> String {
     Command::new("uname")
         .arg(flag)

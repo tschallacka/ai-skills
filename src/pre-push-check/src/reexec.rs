@@ -22,18 +22,19 @@ const PROGRAM: &str = "pre-push-check.sh";
 // ".sh" suffix, since no such file exists for the compiled binary.
 const SELF_BINARY_NAME: &str = "pre-push-check";
 
-fn which(program: &str) -> bool {
-    let Some(path_var) = env::var_os("PATH") else {
-        return false;
-    };
-    env::split_paths(&path_var).any(|dir| dir.join(program).is_file())
-}
+use crate::platform::which;
 
 /// Exits 69 if nix is required and absent; execs into `nix develop` and never
 /// returns if a re-exec is needed and nix is present; returns otherwise
 /// (already inside the flake, or a marker is already set).
 pub fn maybe_reexec(repo_root: &std::path::Path) {
     if env::var_os("AI_SKILLS_PREPUSH_IN_NIX").is_some() || env::var_os("IN_NIX_SHELL").is_some() {
+        return;
+    }
+    // nix does not run natively on Windows, so there is no flake to enter and
+    // requiring one would refuse every Windows host; the toolchain there is
+    // the rustup one rust-toolchain.toml pins.
+    if cfg!(windows) {
         return;
     }
     if !which("nix") {

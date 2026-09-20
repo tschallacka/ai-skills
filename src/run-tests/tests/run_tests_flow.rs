@@ -10,6 +10,22 @@ use std::process::{Command, Output};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// `bash_program()`: on Windows a bare `Command::new("bash")` (or the path
+// "/bin/bash") is not Git for Windows' bash.
+#[path = "../../../tests/rust-support/script_stub.rs"]
+mod script_stub;
+
+/// Where the binary keeps its lock: `/tmp/ai-skills-run-tests.lock`, or the
+/// platform's temporary directory where there is no /tmp.
+fn lock_file() -> PathBuf {
+    let base = if cfg!(windows) {
+        std::env::temp_dir()
+    } else {
+        PathBuf::from("/tmp")
+    };
+    base.join("ai-skills-run-tests.lock")
+}
+
 /// run-tests's own lock path is a fixed, unconfigurable /tmp location by
 /// design (matching the bash original: a mutex only works if every run
 /// agrees on where it lives), so every test that touches it must be
@@ -37,15 +53,30 @@ fn lock_is_held_by_a_live_process(lock_path: &Path) -> bool {
     if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_digit()) {
         return false;
     }
-    for flag in ["args=", "command="] {
-        if let Ok(out) = Command::new("ps").args(["-p", pid, "-o", flag]).output() {
-            let text = String::from_utf8_lossy(&out.stdout);
-            if text.contains("run-tests") {
-                return true;
+    #[cfg(windows)]
+    {
+        // No `ps`: tasklist names the image of a running pid.
+        let filter = format!("PID eq {pid}");
+        if let Ok(out) = Command::new("tasklist")
+            .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+            .output()
+        {
+            return String::from_utf8_lossy(&out.stdout).contains("run-tests");
+        }
+        false
+    }
+    #[cfg(not(windows))]
+    {
+        for flag in ["args=", "command="] {
+            if let Ok(out) = Command::new("ps").args(["-p", pid, "-o", flag]).output() {
+                let text = String::from_utf8_lossy(&out.stdout);
+                if text.contains("run-tests") {
+                    return true;
+                }
             }
         }
+        false
     }
-    false
 }
 
 struct Repo {
@@ -185,10 +216,19 @@ impl Repo {
 }
 
 fn which_bash() -> String {
-    std::env::var("SHELL")
-        .ok()
-        .filter(|s| s.ends_with("bash"))
-        .unwrap_or_else(|| "/bin/bash".to_string())
+    // Windows has no /bin/bash and no $SHELL worth trusting: use Git for
+    // Windows' bash, found the way the run-tests binary itself finds it.
+    #[cfg(windows)]
+    {
+        script_stub::bash_program().to_string_lossy().into_owned()
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("SHELL")
+            .ok()
+            .filter(|s| s.ends_with("bash"))
+            .unwrap_or_else(|| "/bin/bash".to_string())
+    }
 }
 
 fn stdout(output: &Output) -> String {
@@ -241,14 +281,9 @@ fn a_full_run_reports_the_correct_counts_and_exact_summary() {
 
 #[test]
 fn a_hanging_test_is_reported_as_timeout() {
-    // run-tests bounds a test with timeout(1) and says so when there is none.
-    // A stock macOS has none (it ships with GNU coreutils, not the OS), so
-    // the hang would run its full 30s and never report TIMEOUT: there is
-    // nothing to assert against on such a host.
-    if Command::new("timeout").arg("--version").output().is_err() {
-        eprintln!("skipping: no timeout(1) on this host, so a hang cannot be bounded");
-        return;
-    }
+    // Bounded by timeout(1) where there is one, and by the binary itself
+    // where there is not (Windows, a stock macOS), so the answer is TIMEOUT
+    // on every host.
     let _guard = lock_test_guard().lock().unwrap_or_else(|p| p.into_inner());
     let repo = Repo::new("timeout");
     let select = repo.dir.join("select.txt");
@@ -300,7 +335,8 @@ fn the_lock_refuses_a_genuinely_concurrent_second_run() {
         .unwrap();
 
     // Wait for the first run to actually take the machine-wide lock.
-    let lock_path = Path::new("/tmp/ai-skills-run-tests.lock");
+    let lock_buf = lock_file();
+    let lock_path = lock_buf.as_path();
     for _ in 0..50 {
         if lock_path.exists() {
             break;
@@ -339,7 +375,8 @@ fn the_lock_refuses_a_genuinely_concurrent_second_run() {
 #[test]
 fn a_stale_lock_is_reclaimed_and_the_run_proceeds() {
     let _guard = lock_test_guard().lock().unwrap_or_else(|p| p.into_inner());
-    let lock_path = Path::new("/tmp/ai-skills-run-tests.lock");
+    let lock_buf = lock_file();
+    let lock_path = lock_buf.as_path();
     if lock_is_held_by_a_live_process(lock_path) {
         eprintln!(
             "skipping: {lock_path:?} is genuinely held by a live process (an enclosing \
@@ -368,7 +405,8 @@ fn a_stale_lock_is_reclaimed_and_the_run_proceeds() {
 #[test]
 fn sigterm_still_removes_the_scratch_root_and_releases_the_lock() {
     let _guard = lock_test_guard().lock().unwrap_or_else(|p| p.into_inner());
-    let lock_path = Path::new("/tmp/ai-skills-run-tests.lock");
+    let lock_buf = lock_file();
+    let lock_path = lock_buf.as_path();
     if lock_is_held_by_a_live_process(lock_path) {
         eprintln!("skipping: {lock_path:?} is genuinely held by a live process");
         return;
@@ -405,7 +443,8 @@ fn sigterm_still_removes_the_scratch_root_and_releases_the_lock() {
 #[test]
 fn sigint_still_removes_the_scratch_root_and_releases_the_lock() {
     let _guard = lock_test_guard().lock().unwrap_or_else(|p| p.into_inner());
-    let lock_path = Path::new("/tmp/ai-skills-run-tests.lock");
+    let lock_buf = lock_file();
+    let lock_path = lock_buf.as_path();
     if lock_is_held_by_a_live_process(lock_path) {
         eprintln!("skipping: {lock_path:?} is genuinely held by a live process");
         return;

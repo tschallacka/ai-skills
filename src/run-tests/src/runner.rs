@@ -5,9 +5,13 @@
 //! its outcome classified and counted, matching run-tests.sh's own
 //! PASS/SKIP/FAIL/TIMEOUT/UNCONFIGURED reporting exactly.
 
+use crate::platform;
 use std::ffi::OsString;
+use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 pub const CONTEXT_GATED: [&str; 2] = [
     "planning/tests/test-plan-context.sh",
@@ -34,6 +38,9 @@ pub struct RunConfig<'a> {
     pub repo_root: &'a Path,
     pub timeout_cmd: Option<&'a str>,
     pub test_timeout_seconds: u64,
+    /// The bound this process enforces itself, used where there is no
+    /// timeout(1) to hand the job to (Windows, or a host that lacks it).
+    pub native_timeout: Option<Duration>,
     pub wrapper: Option<&'a str>,
     pub bash: &'a str,
     pub verbose: bool,
@@ -56,7 +63,9 @@ pub struct RunConfig<'a> {
 /// path, not from the suite name itself (a suite literally named "tests"
 /// has no leading slash of its own before stripping repo_root).
 fn label_for(test_path: &Path) -> String {
-    let full = test_path.to_string_lossy().into_owned();
+    // Forward slashes first: a Windows path joins its parts with `\`, and the
+    // pattern below looks for "/tests/".
+    let full = test_path.to_string_lossy().replace('\\', "/");
     let after_tests = full
         .rsplit_once("/tests/")
         .map(|(_, rest)| rest)
@@ -120,7 +129,7 @@ pub fn run_one(config: &RunConfig, test_path: &Path, counts: &mut Counts) {
         .strip_prefix(config.repo_root)
         .unwrap_or(test_path)
         .to_string_lossy()
-        .into_owned();
+        .replace('\\', "/");
 
     if is_context_gated(&relative) && !config.context_cache_set {
         counts.unconfigured += 1;
@@ -136,10 +145,12 @@ pub fn run_one(config: &RunConfig, test_path: &Path, counts: &mut Counts) {
         ("2G", "400")
     };
 
-    let trailing: Vec<OsString> = vec![config.bash.into(), test_path.as_os_str().to_os_string()];
+    // bash gets the script in forward-slash form on every platform; on
+    // Windows a backslash path is not one it reliably opens.
+    let trailing: Vec<OsString> = vec![config.bash.into(), platform::to_posix(test_path).into()];
     let mut command = build_command(config, mem, cpu, trailing);
     apply_child_env(&mut command, config);
-    let (code, output) = run_captured(&mut command);
+    let (code, output) = run_captured(&mut command, config.native_timeout);
     report_one(&label, code, &output, config.verbose, counts);
 }
 
@@ -148,7 +159,7 @@ pub fn run_cargo_one(config: &RunConfig, crate_dir: &str, counts: &mut Counts) {
         "cargo-{}",
         crate_dir.rsplit('/').next().unwrap_or(crate_dir)
     );
-    if !which("cargo") {
+    if !platform::which("cargo") {
         if config.refuse_unconfigured_cargo {
             counts.failed += 1;
             counts.failed_names.push(label.clone());
@@ -170,15 +181,8 @@ pub fn run_cargo_one(config: &RunConfig, crate_dir: &str, counts: &mut Counts) {
     ];
     let mut command = build_command(config, "2G", "400", trailing);
     apply_child_env(&mut command, config);
-    let (code, output) = run_captured(&mut command);
+    let (code, output) = run_captured(&mut command, config.native_timeout);
     report_one(&label, code, &output, config.verbose, counts);
-}
-
-fn which(program: &str) -> bool {
-    let Some(path_var) = std::env::var_os("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&path_var).any(|dir| dir.join(program).is_file())
 }
 
 /// Builds the full argv exactly as the original does: optional timeout_cmd,
@@ -193,7 +197,14 @@ fn build_command(config: &RunConfig, mem: &str, cpu: &str, trailing: Vec<OsStrin
         argv.push(config.test_timeout_seconds.to_string().into());
     }
     if let Some(wrapper) = config.wrapper {
-        argv.push(wrapper.into());
+        // The resource wrapper is a bash script, which Windows cannot start
+        // by itself.
+        if cfg!(windows) {
+            argv.push(config.bash.into());
+            argv.push(platform::to_posix(Path::new(wrapper)).into());
+        } else {
+            argv.push(wrapper.into());
+        }
         argv.push(mem.into());
         argv.push(cpu.into());
         argv.push("--".into());
@@ -204,24 +215,130 @@ fn build_command(config: &RunConfig, mem: &str, cpu: &str, trailing: Vec<OsStrin
     command
 }
 
-fn run_captured(command: &mut Command) -> (Option<i32>, String) {
-    let output = command.stdin(Stdio::null()).output();
-    match output {
-        Ok(out) => {
-            let combined = format!(
-                "{}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            );
-            (out.status.code(), combined)
+/// Runs `command` to completion and returns its exit code and combined
+/// output. With a `bound`, a run that outlives it is killed and reported as
+/// exit 124, the code timeout(1) uses, so the caller cannot tell the two
+/// mechanisms apart.
+fn run_captured(command: &mut Command, bound: Option<Duration>) -> (Option<i32>, String) {
+    let Some(bound) = bound else {
+        return match command.stdin(Stdio::null()).output() {
+            Ok(out) => (
+                out.status.code(),
+                format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                ),
+            ),
+            Err(error) => (Some(127), format!("could not run: {error}")),
+        };
+    };
+    let mut child = match command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => return (Some(127), format!("could not run: {error}")),
+    };
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    let deadline = Instant::now() + bound;
+    let code = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.code(),
+            Ok(None) if Instant::now() >= deadline => {
+                kill_tree(&mut child);
+                let _ = child.wait();
+                break Some(124);
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(error) => return (Some(127), format!("could not wait: {error}")),
         }
-        Err(error) => (Some(127), format!("could not run: {error}")),
+    };
+    // Whatever was captured so far. The reader threads are left to finish on
+    // their own: a grandchild that survived the kill (a `sleep` under the
+    // test's bash) keeps the pipes open, and waiting for it to close them
+    // would put the whole bound back.
+    std::thread::sleep(Duration::from_millis(20));
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&stdout.lock().unwrap()),
+        String::from_utf8_lossy(&stderr.lock().unwrap())
+    );
+    (code, text)
+}
+
+/// Reads `pipe` to the end on a background thread into a shared buffer.
+fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> Arc<Mutex<Vec<u8>>> {
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    if let Some(mut pipe) = pipe {
+        let shared = Arc::clone(&buffer);
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 8192];
+            while let Ok(read) = pipe.read(&mut chunk) {
+                if read == 0 {
+                    break;
+                }
+                shared.lock().unwrap().extend_from_slice(&chunk[..read]);
+            }
+        });
     }
+    buffer
+}
+
+/// Ends the child and, on Windows, everything it started: killing only the
+/// bash leaves its children running against the test's own scratch tree.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bounded_run_that_outlives_its_bound_is_reported_as_exit_124() {
+        // The platform's own way of waiting 30 seconds.
+        let mut command = if cfg!(windows) {
+            let mut c = Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.arg("30");
+            c
+        };
+        let started = Instant::now();
+        let (code, _) = run_captured(&mut command, Some(Duration::from_millis(300)));
+        assert_eq!(code, Some(124));
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn a_bounded_run_that_finishes_keeps_its_code_and_output() {
+        let mut command = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "echo hello & exit 3"]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", "echo hello; exit 3"]);
+            c
+        };
+        let (code, text) = run_captured(&mut command, Some(Duration::from_secs(20)));
+        assert_eq!(code, Some(3));
+        assert!(text.contains("hello"), "{text:?}");
+    }
 
     #[test]
     fn label_strips_suite_tests_prefix_and_sh_suffix() {

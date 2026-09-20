@@ -6,9 +6,9 @@
 //! added to a skill directory and never declared, which npm's own file
 //! selection would otherwise only catch in CI.
 
+use crate::platform::script_command;
 use crate::report::Report;
 use std::path::Path;
-use std::process::Command;
 
 pub fn gate_skill_manifest(repo_root: &Path, report: &mut Report) {
     let manifest_test = repo_root.join("tests/test-skill-files-manifest.sh");
@@ -19,7 +19,7 @@ pub fn gate_skill_manifest(repo_root: &Path, report: &mut Report) {
         ));
         return;
     }
-    let output = Command::new(&manifest_test)
+    let output = script_command(&manifest_test)
         .arg("--declarations-only")
         .current_dir(repo_root)
         .output();

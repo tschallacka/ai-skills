@@ -2,6 +2,7 @@
 // PACKAGE: PROD
 mod change_set;
 mod gates;
+mod platform;
 mod reexec;
 mod report;
 

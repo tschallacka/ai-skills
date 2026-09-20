@@ -7,17 +7,10 @@
 //! the change rather than to the whole tree.
 
 use crate::change_set::changed;
+use crate::platform::{script_command, which};
 use crate::report::Report;
-use std::env;
 use std::path::Path;
 use std::process::Command;
-
-fn which(program: &str) -> bool {
-    let Some(path_var) = env::var_os("PATH") else {
-        return false;
-    };
-    env::split_paths(&path_var).any(|dir| dir.join(program).is_file())
-}
 
 fn print_first_lines(text: &str, limit: usize) {
     for line in text.lines().take(limit) {
@@ -38,7 +31,7 @@ pub fn gate_shellcheck(
 ) -> Vec<String> {
     let build_libs = repo_root.join("planning/scripts/build-plan-libs.sh");
     if build_libs.is_file() {
-        let _ = Command::new(&build_libs).current_dir(repo_root).output();
+        let _ = script_command(&build_libs).current_dir(repo_root).output();
     }
 
     let changed_sh: Vec<String> = changed(repo_root, base, r"\.sh$")

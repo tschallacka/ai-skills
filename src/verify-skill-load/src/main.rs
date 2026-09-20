@@ -286,9 +286,15 @@ mod tests {
         );
         assert_eq!(outcome.exit_code(), 65);
         match outcome {
+            // The path is printed the way the platform writes it (`\` on
+            // Windows), so the expectation is built from the same path
+            // rather than spelled with unix slashes.
             Outcome::NoLoadProof { stderr } => assert_eq!(
                 stderr,
-                "/skill/parts/part-1.md carries no load-proof line; run generate-skill-docs.sh"
+                format!(
+                    "{} carries no load-proof line; run generate-skill-docs.sh",
+                    part_file.display()
+                )
             ),
             _ => panic!("expected NoLoadProof"),
         }

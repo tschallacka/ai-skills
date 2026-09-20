@@ -6,16 +6,8 @@
 //! the same real scripts the bash original does rather than reimplementing
 //! their own logic.
 
-use std::env;
+use crate::platform::{self, script_command, which};
 use std::path::Path;
-use std::process::Command;
-
-fn which(program: &str) -> bool {
-    let Some(path_var) = env::var_os("PATH") else {
-        return false;
-    };
-    env::split_paths(&path_var).any(|dir| dir.join(program).is_file())
-}
 
 /// Returns Err(message) with the exact multi-line refusal when a prior
 /// setup-dev-env.sh run started and never finished (or finished a different
@@ -63,16 +55,16 @@ pub fn bootstrap_generated(repo_root: &Path) -> Result<Option<String>, String> {
         .iter()
         .any(|lib| !repo_root.join("planning/scripts").join(lib).is_file());
     if missing {
-        let _ = Command::new(repo_root.join("planning/scripts/build-plan-libs.sh"))
+        let _ = script_command(&repo_root.join("planning/scripts/build-plan-libs.sh"))
             .current_dir(repo_root)
             .status();
     }
     if !repo_root.join("planning/REVIEWER.md").is_file() {
-        let _ = Command::new(repo_root.join("planning/scripts/generate-reviewer.sh"))
+        let _ = script_command(&repo_root.join("planning/scripts/generate-reviewer.sh"))
             .current_dir(repo_root)
             .status();
     }
-    let _ = Command::new(repo_root.join("generate-portability.sh"))
+    let _ = script_command(&repo_root.join("generate-portability.sh"))
         .current_dir(repo_root)
         .status();
 
@@ -84,7 +76,7 @@ pub fn bootstrap_generated(repo_root: &Path) -> Result<Option<String>, String> {
     // re-verification that rjq is then actually found on the newly-extended
     // PATH. Only the elif branch (the call itself failing, or succeeding
     // with empty output) is the failure path.
-    let output = Command::new(repo_root.join("bootstrap.sh"))
+    let output = script_command(&repo_root.join("bootstrap.sh"))
         .args(["rjq", "--path-only"])
         .current_dir(repo_root)
         .output();
@@ -92,7 +84,9 @@ pub fn bootstrap_generated(repo_root: &Path) -> Result<Option<String>, String> {
         .ok()
         .filter(|out| out.status.success())
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .filter(|dir| !dir.is_empty());
+        .filter(|dir| !dir.is_empty())
+        // A bash prints `/d/a/x`; the children PATH is handed to need `D:\a\x`.
+        .map(|dir| platform::to_native_path(&dir));
     match dir {
         Some(dir) => Ok(Some(dir)),
         None => {
@@ -105,9 +99,7 @@ pub fn bootstrap_generated(repo_root: &Path) -> Result<Option<String>, String> {
 /// `extra_dir` (the rjq-fallback directory, when bootstrap_generated found
 /// one) ahead of this process's own current PATH.
 pub fn effective_path(extra_dir: Option<&str>) -> Option<String> {
-    let extra_dir = extra_dir?;
-    let existing = env::var("PATH").unwrap_or_default();
-    Some(format!("{extra_dir}:{existing}"))
+    platform::prepend_to_path(extra_dir?)
 }
 
 #[cfg(test)]

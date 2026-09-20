@@ -7,9 +7,9 @@
 //! bash original's own `[ -f "$f" ] || continue`.
 
 use crate::change_set::changed;
+use crate::platform::bash;
 use crate::report::Report;
 use std::path::Path;
-use std::process::Command;
 
 pub fn gate_bash_syntax(repo_root: &Path, base: Option<&str>, report: &mut Report) {
     let sh_changed = changed(repo_root, base, r"\.sh$");
@@ -23,9 +23,9 @@ pub fn gate_bash_syntax(repo_root: &Path, base: Option<&str>, report: &mut Repor
         if !path.is_file() {
             continue;
         }
-        let ok = Command::new("bash")
+        let ok = bash()
             .arg("-n")
-            .arg(&path)
+            .arg(path.to_string_lossy().replace('\\', "/"))
             .output()
             .map(|out| out.status.success())
             .unwrap_or(false);

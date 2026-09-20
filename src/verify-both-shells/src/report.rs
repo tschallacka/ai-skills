@@ -6,6 +6,15 @@ pub struct ReportResult {
     pub is_failure: bool,
 }
 
+/// A leg the host cannot have at all (see `Leg::skip_reason`). Not a failure:
+/// nothing was attempted, and the reason says so in the report.
+pub fn skipped(label: &str, reason: &str) -> ReportResult {
+    ReportResult {
+        text: format!("=== {label} -- SKIPPED: {reason} ===\n"),
+        is_failure: false,
+    }
+}
+
 /// Reproduces `report()`'s exact real semantics: a log with no `Total ran`
 /// substring anywhere means the leg did not run at all (its own last 20
 /// lines are shown for diagnosis); otherwise every `Total ran`/`^Failed:`

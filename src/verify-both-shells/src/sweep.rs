@@ -56,19 +56,44 @@ fn live_owner(parent: &Path) -> Option<i32> {
     }
 }
 
-// This script's own verify-both-shells.sh has no meaningful bash-comparison
-// workflow on Windows (no bash to compare), but the crate still has to
-// compile there since ci-subjects.sh's own planning_commands catch-all
-// builds every workspace member on every platform. `kill(pid, 0)` is POSIX
-// only; there is no signalable-pid check on offer here, so a non-unix build
-// always answers "not live" -- the same safe default a missing/malformed
-// harness.pid already gets above.
 #[cfg(unix)]
 fn is_live(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
-#[cfg(not(unix))]
+/// Windows has no `kill(pid, 0)`. The equivalent question -- is a process
+/// with this pid still running -- is answered by opening it for a query and
+/// asking for its exit code: a running process reports STILL_ACTIVE. A pid
+/// that cannot be opened (gone, or another user's) is not live, the same
+/// answer `kill` gives for ESRCH and EPERM alike.
+#[cfg(windows)]
+fn is_live(pid: i32) -> bool {
+    use std::ffi::c_void;
+
+    extern "system" {
+        fn OpenProcess(access: u32, inherit_handle: i32, pid: u32) -> *mut c_void;
+        fn GetExitCodeProcess(process: *mut c_void, exit_code: *mut u32) -> i32;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+    }
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+
+    if pid <= 0 {
+        return false;
+    }
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+        if process.is_null() {
+            return false;
+        }
+        let mut exit_code = 0u32;
+        let known = GetExitCodeProcess(process, &mut exit_code);
+        CloseHandle(process);
+        known != 0 && exit_code == STILL_ACTIVE
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn is_live(_pid: i32) -> bool {
     false
 }
@@ -101,7 +126,16 @@ mod tests {
         let dir = scratch_dir("dead-pid");
         // Spawn and wait on a short-lived child so its pid is (almost
         // certainly) no longer live by the time we check it.
-        let mut child = Command::new("true").spawn().unwrap();
+        // A child that exits at once, by whatever the platform calls that.
+        let mut child = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "exit 0"]);
+            c
+        } else {
+            Command::new("true")
+        }
+        .spawn()
+        .unwrap();
         let dead_pid = child.id() as i32;
         let _ = child.wait();
         fs::write(dir.join("harness.pid"), dead_pid.to_string()).unwrap();

@@ -3,6 +3,7 @@
 
 //! Gate 1 (whitespace) and gate 1b (the portability catalogue).
 
+use crate::platform::script_command;
 use crate::report::Report;
 use std::path::Path;
 use std::process::Command;
@@ -38,7 +39,7 @@ pub fn gate_whitespace(repo_root: &Path, base: Option<&str>, report: &mut Report
 /// actually matches what just got pushed.
 pub fn gate_portability(repo_root: &Path, report: &mut Report) {
     let script = repo_root.join("generate-portability.sh");
-    let ok = Command::new(&script)
+    let ok = script_command(&script)
         .current_dir(repo_root)
         .output()
         .map(|out| out.status.success())

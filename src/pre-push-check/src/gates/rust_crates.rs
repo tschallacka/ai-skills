@@ -7,17 +7,10 @@
 //! the change itself did not touch.
 
 use crate::change_set::changed;
+use crate::platform::which;
 use crate::report::Report;
-use std::env;
 use std::path::Path;
 use std::process::Command;
-
-fn which(program: &str) -> bool {
-    let Some(path_var) = env::var_os("PATH") else {
-        return false;
-    };
-    env::split_paths(&path_var).any(|dir| dir.join(program).is_file())
-}
 
 fn gate_rust_crates_fmt_and_test(repo_root: &Path, crates: &[String], report: &mut Report) {
     for crate_name in crates {

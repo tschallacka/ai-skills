@@ -9,6 +9,9 @@ use std::process::{Command, Stdio};
 pub struct Leg {
     pub label: &'static str,
     pub build: Box<dyn Fn(&Path) -> Command>,
+    /// Set when this leg cannot exist on the host at all (not merely failed):
+    /// it is reported as skipped, with this reason, instead of being run.
+    pub skip_reason: Option<&'static str>,
 }
 
 /// AR-77 (refined during implementation to a more robust design than a
@@ -50,10 +53,19 @@ pub fn real_legs(src: &Path) -> [Leg; 2] {
         Leg {
             label: "bash 5.3",
             build: Box::new(|wt: &Path| {
+                // A script cannot be started on Windows; bash runs it.
+                #[cfg(windows)]
+                let mut c = {
+                    let mut c = crate::platform::bash();
+                    c.arg("./run-tests.sh");
+                    c
+                };
+                #[cfg(not(windows))]
                 let mut c = Command::new("./run-tests.sh");
                 c.current_dir(wt);
                 c
             }),
+            skip_reason: None,
         },
         Leg {
             label: "bash 3.2",
@@ -63,6 +75,13 @@ pub fn real_legs(src: &Path) -> [Leg; 2] {
                 c.args(&argv[1..]).current_dir(wt);
                 c
             }),
+            // The 3.2 floor is reached through `nix develop`, and nix does
+            // not run on Windows. The macOS CI legs (system bash 3.2) carry
+            // that floor; this run reports the leg as skipped, not as a leg
+            // that failed to start.
+            skip_reason: cfg!(windows).then_some(
+                "bash 3.2 comes from nix, which does not run on Windows; the macOS legs carry the 3.2 floor",
+            ),
         },
     ]
 }
@@ -92,7 +111,7 @@ mod tests {
             "verify-both-shells-merge-test-{}.log",
             std::process::id()
         ));
-        let mut command = Command::new("bash");
+        let mut command = crate::platform::bash();
         command
             .arg("-c")
             .arg("printf 'out1\\n'; printf 'err1\\n' >&2; printf 'out2\\n'");

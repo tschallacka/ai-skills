@@ -6,9 +6,9 @@
 //! only what this change is responsible for) and the portability-construct
 //! scan (only sees the changed files, not the whole tree).
 
+use crate::platform::script_command;
 use crate::report::Report;
 use std::path::Path;
-use std::process::Command;
 
 fn print_first_lines(text: &str, limit: usize) {
     for line in text.lines().take(limit) {
@@ -32,7 +32,7 @@ fn gate_static_scans_cap(
     }
     let mut args: Vec<String> = vec!["--files".into(), "--base".into(), base.unwrap_or("").into()];
     args.extend(changed_sh.iter().cloned());
-    let output = Command::new(&cap_test)
+    let output = script_command(&cap_test)
         .args(&args)
         .current_dir(repo_root)
         .output();
@@ -66,7 +66,7 @@ fn gate_static_scans_portability(repo_root: &Path, changed_sh: &[String], report
     }
     let mut args: Vec<String> = vec!["--files".into()];
     args.extend(changed_sh.iter().cloned());
-    let output = Command::new(&port_test)
+    let output = script_command(&port_test)
         .args(&args)
         .current_dir(repo_root)
         .output();

@@ -67,7 +67,45 @@ pub fn install_signal_cleanup(cleanup: impl FnOnce() + Send + 'static) {
     });
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+mod console {
+    use std::sync::Mutex;
+
+    type Cleanup = Box<dyn FnOnce() + Send>;
+    pub static CLEANUP: Mutex<Option<Cleanup>> = Mutex::new(None);
+
+    extern "system" {
+        pub fn SetConsoleCtrlHandler(
+            handler: Option<unsafe extern "system" fn(u32) -> i32>,
+            add: i32,
+        ) -> i32;
+    }
+
+    /// Ctrl-C and Ctrl-Break (and a closing console window). Windows runs this
+    /// on a thread of its own, so it may do the cleanup itself before ending
+    /// the process with the code a shell reports for SIGINT.
+    pub unsafe extern "system" fn on_ctrl(_kind: u32) -> i32 {
+        let cleanup = CLEANUP.lock().ok().and_then(|mut slot| slot.take());
+        if let Some(cleanup) = cleanup {
+            cleanup();
+        }
+        std::process::exit(130)
+    }
+}
+
+/// The Windows counterpart of the signal cleanup above: a console control
+/// handler that removes the lock and the scratch root on Ctrl-C.
+#[cfg(windows)]
+pub fn install_signal_cleanup(cleanup: impl FnOnce() + Send + 'static) {
+    if let Ok(mut slot) = console::CLEANUP.lock() {
+        *slot = Some(Box::new(cleanup));
+    }
+    unsafe {
+        console::SetConsoleCtrlHandler(Some(console::on_ctrl), 1);
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn install_signal_cleanup(_cleanup: impl FnOnce() + Send + 'static) {}
 
 pub struct ScratchRoot {
@@ -118,7 +156,8 @@ impl Drop for ScratchRoot {
 /// lib-test.sh's own mktemp template produces), removing only the ones
 /// carrying THIS run's own `.ai-skills-test-run-id` marker.
 pub fn cleanup_marked_test_roots(tmp_dir: &Path, run_id: &str) {
-    for scan in [Path::new("/tmp"), tmp_dir] {
+    let system_tmp = crate::platform::system_tmp();
+    for scan in [system_tmp.as_path(), tmp_dir] {
         let Ok(entries) = fs::read_dir(scan) else {
             continue;
         };

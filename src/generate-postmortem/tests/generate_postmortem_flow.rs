@@ -4,6 +4,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+// `bash_script()`: a .sh file cannot be started directly on Windows, and a bare
+// `Command::new("bash")` there finds System32's WSL launcher.
+#[path = "../../../tests/rust-support/script_stub.rs"]
+mod script_stub;
+
 fn repo_root() -> PathBuf {
     // CARGO_MANIFEST_DIR is src/generate-postmortem; the repo root is two
     // levels up.
@@ -116,11 +121,14 @@ fn the_wired_shell_oracle_matches_the_compiled_binary_directly() {
     fs::create_dir_all(&bin_root).unwrap();
     fs::copy(
         env!("CARGO_BIN_EXE_generate-postmortem"),
-        bin_root.join("generate-postmortem"),
+        bin_root.join(format!(
+            "generate-postmortem{}",
+            std::env::consts::EXE_SUFFIX
+        )),
     )
     .unwrap();
 
-    let help = Command::new(&oracle)
+    let help = script_stub::bash_script(&oracle)
         .arg("--help")
         .env("AI_SKILLS_BIN_ROOT", &bin_root)
         .output()
@@ -138,7 +146,7 @@ fn the_wired_shell_oracle_matches_the_compiled_binary_directly() {
     let via_oracle = scratch.path().join("via-oracle.md");
     let via_binary = scratch.path().join("via-binary.md");
 
-    let oracle_result = Command::new(&oracle)
+    let oracle_result = script_stub::bash_script(&oracle)
         .arg(&plan_dir)
         .arg("--output")
         .arg(&via_oracle)

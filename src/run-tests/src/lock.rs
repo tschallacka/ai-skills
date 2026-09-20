@@ -11,8 +11,15 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub const LOCK_PATH: &str = "/tmp/ai-skills-run-tests.lock";
+pub const LOCK_FILE_NAME: &str = "ai-skills-run-tests.lock";
 pub const LOCK_MARKER: &str = "ai-skills-run-tests";
+
+/// The fixed, machine-wide lock location: `/tmp/ai-skills-run-tests.lock`
+/// where there is a /tmp, the platform's own temporary directory otherwise.
+/// A mutex only works if every run agrees on where it lives.
+pub fn lock_path() -> PathBuf {
+    crate::platform::system_tmp().join(LOCK_FILE_NAME)
+}
 
 pub enum AcquireResult {
     Acquired,
@@ -30,7 +37,7 @@ pub enum AcquireResult {
 
 fn write_lock(path: &Path, repo_root: &Path) -> std::io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    let now = chrono_like_utc_now();
+    let now = crate::platform::utc_stamp();
     write!(
         file,
         "{}\n{}\n{}\n{}\n",
@@ -41,24 +48,35 @@ fn write_lock(path: &Path, repo_root: &Path) -> std::io::Result<()> {
     )
 }
 
-/// A minimal UTC "YYYY-MM-DDTHH:MM:SSZ" stamp via `date -u`, matching the
-/// bash original's own `$(date -u +%Y-%m-%dT%H:%M:%SZ)` exactly rather than
-/// pulling in a date/time crate for one timestamp.
-fn chrono_like_utc_now() -> String {
-    Command::new("date")
-        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
-        .output()
-        .ok()
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .unwrap_or_default()
-}
-
 fn read_lock_lines(path: &Path) -> Vec<String> {
     std::fs::read_to_string(path)
         .map(|content| content.lines().map(str::to_string).collect())
         .unwrap_or_default()
 }
 
+/// Windows has no `ps`; `tasklist` names the image of a running pid
+/// (`"run-tests.exe","1234",...`) and answers `INFO: No tasks...` for one that
+/// has exited, which never contains the marker.
+#[cfg(windows)]
+fn lock_holder_command(pid: &str) -> String {
+    let filter = format!("PID eq {pid}");
+    match Command::new("tasklist")
+        .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+        .output()
+    {
+        Ok(out) => {
+            let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if text.starts_with("INFO:") {
+                String::new()
+            } else {
+                text
+            }
+        }
+        Err(_) => String::new(),
+    }
+}
+
+#[cfg(not(windows))]
 fn lock_holder_command(pid: &str) -> String {
     for flag in ["args=", "command="] {
         if let Ok(out) = Command::new("ps").args(["-p", pid, "-o", flag]).output() {
@@ -100,7 +118,7 @@ impl Lock {
     /// shape: a failed create reads the existing holder's pid, refuses if
     /// it is live, otherwise reclaims a stale lock with one retry.
     /// `lock_path` is injectable so tests never contend for the real,
-    /// machine-wide LOCK_PATH.
+    /// machine-wide lock file.
     pub fn acquire(
         lock_path: &Path,
         repo_root: &Path,
