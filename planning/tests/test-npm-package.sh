@@ -12,7 +12,19 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/npm-package.XXXXXX")"
 tarball=''
 cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
-tarball="$(cd "$repo_root" && npm pack --silent --pack-destination "$tmp")"
+# npm runs lifecycle scripts (the `prepack` one-liner is bash: braces, `&&`
+# groups, command substitution) through cmd.exe on Windows unless told which
+# shell to use, and cmd answers "'{' is not recognized". Name Git for
+# Windows' bash, as a Windows path because npm is a native program.
+npm_shell=()
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+        if command -v cygpath >/dev/null 2>&1; then
+            npm_shell=(--script-shell "$(cygpath -w "$(command -v bash)")")
+        fi
+        ;;
+esac
+tarball="$(cd "$repo_root" && npm pack --silent ${npm_shell[@]+"${npm_shell[@]}"} --pack-destination "$tmp")"
 [ -f "$tmp/$tarball" ]
 # Compiled artifacts under bin/ and extensionless planning commands are
 # excluded, path and size both. Only one artifact is tracked; CI rebuilds them,

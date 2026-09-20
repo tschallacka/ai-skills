@@ -33,9 +33,16 @@ EOF
 chmod +x "$payload_dir/installer"
 tar -czf "$work/release.tar.gz" -C "$payload_dir" installer
 
+# curl on Windows is a native program: it needs a drive-letter path in the URL
+# (file:///C:/...), not the MSYS path (/tmp/...) bash knows the directory by.
+release_url="file://$work/release.tar.gz"
+if command -v cygpath >/dev/null 2>&1; then
+    release_url="file:///$(cygpath -m "$work")/release.tar.gz"
+fi
+
 run_bootstrap() {
     rm -f "$argv_log"
-    AI_SKILLS_NO_SPLASH=1 AI_SKILLS_RELEASE_URL="file://$work/release.tar.gz" \
+    AI_SKILLS_NO_SPLASH=1 AI_SKILLS_RELEASE_URL="$release_url" \
         "$repo_root/installer/bootstrap.sh" "$@" </dev/null >/dev/null 2>&1
 }
 

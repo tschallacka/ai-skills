@@ -68,6 +68,13 @@ bootstrap_target() {
                 aarch64) printf 'aarch64-apple-darwin\n'; return 0 ;;
             esac
             ;;
+        MINGW* | MSYS* | CYGWIN* | Windows_NT)
+            # Git for Windows' bash (MSYS2/MinGW) and Cygwin. build-installer-
+            # release.sh packs installer.exe into this triple's tarball.
+            case "$arch" in
+                x86_64) printf 'x86_64-pc-windows-msvc\n'; return 0 ;;
+            esac
+            ;;
     esac
     return 1
 }
@@ -341,8 +348,16 @@ fi
 mkdir -p "$extract_dir" || bootstrap_die "cannot create $extract_dir"
 tar -xzf "$archive" -C "$extract_dir" || bootstrap_die "extracting $archive failed"
 
-installer_bin="$extract_dir/installer"
-[ -x "$installer_bin" ] || installer_bin="$(find "$extract_dir" -maxdepth 2 -name installer -type f -perm -u+x 2>/dev/null | head -1)"
+# The Windows tarball carries installer.exe; every other target's is plain
+# `installer`.
+installer_bin=''
+for candidate in installer installer.exe; do
+    if [ -x "$extract_dir/$candidate" ]; then
+        installer_bin="$extract_dir/$candidate"
+        break
+    fi
+done
+[ -n "$installer_bin" ] || installer_bin="$(find "$extract_dir" -maxdepth 2 \( -name installer -o -name installer.exe \) -type f -perm -u+x 2>/dev/null | head -1)"
 [ -n "$installer_bin" ] && [ -x "$installer_bin" ] \
     || bootstrap_die "the downloaded release has no executable 'installer'"
 

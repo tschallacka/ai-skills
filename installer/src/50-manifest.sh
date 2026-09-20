@@ -897,14 +897,24 @@ source_is_dev_build() {
 # suffix. Windows still needs the executable suffix on disk. Only generated
 # planning commands use this logical-name rule; ordinary files and shell
 # helpers retain their manifest path exactly.
+#
+# A command is a name with no extension of its own. Everything else under
+# planning/scripts -- a .sh helper, a .awk program, a data file -- is a plain
+# file that already has its real name, and must not gain a ".exe": on Windows
+# the release builder went looking for validate-plan-countable-enumeration.awk.exe.
 platform_relative_path() {
     local skill="$1"
     local relative="$2"
+    local base="${relative##*/}"
     case "$skill:$relative" in
-        planning:scripts/*.sh) : ;;
         planning:scripts/*)
-            case "$(uname -s)" in
-                MINGW*|MSYS*|CYGWIN*|Windows*) relative="$relative.exe" ;;
+            case "$base" in
+                *.*) ;;
+                *)
+                    case "$(uname -s)" in
+                        MINGW*|MSYS*|CYGWIN*|Windows*) relative="$relative.exe" ;;
+                    esac
+                    ;;
             esac
             ;;
     esac

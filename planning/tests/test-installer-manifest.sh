@@ -137,6 +137,12 @@ test_windows_command_paths() {
     [ "$(platform_relative_path planning scripts/plan-content.sh)" = \
         scripts/plan-content.sh ]
     [ "$(platform_relative_path planning SKILL.md)" = SKILL.md ]
+    # Only a command -- a name with no extension of its own -- gains the
+    # suffix. A data or awk file under planning/scripts is a plain file: on
+    # Windows the release builder went looking for
+    # validate-plan-countable-enumeration.awk.exe.
+    [ "$(platform_relative_path planning scripts/validate-plan-stale-wording.awk)" = \
+        scripts/validate-plan-stale-wording.awk ]
     unset -f uname
     printf '%s\n' 'test_windows_command_paths: PASS'
 }

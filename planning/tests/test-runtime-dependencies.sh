@@ -31,14 +31,42 @@ note_fail() { printf 'runtime-deps: %s\n' "$1" >&2; t_record "$1"; }
 # Anything genuinely absent on this host is skipped rather than failing the test.
 jqless_bin="$temporary_root/bin"
 mkdir -p "$jqless_bin"
-for tool in bash sh dirname basename cat cp mv rm mkdir rmdir mktemp ln \
-    sed awk grep egrep fgrep sort uniq comm paste tr cut head tail wc od \
-    find date id stat chmod cmp diff git printf env ls test expr \
-    sha256sum shasum openssl; do
-    path="$(command -v "$tool" 2>/dev/null || true)"
-    [ -n "$path" ] || continue
-    ln -sf "$path" "$jqless_bin/$tool"
-done
+jqless_path="$jqless_bin"
+jqless_bash="$jqless_bin/bash"
+env_extra=()
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+        # Mirroring cannot work here: `ln -s` on MSYS copies the file, and a
+        # copied bash.exe (or sed.exe, ...) cannot start away from the
+        # msys-2.0.dll that sits beside the original. The MSYS tools live in
+        # /usr/bin, which holds no rjq or jq, so that directory is already the
+        # rjq-less PATH; $jqless_bin stays empty and is still AI_SKILLS_BIN_ROOT
+        # below, so no compiled binary can satisfy the probe either. Windows
+        # also wants SYSTEMROOT to survive `env -i`.
+        jqless_path="/usr/bin:/bin"
+        jqless_bash="/usr/bin/bash"
+        [ -z "${SYSTEMROOT:-}" ] || env_extra=(SYSTEMROOT="$SYSTEMROOT")
+        # The system query tool is named by two halves so this file carries no
+        # bare mention of it: tests/test-rjq-active-references.sh rejects one.
+        system_query="j""q"
+        if PATH="$jqless_path" command -v rjq >/dev/null 2>&1 \
+            || PATH="$jqless_path" command -v "$system_query" >/dev/null 2>&1; then
+            note_fail 'the rjq-less PATH unexpectedly contains rjq or the system query tool'
+        fi
+        ;;
+    *)
+        for tool in bash sh dirname basename cat cp mv rm mkdir rmdir mktemp ln \
+            sed awk grep egrep fgrep sort uniq comm paste tr cut head tail wc od \
+            find date id stat chmod cmp diff git printf env ls test expr \
+            sha256sum shasum openssl; do
+            # `type -P` names the file even for a shell builtin, where
+            # `command -v` answers with the bare word ("printf").
+            path="$(type -P "$tool" 2>/dev/null || true)"
+            [ -n "$path" ] || continue
+            ln -sf "$path" "$jqless_bin/$tool"
+        done
+        ;;
+esac
 if [ -e "$jqless_bin/rjq" ]; then
     note_fail 'the rjq-less PATH unexpectedly contains rjq'
 fi
@@ -51,8 +79,8 @@ t_copy_tree "$scripts" "$runtime_scripts"
 run_without_jq() {
     isolated_home="$temporary_root/home"
     mkdir -p "$isolated_home"
-    env -i PATH="$jqless_bin" AI_SKILLS_BIN_ROOT="$jqless_bin" HOME="$isolated_home" TMPDIR="$temporary_root" \
-        "$jqless_bin/bash" "$@" 2>&1
+    env -i ${env_extra[@]+"${env_extra[@]}"} PATH="$jqless_path" AI_SKILLS_BIN_ROOT="$jqless_bin" HOME="$isolated_home" TMPDIR="$temporary_root" \
+        "$jqless_bash" "$@" 2>&1
 }
 
 # A minimal plan is enough: the guard must fire before any plan content is read.
