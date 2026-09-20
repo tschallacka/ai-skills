@@ -120,7 +120,15 @@ fn ensure_built(bin_dir: &Path, name: &str) -> PathBuf {
             break;
         }
     }
+    // One build at a time: tests run on parallel threads and two of them
+    // asking for the same sibling would otherwise race to build it.
+    static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = BUILDING.lock().unwrap_or_else(|p| p.into_inner());
+    if program.is_file() {
+        return program;
+    }
     let output = cmd
+        .arg("--message-format=json-render-diagnostics")
         .current_dir(&workspace_root)
         .output()
         .unwrap_or_else(|error| panic!("could not build {name}: {error}"));
@@ -129,10 +137,30 @@ fn ensure_built(bin_dir: &Path, name: &str) -> PathBuf {
         "building {name} failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    if !program.is_file() {
+        // Cargo reports where it actually put the binary; trust that over the
+        // target/<triple>/debug layout assumed above.
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let built = stdout
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|message| {
+                message["reason"] == "compiler-artifact" && message["target"]["name"] == name
+            })
+            .filter_map(|message| message["executable"].as_str().map(PathBuf::from))
+            .next_back();
+        if let Some(built) = built.filter(|path| path.is_file()) {
+            fs::copy(&built, &program).unwrap_or_else(|error| {
+                panic!("copy {} to {}: {error}", built.display(), program.display())
+            });
+        }
+    }
     assert!(
         program.is_file(),
-        "{name} still missing at {} after building it",
-        program.display()
+        "{name} still missing at {} after building it; cargo reported:\n{}\n{}",
+        program.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
     program
 }
