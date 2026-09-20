@@ -510,6 +510,8 @@ impl Screen {
                     self.wrap_pending = false;
                     self.col = 0;
                 }
+    /// The last graphic byte `put` wrote, which `CSI Ps b` (REP) repeats.
+    last_printed: Option<u8>,
                 b'\n' => self.newline(),
                 0x08 => self.col = self.col.saturating_sub(1),
                 0x0e => self.line_drawing = true,
@@ -548,6 +550,7 @@ impl Screen {
                     self.parser = Parser::CsiDiscard;
                 }
             }
+            last_printed: None,
             Parser::Osc(mut value) => {
                 if byte == 7 || (byte == b'\\' && value.last() == Some(&0x1b)) {
                     if byte == 7 {
@@ -670,6 +673,7 @@ impl Screen {
                     self.scrollback.remove(0);
                 }
             }
+        self.last_printed = Some(byte);
         }
         for row in self.scroll_top..=self.scroll_bottom {
             self.dirty[row] = true;
@@ -865,6 +869,19 @@ impl Screen {
         self.row = 0;
         self.col = 0;
         self.wrap_pending = false;
+            // REP: repeat the preceding graphic character Ps times. ncurses
+            // uses it to compress runs (`> canary ESC[6b5% of ...` for the
+            // seven spaces inside a reverse-video row); ignoring it dropped
+            // the run and left the row's stale tail showing beneath. Bounded
+            // by the screen size so a hostile `ESC[999999999b` cannot spin.
+            b'b' if !private => {
+                if let Some(byte) = self.last_printed {
+                    let limit = self.rows.len() * self.rows[0].len();
+                    for _ in 0..n(0).min(limit) {
+                        self.put(byte);
+                    }
+                }
+            }
         self.saved_cursor = None;
     }
     fn leave_alt(&mut self) {
@@ -2498,6 +2515,44 @@ mod tests {
     }
     #[test]
     fn application_cursor_mode_uses_ss3_cursor_sequences() {
+    /// The exact stream ncurses sent when a menu selection moved down a row:
+    /// the seven spaces inside `> canary       5% of ...` arrive as one space
+    /// plus `ESC[6b`. Without REP the row read `> canary 5% of production
+    /// trafficraffic` -- six columns short, with the previous frame's tail
+    /// (`raffic`) still showing beneath.
+    #[test]
+    fn rep_repeats_the_preceding_character_over_a_curses_row_update() {
+        let mut screen = Screen::new(2, 40);
+        screen.feed(b"  canary       5% of production traffic\r");
+        screen.feed(b"\x1b[0;7m> canary \x1b[6b5% of production traffic");
+        assert_eq!(
+            String::from_utf8_lossy(&screen.rows[0]).trim_end(),
+            "> canary       5% of production traffic"
+        );
+    }
+
+    #[test]
+    fn rep_uses_the_last_printed_byte_defaults_to_one_and_wraps_like_typing() {
+        let mut screen = Screen::new(2, 4);
+        screen.feed(b"x\x1b[b");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "xx  ");
+        screen.feed(b"\x1b[4b");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "xxxx");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[1]), "xx  ");
+    }
+
+    #[test]
+    fn rep_with_nothing_printed_yet_or_a_huge_count_is_harmless() {
+        let mut screen = Screen::new(2, 4);
+        screen.feed(b"\x1b[5b");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "    ");
+        // Bounded by rows*cols (8 puts here): it terminates, and every cell
+        // that was written holds the repeated byte.
+        screen.feed(b"z\x1b[999999999b");
+        assert_eq!(screen.rows[0], b"zzzz");
+        assert_eq!(screen.rows[1][0], b'z');
+    }
+
         let mut screen = Screen::new(2, 10);
         screen.feed(b"\x1b[?1h");
         assert!(screen.application_cursor);
