@@ -9,9 +9,10 @@
 //! `.plans/windows-interactive-shell/02-conpty-backend/working-context.md`.
 use crate::Backend;
 use std::ffi::c_void;
-use std::io::{self, Write};
+use std::io;
 use std::mem::size_of;
 use std::ptr::{null, null_mut};
+#[cfg(test)]
 use std::time::Duration;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, STILL_ACTIVE};
 #[cfg(test)]

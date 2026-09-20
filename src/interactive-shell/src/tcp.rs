@@ -264,7 +264,16 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn parse_discovery_rejects_a_real_unix_socket_path() {
-        let dir = scratch_dir("real-unix-socket");
+        // A bound AF_UNIX path must fit sun_path (104 bytes on macOS, 108 on
+        // Linux), and a test runner's $TMPDIR can be nested deeper than that.
+        // This one test needs a real socket, so it falls back to a short
+        // directory rather than failing on a limit that is not under test.
+        let mut dir = scratch_dir("real-unix-socket");
+        if dir.join("session.sock").as_os_str().len() >= 100 {
+            let _ = fs::remove_dir_all(&dir);
+            dir = std::path::PathBuf::from(format!("/tmp/is-tcp-sock-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+        }
         let socket = dir.join("session.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         assert!(parse_discovery(&socket).is_none());
