@@ -43,6 +43,20 @@ pub fn default_worktrees_root(home: &Path) -> PathBuf {
     crate::shared_bin::xdg_config_home_or(home).join("tsch-ai-worktrees")
 }
 
+/// `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills` -- the shared, cross-
+/// project directory `project-specifics/SKILL.md` documents writing
+/// `<project-name>-deviations.md` directly under (this is its PARENT, not
+/// `plan_migration::default_root`'s own `.../tsch-ai-skills/plans`
+/// subdirectory). Nothing granted an agent write access here before this
+/// existed: verified directly under codex's `--sandbox workspace-write`,
+/// where the write was refused outright ("writing outside of the project"),
+/// and the agent silently relocated the note into the project workspace
+/// instead -- defeating the note's entire cross-project-persistence point,
+/// with no warning that it had done so.
+pub fn default_tsch_ai_skills_root(home: &Path) -> PathBuf {
+    crate::shared_bin::xdg_config_home_or(home).join("tsch-ai-skills")
+}
+
 /// The eight entries install.sh's `claude_permissions` grants for the
 /// planning skill: read/write on the plan root and the tmp directory, plus
 /// read and execute (both a direct and a `bash `-prefixed form) on the
@@ -273,6 +287,34 @@ pub fn claude_worktrees_permissions_remove(
         format!("Bash({worktrees}/**:*)"),
     ];
     remove_allow_entries(&cfg, &entries)
+}
+
+fn project_specifics_entries(root: &str) -> Vec<String> {
+    let root = strip_trailing_slashes(root);
+    vec![
+        format!("Read({root}/**)"),
+        format!("Edit({root}/**)"),
+        format!("Bash({root}/**:*)"),
+    ]
+}
+
+pub fn claude_project_specifics_permissions(
+    root: &str,
+    home: &Path,
+) -> io::Result<PermissionOutcome> {
+    let cfg = claude_settings_path(home);
+    if !cfg.is_file() {
+        return Ok(PermissionOutcome::NoConfigFile);
+    }
+    merge_allow_entries(&cfg, &project_specifics_entries(root))
+}
+
+pub fn claude_project_specifics_permissions_remove(
+    root: &str,
+    home: &Path,
+) -> io::Result<PermissionRemovalOutcome> {
+    let cfg = claude_settings_path(home);
+    remove_allow_entries(&cfg, &project_specifics_entries(root))
 }
 
 pub fn claude_interactive_shell_permissions_remove(
@@ -594,6 +636,45 @@ pub fn opencode_worktrees_permissions_remove(
     )
 }
 
+pub fn opencode_project_specifics_permissions(
+    root: &str,
+    home: &Path,
+) -> io::Result<OpencodePermissionOutcome> {
+    let cfg = opencode_configfile(home);
+    if opencode_prepare_config(&cfg)?.is_none() {
+        return Ok(OpencodePermissionOutcome::NotStrictJson);
+    }
+    let pattern = vec![format!("{}/**", strip_trailing_slashes(root))];
+    opencode_merge_permission(
+        &cfg,
+        &[
+            ("read", &pattern),
+            ("edit", &pattern),
+            ("write", &pattern),
+            ("bash", &pattern),
+            ("external_directory", &pattern),
+        ],
+    )
+}
+
+pub fn opencode_project_specifics_permissions_remove(
+    root: &str,
+    home: &Path,
+) -> io::Result<Vec<String>> {
+    let cfg = opencode_configfile(home);
+    let pattern = vec![format!("{}/**", strip_trailing_slashes(root))];
+    opencode_unmerge_permission(
+        &cfg,
+        &[
+            ("read", &pattern),
+            ("edit", &pattern),
+            ("write", &pattern),
+            ("bash", &pattern),
+            ("external_directory", &pattern),
+        ],
+    )
+}
+
 // ---------------------------------------------------------------
 // codex
 // ---------------------------------------------------------------
@@ -776,6 +857,21 @@ pub fn codex_planning_permissions_remove(
 pub fn codex_worktrees_permissions_remove(worktrees: &str, home: &Path) -> io::Result<Vec<String>> {
     let cfg = codex_configfile(home);
     let unwanted = vec![strip_trailing_slashes(worktrees).to_string()];
+    codex_unmerge_writable_roots(&cfg, &unwanted)
+}
+
+pub fn codex_project_specifics_permissions(root: &str, home: &Path) -> io::Result<CodexOutcome> {
+    let cfg = codex_configfile(home);
+    let wanted = vec![strip_trailing_slashes(root).to_string()];
+    codex_merge_writable_roots(&cfg, &wanted)
+}
+
+pub fn codex_project_specifics_permissions_remove(
+    root: &str,
+    home: &Path,
+) -> io::Result<Vec<String>> {
+    let cfg = codex_configfile(home);
+    let unwanted = vec![strip_trailing_slashes(root).to_string()];
     codex_unmerge_writable_roots(&cfg, &unwanted)
 }
 
@@ -1201,5 +1297,73 @@ mod tests {
         let content = fs::read_to_string(codex_cfg(home.path())).unwrap();
         assert!(!content.contains("\"/worktrees\""));
         assert!(content.contains("\"/plans\""));
+    }
+
+    #[test]
+    fn claude_project_specifics_permissions_grants_three_entries() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = settings_at(home.path(), "{}");
+
+        let outcome =
+            claude_project_specifics_permissions("/home/x/.config/tsch-ai-skills", home.path())
+                .unwrap();
+        let added = match outcome {
+            PermissionOutcome::Added(entries) => entries,
+            _ => panic!("expected Added"),
+        };
+        assert_eq!(added.len(), 3);
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        let allow = doc["permissions"]["allow"].as_array().unwrap();
+        assert!(allow
+            .iter()
+            .any(|v| v == "Edit(/home/x/.config/tsch-ai-skills/**)"));
+    }
+
+    #[test]
+    fn opencode_project_specifics_permissions_grants_five_tools() {
+        let home = tempfile::tempdir().unwrap();
+        let outcome =
+            opencode_project_specifics_permissions("/home/x/.config/tsch-ai-skills", home.path())
+                .unwrap();
+        assert!(matches!(outcome, OpencodePermissionOutcome::Merged { .. }));
+        let cfg = opencode_cfg(home.path());
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(
+            doc["permission"]["write"]["/home/x/.config/tsch-ai-skills/**"],
+            "allow"
+        );
+    }
+
+    #[test]
+    fn codex_project_specifics_permissions_appends_the_root() {
+        let home = tempfile::tempdir().unwrap();
+        codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+
+        let outcome =
+            codex_project_specifics_permissions("/home/x/.config/tsch-ai-skills", home.path())
+                .unwrap();
+        assert!(matches!(outcome, CodexOutcome::Appended(_)));
+        let content = fs::read_to_string(codex_cfg(home.path())).unwrap();
+        assert!(content.contains("\"/home/x/.config/tsch-ai-skills\""));
+    }
+
+    #[test]
+    fn project_specifics_removal_does_not_touch_worktrees_or_planning() {
+        let home = tempfile::tempdir().unwrap();
+        codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+        codex_worktrees_permissions("/worktrees", home.path()).unwrap();
+        codex_project_specifics_permissions("/home/x/.config/tsch-ai-skills", home.path()).unwrap();
+
+        let removed = codex_project_specifics_permissions_remove(
+            "/home/x/.config/tsch-ai-skills",
+            home.path(),
+        )
+        .unwrap();
+        assert_eq!(removed, vec!["/home/x/.config/tsch-ai-skills".to_string()]);
+
+        let content = fs::read_to_string(codex_cfg(home.path())).unwrap();
+        assert!(!content.contains("tsch-ai-skills"));
+        assert!(content.contains("\"/plans\""));
+        assert!(content.contains("\"/worktrees\""));
     }
 }

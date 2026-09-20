@@ -60,10 +60,11 @@ Usage:
                      root this installer can discover under $HOME) needs
                      them; deregisters its MCP entry. Does not touch
                      permission grants written into settings.json.
-  installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR)
+  installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR | --project-specifics DIR)
                      grant that agent read/write on the planning skill's own
-                     scripts/plan-root/tmp directory, or on a worktree root
-  installer revoke-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR)
+                     scripts/plan-root/tmp directory, on a worktree root, or
+                     on the shared project-specifics note directory
+  installer revoke-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR | --project-specifics DIR)
                      the exact inverse of grant-permissions
   installer mcp-register --agent NAME --name NAME --path PATH
                      register PATH as an mcp-mode stdio server named NAME
@@ -963,6 +964,9 @@ fn run_post_install_steps(
     if skills.iter().any(|s| s == "planning") {
         run_planning_post_install(&known_roots, &home, confirms);
     }
+    if skills.iter().any(|s| s == "project-specifics") {
+        run_project_specifics_post_install(&known_roots, &home, confirms);
+    }
     run_mcp_registration_step(roots, source, skills);
     if skills.iter().any(|s| s == "interactive-shell") {
         run_interactive_shell_post_install(&known_roots, source, &home, confirms);
@@ -1140,6 +1144,85 @@ fn run_worktrees_permission_step(roots: &[(&Path, &str)], confirms: &mut Confirm
     }
 }
 
+/// project-specifics is pure-documentation (no compiled script of its own):
+/// SKILL.md tells the agent to `mkdir -p` the shared note directory itself
+/// before writing. That is enough for an ordinary shell, but not for an
+/// agent confined to a workspace-scoped sandbox (codex's own
+/// `--sandbox workspace-write` refuses a write outside the project tree
+/// outright, "writing outside of the project") -- unlike planning/
+/// worktrees/interactive-shell, nothing ever granted this directory the
+/// same install-time permission, so every project-specifics run under that
+/// sandbox either fails outright or (observed) silently relocates the note
+/// into the project workspace, defeating its whole cross-project-
+/// persistence point with no warning that it had done so.
+fn run_project_specifics_post_install(
+    roots: &[(&Path, &str)],
+    home: &Path,
+    confirms: &mut Confirms,
+) {
+    println!();
+    println!("== project-specifics shared note directory ==");
+    let root = permissions::default_tsch_ai_skills_root(home);
+    let root_str = root.to_string_lossy().to_string();
+    if confirms.ask(&format!(
+        "Create {root_str} as the shared project-notes directory?"
+    )) {
+        let _ = ensure_dir(&root);
+    }
+    if !confirms.ask(&format!(
+        "Grant the selected agents read/write on {root_str}, so a project-specifics note there \
+         needs no prompt per file? (Each edited config is backed up beside itself, unless git \
+         already tracks it)"
+    )) {
+        return;
+    }
+    for (_, kind) in roots {
+        match *kind {
+            "claude" => match permissions::claude_project_specifics_permissions(&root_str, home) {
+                Ok(outcome) => print_permission_outcome(
+                    "claude-code",
+                    "project-specifics permissions already present",
+                    outcome,
+                ),
+                Err(e) => println!("claude-code: {e}"),
+            },
+            "opencode" => {
+                match permissions::opencode_project_specifics_permissions(&root_str, home) {
+                    Ok(outcome) => print_opencode_outcome(
+                        "project-specifics permissions already present",
+                        outcome,
+                    ),
+                    Err(e) => println!("opencode: {e}"),
+                }
+            }
+            "codex" => match permissions::codex_project_specifics_permissions(&root_str, home) {
+                Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
+                Err(e) => println!("codex: {e}"),
+            },
+            _ => {}
+        }
+    }
+}
+
+/// Creates `path` (recursively) and reports the outcome the way every other
+/// directory-creation step in the installer's own post-install prompts
+/// does. Extracted so the actual mkdir behavior is unit-testable against an
+/// explicit, isolated path rather than only through the real
+/// `std::env::temp_dir()` a full install run resolves.
+fn ensure_dir(path: &Path) -> std::io::Result<()> {
+    let display = path.to_string_lossy();
+    match std::fs::create_dir_all(path) {
+        Ok(()) => {
+            println!("  Created {display}");
+            Ok(())
+        }
+        Err(e) => {
+            println!("  cannot create {display}: {e}");
+            Err(e)
+        }
+    }
+}
+
 fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mut Confirms) {
     println!("== planning runtime permissions ==");
     let plans = plan_migration::default_root(home);
@@ -1149,16 +1232,23 @@ fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mu
     if confirms.ask(&format!(
         "Create {plans_str} as the global plans directory?"
     )) {
-        match std::fs::create_dir_all(&plans) {
-            Ok(()) => println!("  Created {plans_str}"),
-            Err(e) => println!("  cannot create {plans_str}: {e}"),
-        }
+        let _ = ensure_dir(&plans);
     }
     if confirms.ask(&format!(
         "Grant the selected agents read/write on {plans_str} and {tmp_str}, and allow them to \
          execute the planning shell scripts? (Each edited config is backed up beside itself, \
          unless git already tracks it)"
     )) {
+        // codex's own sandbox refuses to run ANY command at all if a
+        // declared writable root does not already exist on disk (a bare
+        // permission grant naming a not-yet-created directory is not
+        // enough) -- confirmed directly: every command failed at the
+        // sandbox's own mount step, before the planning skill was ever
+        // reached, on a install where this directory happened not to
+        // already exist from prior use. Every other agent tolerates a
+        // not-yet-created root fine, so creating it unconditionally here
+        // is simplest rather than special-casing codex.
+        let _ = ensure_dir(&tmp);
         for (target, kind) in roots {
             let scripts = target.join("planning").join("scripts");
             let scripts = scripts.to_string_lossy();
@@ -1560,6 +1650,9 @@ enum GrantTarget {
     Bins {
         bins: String,
     },
+    ProjectSpecifics {
+        root: String,
+    },
 }
 
 struct GrantArgs {
@@ -1574,6 +1667,7 @@ fn parse_grant_args(argv: &[String]) -> Result<GrantArgs, String> {
     let mut tmp: Option<String> = None;
     let mut worktrees: Option<String> = None;
     let mut bins: Option<String> = None;
+    let mut project_specifics: Option<String> = None;
 
     let mut i = 0;
     while i < argv.len() {
@@ -1592,21 +1686,23 @@ fn parse_grant_args(argv: &[String]) -> Result<GrantArgs, String> {
             "--tmp" => tmp = Some(value!()),
             "--worktrees" => worktrees = Some(value!()),
             "--bins" => bins = Some(value!()),
+            "--project-specifics" => project_specifics = Some(value!()),
             other => return Err(format!("grant-permissions: unknown option: {other}")),
         }
         i += 1;
     }
     let agent = agent.ok_or("grant-permissions: --agent is required")?;
-    let target = match (scripts, plans, tmp, worktrees, bins) {
-        (Some(scripts), Some(plans), Some(tmp), None, None) => GrantTarget::Planning {
+    let target = match (scripts, plans, tmp, worktrees, bins, project_specifics) {
+        (Some(scripts), Some(plans), Some(tmp), None, None, None) => GrantTarget::Planning {
             scripts,
             plans,
             tmp,
         },
-        (None, None, None, Some(worktrees), None) => GrantTarget::Worktrees { worktrees },
-        (None, None, None, None, Some(bins)) => GrantTarget::Bins { bins },
+        (None, None, None, Some(worktrees), None, None) => GrantTarget::Worktrees { worktrees },
+        (None, None, None, None, Some(bins), None) => GrantTarget::Bins { bins },
+        (None, None, None, None, None, Some(root)) => GrantTarget::ProjectSpecifics { root },
         _ => return Err(
-            "grant-permissions: pass exactly one of --scripts/--plans/--tmp together, --worktrees, or --bins"
+            "grant-permissions: pass exactly one of --scripts/--plans/--tmp together, --worktrees, --bins, or --project-specifics"
                 .to_string(),
         ),
     };
@@ -1731,6 +1827,16 @@ fn run_revoke_permissions(argv: &[String]) -> Result<ExitCode, String> {
                 _ => println!("claude-code: nothing to remove"),
             }
         }
+        ("claude", GrantTarget::ProjectSpecifics { root }) => {
+            let outcome = permissions::claude_project_specifics_permissions_remove(root, &home)
+                .map_err(|e| e.to_string())?;
+            match outcome {
+                permissions::PermissionRemovalOutcome::Removed(entries) => {
+                    print_removed("claude-code", &entries)
+                }
+                _ => println!("claude-code: nothing to remove"),
+            }
+        }
         ("claude", GrantTarget::Bins { bins }) => {
             let outcome = permissions::claude_interactive_shell_permissions_remove(bins, &home)
                 .map_err(|e| e.to_string())?;
@@ -1765,6 +1871,11 @@ fn run_revoke_permissions(argv: &[String]) -> Result<ExitCode, String> {
                 .map_err(|e| e.to_string())?;
             print_removed("opencode", &removed);
         }
+        ("opencode", GrantTarget::ProjectSpecifics { root }) => {
+            let removed = permissions::opencode_project_specifics_permissions_remove(root, &home)
+                .map_err(|e| e.to_string())?;
+            print_removed("opencode", &removed);
+        }
         (
             "codex",
             GrantTarget::Planning {
@@ -1779,6 +1890,11 @@ fn run_revoke_permissions(argv: &[String]) -> Result<ExitCode, String> {
         }
         ("codex", GrantTarget::Worktrees { worktrees }) => {
             let removed = permissions::codex_worktrees_permissions_remove(worktrees, &home)
+                .map_err(|e| e.to_string())?;
+            print_removed("codex", &removed);
+        }
+        ("codex", GrantTarget::ProjectSpecifics { root }) => {
+            let removed = permissions::codex_project_specifics_permissions_remove(root, &home)
                 .map_err(|e| e.to_string())?;
             print_removed("codex", &removed);
         }
@@ -1815,6 +1931,15 @@ fn run_grant_permissions(argv: &[String]) -> Result<ExitCode, String> {
                 .map_err(|e| e.to_string())?;
             print_permission_outcome("claude-code", "worktree grant already in place", outcome);
         }
+        ("claude", GrantTarget::ProjectSpecifics { root }) => {
+            let outcome = permissions::claude_project_specifics_permissions(root, &home)
+                .map_err(|e| e.to_string())?;
+            print_permission_outcome(
+                "claude-code",
+                "project-specifics grant already in place",
+                outcome,
+            );
+        }
         ("claude", GrantTarget::Bins { bins }) => {
             let outcome = permissions::claude_interactive_shell_permissions(bins, &home)
                 .map_err(|e| e.to_string())?;
@@ -1846,6 +1971,11 @@ fn run_grant_permissions(argv: &[String]) -> Result<ExitCode, String> {
                 .map_err(|e| e.to_string())?;
             print_opencode_outcome("worktree grant already in place", outcome);
         }
+        ("opencode", GrantTarget::ProjectSpecifics { root }) => {
+            let outcome = permissions::opencode_project_specifics_permissions(root, &home)
+                .map_err(|e| e.to_string())?;
+            print_opencode_outcome("project-specifics grant already in place", outcome);
+        }
         (
             "codex",
             GrantTarget::Planning {
@@ -1862,6 +1992,11 @@ fn run_grant_permissions(argv: &[String]) -> Result<ExitCode, String> {
             let outcome = permissions::codex_worktrees_permissions(worktrees, &home)
                 .map_err(|e| e.to_string())?;
             print_codex_outcome("worktree grant already in place", outcome);
+        }
+        ("codex", GrantTarget::ProjectSpecifics { root }) => {
+            let outcome = permissions::codex_project_specifics_permissions(root, &home)
+                .map_err(|e| e.to_string())?;
+            print_codex_outcome("writable_roots already present", outcome);
         }
         (other, _) => {
             return Err(format!(
@@ -2523,6 +2658,33 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// B(planning-tmp-dir-not-created): codex's own sandbox refuses to run
+    /// any command at all when a declared writable root does not already
+    /// exist on disk, so run_planning_post_install must create BOTH the
+    /// plans directory and the tmp directory it grants agents access to --
+    /// not just the plans directory. Exercised here against
+    /// ensure_dir directly (the extracted, testable unit), since
+    /// the real tmp path in run_planning_post_install comes from the
+    /// process-global std::env::temp_dir() rather than an injectable
+    /// parameter.
+    #[test]
+    fn ensure_dir_creates_a_not_yet_existing_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("planning-agent");
+        assert!(!target.exists());
+        ensure_dir(&target).unwrap();
+        assert!(target.is_dir());
+    }
+
+    #[test]
+    fn ensure_dir_is_idempotent_on_an_already_existing_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("plans");
+        std::fs::create_dir_all(&target).unwrap();
+        ensure_dir(&target).unwrap();
+        assert!(target.is_dir());
+    }
 
     fn write_real_chris_json(root: &Path) {
         std::fs::create_dir_all(root.join(".agents/profiles")).unwrap();
