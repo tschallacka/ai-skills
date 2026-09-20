@@ -124,6 +124,11 @@ const SECONDARY: &[Row] = &[
     // Goal 26: appended after ci-test-scope, matching setup-dev-env-lib.sh's
     // own real plan_secondary() row order exactly.
     ("test-mermaid-accuracy", "test-mermaid-accuracy"),
+    // Built and staged here because planning/PACKAGE-MANIFEST.tsv promises
+    // planning/scripts/generate-postmortem and test-persona-drift fails on a
+    // fresh checkout without it; appended after test-mermaid-accuracy,
+    // matching setup-dev-env-lib.sh's row order.
+    ("generate-postmortem", "generate-postmortem"),
 ];
 
 const HARDCODED: &[Row] = &[
