@@ -69,9 +69,36 @@ export LC_ALL=C
 # after both anchor lines above. ci-failures/ is a top-level skill directory,
 # not under planning/, so the relative path to plan-core-lib.sh crosses two
 # directory levels up from ci-failures/scripts.
+#
+# planning is a SOFT dependency here, not a hard one: ci-failures must work
+# when installed on its own, with no other skill present (confirmed broken
+# this way -- an installed-alone ci-failures previously crashed at this exact
+# `source` with a raw "No such file or directory", since a per-skill install
+# never copies another skill's directory in). Guard the source on the file
+# actually existing, the same shape every other repo-root caller of
+# plan-core-lib.sh already uses (verify-both-shells.sh, pre-push-check.sh,
+# etc.) for the fresh-checkout case; here the reason is a fresh INSTALL
+# instead, but the fix is identical. When planning is not present, resolve
+# the compiled binary with the same two highest-priority checks
+# plan_bin_dir() itself uses (AI_SKILLS_BIN_ROOT, then the shared per-user
+# install location) duplicated inline -- intentionally NOT the dev-tree
+# bin/<triple> walk-up, which only matters for a checkout, not an install,
+# and is not worth vendoring a second copy of. This keeps ci-failures fully
+# functional standalone; if planning also happens to be installed, its own
+# (fuller) resolution runs instead and wins.
 cif_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$cif_script_dir/../../planning/scripts/plan-core-lib.sh"
-plan_exec_compiled_binary_if_present ci-failures "$cif_script_dir" "$@"
+if [ -f "$cif_script_dir/../../planning/scripts/plan-core-lib.sh" ]; then
+    source "$cif_script_dir/../../planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present ci-failures "$cif_script_dir" "$@"
+else
+    cif_bin_dir="${AI_SKILLS_BIN_ROOT:-}"
+    [ -n "$cif_bin_dir" ] && [ -d "$cif_bin_dir" ] || cif_bin_dir="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin"
+    if [ -x "$cif_bin_dir/ci-failures" ]; then
+        exec "$cif_bin_dir/ci-failures" "$@"
+    fi
+    unset cif_bin_dir
+fi
 unset cif_script_dir
 
-plan_die "ci-failures: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it" 69
+printf '%s: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it, or install the planning skill alongside ci-failures\n' "${0##*/}" >&2
+exit 69

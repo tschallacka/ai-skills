@@ -69,6 +69,10 @@ case "$argv" in
         printf '{"headRefName":"%s"}\n' "$STUB_HEAD_BRANCH"
         ;;
     *"run list "*"--json databaseId,name"*)
+        if [ "${STUB_RUN_LIST_EXIT:-0}" != 0 ]; then
+            printf '%s\n' "${STUB_RUN_LIST_STDERR:-}" >&2
+            exit "${STUB_RUN_LIST_EXIT}"
+        fi
         printf '%s\n' "$STUB_RUN_LIST_JSON"
         ;;
     *"run view "*"--json status"*)
@@ -102,6 +106,10 @@ case "$argv" in
         printf '{"source_branch":"%s"}\n' "$STUB_MR_BRANCH"
         ;;
     *"/pipelines?ref="*)
+        if [ "${STUB_PIPELINE_LIST_EXIT:-0}" != 0 ]; then
+            printf '%s\n' "${STUB_PIPELINE_LIST_STDERR:-}" >&2
+            exit "${STUB_PIPELINE_LIST_EXIT}"
+        fi
         printf '%s\n' "$STUB_PIPELINE_LIST_JSON"
         ;;
     *"/pipelines/"*"/jobs?"*)
@@ -436,4 +444,89 @@ fn help_prints_the_usage_block_and_exits_0() {
     assert_eq!(code, 0);
     assert!(out.contains("Usage:"), "{out}");
     assert!(out.contains("FORGE DETECTION."), "{out}");
+}
+
+// A gh/glab call that fails outright (no auth, network down, ...) must never
+// be reported as "no runs"/"no pipelines" -- that message is reserved for a
+// genuinely empty, successful result, and conflating the two hid a real
+// unauthenticated-`gh` state as a false "this branch has no CI history"
+// during an interactive testing-story run (see the opencode ci-failures
+// story, 2026-09-19). `run_list`/`pipelines?ref=` failing must surface
+// verbatim to the caller instead.
+#[test]
+fn a_failed_gh_run_list_call_surfaces_ghs_own_message_not_a_fabricated_no_runs_claim() {
+    let h = Harness::new("gh-run-list-auth-failure");
+    h.set_remote("https://github.com/tschallacka/ai-skills.git");
+    let binary = env!("CARGO_BIN_EXE_ci-failures");
+    let call_log = h.work.join("call.log");
+    let path_env = format!(
+        "{}:{}",
+        h.stub_bin.display(),
+        std::env::var("PATH").unwrap()
+    );
+    let output = Command::new(binary)
+        .args(Vec::<&str>::new())
+        .current_dir(&h.repo)
+        .env("PATH", path_env)
+        .env("STUB_LOG", &call_log)
+        .env("STUB_LOGS_DIR", &h.logs_dir)
+        .env_remove("CI_FAILURES_REPO")
+        .env_remove("CI_FAILURES_FORGE")
+        .env("STUB_GH_AVAILABLE", "1")
+        .env("STUB_HEAD_BRANCH", "some-branch")
+        .env("STUB_RUN_LIST_EXIT", "4")
+        .env(
+            "STUB_RUN_LIST_STDERR",
+            "To get started with GitHub CLI, please run:  gh auth login",
+        )
+        .output()
+        .expect("run the compiled ci-failures binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("gh auth login"),
+        "expected gh's own auth message verbatim, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("no runs for branch"),
+        "an auth/API failure must never be reported as a fabricated 'no runs' result: {stderr}"
+    );
+}
+
+#[test]
+fn a_failed_glab_pipeline_list_call_surfaces_glabs_own_message_not_a_fabricated_no_pipelines_claim()
+{
+    let h = Harness::new("glab-pipeline-list-auth-failure");
+    h.set_remote("git@gitlab.com:tschallacka/ai-skills.git");
+    let binary = env!("CARGO_BIN_EXE_ci-failures");
+    let call_log = h.work.join("call.log");
+    let path_env = format!(
+        "{}:{}",
+        h.stub_bin.display(),
+        std::env::var("PATH").unwrap()
+    );
+    let output = Command::new(binary)
+        .args(Vec::<&str>::new())
+        .current_dir(&h.repo)
+        .env("PATH", path_env)
+        .env("STUB_LOG", &call_log)
+        .env("STUB_LOGS_DIR", &h.logs_dir)
+        .env_remove("CI_FAILURES_REPO")
+        .env_remove("CI_FAILURES_FORGE")
+        .env("STUB_GLAB_AVAILABLE", "1")
+        .env("STUB_PIPELINE_LIST_EXIT", "1")
+        .env(
+            "STUB_PIPELINE_LIST_STDERR",
+            "401 Unauthorized -- no token found",
+        )
+        .output()
+        .expect("run the compiled ci-failures binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("401 Unauthorized"),
+        "expected glab's own auth message verbatim, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("no pipelines for branch"),
+        "an auth/API failure must never be reported as a fabricated 'no pipelines' result: {stderr}"
+    );
 }
