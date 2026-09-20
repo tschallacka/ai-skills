@@ -424,7 +424,23 @@ mod tests {
         let file = nested.join("leaf.rs");
         assert_eq!(find_project_root(&file).as_deref(), Some(project.path()));
         let outside = tempfile::tempdir().unwrap();
-        assert_eq!(find_project_root(outside.path()), None);
+        let found = find_project_root(outside.path());
+        // The walk goes all the way to `/`, so whether a temp dir has "no
+        // project above it" depends on where TMPDIR lives: a `.codegraph` in
+        // $HOME (an indexed home directory) is above every temp dir under it.
+        // With none above, the answer must be None; with one, it must be that
+        // ancestor and never the sibling project this test just created.
+        if outside
+            .path()
+            .ancestors()
+            .any(|ancestor| ancestor.join(".codegraph").is_dir())
+        {
+            let root = found.expect("an ancestor holds a .codegraph, so the walk must find it");
+            assert!(outside.path().starts_with(&root));
+            assert_ne!(root, project.path());
+        } else {
+            assert_eq!(found, None);
+        }
     }
 
     #[test]
