@@ -16,6 +16,11 @@ use std::time::{Duration, Instant};
 
 use support::{run_client, spawn_server, ChildGuard, ScratchDir};
 
+// The descriptor-limit scenario below (and this `ps` helper only it uses) is
+// Unix: `ulimit -n`, /proc/<pid>/fd and process states have no Windows
+// counterpart. The broadcast-stall scenario has a meaning on every platform
+// and runs on all of them.
+#[cfg(unix)]
 fn server_state(pid: u32) -> String {
     Command::new("ps")
         .args(["-o", "state=", "-p", &pid.to_string()])
@@ -28,7 +33,7 @@ fn server_state(pid: u32) -> String {
 // ── B122: one idle subscriber must not wedge the server ────────────────────
 #[test]
 fn one_idle_subscriber_does_not_wedge_the_broadcast_path() {
-    let server = spawn_server("stall", &[]);
+    let mut server = spawn_server("stall", &[]);
     let binary = support::resolve_workspace_binary("chat-client-rs");
 
     // One subscriber, attached the way an agent attaches: `tail` JOINs the
@@ -70,6 +75,7 @@ fn one_idle_subscriber_does_not_wedge_the_broadcast_path() {
             }
         });
     }
+    #[cfg(unix)]
     let sub_pid = sub_child.id();
     let mut sub_guard = ChildGuard(sub_child);
 
@@ -187,36 +193,43 @@ fn one_idle_subscriber_does_not_wedge_the_broadcast_path() {
         );
     }
 
-    // 3. A subscriber that is alive but not reading at all (SIGSTOP).
-    let _ = Command::new("kill")
-        .args(["-STOP", &sub_pid.to_string()])
-        .status();
-    let out = send_as("afterstop", "#stall", "after-the-subscriber-stopped");
-    assert!(
-        out.status.success(),
-        "a stopped (alive, non-reading) subscriber stalled the server: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        logged("#stall", "after-the-subscriber-stopped"),
-        "the send after SIGSTOP returned but never reached the log"
-    );
+    // 3 and 4 freeze a live subscriber with SIGSTOP so it is alive but not
+    // reading at all, then thaw it with SIGCONT. Windows has no such signal
+    // (and no `kill` that can address a Windows process), so these two steps
+    // are Unix's; steps 1, 2, 5 and 6 cover the rest everywhere.
+    #[cfg(unix)]
+    {
+        // 3. A subscriber that is alive but not reading at all (SIGSTOP).
+        let _ = Command::new("kill")
+            .args(["-STOP", &sub_pid.to_string()])
+            .status();
+        let out = send_as("afterstop", "#stall", "after-the-subscriber-stopped");
+        assert!(
+            out.status.success(),
+            "a stopped (alive, non-reading) subscriber stalled the server: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            logged("#stall", "after-the-subscriber-stopped"),
+            "the send after SIGSTOP returned but never reached the log"
+        );
 
-    // 4. Recovery must not need a restart.
-    let out = send_as("afterstop2", "#other", "still-serving-other-channels");
-    assert!(
-        out.status.success(),
-        "the server stopped serving other channels while a subscriber was stopped: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        logged("#other", "still-serving-other-channels"),
-        "the second send after SIGSTOP returned but never reached the log"
-    );
+        // 4. Recovery must not need a restart.
+        let out = send_as("afterstop2", "#other", "still-serving-other-channels");
+        assert!(
+            out.status.success(),
+            "the server stopped serving other channels while a subscriber was stopped: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            logged("#other", "still-serving-other-channels"),
+            "the second send after SIGSTOP returned but never reached the log"
+        );
 
-    let _ = Command::new("kill")
-        .args(["-CONT", &sub_pid.to_string()])
-        .status();
+        let _ = Command::new("kill")
+            .args(["-CONT", &sub_pid.to_string()])
+            .status();
+    }
     drop(sub_guard.0.kill());
     let _ = sub_guard.0.wait();
 
@@ -300,14 +313,14 @@ fn one_idle_subscriber_does_not_wedge_the_broadcast_path() {
     );
 
     // 6. Nothing above may have been bought with a panicked server thread.
-    let state = server_state(server.child.pid());
     assert!(
-        !state.is_empty() && !state.starts_with('Z'),
-        "the server process died during the run (state '{state}')"
+        server.child.is_alive(),
+        "the server process died during the run"
     );
 }
 
 // ── B158/B159/B160: no descriptor leak per connection; survives exhaustion ─
+#[cfg(unix)]
 #[test]
 fn no_descriptor_leak_and_survives_descriptor_exhaustion() {
     let binary_server = support::resolve_workspace_binary("chat-server-rs");
@@ -478,10 +491,12 @@ fn no_descriptor_leak_and_survives_descriptor_exhaustion() {
     let _ = tiny_server.wait();
 }
 
+#[cfg(unix)]
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+#[cfg(unix)]
 fn wait_and_read_stderr(child: &mut Child) -> String {
     let mut text = String::new();
     if let Some(stderr) = child.stderr.as_mut() {
@@ -490,6 +505,7 @@ fn wait_and_read_stderr(child: &mut Child) -> String {
     text
 }
 
+#[cfg(unix)]
 fn wait_and_read_stderr_nonblocking(child: &mut Child) -> String {
     // The process is still running (or has just died); reading its stderr
     // pipe here would block until it closes. Give it a moment to write, then

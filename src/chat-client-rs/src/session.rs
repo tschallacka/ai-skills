@@ -44,7 +44,13 @@ pub fn chat_default_home() -> PathBuf {
 }
 
 fn dirs_home() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+    // USERPROFILE is Windows' HOME: a session started outside Git for Windows'
+    // bash has no HOME at all.
+    PathBuf::from(
+        std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".into()),
+    )
 }
 
 // ---- per-agent session identity -------------------------------------------

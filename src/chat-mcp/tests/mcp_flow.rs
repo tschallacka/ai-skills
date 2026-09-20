@@ -13,7 +13,11 @@
 //! `AI_CHAT_HOME`, a session seeded with the test server's address (so
 //! resolution stops at its first rung and never reaches discovery), and an
 //! `AI_CHAT_BEACON_PORT` nothing announces on.
-#![cfg(unix)]
+//!
+//! Nothing here is unix-only -- loopback TCP, a child process per side, JSON
+//! over stdio -- so it runs on every platform. (It carried a `cfg(unix)` gate
+//! from the day it was written, which quietly left the adapter untested on
+//! Windows.)
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};

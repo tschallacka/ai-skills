@@ -282,9 +282,12 @@ fn main() {
     }
     let plan_arg = &args[0];
     let title = &args[1];
-    let bare_name = !plan_arg.contains('/');
+    // A bare name has no path separator: `/` everywhere, and the platform's own
+    // (`\` on Windows) as well.
+    let names_a_path = plan_arg.contains(['/', std::path::MAIN_SEPARATOR]);
+    let bare_name = !names_a_path;
     let planning_root = skill_dir();
-    let (plan_dir, plans_root) = if plan_arg.contains('/') {
+    let (plan_dir, plans_root) = if names_a_path {
         let path = PathBuf::from(plan_arg);
         let root = path
             .parent()
@@ -328,9 +331,15 @@ fn main() {
     write_text(&plan_dir.join("commands.json"), "{}\n");
     let inventory = format!("# Work-unit inventory: {}\n\n## Definition-of-done coverage\n\n| Required outcome or proof | Work unit IDs | Notes |\n|---|---|---|\n\n## Work units\n\n| ID | Type | File | Primary symbol or file scope | Subscope | Intended change | Depends on | Goal | Step |\n|---|---|---|---|---|---|---|---|---|\n\n## Decomposition review\n\n- [ ] Every definition-of-done item maps to one or more work units.\n- [ ] Every known affected file and changing symbol has its own work unit.\n- [ ] Every work unit has exactly one goal and one step.\n- [ ] Each goal has 2–10 work units, or records an allowed exception.\n- [ ] Each step has exactly one work unit and no unnamed incidental edits.\n- [ ] Dependencies form an executable order with no cycle.\n", plan_dir.file_name().unwrap().to_string_lossy());
     write_text(&plan_dir.join("work-unit-inventory.md"), &inventory);
-    let plan_root = fs::canonicalize(&plan_dir).unwrap_or_else(|error| die(error.to_string(), 64));
-    let root = fs::canonicalize(&plans_root).unwrap_or_else(|error| die(error.to_string(), 64));
-    let skill = fs::canonicalize(&planning_root).unwrap_or_else(|error| die(error.to_string(), 64));
+    // planning_core::canonicalize, not fs::canonicalize: on Windows the latter
+    // yields `\\?\C:\...`, which the manifests written below are sourced by
+    // bash and read by git, and neither can open.
+    let plan_root =
+        planning_core::canonicalize(&plan_dir).unwrap_or_else(|error| die(error.to_string(), 64));
+    let root =
+        planning_core::canonicalize(&plans_root).unwrap_or_else(|error| die(error.to_string(), 64));
+    let skill = planning_core::canonicalize(&planning_root)
+        .unwrap_or_else(|error| die(error.to_string(), 64));
     let snapshot = match git_value(&plan_root, &["rev-parse", "--show-toplevel"]) {
         Some(top) => {
             // The repository that will hold this plan's history, decided the

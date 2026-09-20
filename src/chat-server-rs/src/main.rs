@@ -1612,7 +1612,11 @@ fn main() {
         let xdg = std::env::var("XDG_CONFIG_HOME")
             .ok()
             .filter(|v| !v.is_empty());
-        let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        // USERPROFILE is Windows' HOME: outside Git for Windows' bash there is
+        // no HOME at all.
+        let home_dir = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".into());
         match xdg {
             Some(v) => format!("{}/tsch-ai-skills/chat", v.trim_end_matches('/')),
             None => format!(

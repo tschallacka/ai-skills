@@ -802,10 +802,10 @@ fn a_dead_peer_does_not_spin_the_server_and_frees_its_nick() {
         Some(seconds)
     };
     let cpu_before = server_cpu();
-    for child in &children {
-        let _ = Command::new("kill")
-            .args(["-9", &child.id().to_string()])
-            .status();
+    // Child::kill is SIGKILL on unix (what `kill -9` was) and TerminateProcess
+    // on Windows, where there is no `kill` that can address the process.
+    for child in &mut children {
+        let _ = child.kill();
     }
     for mut child in children {
         let _ = child.wait();

@@ -7,7 +7,9 @@ fn scratch(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("create-plan-flow-{tag}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    fs::canonicalize(&dir).unwrap()
+    // Without the `\\?\` prefix Windows adds: create-plan writes the same
+    // prefix-free form, and compares against it.
+    planning_core::canonicalize(&dir).unwrap()
 }
 
 fn git(dir: &Path, args: &[&str]) -> std::process::Output {
@@ -59,10 +61,14 @@ fn a_gitignored_plans_root_gets_its_own_repository_and_pins_it() {
         "{}",
         String::from_utf8_lossy(&log.stdout)
     );
-    let manifest = fs::read_to_string(plans.join("plan-a/.env")).unwrap();
-    assert!(
-        manifest.contains(&format!("PLAN_SNAPSHOT_REPO={}\n", plans.display())),
-        "{manifest}"
+    // Read back the way the manifest is read (quoting and all), not compared
+    // as text: a Windows path is written with each backslash escaped.
+    let plan = plans.join("plan-a");
+    assert_eq!(
+        planning_core::snapshot_repo(&plan).as_deref(),
+        Some(plans.as_path()),
+        "{}",
+        fs::read_to_string(plan.join(".env")).unwrap()
     );
 
     let _ = fs::remove_dir_all(&project);

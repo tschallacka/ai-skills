@@ -57,7 +57,40 @@ pub fn global_scoped_root(project: &Path) -> Result<PathBuf, String> {
 }
 
 pub fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
-    fs::canonicalize(path).map_err(|_| format!("directory does not exist: {}", path.display()))
+    canonicalize(path).map_err(|_| format!("directory does not exist: {}", path.display()))
+}
+
+/// `fs::canonicalize` without the `\\?\` verbatim prefix Windows adds.
+///
+/// The prefixed form is a valid path to Rust, but nothing that reads what we
+/// write can use it: bash, git and every manifest a shell sources see
+/// `\\?\C:\Users\x` and cannot open it. `C:\Users\x` is the same directory.
+/// Elsewhere this is plain `fs::canonicalize`.
+pub fn canonicalize(path: &Path) -> std::io::Result<PathBuf> {
+    fs::canonicalize(path).map(simplified)
+}
+
+/// Strips the verbatim prefix from a canonical Windows path when what is left
+/// is an ordinary drive or UNC path; every other path is returned as it came.
+pub fn simplified(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            let bytes = rest.as_bytes();
+            if bytes.len() >= 3
+                && bytes[0].is_ascii_alphabetic()
+                && bytes[1] == b':'
+                && bytes[2] == b'\\'
+            {
+                return PathBuf::from(rest.to_string());
+            }
+        }
+    }
+    path
 }
 
 pub fn require_safe_value(label: &str, value: &str) -> Result<(), String> {
@@ -188,16 +221,33 @@ pub fn snapshot_repo(plan: &Path) -> Option<PathBuf> {
     if value.is_empty() || value.contains(['$', '`', ';', '|', '&', '<', '>']) {
         return None;
     }
-    let value = if value.starts_with('\'') && value.ends_with('\'') {
-        value[1..value.len() - 1].replace("'\\''", "'")
-    } else {
-        value.to_string()
-    };
+    let value = shell_unquote(value);
     (!value.is_empty()).then(|| PathBuf::from(value))
 }
 
+/// The value a shell would read back from one `KEY=value` assignment written
+/// by either quoting style in this repository: single-quoted (plan-env), or
+/// bare with a backslash before each unsafe character ([`shell_quote`]).
+pub fn shell_unquote(value: &str) -> String {
+    if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
+        return value[1..value.len() - 1].replace("'\\''", "'");
+    }
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(escaped) = chars.next() {
+                out.push(escaped);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 pub fn git_snapshot(plan: &Path) {
-    let Some(plan) = plan.canonicalize().ok() else {
+    let Some(plan) = canonicalize(plan).ok() else {
         return;
     };
     let Some(repo) = snapshot_repo(&plan) else {
@@ -271,6 +321,7 @@ pub fn parse_git_remote_namespace(remote: &str) -> Option<(String, String)> {
 mod tests {
     use super::{
         atomic_write, git_remote_namespace, parse_git_remote_namespace, require_safe_value,
+        shell_quote, shell_unquote, simplified,
     };
     use std::fs;
     use std::path::Path;
@@ -297,6 +348,39 @@ mod tests {
         assert!(require_safe_value("label", "plain").is_ok());
         assert!(require_safe_value("label", "bad|cell").is_err());
         assert!(require_safe_value("label", "bad\nvalue").is_err());
+    }
+
+    #[test]
+    fn unquoting_reverses_both_quoting_styles() {
+        assert_eq!(shell_unquote("'a b'"), "a b");
+        assert_eq!(shell_unquote("'it'\\''s'"), "it's");
+        assert_eq!(shell_unquote(r"C:\\Users\\x"), r"C:\Users\x");
+        for original in ["plain", "with space", r"C:\Users\runner\x", "a'b", "$x;y"] {
+            assert_eq!(shell_unquote(&shell_quote(original)), original);
+        }
+    }
+
+    #[test]
+    fn a_path_that_is_not_verbatim_is_left_alone() {
+        let path = std::path::PathBuf::from("/some/dir");
+        assert_eq!(simplified(path.clone()), path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_verbatim_prefix_comes_off_a_drive_and_a_unc_path() {
+        assert_eq!(
+            simplified(std::path::PathBuf::from(r"\\?\C:\Users\x")),
+            std::path::PathBuf::from(r"C:\Users\x")
+        );
+        assert_eq!(
+            simplified(std::path::PathBuf::from(r"\\?\UNC\host\share\x")),
+            std::path::PathBuf::from(r"\\host\share\x")
+        );
+        assert_eq!(
+            simplified(std::path::PathBuf::from(r"\\?\Volume{1}\x")),
+            std::path::PathBuf::from(r"\\?\Volume{1}\x")
+        );
     }
 
     #[test]

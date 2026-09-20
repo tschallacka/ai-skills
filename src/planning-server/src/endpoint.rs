@@ -50,8 +50,11 @@ fn short_root(runtime_dir: &Path) -> PathBuf {
     ))
 }
 
+/// Only a unix domain socket has a length limit. Elsewhere the endpoint is a
+/// plain discovery file (see `transport`), which any ordinary path can hold,
+/// and a Windows temp directory plus this file's name already exceeds 90.
 fn fits(root: &Path) -> bool {
-    root.join("planning-server.sock").to_string_lossy().len() <= SUN_PATH_SAFE_LIMIT
+    !cfg!(unix) || root.join("planning-server.sock").to_string_lossy().len() <= SUN_PATH_SAFE_LIMIT
 }
 
 /// The pure decision this module makes, taking the candidate runtime
@@ -83,10 +86,37 @@ mod tests {
     #[test]
     fn short_root_is_always_well_under_the_safe_limit() {
         let runtime_dir = Path::new("/tmp/some/very/long/runtime/dir/that/would/not/fit");
+        let root = short_root(runtime_dir);
         assert!(
-            fits(&short_root(runtime_dir)),
-            "the /tmp-based fallback root must itself always fit"
+            fits(&root),
+            "the fallback root must itself always fit: {}",
+            root.display()
         );
+        // Where the limit applies (a unix socket), that root is the one kept
+        // deliberately short by living directly under /tmp.
+        #[cfg(unix)]
+        assert!(root.starts_with("/tmp"));
+    }
+
+    #[test]
+    fn a_root_over_the_limit_falls_back_only_where_the_limit_applies() {
+        let long = Path::new(
+            "/tmp/one/long/enough/runtime/dir/to/trigger/fallback/aaaaaaaaaaaaaaaaaaaaaa",
+        );
+        let resolved = resolve(long);
+        if cfg!(unix) {
+            assert!(
+                resolved.starts_with(short_root(long)),
+                "an over-long unix socket path must move to the short root: {}",
+                resolved.display()
+            );
+        } else {
+            assert!(
+                resolved.starts_with(preferred_root(long)),
+                "a discovery file has no length limit, so the preferred root stays: {}",
+                resolved.display()
+            );
+        }
     }
 
     #[test]

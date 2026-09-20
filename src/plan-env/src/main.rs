@@ -129,12 +129,11 @@ fn read_pinned(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Reads a value back the way the shell that sources the manifest would:
+/// single-quoted (what this binary writes) or backslash-escaped (what
+/// create-plan writes).
 fn unquote(value: &str) -> String {
-    if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
-        value[1..value.len() - 1].replace("'\\''", "'")
-    } else {
-        value.to_string()
-    }
+    planning_core::shell_unquote(value)
 }
 
 fn write_global(root: &Path, skill: &Path) {
@@ -402,11 +401,13 @@ fn check_fields(plan: &Path, root: &Path) {
     if get(&manifest, "PLANS_ROOT") != path_text(root) {
         mismatch("plan manifest root mismatch");
     }
-    let skill = get(&global, "PLANNING_SKILL_ROOT");
-    if get(&global, "PLANNING_SCRIPTS_ROOT") != format!("{skill}/scripts") {
+    // Built with the platform's own separator, exactly as write_global builds
+    // them: a literal "/scripts" never matches `C:\...\scripts`.
+    let skill = PathBuf::from(get(&global, "PLANNING_SKILL_ROOT"));
+    if get(&global, "PLANNING_SCRIPTS_ROOT") != path_text(&skill.join("scripts")) {
         mismatch("planning scripts root mismatch");
     }
-    if get(&global, "PLANNING_TESTS_ROOT") != format!("{skill}/tests") {
+    if get(&global, "PLANNING_TESTS_ROOT") != path_text(&skill.join("tests")) {
         mismatch("planning tests root mismatch");
     }
     let expected_name = plan

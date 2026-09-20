@@ -105,7 +105,7 @@ pub fn dispatch_with_bin_dir(request: Request, bin_dir: Option<&Path>) -> Respon
 
 fn program_path(bin_dir: Option<&Path>, name: &str) -> PathBuf {
     match bin_dir {
-        Some(dir) => dir.join(name),
+        Some(dir) => dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)),
         None => PathBuf::from(name),
     }
 }

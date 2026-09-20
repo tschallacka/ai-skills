@@ -144,6 +144,13 @@ impl ChildGuard {
     pub fn pid(&self) -> u32 {
         self.0.id()
     }
+
+    /// Whether the process is still running. `try_wait` rather than asking
+    /// `ps`: it is the same answer on every platform, and Windows has no `ps`
+    /// that takes `-o state=`.
+    pub fn is_alive(&mut self) -> bool {
+        matches!(self.0.try_wait(), Ok(None))
+    }
 }
 
 impl Drop for ChildGuard {

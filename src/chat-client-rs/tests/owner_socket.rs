@@ -11,15 +11,17 @@
 //! dependency between them would be a heavier answer than sharing one test
 //! module needs (05-step-migrate-owner-socket's own handoff).
 //!
-//! Unix only: the control endpoint under test is a unix socket whose mode
-//! bits it asserts (Windows serves the same verbs over a loopback port, which
-//! has no file mode), and `PermissionsExt` does not exist there.
-
-#![cfg(unix)]
+//! Runs on every platform. What differs is the control endpoint the owner
+//! records: a unix socket path on unix (whose file mode bits and address-length
+//! limit are asserted below, under `cfg(unix)`), and a loopback `127.0.0.1:port`
+//! on Windows, which has neither. Everything that follows -- the owner serving
+//! forwarded verbs, follow/leave, a later tail taking over -- is the same
+//! behavior on both and is asserted on both.
 
 #[path = "../../chat-server-rs/tests/support/mod.rs"]
 mod support;
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -27,8 +29,18 @@ use std::time::{Duration, Instant};
 
 use support::{spawn_server, ChildGuard};
 
+#[cfg(unix)]
 fn permission_bits(path: &std::path::Path) -> u32 {
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+/// Whether the endpoint an owner recorded is up: a unix socket file that
+/// exists, or a loopback address something is listening on.
+fn endpoint_up(endpoint: &str) -> bool {
+    if let Ok(addr) = endpoint.parse::<std::net::SocketAddr>() {
+        return std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok();
+    }
+    std::path::Path::new(endpoint).exists()
 }
 
 #[test]
@@ -58,9 +70,9 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
     };
     let await_socket = || -> Option<String> {
         for _ in 0..50 {
-            if let Some(path) = owner_socket() {
-                if std::path::Path::new(&path).exists() {
-                    return Some(path);
+            if let Some(endpoint) = owner_socket() {
+                if endpoint_up(&endpoint) {
+                    return Some(endpoint);
                 }
             }
             thread::sleep(Duration::from_millis(200));
@@ -146,35 +158,40 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
 
     let socket = await_socket();
     assert!(
-        socket
-            .as_deref()
-            .is_some_and(|s| std::path::Path::new(s).exists()),
+        socket.as_deref().is_some_and(endpoint_up),
         "the tail bound no control socket (record: {:?})",
         std::fs::read_to_string(&record).ok()
     );
     let socket = socket.unwrap();
-    let socket_path = std::path::Path::new(&socket);
 
-    assert_eq!(
-        permission_bits(&home.join("owners")),
-        0o700,
-        "the record directory is private"
-    );
-    assert_eq!(
-        permission_bits(socket_path.parent().unwrap()),
-        0o700,
-        "the socket directory is private"
-    );
-    assert_eq!(
-        permission_bits(socket_path),
-        0o600,
-        "the socket is owner-only"
-    );
-    assert!(
-        socket.len() < 100,
-        "the socket path is not well inside the address limit: {} chars",
-        socket.len()
-    );
+    // Unix only: a socket file has an owner-only mode and an address-length
+    // limit. A Windows endpoint is a loopback port, which has neither.
+    #[cfg(unix)]
+    {
+        let socket_path = std::path::Path::new(&socket);
+        assert_eq!(
+            permission_bits(&home.join("owners")),
+            0o700,
+            "the record directory is private"
+        );
+        assert_eq!(
+            permission_bits(socket_path.parent().unwrap()),
+            0o700,
+            "the socket directory is private"
+        );
+        assert_eq!(
+            permission_bits(socket_path),
+            0o600,
+            "the socket is owner-only"
+        );
+        assert!(
+            socket.len() < 100,
+            "the socket path is not well inside the address limit: {} chars",
+            socket.len()
+        );
+    }
+    #[cfg(not(unix))]
+    let _ = &socket;
 
     // ── a forwarded send is not suffixed (B283) ─────────────────────────
     let out = client(&["send", "--chan", chan, "--text", "through the owner"]);
@@ -316,7 +333,7 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
         "leaving one of two channels stopped the tail"
     );
     assert!(
-        socket_path.exists(),
+        owner_socket().is_some_and(|endpoint| endpoint_up(&endpoint)),
         "leaving one of two channels took the control socket down"
     );
 
@@ -341,8 +358,11 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
         thread::sleep(Duration::from_millis(250));
     }
     assert!(stopped, "the tail did not actually exit");
+    // The old endpoint, not whatever the record says now: unix drops the
+    // record along with the socket, but a loopback port that is gone must
+    // refuse a connection whether or not a record still names it.
     assert!(
-        !socket_path.exists(),
+        !endpoint_up(&socket),
         "the control socket should be gone once the tail exits"
     );
     let _ = tail_pid;
@@ -397,7 +417,7 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
     let tail2_guard = ChildGuard(tail2_child);
     let mut took_socket = false;
     for _ in 0..50 {
-        if socket_path.exists() {
+        if owner_socket().is_some_and(|endpoint| endpoint_up(&endpoint)) {
             took_socket = true;
             break;
         }
