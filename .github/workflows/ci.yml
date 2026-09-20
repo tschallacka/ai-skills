@@ -265,85 +265,35 @@ jobs:
         # missing; building here keeps that off the suite's clock.
         run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
 
-      - name: Place the compiled run-tests binary so it actually runs in CI
-        # Without it, plan_exec_compiled_binary_if_present finds no binary
-        # (this job's own AI_SKILLS_BIN_ROOT names a scratch directory
-        # containing only this one binary, so it can never coincidentally
-        # shadow-match anything else) and run-tests.sh silently falls
-        # through to its bash implementation on every CI run -- the same gap
-        # goal 15's own adversarial review (AR-51) found: this is the one
-        # script this plan has wired that CI itself invokes directly, so a
-        # CI run that never stages the compiled binary would never actually
-        # exercise it, in either matrix leg. Built on whichever OS this job
-        # is running as (no runner.os restriction), so both matrix legs
-        # (ubuntu-latest and macos-latest, each under its own "default
-        # bash") get the real, native-for-that-OS binary. Placed before the
-        # step below reclaims target/release/deps -- building after that
-        # reclaim would force a full rebuild here for no reason. The
-        # separate "macOS system bash 3.2 (portability floor)" job is a
-        # different job entirely and is not touched by this step -- it
-        # exists specifically to keep proving the bash fallback itself
-        # still works under bash 3.2, which staging a compiled binary there
-        # too would silently stop testing.
+      - name: Build every compiled helper into bin/<triple> (T116)
+        # The shell suite drives compiled binaries, not bash bodies: every
+        # planning/scripts/*.sh execs its crate's binary through
+        # plan_exec_compiled_binary_if_present, which finds it only under
+        # bin/<host triple> (or AI_SKILLS_BIN_ROOT), and run-tests.sh itself
+        # is one of them. Two things used to be missing here and every shard
+        # died at the top of run-tests.sh with exit 69:
+        #
+        #   - planning/scripts/plan-core-lib.sh is generated (by
+        #     build-plan-libs.sh) and gitignored, so a fresh checkout has none
+        #     and the wiring cannot even be sourced;
+        #   - the only binary staged was run-tests, under a scratch
+        #     AI_SKILLS_BIN_ROOT, so every OTHER script the suite ran found no
+        #     binary either.
+        #
+        # setup-dev-env.sh is the one place that knows the crate list, the
+        # host triple, and the generated-library bootstrap, so this runs it
+        # rather than keeping a second list here that drifts.
+        # SETUP_DEV_ENV_IN_NIX=1 skips its nix entry: the toolchain is the
+        # rust-toolchain step above, pinned to the same version.
         run: |
-          cargo build --release --manifest-path src/run-tests/Cargo.toml
-          mkdir -p .ci-bin/run-tests
-          cp "$GITHUB_WORKSPACE/target/release/run-tests" .ci-bin/run-tests/run-tests
-          echo "AI_SKILLS_BIN_ROOT=$PWD/.ci-bin/run-tests" >> "$GITHUB_ENV"
-
-      - name: Build and stage every migrated planning command (T116)
-        # T116: sharding a single job into several means a shell test needing
-        # one of these binaries can now land in a DIFFERENT job than whichever
-        # of its siblings happened to build it as a side effect of testing its
-        # own crate -- setup-dev-env.sh's own comment already calls this exact
-        # "degrades honestly" property what hides the compiled path never being
-        # exercised. Same data source and copy rule as setup-dev-env.sh and the
-        # native job's own "Build and execute every registered planning
-        # command" step: planning/rust-migration.tsv names the migrated
-        # crates, and a binary is staged into planning/scripts/ only where a
-        # `.sh` sibling still names it as this repository's own oracle --
-        # except register-rebuild, whose .sh predecessor was deliberately
-        # retired once skill_files() took over listing the binary directly
-        # (see planning/PACKAGE-MAP.tsv); that retirement left no `.sh` for
-        # the gate below to find, silently dropping it from every one of
-        # this repository's own build steps (setup-dev-env.sh included).
-        run: |
-          set -euo pipefail
-          while IFS=$'\t' read -r path kind candidate note; do
-            [ -n "$candidate" ] || continue
-            case "$candidate" in
-              render-plans-board) continue ;; # owned by another migration
-              overview-state) crate=plan-overview ;;
-              *) crate="$candidate" ;;
-            esac
-            if [ ! -f "planning/scripts/$candidate.sh" ]; then
-              case "$candidate" in
-                register-rebuild) : ;; # retired its .sh oracle; still ships
-                *) continue ;;
-              esac
-            fi
-            manifest="src/$crate/Cargo.toml"
-            [ -f "$manifest" ] || { echo "::error::missing crate for $candidate: $manifest"; exit 1; }
-            cargo build --manifest-path "$manifest" --release
-            binary="target/release/$crate"
-            [ -x "$binary" ] || { echo "::error::missing release artifact: $binary"; exit 1; }
-            cp "$binary" "planning/scripts/$candidate"
-            chmod +x "planning/scripts/$candidate"
-          done < <({
-            printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
-            printf 'planning\truntime-binary\tregister-rebuild\tdeclared in planning/PACKAGE-MAP.tsv\n'
-            awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
-          } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
-          # ~45 crates' worth of dependency objects (deps/, build/,
-          # .fingerprint/) is nearly the whole of target/release and was
-          # never needed past this point -- every final binary this job still
-          # reads directly (tony-the-pony) or copies elsewhere (chat,
-          # bug-report, todo) already happened before this step runs. Freeing
-          # it here is what a disk-tight runner needs: this step's own local
-          # repro of the failure it fixes showed 99% disk usage with 1.3G
-          # free before this reclaim existed.
-          du -sh target/release 2>/dev/null || true
+          SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
+          # Dependency objects (deps/, build/, .fingerprint/) are nearly the
+          # whole of target/ and were never needed past this point. Freeing
+          # them is what a disk-tight runner needs: an earlier version of this
+          # job hit 99% disk usage with 1.3G free before this reclaim existed.
+          du -sh target 2>/dev/null || true
           rm -rf target/release/deps target/release/build target/release/incremental target/release/.fingerprint
+          rm -rf target/*/release/deps target/*/release/build target/*/release/incremental target/*/release/.fingerprint
           df -h . 2>/dev/null || true
 
       - name: Write the selected test list (T116)
@@ -540,48 +490,20 @@ jobs:
         # have one: a build in the other job does not reach this runner.
         run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
 
-      - name: Build and stage every migrated planning command (T116)
+      - name: Build every compiled helper into bin/<triple> (T116)
         # See the sibling step of the same name on the default-bash leg for
-        # why this is here at all now that a shard can land apart from
-        # whichever shard happens to test the crate that builds it, and for
-        # why register-rebuild needs the extra row and gate bypass below.
+        # why the shell suite needs every compiled helper staged before it
+        # runs, and why the wiring cannot start without the generated
+        # plan-core-lib.sh (setup-dev-env.sh builds that too, through
+        # build-plan-libs.sh's own fresh-checkout bootstrap).
         run: |
-          set -euo pipefail
-          while IFS=$'\t' read -r path kind candidate note; do
-            [ -n "$candidate" ] || continue
-            case "$candidate" in
-              render-plans-board) continue ;; # owned by another migration
-              overview-state) crate=plan-overview ;;
-              *) crate="$candidate" ;;
-            esac
-            if [ ! -f "planning/scripts/$candidate.sh" ]; then
-              case "$candidate" in
-                register-rebuild) : ;; # retired its .sh oracle; still ships
-                *) continue ;;
-              esac
-            fi
-            manifest="src/$crate/Cargo.toml"
-            [ -f "$manifest" ] || { echo "::error::missing crate for $candidate: $manifest"; exit 1; }
-            cargo build --manifest-path "$manifest" --release
-            binary="target/release/$crate"
-            [ -x "$binary" ] || { echo "::error::missing release artifact: $binary"; exit 1; }
-            cp "$binary" "planning/scripts/$candidate"
-            chmod +x "planning/scripts/$candidate"
-          done < <({
-            printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
-            printf 'planning\truntime-binary\tregister-rebuild\tdeclared in planning/PACKAGE-MAP.tsv\n'
-            awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
-          } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
-          # ~45 crates' worth of dependency objects (deps/, build/,
-          # .fingerprint/) is nearly the whole of target/release and was
-          # never needed past this point -- every final binary this job still
-          # reads directly (tony-the-pony) or copies elsewhere (chat,
-          # bug-report, todo) already happened before this step runs. Freeing
-          # it here is what a disk-tight runner needs: this step's own local
-          # repro of the failure it fixes showed 99% disk usage with 1.3G
-          # free before this reclaim existed.
-          du -sh target/release 2>/dev/null || true
+          SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
+          # Dependency objects are nearly all of target/ and were never
+          # needed past this point; freeing them is what a disk-tight runner
+          # needs.
+          du -sh target 2>/dev/null || true
           rm -rf target/release/deps target/release/build target/release/incremental target/release/.fingerprint
+          rm -rf target/*/release/deps target/*/release/build target/*/release/incremental target/*/release/.fingerprint
           df -h . 2>/dev/null || true
 
       - name: Write the selected test list (T116)
