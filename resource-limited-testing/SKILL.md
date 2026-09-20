@@ -87,6 +87,16 @@ stability and no adequate limit is available, ask before running it.
 - Do not install another service manager merely to obtain resource limits.
   First check whether the existing user systemd session or cgroup delegation
   can be used.
+- **If neither `systemd-run` nor an approved `cpulimit` is available at
+  all** (no live user systemd session — common inside a plain container with
+  no init system — and installing `cpulimit` wasn't approved), the wrapper's
+  own real fallback is a bare `ulimit -v` virtual-memory ceiling and nothing
+  else: no CPU quota, and — unlike the macOS fallback ladder, which always
+  applies at least `nice` — no scheduling-priority `nice` either, since
+  `ulimit -v` is the wrapper's own last resort, not a species of `nice`.
+  State the guarantee this way explicitly when it's what actually ran: a
+  weaker, address-space-only memory limit with no CPU control at all, not a
+  cgroup-equivalent guarantee.
 
 ### macOS
 

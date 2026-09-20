@@ -25,6 +25,28 @@ replays on the next call, so nothing is lost:
 ai-text-editor search -f /path/to/file --mode exact_text --query needle
 ```
 
+**Under a harness that sandboxes every shell call into its own fresh process
+tree (verified: codex's per-command `bwrap` sandbox), a plain `open`'s
+auto-started server does not survive to the next command** — the server
+process dies with the sandbox that spawned it, before a following `read` or
+`search` can reach it, producing repeated `tab_stale`/`tab_unknown` errors
+even though `--takeover-stale-endpoint` clears the stale endpoint file each
+time. The fix is to pre-start the server explicitly, once, with no idle
+timeout, before the first real operation, then address every later call by
+file path rather than a cached tab id (a tab id from one command is not
+guaranteed to resolve in a later, separate command against the nominally
+same server):
+
+```text
+ai-text-editor-server start --file /path/to/file --idle-timeout-seconds 0 --takeover-stale-endpoint; exec bash
+ai-text-editor read -f /path/to/file
+```
+
+Chaining `exec bash` after the server start keeps the sandboxed process
+group alive long enough for the server to finish detaching; a harness
+without this per-command isolation (a normal shell, most other coding
+harnesses) never needs this and can simply rely on the auto-start above.
+
 In `skill` mode, `ai-text-editor`/`ai-text-editor-server` live in the one
 shared location every skill's compiled binaries live in:
 `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/`. Nothing puts it on
@@ -174,7 +196,10 @@ current list rather than trusting prose here to have kept up with it.
 The client uses a short-lived request connection. Save a session with
 `--save-session-token PATH`, reuse it with `--session-token PATH`, or use
 `--session ID`/`--agent ID` so the client stores and resolves the token under
-the private editor metadata directory. Without an explicit id it falls back
+the private editor metadata directory — `$HOME/.config/tsch-ai-skills/editor`
+by default (created on first use, mode 0700), overridable with
+`TSCH_AI_EDITOR_METADATA_DIR` when that default location isn't writable
+(a workspace-scoped sandbox, a read-only home). Without an explicit id it falls back
 to whatever the surrounding coding harness itself exports
 (`CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID`, `OPENCODE_PID`) — this is also
 what makes the automatic workspace reconnection above possible with no flags.
