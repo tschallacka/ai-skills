@@ -77,6 +77,13 @@ jobs:
           cargo build -p rjq
           echo "$GITHUB_WORKSPACE/target/debug" >> "$GITHUB_PATH"
 
+      # The generated shell libraries the wrappers and several tests need
+      # (plan-core-lib.sh and friends) are gitignored, so a fresh checkout has
+      # none of them.
+      - name: Generate the plan shell libraries
+        shell: bash
+        run: ./planning/scripts/build-plan-libs.sh
+
       - name: Format
         shell: bash
         run: cargo fmt --all --check

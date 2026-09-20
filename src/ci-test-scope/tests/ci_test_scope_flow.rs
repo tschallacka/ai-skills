@@ -12,6 +12,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// `bash_script()`: on Windows a bare `Command::new("bash")` finds System32's
+// WSL launcher before Git for Windows' bash.
+#[path = "../../../tests/rust-support/script_stub.rs"]
+mod script_stub;
+
 fn unique_dir(tag: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
     dir.push(format!(
@@ -593,16 +598,19 @@ fn staged_bin_dir(repo_root: &Path) -> PathBuf {
             let built_dir = built.parent().expect("a built binary lives in a directory");
             let dir = built_dir.join("ci-test-scope-staged-bin");
             fs::create_dir_all(&dir).unwrap();
-            fs::copy(built, dir.join("ci-test-scope")).unwrap();
-            let mut candidates = vec![built_dir.join("run-tests")];
+            // Binaries carry the platform's executable suffix (.exe on
+            // Windows); the wrapper asks for them by their bare name.
+            let exe = |name: &str| format!("{name}{}", std::env::consts::EXE_SUFFIX);
+            fs::copy(built, dir.join(exe("ci-test-scope"))).unwrap();
+            let mut candidates = vec![built_dir.join(exe("run-tests"))];
             if let Some(root) = std::env::var_os("AI_SKILLS_BIN_ROOT") {
-                candidates.push(Path::new(&root).join("run-tests"));
+                candidates.push(Path::new(&root).join(exe("run-tests")));
             }
             if let Ok(triples) = fs::read_dir(repo_root.join("bin")) {
-                candidates.extend(triples.flatten().map(|e| e.path().join("run-tests")));
+                candidates.extend(triples.flatten().map(|e| e.path().join(exe("run-tests"))));
             }
             if let Some(run_tests) = candidates.into_iter().find(|c| c.is_file()) {
-                fs::copy(run_tests, dir.join("run-tests")).unwrap();
+                fs::copy(run_tests, dir.join(exe("run-tests"))).unwrap();
             }
             dir
         })
@@ -610,11 +618,10 @@ fn staged_bin_dir(repo_root: &Path) -> PathBuf {
 }
 
 fn wrapper_scope(repo_root: &Path, args: &[&str]) -> Output {
-    Command::new("bash")
-        .arg(repo_root.join(".github/ci-test-scope.sh"))
+    script_stub::bash_script(&repo_root.join(".github/ci-test-scope.sh"))
         .args(args)
         .current_dir(repo_root)
-        .env("AI_SKILLS_BIN_ROOT", staged_bin_dir(repo_root))
+        .env("AI_SKILLS_BIN_ROOT", bash_form(&staged_bin_dir(repo_root)))
         .env_remove("GITHUB_OUTPUT")
         .output()
         .unwrap()
@@ -629,10 +636,15 @@ fn direct_scope(repo_root: &Path, args: &[&str]) -> Output {
         // binary shells to resolves identically on both sides instead of
         // one of them being shadowed by whatever ~/.config/tsch-ai-skills/bin
         // holds.
-        .env("AI_SKILLS_BIN_ROOT", staged_bin_dir(repo_root))
+        .env("AI_SKILLS_BIN_ROOT", bash_form(&staged_bin_dir(repo_root)))
         .env_remove("GITHUB_OUTPUT")
         .output()
         .unwrap()
+}
+
+/// A path as bash reads it out of an environment variable: forward slashes.
+fn bash_form(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 #[test]
@@ -749,8 +761,7 @@ fn missing_binary_falls_back_to_the_scope_full_safe_default() {
     )
     .unwrap();
 
-    let output = Command::new("bash")
-        .arg(scratch.join(".github/ci-test-scope.sh"))
+    let output = script_stub::bash_script(&scratch.join(".github/ci-test-scope.sh"))
         .arg("--files-from")
         .arg("/dev/null")
         .current_dir(&scratch)

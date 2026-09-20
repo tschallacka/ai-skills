@@ -12,6 +12,7 @@ mod finding;
 mod git;
 mod globs;
 mod manifest;
+mod shell;
 
 use finding::{Level, Line};
 use std::env;

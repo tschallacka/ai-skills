@@ -856,7 +856,6 @@ jobs:
         # planning/scripts/plan-core-lib.sh, which is generated and gitignored,
         # so on a fresh checkout it answers "binary not found" and the
         # comparison fails for a reason that has nothing to do with the crate.
-        if: runner.os != 'Windows'
         shell: bash
         run: ./planning/scripts/build-plan-libs.sh
 

@@ -66,7 +66,7 @@ pub fn run_pass(repo_root: &Path, registry: &Path, changed: &[String]) -> Vec<Li
 /// pipes, which could not reconstruct the true interleaving order.
 fn run_check(repo_root: &Path, check: &str) -> (bool, String) {
     let script = format!("( {check} ) 2>&1");
-    let output = Command::new("bash")
+    let output = Command::new(crate::shell::bash())
         .arg("-c")
         .arg(script)
         .current_dir(repo_root)

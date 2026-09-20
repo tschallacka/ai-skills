@@ -65,20 +65,45 @@ fn discover_repo_root() -> Result<PathBuf, String> {
     }
 }
 
-/// Shells to real `date -u`, matching this crate's own established
-/// shell-out-for-parity precedent (discovery.rs's find/sort). The stamp is
-/// excluded from every comparison this crate or its tests perform (both
-/// `--check`'s own determinism check and the real-tree parity test strip
-/// the `<!-- generated: -->` line first), so exact correctness here has no
-/// bearing on any test outcome -- only human-readability.
+/// The current UTC time as `date -u +%Y-%m-%dT%H:%M:%SZ` prints it. Computed
+/// here rather than by running `date`, which Windows does not have as a
+/// program (only as a cmd builtin), so the stamp used to come out empty
+/// there. The stamp is excluded from every comparison this crate or its
+/// tests perform (both `--check`'s own determinism check and the real-tree
+/// parity test strip the `<!-- generated: -->` line first).
 fn now_utc() -> String {
-    std::process::Command::new("date")
-        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .unwrap_or_default()
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    format_utc(seconds)
+}
+
+/// `seconds` since the Unix epoch as `YYYY-MM-DDTHH:MM:SSZ`, using Howard
+/// Hinnant's days-to-civil-date arithmetic (proleptic Gregorian).
+fn format_utc(seconds: u64) -> String {
+    let days = (seconds / 86_400) as i64;
+    let in_day = seconds % 86_400;
+    let shifted = days + 719_468;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        in_day / 3_600,
+        in_day % 3_600 / 60,
+        in_day % 60
+    )
 }
 
 fn run() -> i32 {
@@ -170,5 +195,13 @@ mod tests {
         let stamp = now_utc();
         assert_eq!(stamp.len(), 20);
         assert!(stamp.ends_with('Z'));
+    }
+
+    #[test]
+    fn format_utc_matches_known_instants() {
+        assert_eq!(format_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(format_utc(951_782_400), "2000-02-29T00:00:00Z"); // a leap day
+        assert_eq!(format_utc(1_709_251_199), "2024-02-29T23:59:59Z");
+        assert_eq!(format_utc(1_789_920_000), "2026-09-20T16:00:00Z");
     }
 }

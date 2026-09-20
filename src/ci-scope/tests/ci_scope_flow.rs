@@ -11,6 +11,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// `bash_program()`/`bash_script()`: on Windows a bare `Command::new("bash")`
+// finds System32's WSL launcher before Git for Windows' bash.
+#[path = "../../../tests/rust-support/script_stub.rs"]
+mod script_stub;
+
 fn unique_dir(tag: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
     dir.push(format!(
@@ -527,18 +532,30 @@ fn staged_bin_dir(_repo_root: &Path) -> PathBuf {
                 .expect("a built binary lives in a directory")
                 .join("ci-scope-staged-bin");
             fs::create_dir_all(&dir).unwrap();
-            fs::copy(built, dir.join("ci-scope")).unwrap();
+            // The wrapper looks the binary up as `<dir>/ci-scope`; on Windows
+            // the file is `ci-scope.exe`, which Git bash resolves the same way.
+            fs::copy(
+                built,
+                dir.join(format!("ci-scope{}", std::env::consts::EXE_SUFFIX)),
+            )
+            .unwrap();
             dir
         })
         .clone()
 }
 
 fn wrapper_scope(repo_root: &Path, args: &[&str]) -> Output {
-    Command::new("bash")
-        .arg(repo_root.join(".github/ci-scope.sh"))
+    script_stub::bash_script(&repo_root.join(".github/ci-scope.sh"))
         .args(args)
         .current_dir(repo_root)
-        .env("AI_SKILLS_BIN_ROOT", staged_bin_dir(repo_root))
+        // Forward slashes: a path bash reads out of its environment is safest
+        // in the form bash itself would write.
+        .env(
+            "AI_SKILLS_BIN_ROOT",
+            staged_bin_dir(repo_root)
+                .to_string_lossy()
+                .replace('\\', "/"),
+        )
         .env_remove("GITHUB_OUTPUT")
         .output()
         .unwrap()
@@ -680,8 +697,7 @@ fn missing_binary_falls_back_to_the_scope_full_safe_default() {
     )
     .unwrap();
 
-    let output = Command::new("bash")
-        .arg(scratch.join(".github/ci-scope.sh"))
+    let output = script_stub::bash_script(&scratch.join(".github/ci-scope.sh"))
         .arg("--files-from")
         .arg("/dev/null")
         .current_dir(&scratch)
@@ -701,14 +717,12 @@ fn missing_binary_falls_back_to_the_scope_full_safe_default() {
         "stdout: {out}"
     );
 
-    let help = Command::new("bash")
-        .arg(scratch.join(".github/ci-scope.sh"))
+    let help = script_stub::bash_script(&scratch.join(".github/ci-scope.sh"))
         .arg("--help")
         .current_dir(&scratch)
         .output()
         .unwrap();
-    let real_help = Command::new("bash")
-        .arg(real_repo_root.join(".github/ci-scope.sh"))
+    let real_help = script_stub::bash_script(&real_repo_root.join(".github/ci-scope.sh"))
         .arg("--help")
         .current_dir(&real_repo_root)
         .output()

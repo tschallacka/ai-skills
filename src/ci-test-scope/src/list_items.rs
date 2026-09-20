@@ -32,8 +32,8 @@ pub enum ListError {
 /// binary itself is invoked.
 pub fn list_items(repo_root: &Path) -> Result<Vec<String>, ListError> {
     let run_tests = repo_root.join("run-tests.sh");
-    let output = Command::new("bash")
-        .arg(&run_tests)
+    let output = Command::new(crate::shell::bash())
+        .arg(crate::shell::script_arg(&run_tests))
         .arg("--list-only")
         .current_dir(repo_root)
         .env("LC_ALL", "C")

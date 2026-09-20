@@ -38,19 +38,36 @@ pub enum Outcome {
     },
 }
 
+/// npm installs mermaid-cli on Windows as `mmdc.cmd` (beside a `mmdc` shell
+/// script that Windows cannot start), and Rust's `Command` only finds a
+/// program by its exact name plus `.exe`.
+fn mmdc_program() -> &'static str {
+    if cfg!(windows) {
+        "mmdc.cmd"
+    } else {
+        "mmdc"
+    }
+}
+
 fn mmdc_on_path() -> bool {
     std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("mmdc").is_file()))
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(mmdc_program()).is_file()))
         .unwrap_or(false)
 }
 
-fn socket_tmpdir_root() -> &'static str {
-    // AR-126: hardcoded, never TMPDIR-derived.
-    "/tmp"
+fn socket_tmpdir_root() -> String {
+    // AR-126: a short, fixed root where a unix socket path has to fit
+    // sun_path, never TMPDIR-derived. Windows has no /tmp and no such limit;
+    // its temp directory is where a scratch profile belongs.
+    if cfg!(windows) {
+        std::env::temp_dir().to_string_lossy().into_owned()
+    } else {
+        "/tmp".to_string()
+    }
 }
 
 fn render_once(diagram: &Path, output: &Path, work: &Path) -> Result<(), String> {
-    let profile = tempfile_dir(socket_tmpdir_root(), "profile");
+    let profile = tempfile_dir(&socket_tmpdir_root(), "profile");
     let puppeteer_json = work.join("puppeteer.json");
     let _ = std::fs::write(
         &puppeteer_json,
@@ -60,7 +77,7 @@ fn render_once(diagram: &Path, output: &Path, work: &Path) -> Result<(), String>
         ),
     );
     let render_log = work.join("render.log");
-    let result = Command::new("mmdc")
+    let result = Command::new(mmdc_program())
         .arg("-q")
         .arg("-p")
         .arg(&puppeteer_json)

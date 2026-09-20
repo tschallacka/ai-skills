@@ -11,6 +11,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// A gh/glab stub is a bash script; Windows only starts real executables, so
+// the shared helper puts a small launcher exe in front of each one.
+#[path = "../../../tests/rust-support/script_stub.rs"]
+mod script_stub;
+
 struct Harness {
     work: PathBuf,
     repo: PathBuf,
@@ -27,6 +32,14 @@ fn write_executable(path: &Path, contents: &str) {
         perms.set_mode(0o755);
         fs::set_permissions(path, perms).unwrap();
     }
+    // Windows starts only real executables; this puts a launcher `<name>.exe`
+    // beside the script that runs it under bash. A no-op on unix.
+    script_stub::install(
+        path.parent().expect("a stub lives in a directory"),
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .expect("a stub has a plain name"),
+    );
 }
 
 impl Harness {
@@ -154,11 +167,7 @@ esac
         let binary = env!("CARGO_BIN_EXE_ci-failures");
         let call_log = self.work.join("call.log");
         let _ = fs::remove_file(&call_log);
-        let path_env = format!(
-            "{}:{}",
-            self.stub_bin.display(),
-            std::env::var("PATH").unwrap_or_default()
-        );
+        let path_env = script_stub::path_with(&self.stub_bin);
         let output = Command::new(binary)
             .args(args)
             .current_dir(&self.repo)
@@ -252,11 +261,7 @@ fn default_gh_listing_shows_only_failing_jobs() {
     h.set_remote("https://github.com/tschallacka/ai-skills.git");
     let binary = env!("CARGO_BIN_EXE_ci-failures");
     let call_log = h.work.join("call.log");
-    let path_env = format!(
-        "{}:{}",
-        h.stub_bin.display(),
-        std::env::var("PATH").unwrap()
-    );
+    let path_env = script_stub::path_with(&h.stub_bin);
     let output = Command::new(binary)
         .args(["pr/47"])
         .current_dir(&h.repo)
@@ -309,11 +314,7 @@ fn ci_failures_repo_overrides_the_default_slug_on_gh() {
     h.set_remote("https://github.com/tschallacka/ai-skills.git");
     let binary = env!("CARGO_BIN_EXE_ci-failures");
     let call_log = h.work.join("call.log");
-    let path_env = format!(
-        "{}:{}",
-        h.stub_bin.display(),
-        std::env::var("PATH").unwrap()
-    );
+    let path_env = script_stub::path_with(&h.stub_bin);
     Command::new(binary)
         .args(["pr/47"])
         .current_dir(&h.repo)
@@ -350,11 +351,7 @@ fn the_extractor_catches_a_panic_and_a_fail_row_in_an_untimestamped_log() {
     );
     let binary = env!("CARGO_BIN_EXE_ci-failures");
     let call_log = h.work.join("call.log");
-    let path_env = format!(
-        "{}:{}",
-        h.stub_bin.display(),
-        std::env::var("PATH").unwrap()
-    );
+    let path_env = script_stub::path_with(&h.stub_bin);
     let output = Command::new(binary)
         .args(["pr/47"])
         .current_dir(&h.repo)
@@ -394,11 +391,7 @@ fn raw_writes_the_de_escaped_log() {
     let raw_dir = h.work.join("raw");
     let binary = env!("CARGO_BIN_EXE_ci-failures");
     let call_log = h.work.join("call.log");
-    let path_env = format!(
-        "{}:{}",
-        h.stub_bin.display(),
-        std::env::var("PATH").unwrap()
-    );
+    let path_env = script_stub::path_with(&h.stub_bin);
     let output = Command::new(binary)
         .args(["pr/47", "--raw", raw_dir.to_str().unwrap()])
         .current_dir(&h.repo)
@@ -459,11 +452,7 @@ fn a_failed_gh_run_list_call_surfaces_ghs_own_message_not_a_fabricated_no_runs_c
     h.set_remote("https://github.com/tschallacka/ai-skills.git");
     let binary = env!("CARGO_BIN_EXE_ci-failures");
     let call_log = h.work.join("call.log");
-    let path_env = format!(
-        "{}:{}",
-        h.stub_bin.display(),
-        std::env::var("PATH").unwrap()
-    );
+    let path_env = script_stub::path_with(&h.stub_bin);
     let output = Command::new(binary)
         .args(Vec::<&str>::new())
         .current_dir(&h.repo)
@@ -499,11 +488,7 @@ fn a_failed_glab_pipeline_list_call_surfaces_glabs_own_message_not_a_fabricated_
     h.set_remote("git@gitlab.com:tschallacka/ai-skills.git");
     let binary = env!("CARGO_BIN_EXE_ci-failures");
     let call_log = h.work.join("call.log");
-    let path_env = format!(
-        "{}:{}",
-        h.stub_bin.display(),
-        std::env::var("PATH").unwrap()
-    );
+    let path_env = script_stub::path_with(&h.stub_bin);
     let output = Command::new(binary)
         .args(Vec::<&str>::new())
         .current_dir(&h.repo)

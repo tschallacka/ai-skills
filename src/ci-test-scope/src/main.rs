@@ -13,6 +13,7 @@ mod git;
 mod global;
 mod list_items;
 mod repo_root;
+mod shell;
 
 use std::env;
 use std::fs;

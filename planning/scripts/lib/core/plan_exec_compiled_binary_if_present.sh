@@ -67,7 +67,14 @@ plan_exec_compiled_binary_if_present() {
     pecbip_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     # shellcheck source=planning/scripts/plan-crypt-lib.sh
     source "$pecbip_lib_dir/plan-crypt-lib.sh"
-    if pecbip_bin_dir="$(plan_bin_dir)" && [ -x "$pecbip_bin_dir/$binary_name" ]; then
+    # A Windows build is `<name>.exe`. Git for Windows' bash usually resolves
+    # `<name>` to it on its own, but asking for the suffixed name outright does
+    # not depend on that, and costs nothing anywhere else.
+    if pecbip_bin_dir="$(plan_bin_dir)" && [ ! -x "$pecbip_bin_dir/$binary_name" ] \
+        && [ -x "$pecbip_bin_dir/$binary_name.exe" ]; then
+        binary_name="$binary_name.exe"
+    fi
+    if [ -n "${pecbip_bin_dir:-}" ] && [ -x "$pecbip_bin_dir/$binary_name" ]; then
         pecbip_skill_root="$(pecbip_find_skill_root "$(cd "$caller_script_dir" && pwd)")" || pecbip_skill_root=""
         PLANNING_SKILL_ROOT="$pecbip_skill_root" \
             exec "$pecbip_bin_dir/$binary_name" "$@"

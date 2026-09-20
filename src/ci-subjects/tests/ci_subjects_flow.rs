@@ -12,6 +12,11 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
+// `bash_program()`/`bash_script()`: on Windows a bare `Command::new("bash")`
+// finds System32's WSL launcher before Git for Windows' bash.
+#[path = "../../../tests/rust-support/script_stub.rs"]
+mod script_stub;
+
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ci-subjects"))
         .args(args)
@@ -137,7 +142,13 @@ fn staged_bin_dir(_repo_root: &Path) -> std::path::PathBuf {
                 .expect("a built binary lives in a directory")
                 .join("ci-subjects-staged-bin");
             fs::create_dir_all(&dir).unwrap();
-            fs::copy(built, dir.join("ci-subjects")).unwrap();
+            // The wrapper looks the binary up as `<dir>/ci-subjects`; on
+            // Windows the file is `ci-subjects.exe`.
+            fs::copy(
+                built,
+                dir.join(format!("ci-subjects{}", std::env::consts::EXE_SUFFIX)),
+            )
+            .unwrap();
             dir
         })
         .clone()
@@ -190,10 +201,12 @@ fn exec_fidelity_matches_the_compiled_binary_for_every_real_test_scenario() {
     ];
 
     for args in scenarios {
-        let wrapper_output = Command::new("bash")
-            .arg(&script)
+        let wrapper_output = script_stub::bash_script(&script)
             .args(&args)
-            .env("AI_SKILLS_BIN_ROOT", &bin_dir)
+            .env(
+                "AI_SKILLS_BIN_ROOT",
+                bin_dir.to_string_lossy().replace('\\', "/"),
+            )
             .env_remove("GITHUB_OUTPUT")
             .current_dir(&repo_root)
             .output()
@@ -237,8 +250,7 @@ fn missing_binary_falls_back_to_the_all_true_safe_default() {
     )
     .unwrap();
 
-    let output = Command::new("bash")
-        .arg(scratch.join(".github/ci-subjects.sh"))
+    let output = script_stub::bash_script(&scratch.join(".github/ci-subjects.sh"))
         .arg("--scope")
         .arg("full")
         .current_dir(&scratch)
