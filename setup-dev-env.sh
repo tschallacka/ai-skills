@@ -218,13 +218,25 @@ while IFS="$(printf '\t')" read -r crate binary; do
         # only one, and a dev-tree install ships the skill with no binaries at
         # all even though setup-dev-env reported them built. T72 folds all of
         # these into one shared bin.
+        #
+        # interactive-shell-mcp is its own crate (a separate package
+        # depending on interactive-shell as a library, exactly like
+        # ai-text-editor-mcp depends on ai-text-editor) but is not its own
+        # skill -- integration.tsv gates it into the interactive-shell
+        # SKILL's mcp-mode install, so its compiled binary has to land in
+        # THAT skill's bin/<triple>/, not a nonexistent
+        # interactive-shell-mcp/ skill directory.
+        skill_dir_for_crate="$crate"
         case "$crate" in
-            bug-report|todo|interactive-shell)
-                skill_dir="$repo_root/$crate/bin/$triple"
+            interactive-shell-mcp) skill_dir_for_crate=interactive-shell ;;
+        esac
+        case "$crate" in
+            bug-report|todo|interactive-shell|interactive-shell-mcp)
+                skill_dir="$repo_root/$skill_dir_for_crate/bin/$triple"
                 mkdir -p "$skill_dir"
                 cp "$repo_root/target/$triple/release/$binary$exe" "$skill_dir/$binary$exe"
                 chmod +x "$skill_dir/$binary$exe"
-                printf '   -> %s/bin/%s/%s%s\n' "$crate" "$triple" "$binary" "$exe"
+                printf '   -> %s/bin/%s/%s%s\n' "$skill_dir_for_crate" "$triple" "$binary" "$exe"
                 ;;
         esac
         built=$((built + 1))

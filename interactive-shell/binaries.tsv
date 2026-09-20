@@ -1,9 +1,14 @@
 # MODE: PROD
 # Prebuilt interactive-shell rust binaries shipped with the skill (PTY wrapper
-# + socket input client).
+# + socket input client + MCP bridge).
 # Built by the release/CI (cargo build --release --workspace); never committed.
 #
-# Two of the crate's three binaries ship. interactive-shell-fixture is a
+# Three binaries ship per target, not two: interactive-shell-mcp lives in the
+# SEPARATE interactive-shell-mcp crate (its own package, depending on this
+# one as a library) but ships beside these two -- integration.tsv is what
+# actually gates it to mcp-mode installs; here it is just one more prebuilt
+# binary per target.
+# interactive-shell-fixture (this crate's own third binary) is a
 # maintainer-only build (its markers say so) because it emits deliberately
 # fragmented CSI and OSC sequences as an input to tests/protocol.rs and has no
 # use on a target machine, so it stays out of this registry. Its marker words
@@ -14,15 +19,22 @@
 target	condition	binary	why
 x86_64-unknown-linux-musl	Linux:x86_64|amd64	interactive-shell	Static 64-bit x86 Linux PTY wrapper emitting JSONL screen events
 x86_64-unknown-linux-musl	Linux:x86_64|amd64	interactive-shell-input	Static 64-bit x86 Linux unix-socket input client
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	interactive-shell-mcp	Static 64-bit x86 Linux MCP bridge
 aarch64-unknown-linux-musl	Linux:aarch64|arm64	interactive-shell	Static 64-bit ARM Linux PTY wrapper emitting JSONL screen events
 aarch64-unknown-linux-musl	Linux:aarch64|arm64	interactive-shell-input	Static 64-bit ARM Linux unix-socket input client
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	interactive-shell-mcp	Static 64-bit ARM Linux MCP bridge
 x86_64-apple-darwin	Darwin:x86_64	interactive-shell	Intel macOS PTY wrapper emitting JSONL screen events
 x86_64-apple-darwin	Darwin:x86_64	interactive-shell-input	Intel macOS unix-socket input client
+x86_64-apple-darwin	Darwin:x86_64	interactive-shell-mcp	Intel macOS MCP bridge
 aarch64-apple-darwin	Darwin:arm64	interactive-shell	Apple Silicon macOS PTY wrapper emitting JSONL screen events
 aarch64-apple-darwin	Darwin:arm64	interactive-shell-input	Apple Silicon macOS unix-socket input client
+aarch64-apple-darwin	Darwin:arm64	interactive-shell-mcp	Apple Silicon macOS MCP bridge
 x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	interactive-shell.exe	64-bit Windows PTY wrapper emitting JSONL screen events
 x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	interactive-shell-input.exe	64-bit Windows loopback-TCP input client
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	interactive-shell-mcp.exe	64-bit Windows MCP bridge
 x86_64-pc-cygwin	CYGWIN*:x86_64|amd64	interactive-shell.exe	Cygwin-native PTY wrapper (openpty, unmodified POSIX code) emitting JSONL screen events
 x86_64-pc-cygwin	CYGWIN*:x86_64|amd64	interactive-shell-input.exe	Cygwin-native unix-socket input client
+x86_64-pc-cygwin	CYGWIN*:x86_64|amd64	interactive-shell-mcp.exe	Cygwin-native MCP bridge
 x86_64-pc-cygwin	MSYS*:x86_64|amd64	interactive-shell.exe	MSYS2-native PTY wrapper (same x86_64-pc-cygwin build, linked with MSYS2's own gcc/msys-2.0.dll instead of Cygwin's) emitting JSONL screen events
 x86_64-pc-cygwin	MSYS*:x86_64|amd64	interactive-shell-input.exe	MSYS2-native unix-socket input client
+x86_64-pc-cygwin	MSYS*:x86_64|amd64	interactive-shell-mcp.exe	MSYS2-native MCP bridge (same x86_64-pc-cygwin build, linked with MSYS2's own gcc/msys-2.0.dll instead of Cygwin's)

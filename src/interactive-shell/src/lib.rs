@@ -4,17 +4,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::net::Shutdown;
+use std::net::{Shutdown, TcpStream};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+mod tcp;
+
 #[cfg(unix)]
 mod posix;
-#[cfg(unix)]
-pub use posix::connect_in_directory;
 #[cfg(unix)]
 use posix::install_interrupt_handler;
 #[cfg(unix)]
@@ -25,13 +27,11 @@ type PlatformListener = posix::PosixListener;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::connect_in_directory;
-#[cfg(windows)]
 use windows::install_interrupt_handler;
 #[cfg(windows)]
 type PlatformBackend = windows::WindowsBackend;
 #[cfg(windows)]
-type PlatformListener = windows::WindowsListener;
+type PlatformListener = tcp::TcpTransportListener;
 
 const MAX_LINE: usize = 65_536;
 pub(crate) static INTERRUPTED: AtomicBool = AtomicBool::new(false);
@@ -78,6 +78,91 @@ trait Listener: Sized {
     fn accept(&self) -> io::Result<Option<Self::Stream>>;
 }
 
+/// The stream `bin/interactive-shell-input.rs` gets back from
+/// `connect_in_directory`: whichever transport a session at `socket` turns
+/// out to be, decided at runtime by `connect_in_directory` itself, not by
+/// platform (Unix defaults to `Unix`, but an explicit `--tcp` session there
+/// connects over `Tcp` exactly like Windows always does). Exposes
+/// `shutdown`/`set_read_timeout` as INHERENT methods -- exactly like the
+/// concrete `UnixStream`/`TcpStream` this replaces -- so the calling binary
+/// needs no `Transport` trait import to use them (AR-06/AR-19's original
+/// reason for returning a concrete type still applies; this enum is the
+/// concrete type now, on every platform).
+pub enum ClientStream {
+    #[cfg(unix)]
+    Unix(UnixStream),
+    Tcp(TcpStream),
+}
+
+impl ClientStream {
+    pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(stream) => stream.shutdown(how),
+            Self::Tcp(stream) => stream.shutdown(how),
+        }
+    }
+
+    pub fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(stream) => stream.set_read_timeout(dur),
+            Self::Tcp(stream) => stream.set_read_timeout(dur),
+        }
+    }
+}
+
+impl Read for ClientStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(stream) => stream.read(buf),
+            Self::Tcp(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl Write for ClientStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(stream) => stream.write(buf),
+            Self::Tcp(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(stream) => stream.flush(),
+            Self::Tcp(stream) => stream.flush(),
+        }
+    }
+}
+
+/// Connects to whatever is actually running at `socket`. A `--tcp` session
+/// left a small discovery file there (port + nonce, the same shape a
+/// Windows `bind()` always writes); a default Unix session left a real
+/// Unix-domain socket special file. Tried in that order: `tcp::parse_discovery`
+/// fails fast and cheaply on a real socket special file (a local read that
+/// either parses or does not, never a costly wrong guess), and once it DOES
+/// parse, a dial failure is reported as-is rather than falling through to a
+/// Unix-connect attempt against a path that is a text file, not a socket.
+pub fn connect_in_directory(socket: &Path) -> Result<ClientStream, String> {
+    if let Some((port, nonce)) = tcp::parse_discovery(socket) {
+        return tcp::dial(port, &nonce).map(ClientStream::Tcp);
+    }
+    #[cfg(unix)]
+    {
+        posix::connect_in_directory(socket).map(ClientStream::Unix)
+    }
+    #[cfg(not(unix))]
+    Err(format!(
+        "no discovery file at {}: expected the port+nonce file a --tcp session writes",
+        socket.display()
+    ))
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Session {
     pub socket: PathBuf,
@@ -87,6 +172,12 @@ pub struct Session {
     pub command: Vec<String>,
     #[serde(default)]
     pub agent: String,
+    /// Whether this session's server was (or should be, on a later restart)
+    /// bound with `--tcp` rather than the platform default. `#[serde(default)]`
+    /// so an old session file with no such field loads as `false`, the
+    /// behavior it always had.
+    #[serde(default)]
+    pub use_tcp: bool,
 }
 
 fn session_root() -> PathBuf {
@@ -419,6 +510,8 @@ struct Screen {
     wrap_pending: bool,
     saved_cursor: Option<(usize, usize)>,
     line_drawing: bool,
+    /// The last graphic byte `put` wrote, which `CSI Ps b` (REP) repeats.
+    last_printed: Option<u8>,
     parser: Parser,
     saved_primary: Option<ScreenState>,
     active_link: Option<String>,
@@ -457,6 +550,7 @@ impl Screen {
             wrap_pending: false,
             saved_cursor: None,
             line_drawing: false,
+            last_printed: None,
             parser: Parser::Ground,
             saved_primary: None,
             active_link: None,
@@ -510,8 +604,6 @@ impl Screen {
                     self.wrap_pending = false;
                     self.col = 0;
                 }
-    /// The last graphic byte `put` wrote, which `CSI Ps b` (REP) repeats.
-    last_printed: Option<u8>,
                 b'\n' => self.newline(),
                 0x08 => self.col = self.col.saturating_sub(1),
                 0x0e => self.line_drawing = true,
@@ -550,7 +642,6 @@ impl Screen {
                     self.parser = Parser::CsiDiscard;
                 }
             }
-            last_printed: None,
             Parser::Osc(mut value) => {
                 if byte == 7 || (byte == b'\\' && value.last() == Some(&0x1b)) {
                     if byte == 7 {
@@ -582,6 +673,7 @@ impl Screen {
         }
     }
     fn put(&mut self, byte: u8) {
+        self.last_printed = Some(byte);
         if self.wrap_pending {
             self.wrap_pending = false;
             self.col = 0;
@@ -673,7 +765,6 @@ impl Screen {
                     self.scrollback.remove(0);
                 }
             }
-        self.last_printed = Some(byte);
         }
         for row in self.scroll_top..=self.scroll_bottom {
             self.dirty[row] = true;
@@ -778,6 +869,19 @@ impl Screen {
             }
             b'J' => self.erase_display(s),
             b'K' => self.erase_line(s),
+            // REP: repeat the preceding graphic character Ps times. ncurses
+            // uses it to compress runs (`> canary ESC[6b5% of ...` for the
+            // seven spaces inside a reverse-video row); ignoring it dropped
+            // the run and left the row's stale tail showing beneath. Bounded
+            // by the screen size so a hostile `ESC[999999999b` cannot spin.
+            b'b' if !private => {
+                if let Some(byte) = self.last_printed {
+                    let limit = self.rows.len() * self.rows[0].len();
+                    for _ in 0..n(0).min(limit) {
+                        self.put(byte);
+                    }
+                }
+            }
             b'h' if private && s == "25" => self.visible = true,
             b'l' if private && s == "25" => self.visible = false,
             b'h' if private && s == "1" => self.application_cursor = true,
@@ -869,19 +973,6 @@ impl Screen {
         self.row = 0;
         self.col = 0;
         self.wrap_pending = false;
-            // REP: repeat the preceding graphic character Ps times. ncurses
-            // uses it to compress runs (`> canary ESC[6b5% of ...` for the
-            // seven spaces inside a reverse-video row); ignoring it dropped
-            // the run and left the row's stale tail showing beneath. Bounded
-            // by the screen size so a hostile `ESC[999999999b` cannot spin.
-            b'b' if !private => {
-                if let Some(byte) = self.last_printed {
-                    let limit = self.rows.len() * self.rows[0].len();
-                    for _ in 0..n(0).min(limit) {
-                        self.put(byte);
-                    }
-                }
-            }
         self.saved_cursor = None;
     }
     fn leave_alt(&mut self) {
@@ -2159,12 +2250,20 @@ fn mouse_bytes(x: u16, y: u16, button: u8, action: &str) -> Result<Vec<u8>, Stri
     Ok(format!("\x1b[<{};{};{}{}", code, x, y, suffix).into_bytes())
 }
 
+/// `use_tcp` chooses the transport `run_generic` binds -- `PlatformListener`
+/// (the platform default: `PosixListener` on Unix, always-TCP on Windows) or
+/// `tcp::TcpTransportListener` explicitly, an opt-in alongside the Unix
+/// default for a sandbox that runs the command but blocks `AF_UNIX` for it.
+/// On Windows both arms are the SAME type (`PlatformListener` already IS the
+/// TCP listener there), so `use_tcp` is accepted but has nothing left to
+/// choose between.
 pub fn run(
     socket: PathBuf,
     cols: u16,
     rows: u16,
     idle: u64,
     command: Vec<String>,
+    use_tcp: bool,
 ) -> Result<(), String> {
     install_interrupt_handler();
     if !(1..=240).contains(&cols) || !(1..=100).contains(&rows) {
@@ -2173,7 +2272,25 @@ pub fn run(
     if command.is_empty() {
         return Err("command is required".into());
     }
-    let listener = PlatformListener::bind(&socket)?;
+    #[cfg(unix)]
+    {
+        if use_tcp {
+            return run_generic::<tcp::TcpTransportListener>(socket, cols, rows, idle, command);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = use_tcp;
+    run_generic::<PlatformListener>(socket, cols, rows, idle, command)
+}
+
+fn run_generic<L: Listener>(
+    socket: PathBuf,
+    cols: u16,
+    rows: u16,
+    idle: u64,
+    command: Vec<String>,
+) -> Result<(), String> {
+    let listener = L::bind(&socket)?;
     let mut backend = PlatformBackend::spawn(&command, cols, rows)?;
     let mut screen = Screen::new(rows as usize, cols as usize);
     let mut out = io::BufWriter::new(io::stdout());
@@ -2398,6 +2515,44 @@ mod tests {
         s.feed(b"\x1b[1Gabcdef\x1b[1G\x1b[K");
         assert_eq!(String::from_utf8_lossy(&s.rows[0]), "      ");
     }
+    /// The exact stream ncurses sent when a menu selection moved down a row:
+    /// the seven spaces inside `> canary       5% of ...` arrive as one space
+    /// plus `ESC[6b`. Without REP the row read `> canary 5% of production
+    /// trafficraffic` -- six columns short, with the previous frame's tail
+    /// (`raffic`) still showing beneath.
+    #[test]
+    fn rep_repeats_the_preceding_character_over_a_curses_row_update() {
+        let mut screen = Screen::new(2, 40);
+        screen.feed(b"  canary       5% of production traffic\r");
+        screen.feed(b"\x1b[0;7m> canary \x1b[6b5% of production traffic");
+        assert_eq!(
+            String::from_utf8_lossy(&screen.rows[0]).trim_end(),
+            "> canary       5% of production traffic"
+        );
+    }
+
+    #[test]
+    fn rep_uses_the_last_printed_byte_defaults_to_one_and_wraps_like_typing() {
+        let mut screen = Screen::new(2, 4);
+        screen.feed(b"x\x1b[b");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "xx  ");
+        screen.feed(b"\x1b[4b");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "xxxx");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[1]), "xx  ");
+    }
+
+    #[test]
+    fn rep_with_nothing_printed_yet_or_a_huge_count_is_harmless() {
+        let mut screen = Screen::new(2, 4);
+        screen.feed(b"\x1b[5b");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "    ");
+        // Bounded by rows*cols (8 puts here): it terminates, and every cell
+        // that was written holds the repeated byte.
+        screen.feed(b"z\x1b[999999999b");
+        assert_eq!(screen.rows[0], b"zzzz");
+        assert_eq!(screen.rows[1][0], b'z');
+    }
+
     #[test]
     fn cursor_save_and_restore_sequences_round_trip() {
         let mut screen = Screen::new(3, 8);
@@ -2515,44 +2670,6 @@ mod tests {
     }
     #[test]
     fn application_cursor_mode_uses_ss3_cursor_sequences() {
-    /// The exact stream ncurses sent when a menu selection moved down a row:
-    /// the seven spaces inside `> canary       5% of ...` arrive as one space
-    /// plus `ESC[6b`. Without REP the row read `> canary 5% of production
-    /// trafficraffic` -- six columns short, with the previous frame's tail
-    /// (`raffic`) still showing beneath.
-    #[test]
-    fn rep_repeats_the_preceding_character_over_a_curses_row_update() {
-        let mut screen = Screen::new(2, 40);
-        screen.feed(b"  canary       5% of production traffic\r");
-        screen.feed(b"\x1b[0;7m> canary \x1b[6b5% of production traffic");
-        assert_eq!(
-            String::from_utf8_lossy(&screen.rows[0]).trim_end(),
-            "> canary       5% of production traffic"
-        );
-    }
-
-    #[test]
-    fn rep_uses_the_last_printed_byte_defaults_to_one_and_wraps_like_typing() {
-        let mut screen = Screen::new(2, 4);
-        screen.feed(b"x\x1b[b");
-        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "xx  ");
-        screen.feed(b"\x1b[4b");
-        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "xxxx");
-        assert_eq!(String::from_utf8_lossy(&screen.rows[1]), "xx  ");
-    }
-
-    #[test]
-    fn rep_with_nothing_printed_yet_or_a_huge_count_is_harmless() {
-        let mut screen = Screen::new(2, 4);
-        screen.feed(b"\x1b[5b");
-        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "    ");
-        // Bounded by rows*cols (8 puts here): it terminates, and every cell
-        // that was written holds the repeated byte.
-        screen.feed(b"z\x1b[999999999b");
-        assert_eq!(screen.rows[0], b"zzzz");
-        assert_eq!(screen.rows[1][0], b'z');
-    }
-
         let mut screen = Screen::new(2, 10);
         screen.feed(b"\x1b[?1h");
         assert!(screen.application_cursor);

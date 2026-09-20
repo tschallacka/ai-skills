@@ -55,6 +55,22 @@ interactive-shell-input --socket /private/session-dir/term.sock observe
 The socket parent must be a private directory owned by the current user. A
 wrapper-managed session directory is mode 0700 and its socket is mode 0600.
 
+Add `--tcp` to `interactive-shell` (server side only -- `interactive-shell-input`
+auto-detects the transport) when a sandbox lets the wrapped command run but
+blocks `AF_UNIX` socket creation for it:
+
+```sh
+interactive-shell --tcp --socket /private/session-dir/term.sock -- bash
+interactive-shell-input --socket /private/session-dir/term.sock observe
+```
+
+The path after `--socket` is unchanged; under `--tcp` it holds a loopback
+port plus a per-start nonce instead of a real Unix socket special file. A
+`--session ID` started with `--tcp` remembers that choice across a later
+restart with no flag repeated. This is always the transport on the prebuilt
+Windows binary, which has no Unix domain socket at all -- `--tcp` is the same
+mechanism made an explicit opt-in on Linux/macOS.
+
 ## Observe the screen
 
 Start with the smallest useful response and request detail only when needed:

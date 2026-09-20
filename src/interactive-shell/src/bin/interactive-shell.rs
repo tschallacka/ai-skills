@@ -6,7 +6,7 @@ fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "usage: interactive-shell [--session ID | --agent ID] [--socket PATH] [OPTIONS] -- COMMAND [ARGUMENTS...]\n\noptions:\n  --session ID             Save and reuse the command, socket, and terminal size\n  --agent ID               Use an agent-keyed saved session\n  --socket PATH            Use an explicit Unix socket (parent must be private)\n  --cols N --rows N        PTY dimensions (default 80x24; prefer smaller when practical)\n  --idle-timeout SECONDS   Stop after inactivity (default 300)\n\nThe command runs in a real PTY. Control it with interactive-shell-input. Start\nwith --session or --agent so later input commands need no socket/configuration\narguments. Without --socket, session sockets are created in a private runtime\ndirectory. The wrapper does not know application keybindings; discover those\nfrom the current screen, built-in help, or a manpage."
+            "usage: interactive-shell [--session ID | --agent ID] [--socket PATH] [OPTIONS] -- COMMAND [ARGUMENTS...]\n\noptions:\n  --session ID             Save and reuse the command, socket, and terminal size\n  --agent ID               Use an agent-keyed saved session\n  --socket PATH            Use an explicit Unix socket (parent must be private)\n  --tcp                    Use loopback TCP instead of a Unix socket -- for a\n                           sandbox that runs the command but blocks AF_UNIX for\n                           it (a --session/--agent remembers this across restarts)\n  --cols N --rows N        PTY dimensions (default 80x24; prefer smaller when practical)\n  --idle-timeout SECONDS   Stop after inactivity (default 300)\n\nThe command runs in a real PTY. Control it with interactive-shell-input. Start\nwith --session or --agent so later input commands need no socket/configuration\narguments. Without --socket, session sockets are created in a private runtime\ndirectory. The wrapper does not know application keybindings; discover those\nfrom the current screen, built-in help, or a manpage."
         );
         return;
     }
@@ -16,6 +16,7 @@ fn main() {
     let mut cols = None;
     let mut rows = None;
     let mut idle = None;
+    let mut tcp = None;
     let mut cmd = Vec::new();
     let mut i = 0;
     while i < a.len() {
@@ -73,6 +74,9 @@ fn main() {
                     std::process::exit(2)
                 }));
             }
+            "--tcp" => {
+                tcp = Some(true);
+            }
             "--" => {
                 cmd.extend_from_slice(&a[i + 1..]);
                 break;
@@ -107,6 +111,9 @@ fn main() {
     let idle = idle
         .or_else(|| saved.as_ref().map(|s| s.idle_timeout))
         .unwrap_or(300);
+    let use_tcp = tcp
+        .or_else(|| saved.as_ref().map(|s| s.use_tcp))
+        .unwrap_or(false);
     let socket = match socket.or_else(|| saved.as_ref().map(|s| s.socket.clone())) {
         Some(socket) => socket,
         None => match session_id.as_deref() {
@@ -134,13 +141,14 @@ fn main() {
             agent: interactive_shell_core::session_identity(None, agent.as_deref())
                 .or_else(|| saved.as_ref().map(|session| session.agent.clone()))
                 .unwrap_or_default(),
+            use_tcp,
         };
         if let Err(error) = interactive_shell_core::save_session(&id, &session) {
             eprintln!("interactive-shell: {error}");
             std::process::exit(2);
         }
     }
-    if let Err(e) = interactive_shell_core::run(socket, cols, rows, idle, cmd) {
+    if let Err(e) = interactive_shell_core::run(socket, cols, rows, idle, cmd, use_tcp) {
         eprintln!("interactive-shell: {e}");
         std::process::exit(1)
     }

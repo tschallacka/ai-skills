@@ -7,13 +7,10 @@
 //! `TerminateJobObject`) in place of POSIX's openpty/ioctl/setsid/kill. The
 //! confirmed windows-sys API surface this binds against is recorded in
 //! `.plans/windows-interactive-shell/02-conpty-backend/working-context.md`.
-use crate::{Backend, Listener, Transport};
+use crate::Backend;
 use std::ffi::c_void;
-use std::fs;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, Write};
 use std::mem::size_of;
-use std::net::{Shutdown, TcpListener, TcpStream};
-use std::path::Path;
 use std::ptr::{null, null_mut};
 use std::time::Duration;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, STILL_ACTIVE};
@@ -403,140 +400,20 @@ impl Drop for WindowsBackend {
     }
 }
 
-// --- Transport: loopback TCP + a per-start nonce (goal 3, W14/W15) ----------
-//
-// The Unix socket transport does not port to Windows: there is no Unix
-// domain socket, and its sun_path-length concerns are moot anyway. This
-// mirrors ai-text-editor's already-shipped, already-CI-proven pattern for
-// non-Unix platforms: bind a loopback TCP listener on an ephemeral port,
-// write that port plus a per-start nonce to the SAME path `session_socket()`
-// already computes (on Unix, a literal socket path; here, just a small text
-// file -- `run()`'s `socket: PathBuf` parameter is reinterpreted, not
-// repurposed, per the Listener trait's own doc comment), and require a
-// connecting client to prove it read that file by echoing the nonce back as
-// the first line, before its connection is handed to the shared client()/
-// run() dispatch. A Unix socket's 0600 file permission is the access
-// control there; a random per-start nonce plays the same role here, where
-// there is no filesystem-permission equivalent for a TCP port.
+// Transport: Windows has no Unix domain socket, so goal 3 originally gave it
+// a dedicated loopback-TCP `Listener`/`Transport` (a per-start nonce written
+// to the discovery file `session_socket()` already computes, in place of a
+// Unix socket's 0600 permission bit). That transport had nothing
+// Windows-specific in it -- no `windows-sys` call anywhere -- so it later
+// moved wholesale into `tcp.rs` as a shared, unconditionally-compiled module,
+// reused here via the `PlatformListener` type alias in lib.rs and made an
+// explicit `--tcp` opt-in on Unix too (Unix's own default stays the
+// `posix.rs` Unix-domain-socket transport). Nothing to implement here now.
 //
 // `install_interrupt_handler()` stays a no-op: no work unit in this plan
 // wires up a real `SetConsoleCtrlHandler`-based one, so Ctrl-C handling on
 // Windows remains a known gap, not silently claimed as done.
 pub(crate) fn install_interrupt_handler() {}
-
-impl Transport for TcpStream {
-    fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
-        TcpStream::set_read_timeout(self, dur)
-    }
-
-    fn shutdown(&self, how: Shutdown) -> io::Result<()> {
-        TcpStream::shutdown(self, how)
-    }
-}
-
-/// An unpredictable, hex-encoded challenge a connecting client must echo
-/// back as its first line. Loopback-only and single-user, so this does not
-/// need the HMAC challenge/response ai-text-editor's TCP transport uses for
-/// its own, differently-shaped multi-client server -- a random per-start
-/// value a local socket file conveys is already the same trust boundary a
-/// Unix socket's 0600 permission bit provides on the POSIX side.
-fn nonce() -> Result<String, String> {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
-/// The Windows counterpart to `posix::connect_in_directory`: reads the
-/// port+nonce `WindowsListener::bind` wrote to `socket`, connects over
-/// loopback TCP, and sends the nonce as the first line so `accept()` admits
-/// it. Returns the CONCRETE `TcpStream`, not `impl Transport`: this is the
-/// one function `bin/interactive-shell-input.rs` (frozen, AR-06) calls
-/// unconditionally, and calling a trait method via dot-syntax on an opaque
-/// `impl Trait` value needs that trait in scope at the call site, which the
-/// frozen binary can never import. `TcpStream`, exactly like `UnixStream`
-/// on the existing Unix path, exposes `shutdown`/`set_read_timeout` as
-/// INHERENT methods needing no `Transport` import at all.
-pub fn connect_in_directory(socket: &Path) -> Result<TcpStream, String> {
-    let contents = fs::read_to_string(socket)
-        .map_err(|error| format!("read discovery file {}: {error}", socket.display()))?;
-    let mut lines = contents.lines();
-    let port: u16 = lines
-        .next()
-        .ok_or_else(|| format!("discovery file {} is missing a port", socket.display()))?
-        .parse()
-        .map_err(|error| {
-            format!(
-                "discovery file {} has an invalid port: {error}",
-                socket.display()
-            )
-        })?;
-    let nonce = lines
-        .next()
-        .ok_or_else(|| format!("discovery file {} is missing a nonce", socket.display()))?;
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).map_err(|error| error.to_string())?;
-    writeln!(stream, "{nonce}").map_err(|error| error.to_string())?;
-    Ok(stream)
-}
-
-/// The Windows counterpart to `PosixListener`: a loopback `TcpListener` plus
-/// the nonce `bind()` generated and wrote out, checked on every `accept()`.
-pub struct WindowsListener {
-    listener: TcpListener,
-    nonce: String,
-}
-
-impl Listener for WindowsListener {
-    type Stream = TcpStream;
-
-    fn bind(socket: &Path) -> Result<Self, String> {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|error| error.to_string())?;
-        listener
-            .set_nonblocking(true)
-            .map_err(|error| error.to_string())?;
-        let port = listener
-            .local_addr()
-            .map_err(|error| error.to_string())?
-            .port();
-        let nonce = nonce()?;
-        fs::write(socket, format!("{port}\n{nonce}\n"))
-            .map_err(|error| format!("write discovery file {}: {error}", socket.display()))?;
-        Ok(WindowsListener { listener, nonce })
-    }
-
-    fn accept(&self) -> io::Result<Option<Self::Stream>> {
-        let stream = match self.listener.accept() {
-            Ok((stream, _addr)) => stream,
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        // Blocking, like PosixListener's own accept() explicitly sets
-        // (Linux already hands back a blocking socket regardless; macOS
-        // does not) -- but bounded just for the nonce line, so a connection
-        // that never sends one can't hang the shared accept loop.
-        stream.set_nonblocking(false)?;
-        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-        let mut line = String::new();
-        let read = BufReader::new(&stream).read_line(&mut line);
-        if read.is_ok() && line.trim_end() == self.nonce {
-            stream.set_read_timeout(None)?;
-            Ok(Some(stream))
-        } else {
-            // Wrong or missing nonce, or the line never arrived in time:
-            // drop it silently, exactly like a rejected connection attempt
-            // never reaching client() on the Unix side.
-            Ok(None)
-        }
-    }
-}
-
-impl Drop for WindowsListener {
-    fn drop(&mut self) {
-        // No cleanup needed: the OS reclaims the ephemeral port on process
-        // exit, and the discovery file is simply overwritten by the next
-        // start -- unlike PosixListener, there is no socket-file identity
-        // to remove.
-    }
-}
 
 // W13's own verification: these tests exercise WindowsBackend's Backend
 // methods directly (spawn/write/read/resize/try_wait/stop), never through

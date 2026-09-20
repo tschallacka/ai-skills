@@ -19,15 +19,18 @@
 # format that needed rjq to read it could not be read on the machine that is
 # missing it. awk and sed parse this.
 #
-# No rows: the skill ships two prebuilt rust binaries (interactive-shell, the
-# PTY wrapper; interactive-shell-input, the socket client) and needs nothing
-# else on the target. Neither is committed or built at install time — the
-# release/CI builds them against binaries.tsv and install.sh copies them. They
-# depend only on libc and serde, allocate the PTY through libc directly, and
+# No rows: the skill ships three prebuilt rust binaries -- interactive-shell
+# (the PTY wrapper), interactive-shell-input (the socket client, skill mode),
+# and interactive-shell-mcp (the MCP bridge, mcp mode; integration.tsv gates
+# which of the latter two an install actually gets) -- and needs nothing else
+# on the target. None is committed or built at install time — the release/CI
+# builds them against binaries.tsv and install.sh copies them. They depend
+# only on libc/serde/serde_json, allocate the PTY through libc directly, and
 # speak JSONL on stdout and a locally authenticated socket (a 0600 Unix
-# domain socket on Linux/macOS, a loopback TCP port with a per-start nonce on
-# Windows), so there is no external tool to verify: no jq (the agent parses
-# the JSONL), no rjq, no terminal library.
+# domain socket on Linux/macOS by default, or loopback TCP with a per-start
+# nonce — always on Windows, or via --tcp as an explicit opt-in elsewhere),
+# so there is no external tool to verify: no jq (the agent parses the JSONL),
+# no rjq, no terminal library.
 #
 # The child program the wrapper drives (nano, mc, lynx, a pager) is the user's
 # choice at call time, not a dependency of the skill — the wrapper is generic

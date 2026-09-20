@@ -106,6 +106,7 @@ ai-text-editor	ai-text-editor-server
 ai-text-editor-mcp	ai-text-editor-mcp
 interactive-shell	interactive-shell
 interactive-shell	interactive-shell-input
+interactive-shell-mcp	interactive-shell-mcp
 PLAN
 }
 
