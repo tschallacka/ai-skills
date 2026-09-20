@@ -201,8 +201,22 @@ mod tests {
     // otherwise depend on.
     fn scratch_dir(prefix: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("is-tcp-{prefix}-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
+        make_usable(&dir);
         dir
+    }
+
+    /// Creates `dir` and makes sure it is searchable and writable by us.
+    /// posix.rs binds its sockets under a temporary `umask(0o177)`, which is
+    /// process-wide, so a directory another test thread creates in that window
+    /// comes out mode 0600 and every write into it fails with EACCES. chmod is
+    /// not subject to the umask.
+    fn make_usable(dir: &std::path::Path) {
+        fs::create_dir_all(dir).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).unwrap();
+        }
     }
 
     #[test]
@@ -272,7 +286,7 @@ mod tests {
         if dir.join("session.sock").as_os_str().len() >= 100 {
             let _ = fs::remove_dir_all(&dir);
             dir = std::path::PathBuf::from(format!("/tmp/is-tcp-sock-{}", std::process::id()));
-            fs::create_dir_all(&dir).unwrap();
+            make_usable(&dir);
         }
         let socket = dir.join("session.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
