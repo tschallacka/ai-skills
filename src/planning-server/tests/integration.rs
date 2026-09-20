@@ -215,14 +215,8 @@ impl ServerGuard {
         ] {
             ensure_built(bin_dir, command);
         }
-        // ...and looks them up on PATH, so the directory they were built into
-        // has to be on it rather than merely happening to be.
-        let mut search = vec![bin_dir.to_path_buf()];
-        search.extend(std::env::split_paths(
-            &std::env::var_os("PATH").unwrap_or_default(),
-        ));
         let child = Command::new(bin_dir.join("planning-server"))
-            .env("PATH", std::env::join_paths(search).unwrap())
+            .env("PATH", search_path(bin_dir))
             .env("XDG_RUNTIME_DIR", &runtime_dir)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -269,8 +263,28 @@ fn client_ok(bin_dir: &Path, server: &ServerGuard, args: &[&str]) {
     );
 }
 
+/// PATH with `bin_dir` in front. The server and the MCP adapter run the
+/// planning commands as plain subprocesses looked up on PATH, so the directory
+/// they were built into has to be on it rather than merely happening to be.
+fn search_path(bin_dir: &Path) -> std::ffi::OsString {
+    let mut search = vec![bin_dir.to_path_buf()];
+    search.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    std::env::join_paths(search).unwrap()
+}
+
 fn mcp_call(bin_dir: &Path, tool: &str, arguments: Value) -> Value {
+    for command in [
+        "update-step",
+        "add-work-unit",
+        "update-plan-content",
+        "validate-plan",
+    ] {
+        ensure_built(bin_dir, command);
+    }
     let mut child = Command::new(ensure_built(bin_dir, "planning-mcp"))
+        .env("PATH", search_path(bin_dir))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
