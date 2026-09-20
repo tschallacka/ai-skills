@@ -148,3 +148,61 @@ jobs:
           name: windows-test-log
           path: windows-test.log
           if-no-files-found: ignore
+
+  # The shell test suite is part of what "works on Windows" means: the planning
+  # skills are bash scripts that exec compiled binaries, and Windows users run
+  # them under Git for Windows' bash. This is the same suite the shard jobs in
+  # ci.yml run on Linux and macOS.
+  shell-suite:
+    name: The shell test suite passes under Git for Windows' bash
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out with LF endings
+        shell: bash
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/benchmark/results/
+
+      - name: Pin the toolchain
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Put Git for Windows' bash and coreutils first on PATH
+        shell: bash
+        run: |
+          {
+            echo 'C:\Program Files\Git\bin'
+            echo 'C:\Program Files\Git\usr\bin'
+          } >> "$GITHUB_PATH"
+
+      - name: Build every compiled helper into bin/<triple>
+        shell: bash
+        run: |
+          ./setup-dev-env.sh
+          triple="$(./setup-dev-env.sh --list | sed -n 's/^host target: //p')"
+          [ -n "$triple" ] || { echo "::error::setup-dev-env.sh --list named no host target"; exit 1; }
+          echo "AI_SKILLS_BIN_ROOT=$PWD/bin/$triple" >> "$GITHUB_ENV"
+
+      - name: Run the suite
+        shell: bash
+        run: |
+          set -o pipefail
+          ./run-tests.sh 2>&1 | tee windows-shell-suite.log
+
+      - name: Keep the suite log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-shell-suite-log
+          path: windows-shell-suite.log
+          if-no-files-found: ignore

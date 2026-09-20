@@ -772,6 +772,14 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
+      # Windows only, and before checkout so it applies to it: Git for
+      # Windows otherwise writes CRLF into every shell script it checks out.
+      # .gitattributes pins the same thing for a developer's own clone.
+      - name: Check out with LF endings
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
@@ -790,6 +798,18 @@ jobs:
           sparse-checkout: |
             /*
             !/benchmark/results/
+
+      # `bash` on a windows-latest PATH can resolve to C:\Windows\System32\
+      # bash.exe, the WSL launcher, which fails when no distro is installed.
+      # Git for Windows' own bash goes first, with the GNU tools beside it.
+      - name: Put Git for Windows' bash and coreutils first on PATH
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          {
+            echo 'C:\Program Files\Git\bin'
+            echo 'C:\Program Files\Git\usr\bin'
+          } >> "$GITHUB_PATH"
 
       - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.98
