@@ -138,7 +138,8 @@ script_list() {
         return
     fi
     ( cd "$repo_root" && find . -name '*.sh' -type f \
-        -not -path './benchmark/results/*' -not -path './.git/*' -not -path './.plans/*' \
+        -not -path './benchmark/results/*' -not -path './testing-stories/runs/*' \
+        -not -path './.git/*' -not -path './.plans/*' \
         -not -path './.claude/*' \
         | LC_ALL=C sort )
 }

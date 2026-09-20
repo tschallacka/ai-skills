@@ -8,7 +8,9 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// Every *.sh file under repo_root except benchmark/results, .git, .plans,
+/// Every *.sh file under repo_root except benchmark/results,
+/// testing-stories/runs (both gitignored run output, the latter holding whole
+/// copies of the repo that `run-story.sh` leaves behind), .git, .plans,
 /// .claude, and this crate's own wired script name -- LC_ALL=C sorted, with
 /// the leading `./` stripped, matching bash's own `sed 's|^\./||'`.
 pub fn script_list(repo_root: &Path) -> Vec<String> {
@@ -23,6 +25,9 @@ pub fn script_list(repo_root: &Path) -> Vec<String> {
             "-not",
             "-path",
             "./benchmark/results/*",
+            "-not",
+            "-path",
+            "./testing-stories/runs/*",
             "-not",
             "-path",
             "./.git/*",
