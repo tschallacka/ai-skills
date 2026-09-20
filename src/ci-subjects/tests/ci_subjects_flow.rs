@@ -114,24 +114,33 @@ fn real_repo_root() -> std::path::PathBuf {
         .to_path_buf()
 }
 
-/// The staged `bin/<triple>` directory holding this repo's own compiled
-/// ci-subjects, whatever the host triple is -- found by content, not a
-/// hardcoded triple string. Pinned onto AI_SKILLS_BIN_ROOT (tier 1) for the
-/// wrapper invocation below, so a stale or partial shared install under
-/// ~/.config/tsch-ai-skills/bin (tier 2, checked first) cannot shadow the
-/// very binary this test just built and is asserting fidelity against.
-fn staged_bin_dir(repo_root: &Path) -> std::path::PathBuf {
-    let bin = repo_root.join("bin");
-    for entry in fs::read_dir(&bin).expect("bin/ directory (run ./setup-dev-env.sh)") {
-        let dir = entry.unwrap().path();
-        if dir.is_dir() && dir.join("ci-subjects").is_file() {
-            return dir;
-        }
-    }
-    panic!(
-        "no bin/<triple>/ci-subjects found under {}; run ./setup-dev-env.sh",
-        bin.display()
-    );
+/// A scratch bin directory holding exactly the ci-subjects this test binary
+/// was built alongside (`CARGO_BIN_EXE_ci-subjects`), pinned onto
+/// AI_SKILLS_BIN_ROOT (tier 1) for the wrapper invocation below. That is the
+/// very binary this test asserts fidelity against, and staging it here means
+/// the test needs no `./setup-dev-env.sh` output: it used to read
+/// `<repo>/bin/<triple>/ci-subjects`, which a fresh CI checkout running
+/// `cargo test --workspace` does not have. A stale or partial shared install
+/// under ~/.config/tsch-ai-skills/bin (tier 2) still cannot shadow it.
+///
+/// The directory has to hold ONLY that binary, so it is not the build
+/// directory itself (which carries whatever else was once built there), and it
+/// is created beside the built binary rather than under the temp directory, so
+/// `cargo clean` removes it and repeated runs leave nothing behind in $TMPDIR.
+fn staged_bin_dir(_repo_root: &Path) -> std::path::PathBuf {
+    static STAGED: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    STAGED
+        .get_or_init(|| {
+            let built = Path::new(env!("CARGO_BIN_EXE_ci-subjects"));
+            let dir = built
+                .parent()
+                .expect("a built binary lives in a directory")
+                .join("ci-subjects-staged-bin");
+            fs::create_dir_all(&dir).unwrap();
+            fs::copy(built, dir.join("ci-subjects")).unwrap();
+            dir
+        })
+        .clone()
 }
 
 // ---- real-tree exec fidelity and the missing-binary fallback (W123: the

@@ -503,25 +503,34 @@ fn real_repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// The staged `bin/<triple>` directory holding this repo's own compiled
-/// ci-scope, whatever the host triple is -- found by content, not a
-/// hardcoded triple string, so this test is not pinned to one platform.
-/// Pinned onto AI_SKILLS_BIN_ROOT (tier 1) for the wrapper invocation below,
-/// so a stale or partial shared install under ~/.config/tsch-ai-skills/bin
-/// (tier 2, checked first) cannot shadow the very binary this test just
-/// built and is asserting fidelity against.
-fn staged_bin_dir(repo_root: &Path) -> PathBuf {
-    let bin = repo_root.join("bin");
-    for entry in fs::read_dir(&bin).expect("bin/ directory (run ./setup-dev-env.sh)") {
-        let dir = entry.unwrap().path();
-        if dir.is_dir() && dir.join("ci-scope").is_file() {
-            return dir;
-        }
-    }
-    panic!(
-        "no bin/<triple>/ci-scope found under {}; run ./setup-dev-env.sh",
-        bin.display()
-    );
+/// A scratch bin directory holding exactly the ci-scope this test binary was
+/// built alongside (`CARGO_BIN_EXE_ci-scope`), pinned onto AI_SKILLS_BIN_ROOT
+/// (tier 1) for the wrapper invocation below. That is the very binary this
+/// test asserts fidelity against, and staging it here means the test needs no
+/// `./setup-dev-env.sh` output: it used to read `<repo>/bin/<triple>/ci-scope`,
+/// which a fresh CI checkout running `cargo test --workspace` does not have, so
+/// it failed there with "bin/ directory (run ./setup-dev-env.sh)". A stale or
+/// partial shared install under ~/.config/tsch-ai-skills/bin (tier 2) still
+/// cannot shadow it, for the same reason as before.
+///
+/// The directory has to hold ONLY that binary, so it is not the build
+/// directory itself (which carries whatever else was once built there), and it
+/// is created beside the built binary rather than under the temp directory, so
+/// `cargo clean` removes it and repeated runs leave nothing behind in $TMPDIR.
+fn staged_bin_dir(_repo_root: &Path) -> PathBuf {
+    static STAGED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    STAGED
+        .get_or_init(|| {
+            let built = Path::new(env!("CARGO_BIN_EXE_ci-scope"));
+            let dir = built
+                .parent()
+                .expect("a built binary lives in a directory")
+                .join("ci-scope-staged-bin");
+            fs::create_dir_all(&dir).unwrap();
+            fs::copy(built, dir.join("ci-scope")).unwrap();
+            dir
+        })
+        .clone()
 }
 
 fn wrapper_scope(repo_root: &Path, args: &[&str]) -> Output {

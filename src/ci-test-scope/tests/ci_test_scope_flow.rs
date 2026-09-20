@@ -564,24 +564,49 @@ fn real_repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// The staged `bin/<triple>` directory holding this repo's own compiled
-/// ci-test-scope, whatever the host triple is -- found by content, not a
-/// hardcoded triple string. Pinned onto AI_SKILLS_BIN_ROOT (tier 1) for the
-/// wrapper invocation below, so a stale or partial shared install under
-/// ~/.config/tsch-ai-skills/bin (tier 2, checked first) cannot shadow the
-/// very binary this test just built and is asserting fidelity against.
+/// A scratch bin directory holding exactly the ci-test-scope this test binary
+/// was built alongside (`CARGO_BIN_EXE_ci-test-scope`), pinned onto
+/// AI_SKILLS_BIN_ROOT (tier 1) for the wrapper invocation below. That is the
+/// very binary this test asserts fidelity against, and staging it here means
+/// the test needs no `./setup-dev-env.sh` output: it used to read
+/// `<repo>/bin/<triple>/ci-test-scope`, which a fresh CI checkout running
+/// `cargo test --workspace` does not have. A stale or partial shared install
+/// under ~/.config/tsch-ai-skills/bin (tier 2) still cannot shadow it.
+///
+/// The directory has to hold ONLY that binary, so it is not the build
+/// directory itself (which carries whatever else was once built there), and it
+/// is created beside the built binary rather than under the temp directory, so
+/// `cargo clean` removes it and repeated runs leave nothing behind in $TMPDIR.
+///
+/// ci-test-scope reads its canonical test list by running `run-tests.sh
+/// --list-only`, which is itself a compiled binary found through the same
+/// AI_SKILLS_BIN_ROOT. Pinning the root to a directory without it makes that
+/// call fail and the scope degrade to "full" -- the same on both sides of a
+/// comparison, which then proves nothing -- so a `run-tests` is staged beside
+/// it when one exists: next to the built binary, under an inherited
+/// AI_SKILLS_BIN_ROOT, or in the repository's own bin/<triple>.
 fn staged_bin_dir(repo_root: &Path) -> PathBuf {
-    let bin = repo_root.join("bin");
-    for entry in fs::read_dir(&bin).expect("bin/ directory (run ./setup-dev-env.sh)") {
-        let dir = entry.unwrap().path();
-        if dir.is_dir() && dir.join("ci-test-scope").is_file() {
-            return dir;
-        }
-    }
-    panic!(
-        "no bin/<triple>/ci-test-scope found under {}; run ./setup-dev-env.sh",
-        bin.display()
-    );
+    static STAGED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    STAGED
+        .get_or_init(|| {
+            let built = Path::new(env!("CARGO_BIN_EXE_ci-test-scope"));
+            let built_dir = built.parent().expect("a built binary lives in a directory");
+            let dir = built_dir.join("ci-test-scope-staged-bin");
+            fs::create_dir_all(&dir).unwrap();
+            fs::copy(built, dir.join("ci-test-scope")).unwrap();
+            let mut candidates = vec![built_dir.join("run-tests")];
+            if let Some(root) = std::env::var_os("AI_SKILLS_BIN_ROOT") {
+                candidates.push(Path::new(&root).join("run-tests"));
+            }
+            if let Ok(triples) = fs::read_dir(repo_root.join("bin")) {
+                candidates.extend(triples.flatten().map(|e| e.path().join("run-tests")));
+            }
+            if let Some(run_tests) = candidates.into_iter().find(|c| c.is_file()) {
+                fs::copy(run_tests, dir.join("run-tests")).unwrap();
+            }
+            dir
+        })
+        .clone()
 }
 
 fn wrapper_scope(repo_root: &Path, args: &[&str]) -> Output {
@@ -600,6 +625,11 @@ fn direct_scope(repo_root: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(repo_root)
         .env("PLANNING_SKILL_ROOT", repo_root)
+        // The same pinned bin root the wrapper gets, so the run-tests.sh this
+        // binary shells to resolves identically on both sides instead of
+        // one of them being shadowed by whatever ~/.config/tsch-ai-skills/bin
+        // holds.
+        .env("AI_SKILLS_BIN_ROOT", staged_bin_dir(repo_root))
         .env_remove("GITHUB_OUTPUT")
         .output()
         .unwrap()
