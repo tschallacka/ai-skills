@@ -202,8 +202,53 @@ fn state_tag(state_dir: &Path) -> String {
     format!("{:08x}", (hash >> 32) as u32)
 }
 
+/// Where the socket goes when the state-directory fallback would be too long
+/// for a unix socket address. macOS has no `XDG_RUNTIME_DIR`, and its `$TMPDIR`
+/// (`/var/folders/<2>/<28>/T/`) is ~49 bytes before a test or a user adds
+/// anything, so the state directory routinely pushes `<state>/owners/<key>-
+/// <tag>.sock` past the 100-byte guard -- and `serve` then answered None, so a
+/// tail never owned its connection there (owner_socket failed on both macOS
+/// legs with "the tail bound no control socket"). `/tmp` rather than
+/// `temp_dir()`, because a long TMPDIR is the very condition that got us here;
+/// keyed by the state directory's own tag so two isolated state dirs still get
+/// two sockets, and verified private by `serve` before anything is bound.
+fn short_socket_dir(state_dir: &Path) -> PathBuf {
+    PathBuf::from("/tmp").join(format!("tsch-ai-chat-{}", state_tag(state_dir)))
+}
+
 pub fn socket_path(state_dir: &Path, key: &str) -> PathBuf {
-    socket_dir(state_dir).join(format!("{}-{}.sock", key, state_tag(state_dir)))
+    socket_path_from(
+        std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
+        state_dir,
+        key,
+    )
+}
+
+/// `socket_path` without reading the environment, for the same reason as
+/// `socket_dir_from`: the tests run as threads in one process.
+fn socket_path_from(runtime: Option<&std::ffi::OsStr>, state_dir: &Path, key: &str) -> PathBuf {
+    let name = format!("{}-{}.sock", key, state_tag(state_dir));
+    let chosen = socket_dir_from(runtime, state_dir).join(&name);
+    // Only the state-directory fallback can be long: a runtime directory is
+    // short by construction and is left exactly as it was.
+    if path_fits(&chosen) || !chosen.starts_with(owner_dir(state_dir)) {
+        return chosen;
+    }
+    short_socket_dir(state_dir).join(name)
+}
+
+/// `dir` exists, is a real directory (not a symlink someone else planted), and
+/// belongs to the same user as `like` -- a directory this process just created
+/// and locked down. A shared `/tmp` name is predictable, so this is what stops
+/// another user pre-creating it and being handed the right to speak as this
+/// agent.
+#[cfg(unix)]
+fn owned_like(dir: &Path, like: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::symlink_metadata(dir), std::fs::metadata(like)) {
+        (Ok(dir), Ok(like)) => dir.is_dir() && dir.uid() == like.uid(),
+        _ => false,
+    }
 }
 
 /// A unix socket address is a fixed-size buffer -- 104 bytes on macOS, 108 on
@@ -607,13 +652,21 @@ mod imp {
         let record_dir = owner_dir(state_dir);
         fs::create_dir_all(&record_dir).ok()?;
         fs::set_permissions(&record_dir, fs::Permissions::from_mode(0o700)).ok()?;
-        let dir = socket_dir(state_dir);
-        fs::create_dir_all(&dir).ok()?;
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).ok()?;
         let socket = socket_path(state_dir, key);
         if !path_fits(&socket) {
             return None;
         }
+        // The directory the path actually chose: the runtime directory, the
+        // state's own owners/ directory, or the short /tmp one an over-long
+        // state path is relocated to. Ownership is checked BEFORE the chmod,
+        // so a directory another user pre-created in shared /tmp is declined
+        // rather than adopted.
+        let dir = socket.parent()?.to_path_buf();
+        fs::create_dir_all(&dir).ok()?;
+        if !owned_like(&dir, &record_dir) {
+            return None;
+        }
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).ok()?;
         // A socket already there is either a live owner or a leftover. Ask,
         // rather than assume: connecting is the only test that distinguishes
         // them, and unlinking a live owner's socket would strand its clients.
@@ -897,6 +950,55 @@ mod tests {
             "a 120-character state path must exceed the address limit: {}",
             fallback.display()
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_over_long_state_path_is_relocated_to_a_short_dir_not_left_without_a_socket() {
+        // The macOS shape: no runtime directory, and a state directory deep
+        // enough that <state>/owners/<key>-<tag>.sock overflows the address.
+        // It used to be declined outright, so a tail there never owned its
+        // connection; it now lands under a short /tmp directory instead.
+        let dir = tmp_dir("relocate");
+        let deep = dir.join("x".repeat(120));
+        let socket = socket_path_from(None, &deep, "key");
+        assert!(
+            path_fits(&socket),
+            "relocated path must fit: {}",
+            socket.display()
+        );
+        assert!(socket.starts_with("/tmp"), "got {}", socket.display());
+        assert_ne!(
+            socket,
+            socket_path_from(None, &dir.join("y".repeat(120)), "key"),
+            "two deep state dirs must still get two sockets"
+        );
+        // A state path that fits keeps the socket beside it, as before, and a
+        // runtime directory is left exactly as it was.
+        let short = tmp_dir("stays");
+        assert!(socket_path_from(None, &short, "key").starts_with(owner_dir(&short)));
+        let runtime = tmp_dir("rt-wins");
+        assert!(socket_path_from(Some(runtime.as_os_str()), &deep, "key").starts_with(&runtime));
+        for d in [&dir, &short, &runtime] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relocated_directory_that_is_a_symlink_is_not_adopted() {
+        let dir = tmp_dir("symlink");
+        let real = dir.join("real");
+        let link = dir.join("link");
+        std::fs::create_dir_all(&real).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(
+            owned_like(&real, &dir),
+            "a real directory of ours is accepted"
+        );
+        assert!(!owned_like(&link, &dir), "a symlink must be refused");
+        assert!(!owned_like(&dir.join("absent"), &dir));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
