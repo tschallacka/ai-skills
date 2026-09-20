@@ -864,23 +864,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # planning-server (and planning-mcp, its adapter) is a unix-socket
-          # design: endpoint.rs asks libc for the uid and both binaries bind
-          # or dial a UnixStream, none of which exists for a windows target,
-          # so they have never compiled there. Building them is not what the
-          # Windows leg is for; drop them from its workspace rather than
-          # pretend.
-          excludes=()
-          case "${{ matrix.target }}" in
-            *windows-msvc) excludes=(--exclude planning-server --exclude planning-mcp) ;;
-          esac
           cargo fmt --all --check
-          # ${arr[@]+"${arr[@]}"}: an empty array is an unbound variable under
-          # `set -u` in bash 3.2, which is what the macOS runners' shell is.
-          cargo clippy --workspace --all-targets --target "${{ matrix.target }}" ${excludes[@]+"${excludes[@]}"} -- -D warnings
+          cargo clippy --workspace --all-targets --target "${{ matrix.target }}" -- -D warnings
           # --no-fail-fast: one failing test binary used to hide every crate
           # after it, so a leg needed one run per failure to list them all.
-          cargo test --workspace --all-targets --no-fail-fast --target "${{ matrix.target }}" ${excludes[@]+"${excludes[@]}"}
+          cargo test --workspace --all-targets --no-fail-fast --target "${{ matrix.target }}"
 
       # ---- rjq -------------------------------------------------------------
       - name: Build rjq and prove it answers a query

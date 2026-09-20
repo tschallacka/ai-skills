@@ -1,0 +1,23 @@
+# Text files are checked out with LF on every platform.
+#
+# Windows' default (core.autocrlf=true) rewrote every shell script, TSV, JSON
+# and Markdown file to CRLF on checkout. Bash read `set -euo pipefail\r` as an
+# option named "pipefail<CR>", awk and cut kept a trailing CR on the last
+# field of every row, and byte-for-byte fixtures stopped matching -- none of
+# which is a bug in the code under test, and none of which a Windows developer
+# could reasonably be expected to know to switch off.
+*.sh   text eol=lf
+*.bash text eol=lf
+*.tsv  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.toml text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.rs   text eol=lf
+*.1    text eol=lf
+*.lock text eol=lf
+*.nix  text eol=lf
+*.mmd  text eol=lf
+*.csv  text eol=lf

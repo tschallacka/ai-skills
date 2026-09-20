@@ -1,0 +1,104 @@
+name: windows
+
+# The dedicated Windows leg. Lives on the long-running `windows` branch until
+# the whole workspace builds, lints and tests clean on x86_64-pc-windows-msvc,
+# then merges back into nextupdate, where ci.yml's `native` matrix carries the
+# same Windows target from then on.
+#
+# It runs alone on purpose: ci.yml's full matrix (eight shell shards, macOS,
+# aarch64, cygwin) takes most of an hour and answers nothing about Windows, and
+# a Windows fix needs a verdict in one job's time, not a queue's.
+
+on:
+  push:
+    branches: [windows]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: 0
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: x86_64-pc-windows-msvc builds, lints and tests the whole workspace
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      # Before checkout, so it applies to it: without this Git for Windows
+      # writes CRLF into every shell script it checks out. .gitattributes
+      # pins the same thing for a developer's own clone.
+      - name: Check out with LF endings
+        shell: bash
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          # Everything except benchmark/results: its archived runs hold paths
+          # longer than Windows allows, and nothing reads them.
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/benchmark/results/
+
+      - name: Pin the toolchain
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      # `bash` on a windows-latest PATH can resolve to C:\Windows\System32\
+      # bash.exe, the WSL launcher, which exits with an error when no distro
+      # is installed. Every test that spawns `bash script.sh` then fails for a
+      # reason that has nothing to do with the script. Git for Windows' own
+      # bash goes first, along with the GNU tools (awk, sed, cut, ...) it
+      # carries beside it.
+      - name: Put Git for Windows' bash and coreutils first on PATH
+        shell: bash
+        run: |
+          {
+            echo 'C:\Program Files\Git\bin'
+            echo 'C:\Program Files\Git\usr\bin'
+          } >> "$GITHUB_PATH"
+
+      - name: Say which shell tools the tests will find
+        shell: bash
+        run: |
+          command -v bash awk sed cut sort git || true
+          bash --version | head -1
+
+      - name: Build rjq and put it on PATH
+        shell: bash
+        run: |
+          cargo build -p rjq
+          echo "$GITHUB_WORKSPACE/target/debug" >> "$GITHUB_PATH"
+
+      - name: Format
+        shell: bash
+        run: cargo fmt --all --check
+
+      - name: Lint every crate
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # --no-fail-fast: one failing test binary must not hide the crates after
+      # it, or listing the failures takes one run per failure.
+      - name: Test every crate
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --all-targets --no-fail-fast 2>&1 | tee windows-test.log
+
+      - name: Keep the full test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-log
+          path: windows-test.log
+          if-no-files-found: ignore
