@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 
 //! Drives the real built binary end to end. The real, live tracked documents
 //! are this suite's own actual value (a synthetic-only test suite would not

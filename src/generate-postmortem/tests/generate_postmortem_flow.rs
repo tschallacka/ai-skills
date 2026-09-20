@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 
 use std::fs;
 use std::path::PathBuf;
