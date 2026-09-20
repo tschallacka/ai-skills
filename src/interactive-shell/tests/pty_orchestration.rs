@@ -21,13 +21,14 @@
 //! write-out, none of which macOS's stock Pico shares) is a loud SKIP, not a
 //! failure, mirroring the bash originals' own posture.
 
+use interactive_shell_core::ClientStream;
 use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
@@ -135,13 +136,26 @@ fn wait_for_socket(dir: &Path) {
     panic!("socket did not appear at {}", dir.join("socket").display());
 }
 
-fn connect(dir: &Path) -> UnixStream {
+/// `connect_in_directory` reaches the socket by NAME from inside its own
+/// directory. An absolute `UnixStream::connect` overflows sun_path (104 bytes
+/// on macOS, 108 on Linux) under the long scratch directory run-tests.sh
+/// hands every test -- the failure `could not connect ... path must be
+/// shorter than SUN_LEN`, with the socket present the whole time. The move
+/// is an fchdir, and the cwd is per PROCESS while the two tests here run as
+/// threads, so it is serialised exactly as protocol.rs does.
+static CWD_LOCK: Mutex<()> = Mutex::new(());
+
+fn connect(dir: &Path) -> ClientStream {
     let socket = dir.join("socket");
     let mut last_error = String::new();
     for _ in 0..READY_POLLS {
-        match UnixStream::connect(&socket) {
+        let attempt = {
+            let _guard = CWD_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+            interactive_shell_core::connect_in_directory(&socket)
+        };
+        match attempt {
             Ok(stream) => return stream,
-            Err(error) => last_error = error.to_string(),
+            Err(error) => last_error = error,
         }
         thread::sleep(POLL_INTERVAL);
     }
