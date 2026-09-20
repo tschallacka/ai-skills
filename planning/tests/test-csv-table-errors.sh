@@ -74,7 +74,7 @@ expect_message 'escaped and raw pipe' 5 'AR-01,it\|em,ch|nge,open,W01' 'unescape
 # Each message must be distinguishable from the others, or the reader is no
 # better off than with the single message this replaced.
 seen=""
-for csv in "AR-01,item,change,open,W01$(printf '\r')" 'AR-01,item,change' 'AR-01,it|em,change,open,W01' \
+for csv in "AR-01,item,change,open,W01${cr}" 'AR-01,item,change' 'AR-01,it|em,change,open,W01' \
            'AR-01,"item,change,open,W01' 'AR-01,a,b,open,W01\n\nAR-02,a,b,open,W02'; do
     out="$(render 5 "$csv" || true)"
     first="$(printf '%s\n' "$out" | head -1)"

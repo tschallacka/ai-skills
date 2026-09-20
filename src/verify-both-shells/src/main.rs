@@ -24,5 +24,7 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    ExitCode::from(run(&src, keep, process::real_legs(&src)).status as u8)
+    let status = run(&src, keep, process::real_legs(&src)).status as u8;
+    verify_both_shells::signal::wait_for_signal_exit();
+    ExitCode::from(status)
 }

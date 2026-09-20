@@ -32,8 +32,12 @@ t_expect_exit 0 'the self-hosted plan validates' "$scripts_dir/validate-plan.sh"
 # The fixture is the plan as the skill left it after execution, so the
 # completion gate must accept it too: trackers at 100%, every placeholder
 # filled, every command literal registered, and the review approved.
-t_expect_exit 0 'it satisfies the completion gate' \
-    "$scripts_dir/validate-plan.sh" --complete "$plan"
+# Run once and keep the output: a refusal names the finding that caused it, and
+# t_expect_exit would throw that away.
+gate_rc=0
+gate_out="$("$scripts_dir/validate-plan.sh" --complete "$plan" 2>&1)" || gate_rc=$?
+t_assert_eq 'it satisfies the completion gate' "$gate_rc" 0
+[ "$gate_rc" -eq 0 ] || printf '%s\n' "$gate_out" >&2
 t_expect_exit 0 'it validates with propagation' \
     "$scripts_dir/validate-plan.sh" --propagation "$plan"
 t_expect_exit 0 'it validates via the --plan-dir synonym' \

@@ -203,7 +203,7 @@ package/planning/scripts/plan-map-lib.sh	4963
 package/planning/scripts/plan-mutate.sh	1582
 package/planning/scripts/plan-progress-lib.sh	6352
 package/planning/scripts/plan-root.sh	2425
-package/planning/scripts/plan-table-lib.sh	13199
+package/planning/scripts/plan-table-lib.sh	13919
 package/planning/scripts/plans-board-lib.sh	10626
 package/planning/scripts/rebuild-plan-progress.sh	2079
 package/planning/scripts/register-command.sh	2189

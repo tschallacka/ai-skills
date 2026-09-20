@@ -60,6 +60,23 @@ pub fn install_signal_cleanup(cleanup: impl FnOnce() + Send + 'static) {
     });
 }
 
+/// Called by `main` once `run` has returned. If a signal has been caught, the
+/// background thread is cleaning up and will exit with `128 + signal` itself;
+/// returning here first would race it, and a leg that the cleanup just killed
+/// makes `run` report an ordinary failure (exit 1) before the thread gets to
+/// say 129. So wait for that thread to finish the job, bounded so a wedged
+/// cleanup cannot hang the process.
+pub fn wait_for_signal_exit() {
+    #[cfg(unix)]
+    {
+        if RECEIVED_SIGNAL.load(Ordering::SeqCst) != 0 {
+            for _ in 0..500 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
+}
+
 #[cfg(windows)]
 mod console {
     use std::sync::Mutex;

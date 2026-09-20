@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const CORE_WORDS: &[&str] = &[
     "git", "make", "docker", "sh", "bash", "zsh", "env", "sudo", "npx",
@@ -295,10 +296,40 @@ fn is_executable(_path: &str) -> bool {
     }
     #[cfg(not(unix))]
     {
-        // No permission bits to read: a file is a command when its extension
-        // says it runs (the same set Git for Windows' bash and cmd start).
-        executable_by_extension(_path)
+        // No permission bits on the filesystem. The executable bit that matters
+        // is the one the repository records, so a tracked file answers by its
+        // git mode -- a `.sh` that is only ever sourced (a library, a test
+        // helper) is 100644 and must not read as a command just because of its
+        // extension. Only a file git does not track falls back to the
+        // extension (the set Git for Windows' bash and cmd start).
+        tracked_executable(_path).unwrap_or_else(|| executable_by_extension(_path))
     }
+}
+
+/// Whether git tracks `path` as executable: `Some(true)` for mode 100755,
+/// `Some(false)` for any other tracked mode, `None` when git does not track
+/// it (or cannot be asked).
+#[cfg_attr(unix, allow(dead_code))]
+fn tracked_executable(path: &str) -> Option<bool> {
+    let path = Path::new(path);
+    let name = path.file_name()?;
+    let parent = path
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(parent)
+        .args(["ls-files", "-s", "--"])
+        .arg(name)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mode = text.split_whitespace().next()?;
+    Some(mode == "100755")
 }
 
 #[cfg_attr(unix, allow(dead_code))]
@@ -334,6 +365,36 @@ mod tests {
             &BTreeSet::from([".md".into()]),
             &BTreeSet::new(),
         ));
+    }
+
+    #[test]
+    fn a_tracked_file_is_executable_by_its_git_mode_not_its_extension() {
+        let dir = std::env::temp_dir().join(format!("pvc-tracked-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "-q"]);
+        fs::write(dir.join("run.sh"), "#!/bin/sh\n").unwrap();
+        fs::write(dir.join("lib.sh"), "#!/bin/sh\n").unwrap();
+        fs::write(dir.join("untracked.sh"), "#!/bin/sh\n").unwrap();
+        git(&["add", "run.sh", "lib.sh"]);
+        git(&["update-index", "--chmod=+x", "run.sh"]);
+        let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        assert_eq!(tracked_executable(&path("run.sh")), Some(true));
+        assert_eq!(
+            tracked_executable(&path("lib.sh")),
+            Some(false),
+            "a sourced library is 100644 however its name ends"
+        );
+        assert_eq!(tracked_executable(&path("untracked.sh")), None);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

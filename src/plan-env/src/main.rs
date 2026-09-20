@@ -61,17 +61,15 @@ fn plan_path(root: &Path) -> PathBuf {
     root.join(".env")
 }
 
+/// The same quoting `create-plan` writes its manifests with. The two used to
+/// have their own, and they agree only for values made entirely of shell-safe
+/// characters -- which no Windows path is (`C:\...`): create-plan escaped each
+/// unsafe character while plan-env single-quoted the whole value. So
+/// `write-plan`, which rewrites the global manifest, changed bytes create-plan
+/// had just written even though nothing about the plan had changed. One
+/// function, one spelling.
 fn shell_quote(value: &str) -> String {
-    if value.is_empty() {
-        "''".into()
-    } else if value
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || b"_./-".contains(&b))
-    {
-        value.into()
-    } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
-    }
+    planning_core::shell_quote(value)
 }
 
 fn write_manifest(path: &Path, values: &[(&str, String)]) {

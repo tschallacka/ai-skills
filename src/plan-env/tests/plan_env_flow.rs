@@ -17,19 +17,10 @@ fn canon(path: &Path) -> PathBuf {
     canonical_directory(path).unwrap()
 }
 
-/// A path as plan-env writes it into a manifest: bare when every character is
-/// shell-safe, single-quoted otherwise (a Windows path always is).
+/// A path as plan-env writes it into a manifest: the quoting create-plan uses
+/// too (`planning_core::shell_quote`), so the two writers agree byte for byte.
 fn q(path: &Path) -> String {
-    let text = path.display().to_string();
-    if !text.is_empty()
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"_./-".contains(&b))
-    {
-        text
-    } else {
-        format!("'{}'", text.replace('\'', "'\\''"))
-    }
+    planning_core::shell_quote(&path.display().to_string())
 }
 
 // `write-plan` rewrites the global manifest too. The binary is exec'd from a

@@ -36,6 +36,19 @@ PLANS_ROOT="$plans_root" "$env_tool" write-plan "$plan_root" "$plans_root"
 [ "$plan_before" = "$(t_sha256 "$plan_root/.env")" ]
 [ -f "$plan_root/keep.me" ]
 
+# A plans root whose path needs shell quoting (every Windows path does: C:\...).
+# create-plan and plan-env each wrote the manifests in their own quoting style,
+# identical only for shell-safe paths, so write-plan rewrote the global manifest
+# create-plan had just made. They share one quoting function now; this pins it
+# with a path that is unsafe on every platform.
+spaced_root="$tmp/plans with space"
+spaced_plan="$spaced_root/demo-plan"
+PLANS_ROOT="$spaced_root" "$repo_dir/planning/scripts/create-plan.sh" "$spaced_plan" 'Demo plan' >/dev/null
+spaced_before="$(t_sha256 "$spaced_root/.env")"
+PLANS_ROOT="$spaced_root" "$env_tool" write-plan "$spaced_plan" "$spaced_root"
+[ "$spaced_before" = "$(t_sha256 "$spaced_root/.env")" ]
+"$env_tool" check "$spaced_plan" "$spaced_root" >/dev/null
+
 helper_output="$tmp/helper-output"
 cat > "$tmp/helper.sh" <<'EOF'
 #!/usr/bin/env bash

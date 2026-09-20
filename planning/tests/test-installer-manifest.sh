@@ -44,8 +44,19 @@ deferred_artifact() {
     esac
 }
 
+# The manifest names a compiled command without a suffix; source_file() returns
+# its physical path, which on Windows carries ".exe". The expectation gets the
+# same platform rule so the two are compared as the same file. Anything outside
+# planning/ is left as written.
+expected_source_path() { # <manifest source>
+    case "$1" in
+        planning/*) printf 'planning/%s\n' "$(platform_relative_path planning "${1#planning/}")" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
 test_manifest_emission() {
-    local emitted map_installable source destination owner gate collision source_only resolved manifest_count
+    local emitted map_installable source destination owner gate collision source_only resolved expected_source manifest_count
     emitted=$(mktemp)
     map_installable=$(mktemp)
     trap 'rm -f "$emitted" "$map_installable"' RETURN
@@ -73,7 +84,8 @@ test_manifest_emission() {
             continue
         fi
         resolved=$(abs_path "$(source_file planning "$destination")")
-        [ "$resolved" = "$(abs_path "$repo_dir/$source")" ] || {
+        expected_source="$(expected_source_path "$source")"
+        [ "$resolved" = "$(abs_path "$repo_dir/$expected_source")" ] || {
             printf 'source mismatch: %s -> %s (got %s)\n' "$source" "$destination" "$resolved" >&2
             return 1
         }

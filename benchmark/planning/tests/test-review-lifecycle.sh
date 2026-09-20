@@ -611,6 +611,18 @@ for artifact in oracle-terminal-evidence.json oracle.json reviewer-state.json pr
         cat "$archive/reviewer-selection.json" >&2 2>/dev/null || true
         cat "$archive/reviewer-b-session-binding.json" >&2 2>/dev/null || true
         cat "$integration_root/fake-reviewer.log" >&2 2>/dev/null || true
+        # Whether the fake reviewer ever ran is decided upstream (the worker's
+        # exit code, whether its plan was found, the launcher), and none of that
+        # reaches the files above; without it a failure on a platform this test
+        # cannot be run on by hand says only that an approval is missing.
+        for evidence in \
+            "$integration_root/worker-output.txt" \
+            "$case_root/workspace/process-audit.txt" \
+            "$case_root/process-registry.tsv" \
+            "$case_root/workspace/reviewer-lifecycle.jsonl"; do
+            printf -- '--- %s\n' "$evidence" >&2
+            cat "$evidence" >&2 2>/dev/null || true
+        done
         exit 1
     fi
 done
