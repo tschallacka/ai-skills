@@ -623,6 +623,11 @@ for artifact in oracle-terminal-evidence.json oracle.json reviewer-state.json pr
             printf -- '--- %s\n' "$evidence" >&2
             cat "$evidence" >&2 2>/dev/null || true
         done
+        # Where the capsules actually are, and what the fake reviewer left in
+        # them: an approval written under one spelling of a path and looked for
+        # under another shows up here as a file in the wrong tree.
+        printf -- '--- capsule tree under %s\n' "${PLANNING_AGENT_TMPDIR:-${TMPDIR:-/tmp}/planning-agent}" >&2
+        find "${PLANNING_AGENT_TMPDIR:-${TMPDIR:-/tmp}/planning-agent}/ai-skills-capsules/$run_id" -maxdepth 6 -print >&2 2>/dev/null || true
         exit 1
     fi
 done
