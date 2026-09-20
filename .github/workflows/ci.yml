@@ -287,6 +287,14 @@ jobs:
         # rust-toolchain step above, pinned to the same version.
         run: |
           SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
+          # Pin the suite to the directory just built (plan_bin_dir tier 1).
+          # Left to itself the lookup prefers ~/.config/tsch-ai-skills/bin
+          # whenever that directory exists, and the suite's own installer
+          # tests create it holding only bugs and todo -- after which every
+          # later wrapper finds no binary and exits 69.
+          triple="$(./setup-dev-env.sh --list | sed -n 's/^host target: //p')"
+          [ -n "$triple" ] || { echo "::error::setup-dev-env.sh --list named no host target"; exit 1; }
+          echo "AI_SKILLS_BIN_ROOT=$PWD/bin/$triple" >> "$GITHUB_ENV"
           # Dependency objects (deps/, build/, .fingerprint/) are nearly the
           # whole of target/ and were never needed past this point. Freeing
           # them is what a disk-tight runner needs: an earlier version of this
@@ -498,6 +506,14 @@ jobs:
         # build-plan-libs.sh's own fresh-checkout bootstrap).
         run: |
           SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
+          # Pin the suite to the directory just built (plan_bin_dir tier 1).
+          # Left to itself the lookup prefers ~/.config/tsch-ai-skills/bin
+          # whenever that directory exists, and the suite's own installer
+          # tests create it holding only bugs and todo -- after which every
+          # later wrapper finds no binary and exits 69.
+          triple="$(./setup-dev-env.sh --list | sed -n 's/^host target: //p')"
+          [ -n "$triple" ] || { echo "::error::setup-dev-env.sh --list named no host target"; exit 1; }
+          echo "AI_SKILLS_BIN_ROOT=$PWD/bin/$triple" >> "$GITHUB_ENV"
           # Dependency objects are nearly all of target/ and were never
           # needed past this point; freeing them is what a disk-tight runner
           # needs.
@@ -758,35 +774,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
-        with:
-          # A full checkout, where the four predecessors each sparse-checked out
-          # their own overlapping subset. One job needs the union, and the union
-          # of those four subsets was most of the tree anyway.
-          #
-          # .github and planning/scripts: real-tree parity tests (blast-radius,
-          # verify-both-shells, generate-portability, setup-dev-env, ci-scope,
-          # ci-subjects, ci-test-scope) shell out to the real bash original
-          # they ported, to diff it against the compiled binary -- .github/*.sh
-          # for the three CI selectors, planning/scripts for
-          # plan-core-lib.sh (needed by every wired script's own
-          # compiled-binary-preference block; guarded to fall through when
-          # absent, but a real parity check needs the real bash path to
-          # actually execute, not just fail open). Cone-mode sparse-checkout
-          # already includes every root-level file (the *.sh scripts
-          # themselves) without being listed.
-          sparse-checkout: |
-            .github
-            planning/scripts
-            planning/rust-migration.tsv
-            planning/binaries.tsv
-            ai-text-editor/ai-text-editor.1
-            ai-text-editor/schemas
-            installer/tools.tsv
-            .agents/profiles
-            src
-            Cargo.toml
-            Cargo.lock
-            rust-toolchain.toml
+        # A full checkout, not a sparse one. The union of what the workspace's
+        # tests read from the tree keeps growing: the real-tree parity tests
+        # (blast-radius, verify-both-shells, generate-portability, ci-scope,
+        # ci-subjects, ci-test-scope) run the real .github/*.sh and
+        # planning/scripts, and test-mermaid-accuracy checks the tracked
+        # documents and every script and artifact their diagrams name. A
+        # sparse list had to be kept equal to that union by hand and failed
+        # the mermaid test (its documents were not checked out) without
+        # anything pointing at the list. The tracked tree is about 14 MB.
 
       - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.98
@@ -846,6 +842,17 @@ jobs:
       # openpty/ioctl/setsid/kill and the Unix socket. tests/protocol.rs is
       # cfg(unix)-gated (its own transport is Unix-socket-specific), so
       # --workspace's test run is meaningful on every target unmodified.
+      - name: Generate plan-core-lib.sh for the real-tree parity tests
+        # ci-scope, ci-subjects, ci-test-scope and generate-postmortem each run
+        # their real .github/*.sh or planning/scripts/*.sh wrapper and compare
+        # it with the compiled binary. A wrapper reaches the binary through
+        # planning/scripts/plan-core-lib.sh, which is generated and gitignored,
+        # so on a fresh checkout it answers "binary not found" and the
+        # comparison fails for a reason that has nothing to do with the crate.
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./planning/scripts/build-plan-libs.sh
+
       - name: Format, lint and test the whole workspace
         shell: bash
         run: |
