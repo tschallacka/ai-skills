@@ -18,7 +18,7 @@
 FROM node:20-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        bash git curl ca-certificates gnupg gawk sed grep \
+        bash git curl ca-certificates gnupg gawk sed grep python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # gh + glab: the ci-failures story needs a real forge CLI to inspect a real
