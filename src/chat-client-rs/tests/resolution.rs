@@ -152,7 +152,20 @@ fn the_server_prefers_its_session_port_across_restarts_and_argv_overrides() {
     // deleted -- same reasoning as above) and `wait_port_changed_from` waits
     // for a genuinely new value rather than trusting the first parseable
     // read, which could otherwise be the outgoing server1b's own port1.
-    let override_port = port1 + 1;
+    // A port the OS has just confirmed is free, not `port1 + 1`: that one sits
+    // in the ephemeral range a busy runner hands to other processes, and when
+    // it was taken the server correctly fell back and this assertion failed
+    // for a reason that had nothing to do with argv overriding the session.
+    let override_port = loop {
+        let candidate = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .expect("bind an ephemeral port")
+            .local_addr()
+            .expect("local addr")
+            .port();
+        if candidate != port1 {
+            break candidate;
+        }
+    };
     let server3 = start_server_silent(&binary, home.path(), &[&override_port.to_string()]);
     let port3 = wait_port_changed_from(home.path(), port1)
         .expect("explicit-port server did not report a port");

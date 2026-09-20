@@ -241,6 +241,14 @@ fn a_full_run_reports_the_correct_counts_and_exact_summary() {
 
 #[test]
 fn a_hanging_test_is_reported_as_timeout() {
+    // run-tests bounds a test with timeout(1) and says so when there is none.
+    // A stock macOS has none (it ships with GNU coreutils, not the OS), so
+    // the hang would run its full 30s and never report TIMEOUT: there is
+    // nothing to assert against on such a host.
+    if Command::new("timeout").arg("--version").output().is_err() {
+        eprintln!("skipping: no timeout(1) on this host, so a hang cannot be bounded");
+        return;
+    }
     let _guard = lock_test_guard().lock().unwrap_or_else(|p| p.into_inner());
     let repo = Repo::new("timeout");
     let select = repo.dir.join("select.txt");
