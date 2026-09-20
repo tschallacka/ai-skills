@@ -171,13 +171,27 @@ jobs:
             /*
             !/benchmark/results/
 
+      # A focused run (see the first job) is about one thing; the 30-minute
+      # suite would only delay its answer.
+      - name: Skip when a focused run is requested
+        id: focus
+        shell: bash
+        run: |
+          if [ -s .github/windows-focus.txt ]; then
+            echo "focused=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "focused=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Pin the toolchain
+        if: steps.focus.outputs.focused != 'true'
         uses: dtolnay/rust-toolchain@1.98
         with:
           targets: x86_64-pc-windows-msvc
           components: rustfmt, clippy
 
       - name: Put Git for Windows' bash and coreutils first on PATH
+        if: steps.focus.outputs.focused != 'true'
         shell: bash
         run: |
           {
@@ -186,6 +200,7 @@ jobs:
           } >> "$GITHUB_PATH"
 
       - name: Build every compiled helper into bin/<triple>
+        if: steps.focus.outputs.focused != 'true'
         shell: bash
         run: |
           SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
@@ -194,13 +209,14 @@ jobs:
           echo "AI_SKILLS_BIN_ROOT=$PWD/bin/$triple" >> "$GITHUB_ENV"
 
       - name: Run the suite
+        if: steps.focus.outputs.focused != 'true'
         shell: bash
         run: |
           set -o pipefail
           ./run-tests.sh 2>&1 | tee windows-shell-suite.log
 
       - name: Keep the suite log
-        if: always()
+        if: always() && steps.focus.outputs.focused != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: windows-shell-suite-log

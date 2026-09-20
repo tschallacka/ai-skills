@@ -1,0 +1,19 @@
+build -p rjq
+set -x
+which python3 python; python3 --version; python3 -c "import sys; print(sys.executable, sys.platform)"
+base="$(mktemp -d)"; echo "base=$base"
+win_native="$(cygpath -w "$base")"; echo "native=$win_native"
+mkdir -p "$base/reviewers/sess-1/plan"
+printf '{"reviewer_session_id":"sess-1","overall_plan_approval":true}\n' > "$base/reviewers/sess-1/plan/approval.json"
+: > "$base/lifecycle.jsonl"
+mixed="$win_native/reviewers"
+echo "mixed root: $mixed"
+python3 benchmark/planning/lib-approval.py select-approval "$mixed" "$base/lifecycle.jsonl" "$base/sel-native.json"; echo "rc=$?"; cat "$base/sel-native.json"
+python3 benchmark/planning/lib-approval.py select-approval "$base/reviewers" "$base/lifecycle.jsonl" "$base/sel-posix.json"; echo "rc=$?"; cat "$base/sel-posix.json"
+python3 benchmark/planning/lib-approval.py select-approval "$(cygpath -m "$base")/reviewers" "$base/lifecycle.jsonl" "$base/sel-m.json"; echo "rc=$?"; cat "$base/sel-m.json"
+python3 -c "
+import sys
+from pathlib import Path
+for p in sys.argv[1:]:
+    q = Path(p); print(repr(p), q.is_dir(), sorted(str(x) for x in q.glob('*/plan/approval.json')))
+" "$mixed" "$base/reviewers" "$(cygpath -m "$base")/reviewers" "$win_native\\reviewers"
