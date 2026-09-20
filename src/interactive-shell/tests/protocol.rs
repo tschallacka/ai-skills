@@ -1473,7 +1473,12 @@ fn session_file_remembers_tcp_transport_across_a_restart() {
         ])
         .output()
         .unwrap();
-    assert!(resumed.status.success());
+    assert!(
+        resumed.status.success(),
+        "wait on the resumed TCP session failed: {}\n{}",
+        String::from_utf8_lossy(&resumed.stderr),
+        wrapper_stderr(socket.parent().unwrap())
+    );
     assert!(String::from_utf8_lossy(&resumed.stdout).contains("\"matched\":true"));
     let _ = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .env("INTERACTIVE_SHELL_HOME", &state)

@@ -126,6 +126,8 @@ impl Transport for TcpConnection {
 pub struct TcpTransportListener {
     listener: TcpListener,
     nonce: String,
+    /// Where `bind()` wrote the port and nonce, so `drop` can take it away.
+    discovery: std::path::PathBuf,
 }
 
 impl Listener for TcpTransportListener {
@@ -143,7 +145,11 @@ impl Listener for TcpTransportListener {
         let nonce = nonce()?;
         fs::write(socket, format!("{port}\n{nonce}\n"))
             .map_err(|error| format!("write discovery file {}: {error}", socket.display()))?;
-        Ok(TcpTransportListener { listener, nonce })
+        Ok(TcpTransportListener {
+            listener,
+            nonce,
+            discovery: socket.to_path_buf(),
+        })
     }
 
     fn accept(&self) -> io::Result<Option<Self::Stream>> {
@@ -184,10 +190,15 @@ impl Listener for TcpTransportListener {
 
 impl Drop for TcpTransportListener {
     fn drop(&mut self) {
-        // No cleanup needed: the OS reclaims the ephemeral port on process
-        // exit, and the discovery file is simply overwritten by the next
-        // bind -- unlike PosixListener, there is no socket-file identity to
-        // remove.
+        // The OS reclaims the ephemeral port on process exit, but the
+        // discovery file would outlive it and point every later client at a
+        // dead port -- and make a restart look ready the moment it begins,
+        // because the file already exists. Remove it, but only if it is still
+        // the one this listener wrote: a newer session for the same path
+        // rewrites it with its own nonce and must keep it.
+        if fs::read_to_string(&self.discovery).is_ok_and(|text| text.contains(&self.nonce)) {
+            let _ = fs::remove_file(&self.discovery);
+        }
     }
 }
 
