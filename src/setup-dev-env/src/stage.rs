@@ -202,14 +202,22 @@ fn stage_extras(
     // bug-report and todo resolve their tool at <skill>/bin/<triple>/, which
     // is what skill_files() promises and what CI's own staging steps do;
     // interactive-shell's binaries.tsv resolves the same way (B291).
-    if matches!(crate_name, "bug-report" | "todo" | "interactive-shell") {
+    // interactive-shell-mcp is its own crate but not its own skill: its
+    // binary ships in the interactive-shell skill's mcp-mode install
+    // (integration.tsv), so it lands in THAT skill's bin/<triple>/.
+    let skill_dir = match crate_name {
+        "bug-report" | "todo" | "interactive-shell" => Some(crate_name),
+        "interactive-shell-mcp" => Some("interactive-shell"),
+        _ => None,
+    };
+    if let Some(skill_dir) = skill_dir {
         let skill_dest = repo_root
-            .join(crate_name)
+            .join(skill_dir)
             .join("bin")
             .join(triple)
             .join(format!("{binary}{exe_suffix}"));
         stage_from(&built_path, &skill_dest)?;
-        println!("   -> {crate_name}/bin/{triple}/{binary}{exe_suffix}");
+        println!("   -> {skill_dir}/bin/{triple}/{binary}{exe_suffix}");
     }
     Ok(())
 }

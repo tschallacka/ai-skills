@@ -132,6 +132,7 @@ const HARDCODED: &[Row] = &[
     ("ai-text-editor-mcp", "ai-text-editor-mcp"),
     ("interactive-shell", "interactive-shell"),
     ("interactive-shell", "interactive-shell-input"),
+    ("interactive-shell-mcp", "interactive-shell-mcp"),
 ];
 
 /// The full plan, in the same order setup-dev-env-lib.sh's own plan()

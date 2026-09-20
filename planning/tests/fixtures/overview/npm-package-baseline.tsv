@@ -20,7 +20,7 @@ package/agent-identity-plugin/hooks/hooks.json	192
 package/agent-identity-plugin/hooks/lib.sh	2779
 package/agent-identity-plugin/hooks/subagent-start.sh	1325
 package/agent-identity-plugin/tests/test-agent-identity-injection.sh	1934
-package/ai-text-editor/SKILL.md	23387
+package/ai-text-editor/SKILL.md	24814
 package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	19410
 package/ai-text-editor/binaries.tsv	500
@@ -30,10 +30,10 @@ package/ai-text-editor/references/protocol.md	36297
 package/ai-text-editor/requires.tsv	190
 package/ai-text-editor/schemas/capabilities.v1.json	2508
 package/ai-text-editor/schemas/protocol.v1.json	764
-package/brainstorm/SKILL.md	11440
+package/brainstorm/SKILL.md	11893
 package/brainstorm/docs/README.md	1387
 package/brainstorm/requires.tsv	1162
-package/bug-report/SKILL.md	17702
+package/bug-report/SKILL.md	18434
 package/bug-report/binaries.tsv	945
 package/bug-report/docs/README.md	1318
 package/bug-report/requires.tsv	1628
@@ -48,7 +48,7 @@ package/ci-failures/SKILL.md	4151
 package/ci-failures/docs/README.md	1146
 package/ci-failures/requires.tsv	1641
 package/ci-failures/scripts/ci-failures-glab-lib.sh	7548
-package/ci-failures/scripts/ci-failures.sh	4961
+package/ci-failures/scripts/ci-failures.sh	6554
 package/editor-gate-plugin/.claude-plugin/plugin.json	367
 package/editor-gate-plugin/README.md	2162
 package/editor-gate-plugin/hooks/editor-token	1067
@@ -64,7 +64,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/installer/bootstrap.sh	15664
-package/interactive-shell/SKILL.md	14471
+package/interactive-shell/SKILL.md	16392
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/appprofiles/FORMAT.md	3629
 package/interactive-shell/appprofiles/alsamixer.md	1289
@@ -129,9 +129,10 @@ package/interactive-shell/appprofiles/vmstat.md	1474
 package/interactive-shell/appprofiles/watch.md	1177
 package/interactive-shell/appprofiles/whiptail.md	2183
 package/interactive-shell/appprofiles/write.md	2257
-package/interactive-shell/binaries.tsv	2461
-package/interactive-shell/docs/README.md	6143
-package/interactive-shell/requires.tsv	2032
+package/interactive-shell/binaries.tsv	3547
+package/interactive-shell/docs/README.md	6924
+package/interactive-shell/integration.tsv	1562
+package/interactive-shell/requires.tsv	2252
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
@@ -232,7 +233,7 @@ package/planning/scripts/verify-target.sh	3449
 package/planning/skill-source.txt	94028
 package/planning/state-change-registry.json	1096
 package/planning/telemetry-schema.json	888
-package/post-implementation-review/SKILL.md	11079
+package/post-implementation-review/SKILL.md	12077
 package/post-implementation-review/docs/README.md	1462
 package/post-implementation-review/requires.tsv	1162
 package/project-specifics/SKILL.md	4057
@@ -241,7 +242,7 @@ package/project-specifics/requires.tsv	1162
 package/question-etiquette/SKILL.md	2881
 package/question-etiquette/docs/README.md	770
 package/question-etiquette/requires.tsv	1187
-package/resource-limited-testing/SKILL.md	9515
+package/resource-limited-testing/SKILL.md	10226
 package/resource-limited-testing/docs/README.md	1115
 package/resource-limited-testing/requires.tsv	1407
 package/resource-limited-testing/scripts/limited-run.sh	4459

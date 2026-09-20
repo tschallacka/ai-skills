@@ -628,6 +628,7 @@ agents/openai.yaml
 docs/README.md
 requires.tsv
 binaries.tsv
+integration.tsv
 appprofiles/FORMAT.md
 appprofiles/alsamixer.md
 appprofiles/atop.md
@@ -694,15 +695,15 @@ appprofiles/write.md
 ISHEOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    skill_artifact_files interactive-shell bin/x86_64-unknown-linux-musl/interactive-shell bin/x86_64-unknown-linux-musl/interactive-shell-input ;;
+                    skill_artifact_files interactive-shell bin/x86_64-unknown-linux-musl/interactive-shell bin/x86_64-unknown-linux-musl/interactive-shell-input bin/x86_64-unknown-linux-musl/interactive-shell-mcp ;;
                 Linux:aarch64|Linux:arm64)
-                    skill_artifact_files interactive-shell bin/aarch64-unknown-linux-musl/interactive-shell bin/aarch64-unknown-linux-musl/interactive-shell-input ;;
+                    skill_artifact_files interactive-shell bin/aarch64-unknown-linux-musl/interactive-shell bin/aarch64-unknown-linux-musl/interactive-shell-input bin/aarch64-unknown-linux-musl/interactive-shell-mcp ;;
                 Darwin:x86_64)
-                    skill_artifact_files interactive-shell bin/x86_64-apple-darwin/interactive-shell bin/x86_64-apple-darwin/interactive-shell-input ;;
+                    skill_artifact_files interactive-shell bin/x86_64-apple-darwin/interactive-shell bin/x86_64-apple-darwin/interactive-shell-input bin/x86_64-apple-darwin/interactive-shell-mcp ;;
                 Darwin:arm64)
-                    skill_artifact_files interactive-shell bin/aarch64-apple-darwin/interactive-shell bin/aarch64-apple-darwin/interactive-shell-input ;;
+                    skill_artifact_files interactive-shell bin/aarch64-apple-darwin/interactive-shell bin/aarch64-apple-darwin/interactive-shell-input bin/aarch64-apple-darwin/interactive-shell-mcp ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    skill_artifact_files interactive-shell bin/x86_64-pc-windows-msvc/interactive-shell.exe bin/x86_64-pc-windows-msvc/interactive-shell-input.exe ;;
+                    skill_artifact_files interactive-shell bin/x86_64-pc-windows-msvc/interactive-shell.exe bin/x86_64-pc-windows-msvc/interactive-shell-input.exe bin/x86_64-pc-windows-msvc/interactive-shell-mcp.exe ;;
                 *)
                     printf 'skill_files: no interactive-shell artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
