@@ -235,13 +235,13 @@ mod tests {
             "#!/bin/sh\ncat <<'EOF'\n# role-context fixture (Fixture) - page 1/1\n{payload}\nEOF\n"
         );
         fs::write(&script, body).unwrap();
-        let mut perms = fs::metadata(&script).unwrap().permissions();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&script).unwrap().permissions();
             perms.set_mode(0o755);
+            fs::set_permissions(&script, perms).unwrap();
         }
-        fs::set_permissions(&script, perms).unwrap();
         script
     }
 

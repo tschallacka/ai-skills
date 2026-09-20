@@ -5,7 +5,9 @@
 // of the CLI surface that don't need the legs to run at all.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 #[cfg(unix)]
 use std::process::Stdio;
 use std::process::{Command, Output};

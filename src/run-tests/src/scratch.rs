@@ -8,10 +8,17 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::sync::atomic::{AtomicI32, Ordering};
+#[cfg(unix)]
 use std::sync::OnceLock;
 
+// The signal machinery is unix-only, like the handler that uses it: there is
+// no SIGINT/SIGTERM delivery to hook on Windows, and unused statics fail the
+// build there under -D warnings.
+#[cfg(unix)]
 static SIGNAL_PIPE_WRITE: OnceLock<i32> = OnceLock::new();
+#[cfg(unix)]
 static RECEIVED_SIGNAL: AtomicI32 = AtomicI32::new(0);
 
 #[cfg(unix)]

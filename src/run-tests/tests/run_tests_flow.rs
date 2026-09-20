@@ -364,6 +364,7 @@ fn a_stale_lock_is_reclaimed_and_the_run_proceeds() {
     let _ = std::fs::remove_file(lock_path);
 }
 
+#[cfg(unix)]
 #[test]
 fn sigterm_still_removes_the_scratch_root_and_releases_the_lock() {
     let _guard = lock_test_guard().lock().unwrap_or_else(|p| p.into_inner());
@@ -400,6 +401,7 @@ fn sigterm_still_removes_the_scratch_root_and_releases_the_lock() {
     assert!(!lock_path.exists(), "SIGTERM must still release the lock");
 }
 
+#[cfg(unix)]
 #[test]
 fn sigint_still_removes_the_scratch_root_and_releases_the_lock() {
     let _guard = lock_test_guard().lock().unwrap_or_else(|p| p.into_inner());
