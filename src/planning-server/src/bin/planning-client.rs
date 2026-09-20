@@ -9,8 +9,8 @@
 //! "read" step the caller must remember to run first.
 
 use planning_server::protocol::{decode_response, encode_request, Request, Response};
+use planning_server::transport::Stream;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
 
 const USAGE: &str = "planning-client -- CLI-over-protocol client for planning-server\n\nUsage:\n  planning-client read-plan-document <plan-dir> <document-id> [--view VIEW]\n  planning-client read-work-unit <plan-dir> <unit-id>\n  planning-client update-step <plan-dir> <goal> <step> <status> [--revision REV]\n  planning-client add-work-unit <plan-dir> <id> <type> <file> <scope> <subscope> <change> <depends-on> <goal> <step> [--revision REV]\n  planning-client set-review-status <plan-dir> <status> [--revision REV]\n  planning-client set-testing-requirement <plan-dir> <goal> <yes|no> <rationale> [--revision REV]\n  planning-client validate-plan <plan-dir> [--complete]\n  planning-client --help\n\nA guarded subcommand (update-step, add-work-unit, set-review-status,\nset-testing-requirement) reads the document's current revision itself when\n--revision is not given. Exit codes: 0 success, 64 bad usage, 65 stale\nrevision (re-read and retry), 69 cannot connect to the server, 70 the\nserver reported an error.\n";
@@ -26,7 +26,7 @@ fn usage(code: u8) -> ExitCode {
 
 fn send(request: &Request) -> Result<Response, String> {
     let socket_path = planning_server::endpoint::socket_path();
-    let mut stream = UnixStream::connect(&socket_path).map_err(|error| {
+    let mut stream = Stream::connect(&socket_path).map_err(|error| {
         format!(
             "cannot connect to planning-server at {}: {error}",
             socket_path.display()

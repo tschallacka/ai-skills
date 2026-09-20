@@ -388,7 +388,7 @@ mod tests {
         for sibling in siblings {
             ensure_built(bin_dir, sibling);
         }
-        let program = bin_dir.join(name);
+        let program = bin_dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
         if program.is_file() {
             return program;
         }

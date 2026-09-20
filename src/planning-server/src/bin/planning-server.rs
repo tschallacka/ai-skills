@@ -7,10 +7,21 @@
 
 use planning_server::handlers::dispatch;
 use planning_server::protocol::{decode_request, encode_response, Response};
+use planning_server::transport::{Listener, Stream};
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 
-fn handle_client(stream: UnixStream) {
+fn handle_client(mut stream: Stream) {
+    match stream.authenticate() {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!("planning-server: refused a connection that did not present the nonce");
+            return;
+        }
+        Err(error) => {
+            eprintln!("planning-server: could not read the connection's nonce: {error}");
+            return;
+        }
+    }
     let reader_stream = match stream.try_clone() {
         Ok(cloned) => cloned,
         Err(error) => {
@@ -50,15 +61,11 @@ fn main() {
             std::process::exit(74);
         }
     }
-    // A stale socket file from a prior, no-longer-running server prevents
-    // bind; removing it first is safe because a live server would already
-    // hold the address (bind would fail with AddrInUse only while a real
-    // listener is active, which this replace-on-start policy accepts as the
-    // MVP's own scope -- a stale-endpoint takeover protocol like
-    // ai-text-editor's own is deferred, matching this goal's own recorded
-    // narrowing).
-    let _ = std::fs::remove_file(&socket_path);
-    let listener = match UnixListener::bind(&socket_path) {
+    // Listener::bind replaces a stale endpoint left by a prior, no-longer-
+    // running server (a live one would already hold the address); a
+    // stale-endpoint takeover protocol like ai-text-editor's own is deferred,
+    // matching this goal's own recorded narrowing.
+    let listener = match Listener::bind(&socket_path) {
         Ok(listener) => listener,
         Err(error) => {
             eprintln!(
@@ -69,8 +76,8 @@ fn main() {
         }
     };
     println!("planning-server: listening on {}", socket_path.display());
-    for stream in listener.incoming() {
-        match stream {
+    loop {
+        match listener.accept() {
             Ok(stream) => {
                 std::thread::spawn(move || handle_client(stream));
             }
