@@ -84,19 +84,58 @@ jobs:
         shell: bash
         run: ./planning/scripts/build-plan-libs.sh
 
+      # A quick loop for one failing thing. When .github/windows-focus.txt has
+      # content, the run builds and does ONLY that: line 1 is passed to cargo
+      # (e.g. `test -p chat-server-rs --test end_to_end -- --nocapture`), any
+      # further lines are a bash script run afterwards from the repository
+      # root. Empty or absent means the full run below. It turns a 25-minute
+      # workspace build-and-test into a few minutes for the crate at hand.
+      - name: Read the focus file
+        id: focus
+        shell: bash
+        run: |
+          if [ -s .github/windows-focus.txt ]; then
+            echo "focused=true" >> "$GITHUB_OUTPUT"
+            head -1 .github/windows-focus.txt > focus-cargo.txt
+            tail -n +2 .github/windows-focus.txt > focus-script.sh
+            echo "focused run: cargo $(cat focus-cargo.txt)"
+          else
+            echo "focused=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Focused cargo command
+        if: steps.focus.outputs.focused == 'true'
+        shell: bash
+        env:
+          RUST_BACKTRACE: '1'
+        run: |
+          set +e
+          # shellcheck disable=SC2046
+          cargo $(cat focus-cargo.txt) 2>&1 | tee windows-test.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Focused script
+        if: steps.focus.outputs.focused == 'true' && !cancelled()
+        shell: bash
+        run: |
+          [ -s focus-script.sh ] || exit 0
+          bash focus-script.sh 2>&1 | tee -a windows-test.log
+          exit "${PIPESTATUS[0]}"
+
       - name: Format
+        if: steps.focus.outputs.focused != 'true'
         shell: bash
         run: cargo fmt --all --check
 
       - name: Lint every crate
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.focus.outputs.focused != 'true' }}
         shell: bash
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       # --no-fail-fast: one failing test binary must not hide the crates after
       # it, or listing the failures takes one run per failure.
       - name: Test every crate
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.focus.outputs.focused != 'true' }}
         shell: bash
         run: |
           set -o pipefail

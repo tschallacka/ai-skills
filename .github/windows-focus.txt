@@ -1,0 +1,12 @@
+test -p chat-server-rs --test end_to_end --test message_tags -- --nocapture --test-threads=1
+export AI_CHAT_HOME="$PWD/target/chat-home"; mkdir -p "$AI_CHAT_HOME"
+target/debug/chat-server-rs 0 > target/server.out 2>&1 &
+sleep 3
+echo "--- server.port:"; cat "$AI_CHAT_HOME/server.port"; echo
+port=$(cat "$AI_CHAT_HOME/server.port")
+echo "--- tail (8s):"
+timeout 8 target/debug/chat-client-rs tail --server "127.0.0.1:$port" --nick wakee --chan '#wake' --insecure < /dev/null
+echo "tail exit=$?"
+echo "--- server output:"; cat target/server.out
+echo "--- owner_socket:"
+cargo test -p chat-client-rs --test owner_socket -- --nocapture --test-threads=1
