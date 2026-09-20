@@ -82,8 +82,28 @@ fn apply_child_env(command: &mut Command, config: &RunConfig) {
     }
     command
         .env("TMPDIR", config.tmpdir)
-        .env("PLANNING_AGENT_TMPDIR", config.planning_agent_tmpdir)
+        .env(
+            "PLANNING_AGENT_TMPDIR",
+            forward_slashes(config.planning_agent_tmpdir),
+        )
         .env("AI_SKILLS_TEST_RUN_ID", config.test_run_id);
+}
+
+/// The path with `/` as its separator on Windows, unchanged elsewhere.
+///
+/// Scripts under test splice this into JSON with bash `printf` and into
+/// `sha256sum` arguments. A `C:\Users\...` spelling breaks both: the
+/// backslashes become invalid JSON escapes (`\U`, `\5`), so the lifecycle log
+/// stopped parsing and a present approval was reported missing, and
+/// `sha256sum` prefixes its output line with a backslash when the file name
+/// contains one. `C:/Users/...` is a path bash, git, python and every native
+/// tool accept alike.
+fn forward_slashes(path: &Path) -> std::ffi::OsString {
+    if cfg!(windows) {
+        path.to_string_lossy().replace('\\', "/").into()
+    } else {
+        path.as_os_str().to_os_string()
+    }
 }
 
 fn report_one(label: &str, code: Option<i32>, output: &str, verbose: bool, counts: &mut Counts) {

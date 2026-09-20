@@ -524,13 +524,12 @@ t_begin() {
         printf '%s: %s\n' "${0##*/}" "$dirty_reason" >&2
         exit 70
     fi
-    # The native runner exports PLANNING_AGENT_TMPDIR in Windows spelling
-    # (C:\Users\...\planning-agent) while bash and everything under it spells
-    # the same directory /tmp/... or /c/... . The capsule and reviewer-selection
-    # code compares and joins these as strings, so a capsule recorded under one
-    # spelling was never found under the other. Give bash the spelling bash uses.
+    # A test started by hand (not through run-tests, which already exports it
+    # this way) may carry PLANNING_AGENT_TMPDIR as C:\Users\...\planning-agent.
+    # Scripts splice it into JSON and sha256sum arguments, where the backslashes
+    # are invalid escapes / a line prefix; C:/Users/... works everywhere.
     if t_is_windows && [ -n "${PLANNING_AGENT_TMPDIR:-}" ] && command -v cygpath >/dev/null 2>&1; then
-        PLANNING_AGENT_TMPDIR="$(cygpath -u "$PLANNING_AGENT_TMPDIR")"
+        PLANNING_AGENT_TMPDIR="$(cygpath -m "$PLANNING_AGENT_TMPDIR")"
         export PLANNING_AGENT_TMPDIR
     fi
     T_FINDINGS="$(mktemp "${TMPDIR:-/tmp}/t-findings.XXXXXX")"
