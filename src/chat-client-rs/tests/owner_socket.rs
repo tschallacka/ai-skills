@@ -10,6 +10,12 @@
 //! depends on the other in `[dependencies]`, and a real (even dev-only) path
 //! dependency between them would be a heavier answer than sharing one test
 //! module needs (05-step-migrate-owner-socket's own handoff).
+//!
+//! Unix only: the control endpoint under test is a unix socket whose mode
+//! bits it asserts (Windows serves the same verbs over a loopback port, which
+//! has no file mode), and `PermissionsExt` does not exist there.
+
+#![cfg(unix)]
 
 #[path = "../../chat-server-rs/tests/support/mod.rs"]
 mod support;
