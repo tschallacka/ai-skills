@@ -17,6 +17,15 @@ pub type Client = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 /// instead of inferring one, falling back to exactly its old polling
 /// behaviour when this is `false` -- a NAK, or an older/unrelated IRC server
 /// that never answers CAP at all.
+/// Whether a read failed only because its `set_read_timeout` ran out, with the
+/// connection still alive. The same event surfaces as `WouldBlock` on unix
+/// and as `TimedOut` on Windows, and every polling loop here treats it as
+/// "nothing yet, keep waiting"; checking one kind ended the `tail` loop, and so
+/// the whole `tail`, at its first quiet second on Windows.
+pub fn is_timeout(e: &io::Error) -> bool {
+    matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut)
+}
+
 pub fn connect(
     server: &str,
     nick: &str,
@@ -95,7 +104,7 @@ fn negotiate_message_tags(tls: &mut Client) -> bool {
                 }
             }
             Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
+                if !is_timeout(&e) {
                     return false;
                 }
             }
@@ -268,7 +277,7 @@ pub fn wait_for_welcome(
                 // EAGAIN/EWOULDBLOCK: the welcome hasn't arrived within this
                 // read's timeout but the connection is alive; keep waiting for
                 // the deadline rather than failing a noisy localhost exchange.
-                if e.kind() != ErrorKind::WouldBlock {
+                if !is_timeout(&e) {
                     return Err(e.to_string());
                 }
             }

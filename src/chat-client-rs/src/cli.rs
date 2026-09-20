@@ -19,7 +19,6 @@ use crate::wire::{json_field, mentions, msg_line_id, valid_chan, wire_segments};
 use chat_proto::Message;
 use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::io::ErrorKind;
 use std::net::TcpStream;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -412,7 +411,7 @@ fn send(args: &[String], state_dir: &std::path::Path) {
                 }
             }
             Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
+                if !crate::net::is_timeout(&e) {
                     break;
                 }
             }
@@ -457,7 +456,7 @@ pub fn read_last_id(
                 pending.push_back(l);
             }
             Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
+                if !crate::net::is_timeout(&e) {
                     break;
                 }
             }
@@ -526,7 +525,7 @@ fn names(args: &[String], state_dir: &std::path::Path) {
                 }
             }
             Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
+                if !crate::net::is_timeout(&e) {
                     break;
                 }
             }
@@ -768,7 +767,7 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
                 }
             }
             Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
+                if !crate::net::is_timeout(&e) {
                     break;
                 }
             }
@@ -824,7 +823,7 @@ fn collect_answer(
                 Take::Done => return (kept, true),
             },
             Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
+                if !crate::net::is_timeout(&e) {
                     break;
                 }
             }
@@ -1269,7 +1268,7 @@ pub(crate) fn tail(args: &[String], state_dir: &std::path::Path) {
                                 }
                             }
                             Err(e) => {
-                                if e.kind() != ErrorKind::WouldBlock {
+                                if !crate::net::is_timeout(&e) {
                                     break;
                                 }
                             }
@@ -1500,7 +1499,7 @@ pub(crate) fn tail(args: &[String], state_dir: &std::path::Path) {
                 }
             }
             Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
+                if !crate::net::is_timeout(&e) {
                     break;
                 }
             }
