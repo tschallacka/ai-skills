@@ -350,6 +350,7 @@ tests/fixtures/progress-shape/02-goal-b/progress.md
 tests/fixtures/progress-shape/02-goal-b/steps/01-step-b.md
 tests/fixtures/progress-shape/02-goal-b/steps/02-step-b2.md
 tests/fixtures/progress-shape/progress.md
+tests/lib-script-stub.sh
 tests/lib-test.sh
 tests/test-add-fix-claim.sh
 tests/test-add-planning-bug.sh
