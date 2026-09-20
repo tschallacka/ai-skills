@@ -18,12 +18,17 @@ impression.
 
 ## The file
 
-`BUGS.json` at the root of whatever holds the defect.
+`BUGS.json` at the root of whatever holds the defect. **If it does not exist
+yet**, `bugs` will not create it for you — write it yourself first, as the
+skeleton below with an empty `bugs` array and `skill_version` copied exactly
+as shown (this is the one supported way to bootstrap a fresh register; a
+stale or invented version number is refused by name on the very next
+command).
 
 ```json
 {
   "skill": "bug-report",
-  "skill_version": "1.4.2",
+  "skill_version": "2.0.0-alpha.1",
   "comment": "Defects found in <subject>, with reproduction and verification.",
   "bugs": [
     {
@@ -108,6 +113,13 @@ bugs add --title "A colonless heading silently ignores a rename" \
 It prints the id it allocated. `--title`, `--reproduce`, `--observed` and
 `--expected` are required and the command refuses without them: a defect nobody
 can reproduce is a rumour, and one with no stated expectation is an opinion.
+
+Pass `--notes "..."` to `add` for an initial note (e.g. "not locally
+reproduced yet"). A note added later — after the fact, once something new is
+learned — goes through `bugs update <ID> --append-note "..."` instead, which
+appends rather than replacing. There is no `--help` on `add`/`update`
+specifically; `bugs --help` (or `-h`, anywhere in the command line) always
+shows the full usage.
 
 ### Prose from a file, not the shell
 
