@@ -302,10 +302,14 @@ fn assert_signal_removes_worktree(tag: &str, signal: libc::c_int, expected_exit:
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
+        // Keeps reading after the match instead of returning: dropping the
+        // read end of the pipe makes the child's next println! fail with EPIPE,
+        // which panics it (exit 101) before the signal under test is handled.
+        // Whether it prints again before the kill lands is a race that x86_64
+        // happened to win and aarch64 lost.
         for line in reader.lines().map_while(Result::ok) {
             if line.starts_with("worktree ") {
                 let _ = tx.send(line);
-                return;
             }
         }
     });

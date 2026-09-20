@@ -774,15 +774,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
-        # A full checkout, not a sparse one. The union of what the workspace's
-        # tests read from the tree keeps growing: the real-tree parity tests
-        # (blast-radius, verify-both-shells, generate-portability, ci-scope,
-        # ci-subjects, ci-test-scope) run the real .github/*.sh and
-        # planning/scripts, and test-mermaid-accuracy checks the tracked
-        # documents and every script and artifact their diagrams name. A
-        # sparse list had to be kept equal to that union by hand and failed
-        # the mermaid test (its documents were not checked out) without
-        # anything pointing at the list. The tracked tree is about 14 MB.
+        with:
+          # Everything EXCEPT benchmark/results. The union of what the
+          # workspace's tests read from the tree keeps growing: the real-tree
+          # parity tests (blast-radius, verify-both-shells,
+          # generate-portability, ci-scope, ci-subjects, ci-test-scope) run
+          # the real .github/*.sh and planning/scripts, and
+          # test-mermaid-accuracy checks the tracked documents and every
+          # script and artifact their diagrams name. A hand-kept include list
+          # had to equal that union and failed the mermaid test without
+          # anything pointing at the list, so this excludes the one directory
+          # nothing reads instead: its archived runs hold paths longer than
+          # Windows allows, and checking them out failed the Windows leg.
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/benchmark/results/
 
       - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.98
