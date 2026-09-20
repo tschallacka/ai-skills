@@ -110,9 +110,31 @@ pub fn resolve_document(plan: &Path, id: &str) -> Result<PathBuf, String> {
                 .join("steps")
                 .join(format!("{}.md", row.step))
         }
-        value => return Err(format!("usage: unsupported entry id: {value}")),
+        value => return Err(unsupported_id(value)),
     };
     Ok(path)
+}
+
+/// An unsupported id is a dead end unless the message says what to use instead.
+/// A reviewer once asked for `progress:<goal>` -- the real id is
+/// `goal-progress:<goal>` -- and read a bare "unsupported entry id" as meaning
+/// per-goal progress trackers could not be served at all, so they went
+/// unreviewed. A near miss is named when one exists (a kind that ends with, or
+/// starts with, the prefix that was tried); otherwise the whole vocabulary is.
+fn unsupported_id(given: &str) -> String {
+    if let Some((prefix, rest)) = given.split_once(':') {
+        let suggestion = ["goal", "goal-progress", "step", "unit"]
+            .into_iter()
+            .find(|kind| *kind != prefix && (kind.ends_with(prefix) || kind.starts_with(prefix)));
+        if let Some(kind) = suggestion {
+            return format!(
+                "usage: unsupported entry id: {given} -- did you mean {kind}:{rest}? Run plan-context with no arguments for the full id list."
+            );
+        }
+    }
+    format!(
+        "usage: unsupported entry id: {given} -- valid ids are plan, inventory, progress, adversarial-review, coverage, stories, bugs, fixes, fix-keys, approval, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:WNN"
+    )
 }
 
 pub fn entry_inputs(plan: &Path, id: &str) -> Result<Vec<PathBuf>, String> {
@@ -313,8 +335,9 @@ fn labelled_paragraph(content: &str, heading: &str, label: &str) -> Result<Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{entry_hash, hash_bytes, is_inventory_row, valid_section_label};
+    use super::{entry_hash, hash_bytes, is_inventory_row, resolve_document, valid_section_label};
     use std::fs;
+    use std::path::Path;
 
     #[test]
     fn hash_matches_sha256_vector() {
@@ -368,5 +391,16 @@ mod tests {
         assert!(valid_section_label("§ 5.1"));
         assert!(!valid_section_label("§ 5.x"));
         assert!(!valid_section_label("§ 5.1 trailing"));
+    }
+
+    #[test]
+    fn an_unsupported_id_names_the_near_miss_or_the_vocabulary() {
+        let plan = Path::new("plan");
+        let near = resolve_document(plan, "progress:01-a").unwrap_err();
+        assert!(near.contains("did you mean goal-progress:01-a?"), "{near}");
+        let unknown = resolve_document(plan, "nonsense").unwrap_err();
+        for expected in ["plan", "inventory", "goal-progress:<goal>", "unit:WNN"] {
+            assert!(unknown.contains(expected), "{unknown}");
+        }
     }
 }

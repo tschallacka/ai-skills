@@ -97,3 +97,39 @@ fn find_scope_steps_keeps_a_step_whose_own_name_ends_in_testing_b336() {
 
     let _ = fs::remove_dir_all(&plan);
 }
+
+// `get <plan> <id>` with no trailing format defaults to markdown, and a
+// document that is not there reaches its own exit 66 rather than the usage
+// exit 64: the argument-count guards used to count the plan directory that
+// `hoist` had already removed.
+#[test]
+fn get_without_a_format_prints_the_document_and_a_missing_one_exits_66() {
+    let plan = unique_dir("get-default-format");
+    fs::write(plan.join("progress.md"), "# Progress\n\nnothing yet\n").unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_plan-content"))
+            .args(args)
+            .output()
+            .expect("run plan-content get")
+    };
+    let plan_arg = plan.to_str().unwrap();
+
+    let found = run(&["get", plan_arg, "progress"]);
+    assert!(
+        found.status.success(),
+        "{}",
+        String::from_utf8_lossy(&found.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&found.stdout),
+        "# Progress\n\nnothing yet\n"
+    );
+
+    let with_format = run(&["get", plan_arg, "progress", "path"]);
+    assert!(with_format.status.success());
+
+    let missing = run(&["get", plan_arg, "stories"]);
+    assert_eq!(missing.status.code(), Some(66));
+
+    let _ = fs::remove_dir_all(&plan);
+}

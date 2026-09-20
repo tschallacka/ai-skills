@@ -886,8 +886,14 @@ fn main() {
     };
     let (plan, rest) = hoist(&args[1..]);
     require_dir(&plan);
+    // `hoist` has already taken the plan directory out of `rest`, so `get` and
+    // `blast-radius` see `<id>` or `<id> <format>`: one or two arguments. The
+    // guards said 2..=3, which counted a plan directory that is no longer
+    // there, so `get <plan> <id>` printed usage and exited 64 unless a format
+    // was also given -- and a missing document could never reach its own
+    // "not found" exit code.
     match command.as_str() {
-        "get" if (2..=3).contains(&rest.len()) => format_document(
+        "get" if (1..=2).contains(&rest.len()) => format_document(
             &plan,
             &rest[0],
             rest.get(1).map(String::as_str).unwrap_or("markdown"),
@@ -896,7 +902,7 @@ fn main() {
             &plan,
             rest.first().map(String::as_str).unwrap_or("markdown"),
         ),
-        "blast-radius" if (2..=3).contains(&rest.len()) => blast_radius(
+        "blast-radius" if (1..=2).contains(&rest.len()) => blast_radius(
             &plan,
             &rest[0],
             rest.get(1).map(String::as_str).unwrap_or("markdown"),
