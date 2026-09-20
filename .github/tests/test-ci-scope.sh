@@ -93,10 +93,13 @@ check "a doc-only change"      none README.md
 check "a skill-only change"    none chat/SKILL.md
 
 echo "ci-scope: a crate change narrows to that crate and its dependents"
-got="$("$scope_sh" --files-from /dev/stdin <<'EOF' | awk -F= '/^scope=/{print $2}'
-src/rjq/src/main.rs
-EOF
-)"
+# The list goes through a file, not /dev/stdin: ci-scope is a native program,
+# and on Windows the MSYS layer turns /dev/null into NUL for it but has no such
+# translation for /dev/stdin, so the binary saw an unreadable path and (by
+# design) fell back to scope=full.
+leaf_list="$work/leaf-files"
+printf '%s\n' 'src/rjq/src/main.rs' > "$leaf_list"
+got="$("$scope_sh" --files-from "$leaf_list" | awk -F= '/^scope=/{print $2}')"
 if [ "$got" = "selective" ]; then
     printf '  ok    a leaf crate is selective\n'
 else

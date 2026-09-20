@@ -2,7 +2,7 @@
 // PACKAGE: PROD
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::{self, Command};
+use std::process;
 
 const USAGE: &str = r#"Usage:
   ${0##*/} add-goal <plan> <goal-name> <title> <outcome>
@@ -232,19 +232,24 @@ fn dispatch(root: &Path, command: &str, args: &[String]) -> ! {
         usage(64)
     }
     let (name, path, target_args) = if let Some(name) = rust_name {
-        let mut candidates = vec![root.join("bin").join(name)];
+        // The built file is `<name>.exe` on Windows. Without the suffix none of
+        // these exists there, the lookup falls through to the `.sh` script,
+        // and starting that file directly fails with "%1 is not a valid Win32
+        // application".
+        let file = planning_core::exe_name(name);
+        let mut candidates = vec![root.join("bin").join(&file)];
         if let Ok(entries) = std::fs::read_dir(root.join("bin")) {
             for entry in entries.flatten() {
-                candidates.push(entry.path().join(name));
+                candidates.push(entry.path().join(&file));
             }
         }
         candidates.push(
             root.join("src")
                 .join(name)
                 .join("target/release")
-                .join(name),
+                .join(&file),
         );
-        candidates.push(root.join("src").join(name).join("target/debug").join(name));
+        candidates.push(root.join("src").join(name).join("target/debug").join(&file));
         let path = candidates
             .into_iter()
             .find(|candidate| candidate.is_file())
@@ -266,7 +271,7 @@ fn dispatch(root: &Path, command: &str, args: &[String]) -> ! {
         eprintln!("plan-mutate.sh: command not found: {name}");
         process::exit(69)
     }
-    let status = Command::new(&path)
+    let status = planning_core::command_for(&path)
         .args(target_args)
         .status()
         .unwrap_or_else(|error| {

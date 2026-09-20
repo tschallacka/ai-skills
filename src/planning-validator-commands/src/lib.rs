@@ -295,8 +295,24 @@ fn is_executable(_path: &str) -> bool {
     }
     #[cfg(not(unix))]
     {
-        false
+        // No permission bits to read: a file is a command when its extension
+        // says it runs (the same set Git for Windows' bash and cmd start).
+        executable_by_extension(_path)
     }
+}
+
+#[cfg_attr(unix, allow(dead_code))]
+fn executable_by_extension(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|extension| {
+            matches!(
+                extension.as_str(),
+                "exe" | "bat" | "cmd" | "com" | "ps1" | "sh"
+            )
+        })
 }
 
 #[cfg(test)]
@@ -318,6 +334,21 @@ mod tests {
             &BTreeSet::from([".md".into()]),
             &BTreeSet::new(),
         ));
+    }
+
+    #[test]
+    fn without_permission_bits_an_extension_says_what_is_a_command() {
+        for command in ["vendor/x/tool.sh", "tools/run.EXE", "a/b.cmd", "a/b.ps1"] {
+            assert!(executable_by_extension(command), "{command}");
+        }
+        for cited in [
+            "vendor/x/config.xml",
+            "generated/Foo.php",
+            "README.md",
+            "bin/tool",
+        ] {
+            assert!(!executable_by_extension(cited), "{cited}");
+        }
     }
 
     #[test]

@@ -228,7 +228,11 @@ if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/missing-companio
     echo 'A required testing companion unexpectedly passed validation when missing.' >&2
     exit 1
 fi
-grep -Fq "W02 requires testing instructions at $missing_companion" "$temporary_root/missing-companion.log"
+# The validator is a native program: it names the file as C:/..., possibly with
+# backslash separators, not as the bash-side /tmp/... path. t_native_path and
+# t_slashes are the identity on unix.
+missing_companion_log="$(t_slashes < "$temporary_root/missing-companion.log")"
+grep -Fq "W02 requires testing instructions at $(t_native_path "$missing_companion")" <<< "$missing_companion_log"
 mv "$missing_companion.missing" "$missing_companion"
 
 "$script_dir/add-goal.sh" "$plan_dir" 02-research 'Research only' \

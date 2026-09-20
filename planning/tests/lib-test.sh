@@ -9,6 +9,10 @@
 #   t_unique_suffix                 a unique token, no `date +%N`
 #   t_copy_tree <src> <dst>         contents incl. dotfiles, no `cp -R src/.`
 #   t_sha256 <file>                 sha256 hex digest, GNU or BSD or openssl
+#   t_is_windows                    true under Git for Windows / MSYS / Cygwin
+#   t_native_path <path>            the path as a native tool prints it (C:/...)
+#   t_slashes                       filter: backslashes to slashes
+#   t_enable_symlinks               true when `ln -s` makes a real link here
 #
 # Assertion support. Two modes, and they are mutually exclusive by design:
 #
@@ -404,6 +408,53 @@ if stat -c '%a' . >/dev/null 2>&1; then
 else
     t_stat_mode() { stat -f '%Lp' "$1"; }
 fi
+
+# Windows: Git for Windows' bash (MSYS2) runs the tests, but the
+# compiled tools they drive are native Windows programs. Two consequences the
+# tests have to know about. First, the two sides disagree on what a path looks
+# like: bash says /tmp/x or /d/a/x, a native tool says C:/Users/x (or
+# C:\Users\x, or a mix of both after a Rust `join`). Second, NTFS has no unix
+# permission bits: chmod is a no-op and stat reports 644/755 whatever was set,
+# and a symlink is a copy unless MSYS=winsymlinks:nativestrict is exported.
+t_is_windows() {
+    case "$(uname -s 2>/dev/null)" in
+        MINGW* | MSYS* | CYGWIN*) return 0 ;;
+    esac
+    return 1
+}
+
+# The path as a native (non-MSYS) program spells it: C:/... on Windows,
+# unchanged everywhere else. Compare a tool's output against this, not against
+# the bash-side path.
+t_native_path() { # <path>
+    if t_is_windows && command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+# Succeeds when `ln -s` makes a real symbolic link here. On Git for Windows it
+# copies the target unless MSYS=winsymlinks:nativestrict is set, and a native
+# link then needs the privilege to create one (an elevated shell or Developer
+# Mode) -- so this asks the filesystem instead of assuming. A test whose
+# subject is symlink handling calls it and skips that part when it fails.
+t_enable_symlinks() {
+    local probe status=1
+    t_is_windows && export MSYS=winsymlinks:nativestrict
+    probe="$(mktemp -d "${TMPDIR:-/tmp}/t-symlink-probe.XXXXXX")" || return 1
+    if printf 'x' > "$probe/target" && ln -s target "$probe/link" 2>/dev/null && [ -L "$probe/link" ]; then
+        status=0
+    fi
+    rm -rf "$probe"
+    return "$status"
+}
+
+# Stdin with backslashes turned into slashes, so output that a native tool
+# built with a Windows separator compares against a t_native_path.
+t_slashes() {
+    tr '\\' '/'
+}
 
 # PORTABILITY(date-nanoseconds): BSD date has no %N and emits a literal "N".
 t_unique_suffix() {

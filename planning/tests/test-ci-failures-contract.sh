@@ -32,9 +32,15 @@ for candidate in "$repo_dir/target/release/rjq" "$repo_dir/bin"/*/rjq; do
 done
 [ -n "$rjq_bin" ] || t_skip "no built rjq found (run ./setup-dev-env.sh)"
 
+# shellcheck source=planning/tests/lib-script-stub.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-script-stub.sh"
+
 stub_bin="$work/bin"
 mkdir -p "$stub_bin"
-ln -s "$rjq_bin" "$stub_bin/rjq"
+# On Windows the gh and glab stubs below are bash scripts that the NATIVE
+# ci-failures binary has to start; each gets an .exe launcher (see the library).
+stub_prepare_shim "$work/shim"
+stub_link_or_copy "$rjq_bin" "$stub_bin/rjq"
 logs_dir="$work/logs"
 mkdir -p "$logs_dir"
 
@@ -77,6 +83,7 @@ case "$argv" in
 esac
 STUB
 chmod +x "$stub_bin/gh"
+stub_install_exe "$stub_bin" gh
 
 cat >"$stub_bin/glab" <<'STUB'
 #!/usr/bin/env bash
@@ -107,6 +114,7 @@ case "$argv" in
 esac
 STUB
 chmod +x "$stub_bin/glab"
+stub_install_exe "$stub_bin" glab
 
 run_script() {
     : >"$work/call.log"
@@ -380,8 +388,8 @@ run_script pr/47 --bogus
 # check (refuse, never quietly do less) holds either way.
 no_rjq_bin="$work/no-rjq-bin"
 mkdir -p "$no_rjq_bin"
-ln -s "$stub_bin/gh" "$no_rjq_bin/gh"
-ln -s "$stub_bin/glab" "$no_rjq_bin/glab"
+stub_link_or_copy "$stub_bin/gh" "$no_rjq_bin/gh"
+stub_link_or_copy "$stub_bin/glab" "$no_rjq_bin/glab"
 no_bin_root="$work/no-bin-root"
 mkdir -p "$no_bin_root"
 set +e

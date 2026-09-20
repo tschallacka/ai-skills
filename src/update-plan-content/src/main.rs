@@ -476,7 +476,11 @@ fn update_review_status(plan: &Path, requested: &str) {
             let claimant = env::var("CLAIMED_BY").unwrap_or_else(|_| id.clone());
             let verifier = env::current_exe()
                 .ok()
-                .and_then(|path| path.parent().map(|parent| parent.join("verify-fix-keys")))
+                .and_then(|path| {
+                    path.parent().map(|parent| {
+                        parent.join(format!("verify-fix-keys{}", env::consts::EXE_SUFFIX))
+                    })
+                })
                 .unwrap_or_else(|| PathBuf::from("verify-fix-keys"));
             let result = Command::new(verifier)
                 .arg(plan)

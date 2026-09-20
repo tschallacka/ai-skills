@@ -94,7 +94,10 @@ fn reset_boxes(content: &str) -> String {
 fn child_update_progress(goal_dir: &Path) -> Result<(), (i32, String)> {
     let executable = env::current_exe()
         .ok()
-        .and_then(|path| path.parent().map(|parent| parent.join("update-progress")))
+        .and_then(|path| {
+            path.parent()
+                .map(|parent| parent.join(planning_core::exe_name("update-progress")))
+        })
         .filter(|path| path.is_file())
         .unwrap_or_else(|| PathBuf::from("update-progress"));
     let output = Command::new(executable)

@@ -93,6 +93,74 @@ pub fn simplified(path: PathBuf) -> PathBuf {
     path
 }
 
+/// A program's file name on this platform: `plan-context` is
+/// `plan-context.exe` on Windows and itself elsewhere. Anything that looks for
+/// a sibling binary by joining a bare name onto a directory needs this, or it
+/// finds nothing on Windows and falls back to a name the OS cannot resolve.
+pub fn exe_name(name: &str) -> String {
+    format!("{name}{}", std::env::consts::EXE_SUFFIX)
+}
+
+/// The `bash` to run scripts with.
+///
+/// Elsewhere that is `bash`, found through PATH. On Windows a bare
+/// `Command::new("bash")` is not: Rust looks in the system directories before
+/// PATH, so it finds `C:\Windows\System32\bash.exe`, the WSL launcher, ahead of
+/// the Git for Windows bash the user has. PATH is walked here, skipping the
+/// launcher stubs.
+pub fn bash_program() -> PathBuf {
+    #[cfg(windows)]
+    {
+        if let Some(path) = env::var_os("PATH") {
+            for dir in env::split_paths(&path) {
+                let candidate = dir.join("bash.exe");
+                if candidate.is_file() && !is_wsl_launcher(&candidate) {
+                    return candidate;
+                }
+            }
+        }
+    }
+    PathBuf::from("bash")
+}
+
+/// True for the WSL launcher stubs Windows ships as `bash.exe`: the one in
+/// System32 and the app-execution alias under WindowsApps.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_wsl_launcher(path: &Path) -> bool {
+    let lowered = path.to_string_lossy().to_ascii_lowercase();
+    lowered.contains("\\windows\\system32\\") || lowered.contains("\\windowsapps\\")
+}
+
+/// A path as bash wants to receive it as an argument: with slashes on Windows
+/// (MSYS converts a `C:/x` argument and mangles a `C:\x` one), untouched
+/// elsewhere.
+pub fn for_bash(path: &Path) -> String {
+    let text = path.to_string_lossy().into_owned();
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text
+    }
+}
+
+/// A command that runs `program`. A `.sh` script is started through bash on
+/// Windows, where the file itself cannot be executed (CreateProcess answers
+/// "%1 is not a valid Win32 application"); everywhere else, and for a real
+/// executable, the file is started directly.
+pub fn command_for(program: &Path) -> Command {
+    if cfg!(windows)
+        && program
+            .extension()
+            .is_some_and(|extension| extension == "sh")
+    {
+        let mut command = Command::new(bash_program());
+        command.arg(for_bash(program));
+        command
+    } else {
+        Command::new(program)
+    }
+}
+
 pub fn require_safe_value(label: &str, value: &str) -> Result<(), String> {
     if value.is_empty() {
         return Err(format!("{label} must not be empty"));
@@ -320,8 +388,8 @@ pub fn parse_git_remote_namespace(remote: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        atomic_write, git_remote_namespace, parse_git_remote_namespace, require_safe_value,
-        shell_quote, shell_unquote, simplified,
+        atomic_write, command_for, exe_name, git_remote_namespace, is_wsl_launcher,
+        parse_git_remote_namespace, require_safe_value, shell_quote, shell_unquote, simplified,
     };
     use std::fs;
     use std::path::Path;
@@ -381,6 +449,40 @@ mod tests {
             simplified(std::path::PathBuf::from(r"\\?\Volume{1}\x")),
             std::path::PathBuf::from(r"\\?\Volume{1}\x")
         );
+    }
+
+    #[test]
+    fn the_wsl_launchers_are_recognised_and_git_bash_is_not() {
+        assert!(is_wsl_launcher(Path::new(r"C:\Windows\System32\bash.exe")));
+        assert!(is_wsl_launcher(Path::new(
+            r"C:\Users\me\AppData\Local\Microsoft\WindowsApps\bash.exe"
+        )));
+        assert!(!is_wsl_launcher(Path::new(
+            r"C:\Program Files\Git\bin\bash.exe"
+        )));
+    }
+
+    #[test]
+    fn a_program_name_carries_the_platform_suffix() {
+        assert_eq!(
+            exe_name("plan-context"),
+            format!("plan-context{}", std::env::consts::EXE_SUFFIX)
+        );
+    }
+
+    #[test]
+    fn a_shell_script_command_goes_through_bash_only_on_windows() {
+        let command = command_for(Path::new("/x/run.sh"));
+        if cfg!(windows) {
+            assert!(command
+                .get_program()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .contains("bash"));
+        } else {
+            assert_eq!(command.get_program(), "/x/run.sh");
+        }
+        assert_eq!(command_for(Path::new("/x/tool")).get_program(), "/x/tool");
     }
 
     #[test]

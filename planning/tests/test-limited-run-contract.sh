@@ -101,11 +101,21 @@ if (ulimit -v 262144) >/dev/null 2>&1; then
     mkdir -p "$nested_bin"
     cp "$stub_bin/uname" "$nested_bin/uname"
     cp "$stub_bin/true" "$nested_bin/true"
-    ln -s "$BASH" "$nested_bin/bash"
+    # The stubs' `#!/usr/bin/env bash` needs a bash on this PATH. A symlink to
+    # $BASH does it on Linux and macOS; on Windows (MSYS) `ln -s` makes a
+    # Windows shortcut a native loader cannot open ("error while loading shared
+    # libraries"), and bash.exe copied alone cannot find msys-2.0.dll. There
+    # the real bash's own directory follows the stubs instead: the stubbed
+    # uname and true still win, and nothing there provides systemd-run.
+    nested_path="$nested_bin"
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) nested_path="$nested_bin:${BASH%/*}" ;;
+        *) ln -s "$BASH" "$nested_bin/bash" ;;
+    esac
     set +e
     (
         ulimit -v 262144
-        STUB_LOG="$temporary_root/log" STUB_UNAME_S=Linux PATH="$nested_bin" \
+        STUB_LOG="$temporary_root/log" STUB_UNAME_S=Linux PATH="$nested_path" \
             "$BASH" "$wrapper" 512M 400 -- true
     ) >"$temporary_root/nested.out" 2>"$temporary_root/nested.err"
     RUN_RC=$?

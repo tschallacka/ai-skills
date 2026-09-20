@@ -215,7 +215,10 @@ fn mint_fix_keys_binary() -> PathBuf {
     }
     env::current_exe()
         .ok()
-        .and_then(|path| path.parent().map(|parent| parent.join("mint-fix-keys")))
+        .and_then(|path| {
+            path.parent()
+                .map(|parent| parent.join(planning_core::exe_name("mint-fix-keys")))
+        })
         .unwrap_or_else(|| PathBuf::from("mint-fix-keys"))
 }
 

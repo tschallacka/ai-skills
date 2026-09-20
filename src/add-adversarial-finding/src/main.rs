@@ -172,7 +172,10 @@ fn main() {
         // minter's own chatter kept off this command's one-line stdout result.
         let minter = env::current_exe()
             .ok()
-            .and_then(|path| path.parent().map(|parent| parent.join("mint-fix-keys")))
+            .and_then(|path| {
+                path.parent()
+                    .map(|parent| parent.join(planning_core::exe_name("mint-fix-keys")))
+            })
             .unwrap_or_else(|| PathBuf::from("mint-fix-keys"));
         let result = Command::new(minter)
             .arg(&plan)

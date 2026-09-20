@@ -1135,6 +1135,9 @@ dependencies = [
 [[package]]
 name = "plan-context-wrapper"
 version = "0.1.0"
+dependencies = [
+ "planning-core",
+]
 
 [[package]]
 name = "plan-crypt"

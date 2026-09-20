@@ -20,8 +20,12 @@ PLANS_ROOT="$plans_root" "$repo_dir/planning/scripts/create-plan.sh" "$plan_root
 
 [ -f "$plans_root/.env" ]
 [ -f "$plan_root/.env" ]
-[ "$(t_stat_mode "$plans_root/.env")" = 600 ]
-[ "$(t_stat_mode "$plan_root/.env")" = 600 ]
+# NTFS has no permission bits: a manifest cannot be mode 600 there, stat says
+# 644 whatever was set, and the checker has no mode to enforce.
+if ! t_is_windows; then
+    [ "$(t_stat_mode "$plans_root/.env")" = 600 ]
+    [ "$(t_stat_mode "$plan_root/.env")" = 600 ]
+fi
 "$env_tool" check "$plan_root" "$plans_root" >/dev/null
 
 global_before="$(t_sha256 "$plans_root/.env")"
@@ -48,7 +52,11 @@ printf '%s\n' "$PLAN_NAME|$PLAN_DESCRIPTION_FILE|$PLAN_STEPS_ROOT"
 EOF
 chmod 700 "$tmp/helper.sh"
 "$tmp/helper.sh" "$plan_root" "$plans_root" "$env_tool" > "$helper_output"
-grep -Fqx "demo-plan|$plan_root/plan-description.md|$plan_root/steps" "$helper_output"
+# The manifest holds the paths as the native tool spelled them (C:\... on
+# Windows); t_native_path and t_slashes are the identity on unix.
+native_plan_root="$(t_native_path "$plan_root")"
+helper_slashed="$(t_slashes < "$helper_output")"
+grep -Fqx "demo-plan|$native_plan_root/plan-description.md|$native_plan_root/steps" <<< "$helper_slashed"
 usage_file="$tmp/plan-env-usage"
 if "$env_tool" >"$usage_file" 2>&1; then
     printf '%s\n' 'missing plan-env arguments were accepted' >&2
@@ -68,11 +76,14 @@ if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
 fi
 [ ! -e "$tmp/sentinel" ]
 
-cp "$plan_root/.env" "$bad/.env"
-chmod 644 "$bad/.env"
-if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
-    printf '%s\n' 'weak manifest mode was accepted' >&2
-    exit 1
+# A weak mode is only a fault where a mode can be weak (see above).
+if ! t_is_windows; then
+    cp "$plan_root/.env" "$bad/.env"
+    chmod 644 "$bad/.env"
+    if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
+        printf '%s\n' 'weak manifest mode was accepted' >&2
+        exit 1
+    fi
 fi
 
 cp "$plan_root/.env" "$bad/.env"
@@ -149,10 +160,14 @@ if nobody_uid="$(id -u nobody 2>/dev/null)" && chown "$nobody_uid" "$bad/.env" 2
 fi
 
 mv "$bad/.env" "$bad/.env.real"
-ln -s .env.real "$bad/.env"
-if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
-    printf '%s\n' 'symlinked manifest was accepted' >&2
-    exit 1
+# Needs a real link: Git for Windows copies the target for `ln -s` unless told
+# otherwise, and a copy is an ordinary manifest (t_enable_symlinks says which).
+if t_enable_symlinks; then
+    ln -s .env.real "$bad/.env"
+    if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
+        printf '%s\n' 'symlinked manifest was accepted' >&2
+        exit 1
+    fi
 fi
 
 # ── Duplication parity (T6) ───────────────────────────────────────────────────

@@ -501,21 +501,46 @@ EOF
 chmod +x "$fake_bin/codex" "$fake_bin/timeout"
 no_setsid_path="$integration_root/no-setsid-path"
 mkdir -p "$no_setsid_path"
+# Every tool on PATH except the three that would let a worker detach. Symlinks
+# on unix. Windows (MSYS) differs three ways: `ln -s` makes a shortcut file a
+# native loader cannot open, so a hard link (or a copy) stands in; the Windows
+# directories on PATH hold thousands of programs and none of the three, so they
+# are appended to the new PATH as they are instead of being linked one by one
+# (doing that took the test past its time limit); and an MSYS program finds its
+# msys-2.0.dll beside itself, which is why the whole directory is linked and
+# not a chosen few.
+link_tool() { # <source> <destination>
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) ln -f "$1" "$2" 2>/dev/null || cp -f "$1" "$2" ;;
+        *) ln -sf "$1" "$2" ;;
+    esac
+}
+windows_host=0
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) windows_host=1 ;; esac
+windows_native_dirs=""
 old_ifs="$IFS"
 IFS=:
 for dir in $PATH; do
     [ -d "$dir" ] || continue
+    if [ "$windows_host" -eq 1 ]; then
+        case "$dir" in
+            /usr/*|/bin|/mingw*|/ucrt*|/clang*|/opt/*) ;;
+            *) windows_native_dirs="$windows_native_dirs:$dir"; continue ;;
+        esac
+    fi
     for path in "$dir"/*; do
         [ -x "$path" ] || continue
+        [ -f "$path" ] || continue
         tool="${path##*/}"
-        case "$tool" in setsid|nohup|open) continue ;; esac
-        [ -e "$no_setsid_path/$tool" ] || ln -s "$path" "$no_setsid_path/$tool"
+        case "$tool" in setsid|setsid.exe|nohup|nohup.exe|open|open.exe) continue ;; esac
+        [ -e "$no_setsid_path/$tool" ] || link_tool "$path" "$no_setsid_path/$tool"
     done
 done
 IFS="$old_ifs"
 for tool in codex fake-reviewer codex-worker timeout; do
-    ln -sf "$fake_bin/$tool" "$no_setsid_path/$tool"
+    link_tool "$fake_bin/$tool" "$no_setsid_path/$tool"
 done
+[ -z "$windows_native_dirs" ] || no_setsid_path_tail="$windows_native_dirs"
 # The run id must match UTC_TIMESTAMP-<name>, so the name is the only place
 # collision-proof entropy fits: two suite runs starting in the same second
 # otherwise derive the same RESULT_DIR and race the publication `mv`.
@@ -540,7 +565,7 @@ PY
 # the suite whose result depended on machine speed, and the only one that could
 # not run on macOS at all, where `timeout` does not exist. A hang here is a hang
 # to see, the same as in the other 79 tests, none of which are capped.
-if ! PATH="$no_setsid_path" env \
+if ! PATH="$no_setsid_path${no_setsid_path_tail:-}" env \
     REVIEWER_COMMAND="$fake_bin/fake-reviewer" \
     REVIEWER_SESSION_ID="${run_id}-current-B-fixed" \
     REVIEWER_CAPSULE_ID="capsule-001" \
@@ -558,7 +583,7 @@ if ! bash -n "$integration_root/testing/current-$run_id/start-worker.sh"; then
     nl -ba "$integration_root/testing/current-$run_id/start-worker.sh" | sed -n '600,620p' >&2
     exit 1
 fi
-if ! PATH="$no_setsid_path" "$BASH" "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
+if ! PATH="$no_setsid_path${no_setsid_path_tail:-}" "$BASH" "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
     cat "$integration_root/worker-output.txt" >&2 || true
     cat "$integration_root/testing/current-$run_id/workspace/oracle-grade.txt" >&2 2>/dev/null || true
     exit 1

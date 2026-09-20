@@ -120,7 +120,11 @@ printf 'AR-31,A later gap.,Do the later thing.,%s,W01\n' '✅ resolved' \
 history_file="$plan_stdin/adversarial-review-history.md"
 grep -Fq "Archived this cycle's Findings table" "$archive_log" \
     || note_fail 'the rewrite did not say this cycle'"'"'s table was archived'
-grep -Fq "$history_file" "$archive_log" \
+# The notice comes from a native tool, so on Windows it spells the file
+# C:/... (or C:\...), not the bash-side /tmp/... path; t_native_path and
+# t_slashes are the identity on unix.
+archive_notice="$(t_slashes < "$archive_log")"
+grep -Fq "$(t_native_path "$history_file")" <<< "$archive_notice" \
     || note_fail 'the archive notice did not name the file it wrote to'
 if [ -f "$history_file" ]; then
     grep -Fq '| AR-31 |' "$history_file" \
