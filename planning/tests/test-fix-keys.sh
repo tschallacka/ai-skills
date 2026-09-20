@@ -255,16 +255,20 @@ if printf 'ID,Missing,Required,Status\nAR-11,a,b,✅ resolved\n' | \
     "$script_dir/update-adversarial-review.sh" "$plan_c" >/dev/null 2>&1; then
     fail 'update-adversarial-review.sh accepted a 4-column CSV'
 fi
-grep -Fq 'plan_render_csv_table 5' "$script_dir/update-adversarial-review.sh" \
-    || fail 'update-adversarial-review.sh does not call plan_render_csv_table 5'
-grep -Fq 'plan_render_csv_table 4' "$script_dir/update-adversarial-review.sh" \
-    && fail 'update-adversarial-review.sh still calls plan_render_csv_table 4'
-grep -Fq 'Required plan change, Status, Work unit' "$script_dir/update-adversarial-review.sh" \
-    || fail 'update-adversarial-review.sh strings do not list the 5-column format'
-grep -Fq 'Required plan change, Status)' "$script_dir/update-adversarial-review.sh" \
-    && fail 'a 4-column column list remains in update-adversarial-review.sh'
-grep -Fqi 'optional' "$script_dir/update-adversarial-review.sh" \
-    && fail 'update-adversarial-review.sh still describes the work unit column as optional'
+# The renderer is compiled now, so the script text says nothing: what has to hold
+# is what the command tells a caller. Its help lists the 5-column format, no
+# 4-column list survives, and the work unit column is not called optional.
+uar_help="$("$script_dir/update-adversarial-review.sh" --help 2>&1)"
+case "$uar_help" in
+    *'Required plan change, Status, Work unit'*) ;;
+    *) fail 'update-adversarial-review.sh help does not list the 5-column format' ;;
+esac
+case "$uar_help" in
+    *'Required plan change, Status)'*) fail 'a 4-column column list remains in update-adversarial-review.sh help' ;;
+esac
+case "$uar_help" in
+    *ptional*) fail 'update-adversarial-review.sh help still describes the work unit column as optional' ;;
+esac
 
 plan_c2="$temporary_root/plan-c2"
 seed_gated_plan "$plan_c2" test-session-c

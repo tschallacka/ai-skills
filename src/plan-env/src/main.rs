@@ -158,14 +158,51 @@ fn write_global(root: &Path, skill: &Path) {
     );
 }
 
-fn write_plan(plan: &Path, root_arg: Option<&str>, snapshot_arg: Option<&str>) {
-    let plan = absolute(plan.to_str().unwrap());
-    let root = absolute(&plans_root(root_arg).display().to_string());
-    let skill = env::args()
+/// The planning skill directory the global manifest records.
+///
+/// The binary no longer lives in `<skill>/scripts/`: the shell shims exec it
+/// from a `bin/<triple>` directory, where "two directories up from the
+/// executable" is `bin`, not the skill, and `write-plan` used to rewrite the
+/// global manifest with `PLANNING_SKILL_ROOT=<repo>/bin`. In order: the nearest
+/// ancestor of the executable that holds `scripts/plan-env.sh`; the value the
+/// global manifest already carries (which `create-plan` wrote from the real
+/// skill directory); the old two-levels-up guess as the last resort. The
+/// `PLANNING_SKILL_ROOT` environment variable is deliberately not consulted: it
+/// names the directory that CONTAINS `planning/`, a different level from the
+/// one the manifest records.
+fn skill_root(plans_root: &Path) -> PathBuf {
+    let executable = env::current_exe()
+        .ok()
+        .or_else(|| env::args().next().map(PathBuf::from));
+    if let Some(found) = executable.as_deref().and_then(|exe| {
+        exe.ancestors()
+            .skip(1)
+            .find(|dir| dir.join("scripts/plan-env.sh").is_file())
+            .map(Path::to_path_buf)
+    }) {
+        return found;
+    }
+    if let Ok(text) = fs::read_to_string(global_path(plans_root)) {
+        if let Some(recorded) = text
+            .lines()
+            .find_map(|line| line.strip_prefix("PLANNING_SKILL_ROOT="))
+            .map(unquote)
+            .filter(|value| !value.is_empty())
+        {
+            return PathBuf::from(recorded);
+        }
+    }
+    env::args()
         .next()
         .and_then(|p| PathBuf::from(p).parent().map(Path::to_path_buf))
         .and_then(|p| p.parent().map(Path::to_path_buf))
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+fn write_plan(plan: &Path, root_arg: Option<&str>, snapshot_arg: Option<&str>) {
+    let plan = absolute(plan.to_str().unwrap());
+    let root = absolute(&plans_root(root_arg).display().to_string());
+    let skill = skill_root(&root);
     let manifest = plan_path(&plan);
     let snapshot = snapshot_arg
         .filter(|v| !v.is_empty())
@@ -320,6 +357,118 @@ fn manifest_check(path: &Path, expected: &[&str]) {
     }
 }
 
+/// The `KEY=value` pairs of an already structurally-checked manifest, unquoted.
+fn read_manifest(path: &Path) -> std::collections::BTreeMap<String, String> {
+    fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.to_string(), unquote(value)))
+        .collect()
+}
+
+/// The per-field consistency checks once both manifests have passed their
+/// structural check: a manifest copied in from another plan, another plans
+/// root or an older schema is refused rather than trusted (`65`, like every
+/// other manifest refusal). The global manifest's own skill root is compared
+/// with its scripts/tests roots, not with this binary's location -- the
+/// binary lives in a `bin/<triple>` directory, not beside the scripts.
+fn check_fields(plan: &Path, root: &Path) {
+    let global = read_manifest(&global_path(root));
+    let manifest = read_manifest(&plan_path(plan));
+    let get = |map: &std::collections::BTreeMap<String, String>, key: &str| {
+        map.get(key).cloned().unwrap_or_default()
+    };
+    let path_text = |path: &Path| path.display().to_string();
+    let mismatch = |what: &str| -> ! { die(what, 65) };
+
+    let global_schema = get(&global, "PLAN_ENV_SCHEMA_VERSION");
+    if global_schema != "2" {
+        mismatch(&format!(
+            "unsupported global manifest schema: {global_schema}"
+        ));
+    }
+    let plan_schema = get(&manifest, "PLAN_ENV_SCHEMA_VERSION");
+    if plan_schema != "2" {
+        mismatch(&format!("unsupported plan manifest schema: {plan_schema}"));
+    }
+    if get(&global, "PLANS_ROOT") != path_text(root) {
+        mismatch("global manifest root mismatch");
+    }
+    if get(&manifest, "PLAN_ROOT") != path_text(plan) {
+        mismatch("plan manifest root mismatch");
+    }
+    if get(&manifest, "PLANS_ROOT") != path_text(root) {
+        mismatch("plan manifest root mismatch");
+    }
+    let skill = get(&global, "PLANNING_SKILL_ROOT");
+    if get(&global, "PLANNING_SCRIPTS_ROOT") != format!("{skill}/scripts") {
+        mismatch("planning scripts root mismatch");
+    }
+    if get(&global, "PLANNING_TESTS_ROOT") != format!("{skill}/tests") {
+        mismatch("planning tests root mismatch");
+    }
+    let expected_name = plan
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".to_string());
+    if get(&manifest, "PLAN_NAME") != expected_name {
+        mismatch("plan name mismatch");
+    }
+    let fixed = [
+        (
+            "GLOBAL_PLANS_ENV_FILE",
+            path_text(&global_path(root)),
+            "global manifest path mismatch",
+        ),
+        (
+            "PLAN_ENV_FILE",
+            path_text(&plan_path(plan)),
+            "plan manifest path mismatch",
+        ),
+        (
+            "PLAN_DESCRIPTION_FILE",
+            path_text(&plan.join("plan-description.md")),
+            "plan description path mismatch",
+        ),
+        (
+            "PLAN_PROGRESS_FILE",
+            path_text(&plan.join("progress.md")),
+            "plan progress path mismatch",
+        ),
+        (
+            "PLAN_WORK_UNIT_INVENTORY",
+            path_text(&plan.join("work-unit-inventory.md")),
+            "work-unit inventory path mismatch",
+        ),
+        (
+            "PLAN_VALIDATION_FILE",
+            path_text(&plan.join("validation-report.md")),
+            "validation path mismatch",
+        ),
+        (
+            "PLAN_CONTEXT_ROOT",
+            path_text(&plan.join("context")),
+            "context root mismatch",
+        ),
+        (
+            "PLAN_STEPS_ROOT",
+            path_text(&plan.join("steps")),
+            "steps root mismatch",
+        ),
+    ];
+    for (key, expected, message) in fixed {
+        if get(&manifest, key) != expected {
+            mismatch(message);
+        }
+    }
+    let snapshot = get(&manifest, "PLAN_SNAPSHOT_REPO");
+    if !(snapshot.is_empty() || snapshot == path_text(root) || snapshot == path_text(plan)) {
+        mismatch("snapshot repo mismatch");
+    }
+}
+
 #[cfg(unix)]
 fn current_uid() -> u32 {
     use std::os::unix::fs::MetadataExt;
@@ -381,11 +530,16 @@ fn main() {
                     "PLAN_STEPS_ROOT",
                 ],
             );
+            check_fields(&plan, &root);
             println!("plan-env: manifests valid for {}", args[2]);
         }
         Some("print") if (2..=3).contains(&(args.len() - 1)) => {
             let plan = absolute(&args[2]);
-            let root = plans_root(args.get(3).map(String::as_str));
+            let root = absolute(
+                &plans_root(args.get(3).map(String::as_str))
+                    .display()
+                    .to_string(),
+            );
             manifest_check(
                 &global_path(&root),
                 &[
@@ -414,6 +568,7 @@ fn main() {
                     "PLAN_STEPS_ROOT",
                 ],
             );
+            check_fields(&plan, &root);
             print!(
                 "{}{}",
                 fs::read_to_string(global_path(&root)).unwrap(),
