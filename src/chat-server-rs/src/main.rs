@@ -714,7 +714,10 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                         }
                     }
                     Err(e) => {
-                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        ) {
                             continue;
                         }
                         // A plaintext client retrying against the TLS listener
@@ -779,8 +782,26 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
         // decrypt them before draining plaintext. read_tls returning Ok(0) is
         // the peer's TCP close: the authoritative "this connection is over"
         // signal, and discarding it was how dead sockets stayed in CLOSE-WAIT.
-        if let Ok(0) = st.conn.read_tls(&mut st.tcp) {
-            done = true;
+        match st.conn.read_tls(&mut st.tcp) {
+            Ok(0) => done = true,
+            // A peer that was killed rather than closed sends a reset, not a
+            // FIN: `ConnectionReset`/`ConnectionAborted` here, where a clean
+            // close reads as Ok(0). Windows does this for every killed
+            // process and Linux for one that died with unread data. Ignoring
+            // it left the dead connection open and its nick held for good. A
+            // read that merely ran out its timeout is `WouldBlock` on unix
+            // and `TimedOut` on Windows, and means only "nothing yet".
+            Err(e)
+                if !matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                done = true
+            }
+            _ => {}
         }
         let _ = st.conn.process_new_packets();
         while st.conn.write_tls(&mut st.tcp).unwrap_or(0) > 0 {}
