@@ -223,6 +223,20 @@ fn git_ignored(repo: &Path, path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Git runs its automatic maintenance DETACHED after a commit, so it outlives
+/// the tool that committed: it takes `.git/objects/maintenance.lock` (and, when
+/// it repacks, temporary pack and bitmap files) in and out under whatever reads,
+/// copies or removes the plan next. Foreground keeps the maintenance and drops
+/// the stray process. `.agents/MAINTAINER.md` 1.15 has the measurement.
+///
+/// Only for a repository this tool has just created: an existing project's own
+/// repository keeps whatever the user configured.
+fn keep_maintenance_in_the_foreground(repo: &Path) {
+    for key in ["gc.autoDetach", "maintenance.autoDetach"] {
+        git_succeeds(repo, &["config", key, "false"]);
+    }
+}
+
 fn initialise_git(plan: &Path, plans_root: &Path, bare_name: bool) {
     let existing = git_value(plan, &["rev-parse", "--show-toplevel"]).map(PathBuf::from);
     let repo = existing.as_ref().map(|top| {
@@ -246,7 +260,11 @@ fn initialise_git(plan: &Path, plans_root: &Path, bare_name: bool) {
     // no history for any later pre-mutation snapshot. Re-initialising an
     // existing repository is a no-op.
     let _ = fs::create_dir_all(&repo);
+    let created = !repo.join(".git").exists();
     let _ = Command::new("git").args(["init", "-q"]).arg(&repo).status();
+    if created {
+        keep_maintenance_in_the_foreground(&repo);
+    }
     let _ = Command::new("git")
         .args(["-C"])
         .arg(&repo)

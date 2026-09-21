@@ -232,6 +232,22 @@ this file holds what applies to the repository as a whole.
   (`AI_SKILLS_ALLOW_CONCURRENT=1` bypasses it and accepts the collisions).
   The gate's per-crate `cargo test` does not, so do not run the suite and the
   gate at the same time.
+- **A detached child is a shared resource too.** Git runs its automatic
+  maintenance detached after a commit, so it outlives the tool that committed
+  and creates and removes files under `.git` while the plan directory is read,
+  copied or removed. Measured 2026-09-21 on `planning-server`'s
+  `update_step_with_a_stale_revision_is_refused_and_changes_nothing`: 14
+  failures in 2400 runs with 8 in parallel, 0 in 40 run alone, and every one of
+  the 14 differed by exactly one file, `.git/objects/maintenance.lock`, present
+  in the "before" snapshot and gone from the "after". The macOS bash 3.2 leg
+  failed the same test with `NotFound` from `fs::read` mid-walk (the file was
+  not named), and a sibling copy test once failed with
+  `cp: cannot stat '.../.git/objects/bitmap-ref-tips_*'`. `create-plan` now sets
+  `gc.autoDetach` and `maintenance.autoDetach` to `false` in a repository it
+  creates (never in an existing project's own), which brought the same
+  parallel run to 0 in 2400. A test that snapshots, copies or deletes a
+  directory a tool has just committed into is exposed to this unless the
+  tool's git runs in the foreground.
 
 ### 1.16 Windows is proved by CI legs, and it has its own conventions
 - **A Linux run says nothing about Windows.** The target is

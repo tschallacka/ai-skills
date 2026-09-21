@@ -73,3 +73,68 @@ fn a_gitignored_plans_root_gets_its_own_repository_and_pins_it() {
 
     let _ = fs::remove_dir_all(&project);
 }
+
+fn git_config(dir: &Path, key: &str) -> String {
+    String::from_utf8_lossy(&git(dir, &["config", "--local", "--get", key]).stdout)
+        .trim()
+        .to_string()
+}
+
+fn run_create_plan(cwd: &Path, plans_root: &Path) {
+    let output = Command::new(env!("CARGO_BIN_EXE_create-plan"))
+        .args(["plan-a", "Maintenance probe"])
+        .current_dir(cwd)
+        .env("PLANS_ROOT", plans_root)
+        .env("PLAN_NONINTERACTIVE", "1")
+        .output()
+        .expect("run create-plan");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// Git runs automatic maintenance detached after a commit, so it outlives the
+// command that committed and creates and removes files under `.git` while the
+// plan is being read, copied or removed. A repository create-plan makes for a
+// plan runs it in the foreground instead, where it finishes before the commit
+// returns.
+#[test]
+fn a_repository_created_for_a_plan_runs_git_maintenance_in_the_foreground() {
+    let plans = scratch("maintenance-new").join("plans");
+    fs::create_dir_all(&plans).unwrap();
+    run_create_plan(&plans, &plans);
+
+    let plan_repo = if plans.join(".git").exists() {
+        plans.clone()
+    } else {
+        plans.join("plan-a")
+    };
+    for key in ["gc.autoDetach", "maintenance.autoDetach"] {
+        assert_eq!(git_config(&plan_repo, key), "false", "{key}");
+    }
+
+    let _ = fs::remove_dir_all(plans.parent().unwrap());
+}
+
+// A project's own repository is the user's: only a repository this tool
+// creates gets the setting.
+#[test]
+fn an_existing_project_repository_keeps_its_own_maintenance_settings() {
+    let project = scratch("maintenance-existing");
+    assert!(git(&project, &["init", "-q"]).status.success());
+    let plans = project.join(".plans");
+    fs::create_dir_all(&plans).unwrap();
+    run_create_plan(&project, &plans);
+
+    for key in ["gc.autoDetach", "maintenance.autoDetach"] {
+        assert_eq!(
+            git_config(&project, key),
+            "",
+            "{key} was set on the project"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&project);
+}
