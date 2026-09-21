@@ -20,7 +20,7 @@ original text if the archaeology is ever needed.
 | How code is shaped | `CODE-STYLE.md` |
 | What a script owes everything else | `CODE-CONTRACTS.md` |
 | What breaks on BSD or bash 3.2 | `PORTABILITY.md`, generated from `portability-rules.json` |
-| What a change must update | `planning/MAINTAINER.md` §4 |
+| What a change must update | `.agents/MAINTAINER.md` section 2 (2a a file, 2b a crate); `planning/MAINTAINER.md` section 4 adds the planning skill's own steps |
 | How a release is cut | `RELEASE.md` |
 | Who receives a file | its own `MODE:` / `PACKAGE:` marker (contract 10a) |
 | What is queued or broken | `TODO.json`, `BUGS.json` |
@@ -99,9 +99,10 @@ narrow" warning against exactly that edit. **Settle it with `git check-ignore -v
 and `git ls-files --error-unmatch` before writing the sentence**; both take a
 second and neither is fooled by what the last doc said.
 
-**`./run-tests.sh <word>` is not a filter.** An unrecognised argument is not
-rejected — it runs the entire suite, about ten minutes. `./run-tests.sh markers`
-looks like a targeted marker check and is not one. Run the specific test file.
+**`./run-tests.sh <word>` is not a filter.** The runner refuses an unrecognised
+argument with exit 64 ("unknown argument"), so `./run-tests.sh markers` runs
+nothing. To run a subset, pass `--select-file FILE` (one repo-relative test path
+per line, as `--list-only` prints them), or run the specific test file.
 
 **The npm baseline pins the byte size of every packaged file.** Editing a
 packaged document — `README.md`, `AGENTS.md` — fails `pre-push-check` with

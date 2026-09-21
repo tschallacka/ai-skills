@@ -1,6 +1,8 @@
 # Contributing
 
-Two documents matter before you write anything here:
+Start at `.agents/MAINTAINER.md` ("Start here") for building, testing, pushing,
+CI and the change checklist. Two documents matter before you write anything
+here:
 
 - **`CODE-STYLE.md`** — the contract for every shell file in the repo:
   portability target, file skeleton, size limits, exit codes, output discipline.
@@ -17,11 +19,24 @@ Everything you need is in the flake, including the one tool you cannot get from
 a package manager: **bash 3.2**.
 
 ```bash
-nix develop           # bash32, bash32-run-tests, shellcheck, rjq, git
+nix develop
+./setup-dev-env.sh    # build the crates into this tree; a fresh clone has none
 ```
 
-Without nix, install `shellcheck` and `rjq` yourself and see
-[Testing on bash 3.2 without nix](#testing-on-bash-32-without-nix).
+The shell provides `bash32`, `bash32-run-tests`, `bash32-run`, `shellcheck`,
+`actionlint`, `git`, the Rust toolchain with the five release targets (and a
+musl cross compiler on Linux), `nodejs` with `mmdc` (mermaid-cli), `python3`,
+`sqlite`, `curl` and `openssl`. It does **not** provide `rjq`: `setup-dev-env.sh`
+builds it (`./bootstrap.sh rjq --path-only` does the same for the runner's own
+bootstrap and `npm prepack`, where the dev shell is not available). The
+shell puts the tree's `bin/*/` first on `PATH`, but the lookup the shims use for
+the compiled binaries (`plan_bin_dir`) ignores `PATH`, so an installed
+`~/.config/tsch-ai-skills/bin` still hides the tree's build unless you export
+`AI_SKILLS_BIN_ROOT=$PWD/bin/<triple>`. `.agents/MAINTAINER.md` 1.9 has the
+lookup order.
+
+**Nix is mandatory, and every developer flow goes through it.** Building the
+tree, the suite, the gate and CI's reproduction all run inside the flake.
 
 The flake is a **development** dependency only. Nothing it provides is required
 to *use* the skills — those need `bash`, POSIX coreutils, `awk`, `sed`, `grep`,
@@ -63,12 +78,15 @@ needed because unpacking normalises timestamps and make regenerates the shipped
 bash32-run-tests               # the same suite, entirely under bash 3.2
 ```
 
-`run-tests.sh` runs every `test-*.sh` under `planning/tests/` and
-`benchmark/planning/tests/`, each under the resource wrapper, in sorted order.
-Both suites must be green on **both** bashes.
+`run-tests.sh` is a shim over the compiled `run-tests`, so it needs
+`./setup-dev-env.sh` first. It runs every shell test suite in the repository and
+`cargo test` for each crate (`--list-only` names them), each item under the
+resource wrapper where one applies (`.agents/MAINTAINER.md`,
+"Start here" step 4). The suite must be green on **both** bashes.
 
-Two context-cache tests report `UNCONFIGURED` without `PLANNING_CONTEXT_CACHE`.
-That is expected and is not a failure.
+Two context-cache tests report `UNCONFIGURED` without `PLANNING_CONTEXT_CACHE`,
+and a crate item is `UNCONFIGURED` when `cargo` is missing. Neither is a
+failure, but read the Skipped and Unconfigured counts in the summary.
 
 `bash32-run-tests` prepends a directory whose `bash` *is* 3.2, so every
 `#!/usr/bin/env bash` child resolves to 3.2 as well. Running
@@ -94,7 +112,7 @@ registry:
 # PORTABILITY(<rule-id>): <one line, why this local code is shaped this way>
 ```
 
-`PORTABILITY.md` is **not committed** (`planning/MAINTAINER.md` §2.16): it is
+`PORTABILITY.md` is **not committed** (`.agents/MAINTAINER.md` 1.10): it is
 generated on demand, so a fresh clone does not have one. Run
 `./generate-portability.sh` when you want to read the catalogue, and never
 hand-edit the copy you generated. `--check` proves the generator is
@@ -131,7 +149,8 @@ with a comment saying why; do not add a fourth without one.
 
 Note that `git ls-files` only sees tracked files, so `git add` new scripts
 before trusting a clean lint run — and generated scripts are never tracked at
-all (§2.16), which is why the checklist invocation names them explicitly.
+all (`.agents/MAINTAINER.md` 1.10), which is why the checklist invocation names
+them explicitly.
 
 ## Before you open a pull request
 
@@ -186,11 +205,13 @@ Then, specific to this repo:
   surviving fragments of the retired bash installer.** `installer/build-release.sh`
   still sources both directly for `SKILL_NAMES`/`SKILL_DESCRIPTIONS` and
   `skill_files()`/`skill_artifact_files()` — the file list a release packs.
-  A new or renamed file under a skill directory moves in four places, or
-  `planning/tests/test-installer-manifest.sh` fails: `planning/PACKAGE-MANIFEST.tsv`,
-  `planning/PACKAGE-MAP.tsv`, `installer/src/50-manifest.sh`'s `skill_files()`,
-  and `package.json`'s `files` (directory level only). The manifest and the map
-  are compared byte-for-byte, so row *order* matters.
+  A new or renamed file under a skill directory must be declared in
+  `installer/src/50-manifest.sh`'s `skill_files()` (the pre-push gate checks it).
+  For the `planning/` skill it also moves in `planning/PACKAGE-MANIFEST.tsv`,
+  `planning/PACKAGE-MAP.tsv` and `package.json`'s `files` (directory level
+  only), or `planning/tests/test-installer-manifest.sh` fails; the manifest and
+  the map are compared byte-for-byte, so row *order* matters. The full list,
+  including a new skill, is `.agents/MAINTAINER.md` section 2a.
 - **A skill's runtime dependencies live in `<skill>/requires.tsv`**: tool id, a
   `<uname -s>:<uname -m>` condition, a strength, and the capability lost without
   it. `hard` means the installer refuses to install *that skill* and exits
@@ -207,16 +228,15 @@ Then, specific to this repo:
 
 ## CI
 
-`.github/workflows/ci.yml` runs the suite on `ubuntu-latest` and
-`macos-latest`, plus a leg pinned to macOS's system bash 3.2 and the
-shellcheck gate. Both macOS legs are blocking: a regression there fails the
-PR (T37 removed the old informational flag once two consecutive runner runs
-came back green under both shells).
+What each workflow and job proves, when it runs and how to reproduce it locally
+is `.agents/MAINTAINER.md` section 3.
 
-## Testing on bash 3.2 without nix
+## How the flake's bash 3.2 is built
 
-macOS already has it at `/bin/bash`. On Linux, either use the flake or build it
-yourself with the same three fixes:
+This is background, not an alternative to the flake (nix is mandatory, see
+"Development environment"): it records how the `bash32` the flake provides is
+made, and what stock macOS already has at `/bin/bash`. The same three fixes it
+applies:
 
 ```bash
 curl -sSLO https://ftp.gnu.org/gnu/bash/bash-3.2.57.tar.gz

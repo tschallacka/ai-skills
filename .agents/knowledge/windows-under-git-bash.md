@@ -12,7 +12,7 @@ Measured 2026-09-21 on GitHub's `windows-latest` runner (Git for Windows' bash,
 `x86_64-pc-windows-msvc`, Rust 1.98), by making the whole workspace and
 the whole shell suite pass on a dedicated branch and then merging it. At that
 point `cargo test --workspace --all-targets` ran 186 test binaries and the
-shell suite ran 247 tests; the unsharded suite took about 30 minutes.
+shell suite ran 247 tests.
 
 ## Symptom, cause, what the repository does
 
@@ -35,17 +35,29 @@ shell suite ran 247 tests; the unsharded suite took about 30 minutes.
 ## Fixing one platform's error kind can break another
 
 Ending a connection on **any** read error, to fix the killed-peer row, broke
-the macOS `chat-mcp` join with "unexpected end of file": a read error that is
+the macOS `chat-mcp` join with "unexpected end of file" (run 35545991115, commit
+`1a7f4c2f`, job 106171959866, "x86_64-apple-darwin builds and runs every subject
+in scope", failing
+`a_registered_trigger_wakes_wait_on_a_message_with_no_mention_at_all` in
+`src/chat-mcp/tests/mcp_flow.rs` with `join refused: "send: unexpected end of
+file"`): a read error that is
 not a lost peer is not the end of the connection. The list above is the fix,
 not "any error". A change made for one platform's error kind has to be
 re-checked on the others.
 
 ## What it means here
 
-- Windows behaviour is only ever established by a CI leg. A dedicated branch
-  with its own workflow (`windows.yml`, plus `.github/windows-focus.txt` to run
-  one thing) gets a verdict in one job's time; `ci.yml`'s matrix takes most of
-  an hour.
+- Windows behaviour is only ever established by a CI leg. `windows.yml` on the
+  `windows` branch is a shortcut **only with `.github/windows-focus.txt`**, which
+  makes it run one thing: measured 2026-09-21, a focused run (run 35543660777,
+  commit `c0f5a598`) took 1 min 15 s, while an unfocused one (run 35543977213,
+  commit `1a7f4c2f`, workspace tests plus the unsharded shell suite) took
+  37 min 30 s. That is not faster than the whole main workflow: `ci.yml` runs on
+  `nextupdate` took 26 min 20 s (run 35563751715, `f650bf56`), 29 min 29 s (run
+  35570621053, `48a09027`) and 39 min 45 s (run 35573178188, `a3a5df90`), each
+  including the four Windows shell-suite shards. These are wall-clock times from
+  each run's `createdAt` to `updatedAt` (`gh run view <id> --json
+  createdAt,updatedAt`), so they include time spent waiting for a runner.
 - When a Windows-only failure appears, look first for a spelling difference
   (path, line ending, exit code, error kind) between what the test expects and
   what the platform produces, before suspecting the code under test.

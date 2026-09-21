@@ -11,9 +11,13 @@ Every figure here comes from a run's own log, named so it can be re-read.
 
 Both macOS legs — the default-bash one and the bash 3.2 portability floor — run
 that image (run 33871455553). **Do not reason about "the Intel macOS runner"**:
-there is not one on `macos-latest`. `x86_64-apple-darwin` appears in this repo
-only as a *cross-compilation target*, built on the same arm64 host, so a leg
-named for it is not evidence of an Intel machine.
+there is not one on `macos-latest`. The shell-suite legs (`test`, `test-bash32`)
+run only on `macos-latest`, so every shell test that ran on macOS ran on arm64.
+Intel is a separate runner, `macos-15-intel`, which `ci.yml`'s `native` job,
+`render-artifacts.yml` and `release-installer.yml` use to build and run
+`x86_64-apple-darwin` natively. A leg named `x86_64-apple-darwin` is therefore
+evidence of an Intel machine for the crates, and of nothing for the shell suite.
+Re-checked against the workflow files on 2026-09-21.
 
 ## The macOS runner is ~150x slower than a developer machine, not 2x
 
@@ -121,8 +125,18 @@ because CI logs carry terminal colour codes. Strip them with
 
 ## Do not push while a run is queued
 
-The workflow's concurrency group cancels the older run, and registration on
-these runners takes ~15 minutes, so a push inside that window destroys the
-result you were waiting for. It has cost this repository a Darwin errno it then
-had to re-derive by controlled intervention, and both macOS suite legs twice
-over. Batch the work, or wait.
+The workflow's concurrency group cancels the older run when the same ref is
+pushed again (`.agents/MAINTAINER.md` 1.11), so a push while the run you need is
+still going destroys its result. It has cost this repository a Darwin errno it
+then had to re-derive by controlled intervention, and both macOS suite legs
+twice over. Batch the work, or wait.
+
+**How long a run waits before its macOS legs start**, measured 2026-09-21 on
+run 35573178188 (commit `a3a5df90`, `ci.yml`): the run was created at 07:29:11Z
+and its first job (`shellcheck`, ubuntu) started 3 s later, so a run registers
+at once. Its `x86_64-apple-darwin` leg started at 07:40:26Z, 11 min 15 s after
+the run was created, and its `aarch64-apple-darwin` leg at 07:41:35Z, 12 min
+24 s after; the Linux legs had started within seconds. So the wait is for a
+macOS *runner*, not for registration, and it is one run's figure, not a
+guarantee. (The earlier version of this section said registration takes about
+15 minutes; that figure had no run behind it.)

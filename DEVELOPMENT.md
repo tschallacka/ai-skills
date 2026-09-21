@@ -46,12 +46,12 @@ runtime dependencies unless the skill genuinely needs them.
 
 Every shell file here targets bash 3.2 on macOS, bash 4/5 on Linux, and GNU
 *or* BSD userland — macOS `/bin/bash` is the floor, so bash 4 syntax and
-GNU-only utility flags are out. `PORTABILITY.md` (generated) catalogues the traps already hit.
+GNU-only utility flags are out. Git for Windows' bash is a supported floor too
+(`CODE-STYLE.md` section 1). `PORTABILITY.md` (generated) catalogues the traps already hit.
 `CODE-STYLE.md` is the authority: it lists the
 banned constructs with their replacements, the file skeleton, the exit-code
-vocabulary, and the pre-commit checklist. CI enforces it by running the suite on
-`ubuntu-latest` and `macos-latest` (including explicitly under system bash 3.2)
-plus a `shellcheck` pass.
+vocabulary, and the pre-commit checklist. What CI runs to enforce it, on which
+platforms, is in `.agents/MAINTAINER.md` section 3.
 
 ## Testing the installer
 
@@ -69,10 +69,11 @@ shellcheck -s bash installer/bootstrap.sh planning/scripts/*.sh   # no new findi
 git diff --check
 ```
 
-`./run-tests.sh` runs every test under `planning/tests/` and
-`benchmark/planning/tests/`; run it rather than naming individual test scripts.
-Two context-cache tests report `UNCONFIGURED` without `PLANNING_CONTEXT_CACHE`,
-which is expected.
+`./run-tests.sh` runs every shell test suite in the repository and `cargo test`
+for each crate (`./run-tests.sh --list-only` names them); run it rather than
+naming individual test scripts. It needs the compiled runner, so run
+`./setup-dev-env.sh` first (`.agents/MAINTAINER.md` 1.9). Two context-cache tests
+report `UNCONFIGURED` without `PLANNING_CONTEXT_CACHE`, which is expected.
 
 Show installer options without making changes:
 
@@ -110,7 +111,7 @@ JavaScript or move the skills to satisfy npm packaging.
 
 The generated artifacts the package ships — the five compiled plan libraries
 and `planning/REVIEWER.md` — are built by `npm prepack` from the tracked
-sources, never committed (`planning/MAINTAINER.md` §2.16). A pack from a clean
+sources, never committed (`.agents/MAINTAINER.md` 1.10). A pack from a clean
 checkout is therefore complete without any generated file in git.
 
 ## Verifying on both shells

@@ -2,7 +2,7 @@
 # Release protocol
 
 A release ships a **prod package**: the files an end user needs and nothing else.
-The maintainer's files — the per-function library sources, the 70 test scripts and
+The maintainer's files — the per-function library sources, the test scripts and
 their fixtures, the compiler, the architecture and maintainer documentation — stay
 in the repository. They are not bloat to a maintainer and they are nothing but
 bloat to a user, so the two are separated by declaration rather than by judgement.
@@ -49,7 +49,7 @@ cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
    `--check` that fails rather than silently rebuilding:
 
    ```sh
-   ./planning/scripts/build-plan-libs.sh --check   # the four plan-*-lib.sh
+   ./planning/scripts/build-plan-libs.sh --check   # the five plan-*-lib.sh
    ./generate-portability.sh --check               # PORTABILITY.md
    ./blast-radius.sh                               # every coupling in coupling.tsv
    ```
@@ -70,7 +70,12 @@ cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
    step. Read `--list` before tagging: it is the last point at which a file that
    should not ship is cheap to catch.
 
-6. **Regenerate `.npmignore`** so `npm publish` excludes the same set:
+6. **Check that `.npmignore` is current**, so `npm publish` excludes the same set.
+   It is generated, and its own header says to regenerate it after adding a
+   file: the change that adds, removes or renames a tracked file regenerates it
+   in that same change, so at release time this is a re-check and the file
+   should already be current. No gate enforces this, so run the command and
+   commit any difference it shows:
 
    ```sh
    ./installer/build-release.sh --npmignore > .npmignore
@@ -109,8 +114,8 @@ installer install --all --source . --target DIR --package dev    # prod plus the
 
 `--package dev` exists so a contributor can install a working development copy
 anywhere: the per-function library sources, the compiler, every test and fixture,
-`ARCHITECTURE.md` and `MAINTAINER.md`. For the planning skill that is 241 files
-against 85 in a prod install.
+`ARCHITECTURE.md` and `MAINTAINER.md`. For the planning skill that is several
+times as many files as a prod install.
 
 `prod` is the default deliberately. The one-line install is the common path and
 must never quietly deliver a maintainer's tree.

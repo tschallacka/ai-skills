@@ -49,12 +49,16 @@ before the code).
 
 ## 1. Portability contract
 
-**Target: bash 3.2 on macOS, bash 4/5 on Linux, GNU *or* BSD userland.**
+**Target: bash 3.2 on macOS, bash 4/5 on Linux, GNU *or* BSD userland, and
+Git for Windows' bash with its bundled coreutils on Windows.**
 
 macOS ships `/bin/bash` 3.2.57 and has done for over a decade. `#!/usr/bin/env
 bash` resolves to it unless the user installed Homebrew bash *and* has it first
 on `PATH`, which we do not get to assume. So bash 3.2 is the floor, and BSD
-coreutils are the floor for utilities.
+coreutils are the floor for utilities. Git for Windows' bash plus its bundled
+coreutils is a supported floor alongside them; the CI evidence and the
+conventions it adds (paths, `.exe`, line endings) are in `.agents/MAINTAINER.md`
+1.16.
 
 Interpretation of "works in every shell": the **shebang stays bash** — these are
 bash scripts and rewriting them for `dash`/busybox `ash` would cost more than it
@@ -186,10 +190,10 @@ one unit and say which in a comment.
 
 ### Enforcement
 
-Portability is enforced by CI, not by good intentions: `.github/workflows/ci.yml`
-runs the suite on `ubuntu-latest` **and** `macos-latest`, plus a `shellcheck`
-pass. A rule in this file without a CI leg or a regression test in
-`planning/tests/` is a suggestion, and suggestions rot.
+Portability is enforced by CI, not by good intentions; what each job proves is
+mapped in `.agents/MAINTAINER.md` section 3. A rule in this file without a CI
+leg or a regression test in `planning/tests/` is a suggestion, and suggestions
+rot.
 
 ---
 
@@ -356,7 +360,8 @@ artifact — it is fetched and run standalone (`curl … | bash`) and is the npm
 `bin`, so at the moment it runs nothing else from this repository is on disk
 yet to source. It stays self-contained by design, not by generation: its own
 header explains why the mascot/palette pixels are copied in verbatim rather
-than sourced from `installer/src/05-config.sh`/`30-render.sh`.
+than sourced: `ART` from `installer/src/05-config.sh`, while the palette functions
+live only there and in `src/installer/src/ui/mascot.rs`.
 
 The actual installer — the skill picker, headless install, permission and
 MCP registration — is the compiled Rust binary under `src/installer/`, not a
@@ -792,7 +797,7 @@ A portability workaround gets a marker, because without one the next reader
 - The untagged `# PORTABILITY:` form is rejected: it cannot be indexed.
 
 `generate-portability.sh` harvests these into `PORTABILITY.md` — generated on
-demand and never committed (`planning/MAINTAINER.md` §2.16), so run the
+demand and never committed (`.agents/MAINTAINER.md` 1.10), so run the
 generator to read the catalogue — and the marker does double duty: a local
 warning and the catalogue's index. That is also how the cross-file
 information stays out of comments: it is generated, not written.

@@ -51,7 +51,7 @@ contributing a harness that is not yet listed.
 |---|---|
 | Linux | any distribution, bash 4 or 5, GNU userland |
 | macOS | 11+ with the stock `/bin/bash` 3.2, BSD userland; Homebrew bash not required |
-| Windows | via WSL2, which is a Linux install. Git Bash / MSYS / Cygwin get dependency hints from the installer but are untested and have no CI leg |
+| Windows | Git for Windows' bash with its bundled coreutils, checked by CI legs, or WSL2, which is a Linux install. The evidence and the conventions are in `.agents/MAINTAINER.md` 1.16 |
 
 The installer and the helper scripts need `bash`, POSIX `coreutils`, `awk`,
 `sed`, `grep`, `git`, and `curl` for the one-command install. The `planning`
@@ -60,9 +60,8 @@ skill additionally needs `rjq`, and on macOS `resource-limited-testing` needs
 install hint rather than failing partway through. Those two are the only extra
 runtime dependencies any skill has — in particular `python3` is **not** required
 by anything that gets installed, only by this repository's own benchmark
-harness. `CODE-STYLE.md` is the contract these scripts are held to,
-and CI runs the test suite on Linux and macOS — including under macOS's
-bash 3.2.
+harness. `CODE-STYLE.md` is the contract these scripts are held to;
+what CI proves on each platform is mapped in `.agents/MAINTAINER.md` section 3.
 
 One skill is genuinely OS-scoped: `resource-limited-testing` enforces a *hard*
 RAM cap only on Linux, via a transient systemd `--user` cgroup v2 scope. On

@@ -45,46 +45,30 @@ the maintainer must behave going forward.
 ## 2. Behavior rules for the future
 
 ### 2.1 No backwards compatibility
-- A changed command/format is a **clean break**. No aliases, legacy modes, or
-  inferred defaults. Old forms fail loudly.
-- Coordinated migration: update producer, parser/validator, fixtures, tests,
-  manifest/map, `installer/src/50-manifest.sh`'s `skill_files()`, capsule copy,
-  and the hash test in the **same** change. Run the plan validator and
-  installer-manifest check.
+The rule is `../.agents/MAINTAINER.md` 1.1. Planning-specific: run the plan
+validator and the installer-manifest check with the coordinated migration.
 
 ### 2.2 Small, scoped, single-source docs
-- `SKILL.md` stays a lean index/contract. Never let it regrow into the
-  monolithic document it replaced.
-- Agents read only the doc for the task they are doing. Phase scoping prevents
-  "future knowledge" leaking into a planning/execution/cleanup context.
-- Shared facts live in exactly one place: the contract in `SKILL.md`, the
-  canonical roles in `MAINTAINER-STYLE-CONTRACT.md`. Phase docs and role docs
-  **reference, never duplicate**.
+The rule is `../.agents/MAINTAINER.md` 1.2. Planning-specific: `SKILL.md` is the
+contract and `MAINTAINER-STYLE-CONTRACT.md` holds the canonical roles; phase
+docs and role docs reference them, never duplicate them, and phase scoping keeps
+"future knowledge" out of a planning, execution or cleanup context.
 
 ### 2.3 Proactive, reconciling tools
-- When a mutation happens, the tool reconciles every reference automatically —
-  coverage rows, Owned-work-units, "Depends on", step/testing files, and
-  progress trackers. Do not make an agent issue a follow-up call the tool
-  knew it needed.
-- Keep helpers **small**; put shared logic in library files
-  (`plan-document-lib.sh`) — or, for a new capability's own logic, in a Rust
-  crate under `src/` (CODE-STYLE.md section 1b), not a new bash library.
+The rule is `../.agents/MAINTAINER.md` 1.3. Planning-specific: the references a
+mutation reconciles are coverage rows, Owned-work-units, "Depends on",
+step/testing files and progress trackers. Shared logic goes in
+`plan-document-lib.sh` or, for a new capability, in a Rust crate under `src/`
+(`CODE-STYLE.md` section 1b), not a new bash library.
 
 ### 2.4 Deterministic command contracts
-- Every subcommand has one fixed, documented positional signature. An explicit
-  `document-id` where applicable. No positional overloading, no value-sniffing.
-- Every mutating helper has `--help` (exit 0, concise) and **actionable
-  errors**: state the problem and what the agent can do to resolve it.
+The rule is `../.agents/MAINTAINER.md` 1.4.
 
 ### 2.5 Identity-gated capabilities
-- Revealing capabilities (e.g. `--paths`) are gated by caller role (`ROLE_ID`);
-  `--list` is deliberately open (id/name only). Default print mode only ever
-  emits the requested role's own docs.
-- Content reads FAIL CLOSED: an unset or unknown `ROLE_ID` is a hard refusal
-  with a `FAIL-CLOSED identity` message — the worker is denied a persona and
-  must be respawned. Only `--list` is identity-free.
-- Shell gates are **advisory, not a security boundary**; the agent framework
-  confines the process. Document that.
+The rule is `../.agents/MAINTAINER.md` 1.5. Planning-specific: `--paths` is a
+revealing capability gated by `ROLE_ID`, `--list` (id/name only) is the one
+identity-free read, and default print mode emits only the requested role's own
+docs.
 
 ### 2.6 Plans are transient work orders
 - Plans are not fixtures. `.plans/` is gitignored; `.env` manifests are
@@ -282,7 +266,8 @@ entry carries a surface that drives the verdict:
 
 ### 2.14 One EXIT trap, process-wide
 
-`plan-document-lib.sh` installs a single `plan_cleanup` on `EXIT INT TERM` at
+The rule is `../.agents/MAINTAINER.md` 1.8; this section is how the planning
+library implements it. `plan-document-lib.sh` installs a single `plan_cleanup` on `EXIT INT TERM` at
 load and keeps one accumulating temp list, replacing the per-call
 `trap … EXIT` / `trap - EXIT` pair that leaked temps whenever two of them
 nested (CODE-STYLE §8).
@@ -305,80 +290,21 @@ vocabulary, removes the overlap. Until then, never use `trap - EXIT` to
 
 ### 2.15 A working local tree needs the crates built
 
-Run `../setup-dev-env.sh` once after cloning. It builds every crate under
-`../src/` for this machine's target triple into ONE `bin/<target triple>` at
-the repository root — the directory `plan_bin_dir` walks up to find — rather
-than a bin/ inside each skill. Only the host triple is built; cross-building
-the other four is what a release (`installer/build-release.sh`) and CI do.
-
-For every planning command that has a `.sh` oracle, the same build also copies
-the extensionless Rust executable to `scripts/<command>` beside
-`scripts/<command>.sh`. Those sibling files are generated, executable, and
-ignored; they are the developer-facing command layout for the Rust migration.
-The shared root copy remains because existing shell helpers use it for runtime
-discovery, and because the target artifact pipeline still consumes that layout.
-
-Why this needs saying: exactly one artifact is committed, and every helper that
-wants a compiled one degrades honestly when it is absent. `plan_crypt_resolve`
-falls through to the shell rungs, the chat server drops to an interpreter tier.
-So a tree with nothing built still passes the suite, and the compiled path —
-the one a target actually runs — is never exercised locally. A green run on an
-unbuilt tree is not evidence about the code a user gets.
-
-- **The script refuses to run without nix, and does not fall back to a system
-  cargo.** The flake pins the newest stable rust the locked nixpkgs offers,
-  with the five house targets; another toolchain produces a different artifact
-  from the one CI and a release ship. It exits 69 and prints how to install
-  nix.
-- **`rjq` is invoked by name.** Building it is not enough — the planning helpers
-  find it on PATH, so until the root `bin/<triple>` is on PATH the tree uses
-  whatever `rjq` the machine happens to have, or none. The script prints the
-  export line; `--check` reports what is present or missing without building.
+What `../setup-dev-env.sh` builds and generates, its exit codes, how `rjq` and
+an installed copy are resolved, and why an unbuilt tree cannot run the suite are
+in `../.agents/MAINTAINER.md` section 1.9, and are not repeated here. That
+includes the copy of each planning command into `scripts/<command>` and the
+requirement for nix.
 
 ### 2.16 Generated files are CI's job, not the repo's
 
-- Every binary and compiled output is built by a CI runner and delivered as a
-  release artifact. The repo carries no generated files — nothing
-  machine-produced is committed, ever. A generated file in git is a blob: it
-  cannot be rebuilt on every maintainer box (no darwin or msvc link here), it
-  rots out of sight of the build that produces it, and every clone pays for it
-  forever.
-- This is absolute, and it names the files that are tracked today and must
-  leave: the committed `planning/bin/x86_64-unknown-linux-musl/rjq` binary
-  (T70a), the compiled `plan-*-lib.sh` outputs of `build-plan-libs.sh` (§2.8),
-  `PORTABILITY.md` and `REVIEWER.md`. Each moves to a CI build that publishes
-  the artifact, and its in-repo copy is removed in the same coordinated
-  change. T73 tracks the migration; its per-file work lands as sub-tasks. (An
-  earlier recording of this rule named T71; master had already assigned that
-  id to the planning/SKILL.md phase-doc split before it landed.)
-- Until a file's migration lands, its existing gate keeps running and a stale
-  generated file still fails it. The rule does not downgrade any gate; it adds
-  "not tracked" as the required end state. Declared-but-unbuilt is the legal
-  resting state on disk (`binaries.tsv` rows; rust-development-guidelines.md
-  §6: declare before building — the building happens on the runner).
-- Consumers that read a generated file from the working tree — the installer,
-  npm pack, test harnesses, `blast-radius.sh`'s freshness checks — must be
-  reconciled to fetch the artifact from the release or publish pipeline in the
-  same change that untracks the file. An artifact neither tracked nor
-  delivered is a broken install, which is the failure this rule exists to
-  prevent, so the reconciliation is part of the work, never a follow-up.
-- The lint gate is one of those consumers, and not an obvious one. shellcheck
-  resolves a `source=` directive only against files named on the same command
-  line, so an untracked library drops out of `git ls-files` and every variable
-  a sourcing script reads from it reads as unassigned (SC2154). The CI job
-  therefore builds the libraries and appends them to the file list; a
-  generated file that is linted, or sourced by something linted, belongs in
-  that list.
-- **This section's exception used to be `install.sh` — machine-assembled yet
-  committed, because it was fetched and run standalone (`curl … | bash`) with
-  no pipeline to fetch it from.** It is retired (see git history and
-  `.agents/MAINTAINER.md`); the exception retired with it. The installer is now
-  a compiled Rust binary (`src/installer/`), built at release time and shipped
-  as a GitHub release asset — never committed, so the rule above already
-  covers it without carve-out. `installer/bootstrap.sh`, the curl-piped entry
-  point that downloads that asset, stays committed for the ordinary reason: it
-  is hand-written source, not generated. See `CONTRIBUTING.md` and
-  `RELEASE.md`, which say the same.
+The rule, the table of every generated file with its generator, the
+`.npmignore` exception and the npm size baseline are in
+`../.agents/MAINTAINER.md` sections 1.10 and 1.10a, and are not repeated here.
+The planning-specific part: `plan-*-lib.sh` come from `build-plan-libs.sh`
+(section 2.8 below) and `REVIEWER.md` from `generate-reviewer.sh`; both are
+untracked and gitignored, as are the extensionless compiled copies of the
+planning commands that `setup-dev-env.sh` stages into `planning/scripts/`.
 
 ## 3. Pending consolidation (the duplication inventory)
 
@@ -405,45 +331,35 @@ capture the affected scripts' stdout, stderr and exit codes over real inputs
 before and after, and diff. `test-progress-bar-shape.sh` and
 `test-plan-commands.sh` pin much of the observable output already.
 
-## 4. Change checklist (minimum, per change)
+## 4. Change checklist (planning additions)
 
-1. Identify every consumer (parser/validator, other helpers, tests, `role_docs()`
-   in `role-context.sh`, manifest/map, `installer/src/50-manifest.sh`'s
-   `skill_files()`, capsule copy, hash test).
-2. Update shared logic in the library, keep the helper thin.
-3. Add/update a regression fixture + test for the new behavior, including the
-   actionable-error path.
-4. If the change alters a flow that crosses more than two scripts, or adds/removes
-   a plan artifact, update the affected diagram in `ARCHITECTURE.md` in the same
-   change (`CODE-STYLE.md` §11 picks the diagram form).
-5. If a doc changed: keep `SKILL.md` small, update the phase/role docs and their
-   references, regenerate `REVIEWER.md` if a reviewer section changed. Keep
-   `roles/VOICES.md` registry-aligned and keep `ROLES.md`'s persona doc matrix +
-   `role_cap()`'s reader composition (`src/plan-context/src/main.rs`) in sync with `role_docs()`/`ROLES=()`;
-   re-run `test-persona-drift.sh` + `test-voice-artifact-drift.sh`.
-6. Register new files in `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv`,
-   and `installer/src/50-manifest.sh`'s `skill_files()`. If the file is a benchmark capsule dependency
-   (`scripts/*`, `SKILL.md`, `REVIEWER.md`), reflect it in `setup-benchmark.sh`'s
-   capsule copy. The manifest line-count is derived from the map (no constant to
-   bump) — `test-installer-manifest.sh` asserts the reconcile.
-7. Run `bash -n`, `git diff --check`, `test-plan-commands.sh`,
-   `test-installer-manifest.sh` (asserts `skill_files()` ↔ manifest/map
-   reconcile), `test-plan-env.sh`, the plan validator, and — after any
-   role/reader/VOICES change — `test-persona-drift.sh`,
-   `test-voice-artifact-drift.sh`, `test-supervision-frame.sh`,
-   `test-progress-bar-shape.sh`, and `test-reviewer-projection.sh`. For
-   every change under `src/`, also `cargo fmt --check` and `cargo test`
-   on each touched crate before pushing: CI runs fmt first and test per
-   target leg, so unformatted or failing rust turns four chat legs red
-   and burns a cycle.
-8. Update the registers, which nothing else will. A defect this change fixes is
-   closed in `../BUGS.json` with the commit and the mutation that proves it; a
-   defect it *finds* and does not fix is added there rather than left in a commit
-   message; queued work goes in `../TODO.json`. Recipes are in
-   `../bug-report/SKILL.md` and `../todo/SKILL.md`. This is the one step on this
-   list with no gate behind it — no test can tell that a commit resolved a bug —
-   so it is the one that gets skipped, and then the next reader has to
-   reconstruct the change from its diff.
-9. Commit as one coordinated, no-backwards-compat change. The message carries the
-   *why* that does not belong in a comment (`CODE-STYLE.md` §12) and names the
-   register entries it closes, so the two can be checked against each other.
+Do the repo-wide checklist first: `../.agents/MAINTAINER.md` section 2 (every
+consumer, a regression test, the registers, one coordinated commit), 2a (adding
+a file) and 2b (adding a crate). A change to the planning skill adds these:
+
+1. The consumers to check include `role_docs()` in `role-context.sh`, the
+   manifest and map, `skill_files()`, the capsule copy and the hash test.
+2. If the change alters a flow that crosses more than two scripts, or
+   adds/removes a plan artifact, update the affected diagram in
+   `ARCHITECTURE.md` in the same change (`CODE-STYLE.md` §11 picks the diagram
+   form).
+3. If a doc changed: keep `SKILL.md` small, update the phase/role docs and their
+   references, and regenerate `REVIEWER.md` if a reviewer section changed. Keep
+   `roles/VOICES.md` registry-aligned and keep `ROLES.md`'s persona doc matrix
+   and `role_cap()`'s reader composition (`src/plan-context/src/main.rs`) in sync
+   with `role_docs()`/`ROLES=()`; re-run `test-persona-drift.sh` and
+   `test-voice-artifact-drift.sh`.
+4. Register new files in `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv` and
+   `installer/src/50-manifest.sh`'s `skill_files()`. If the file is a benchmark
+   capsule dependency (`scripts/*`, `SKILL.md`, `REVIEWER.md`), reflect it in
+   `setup-benchmark.sh`'s capsule copy. The manifest line-count is derived from
+   the map (no constant to bump); `test-installer-manifest.sh` asserts the
+   reconcile.
+5. Run `test-plan-commands.sh`, `test-installer-manifest.sh` (asserts
+   `skill_files()` ↔ manifest/map reconcile), `test-plan-env.sh`, the plan
+   validator and, after any role/reader/VOICES change,
+   `test-persona-drift.sh`, `test-voice-artifact-drift.sh`,
+   `test-supervision-frame.sh`, `test-progress-bar-shape.sh` and
+   `test-reviewer-projection.sh`, in addition to `bash -n`, `git diff --check`
+   and, for a change under `src/`, `cargo fmt --check` and `cargo test` on each
+   touched crate.
