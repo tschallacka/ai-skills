@@ -23,6 +23,19 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
+      "id": "T149",
+      "title": "Remove the retired required check 'install.sh matches installer/build.sh output' from master's branch protection",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Owner action, outside the repository: GitHub branch protection for master. Read with: gh api repos/tschallacka/ai-skills/branches/master/protection/required_status_checks --jq '{strict, contexts}' (read on 2026-09-21). It requires 'Decide how much of the workspace this run must build', 'install.sh matches installer/build.sh output', 'Every mermaid diagram renders (syntax only, proves nothing about accuracy)', the five 'plan-overview <target>' jobs from render-artifacts.yml, and 'Shell test suite (all shards) passes'. No workflow has a job named 'install.sh matches installer/build.sh output' (grep -rn 'install.sh matches' .github is empty; install.sh and installer/build.sh are retired), so that check can never report and a pull request to master cannot go green without an admin bypass (enforce_admins is false, strict is false, no required reviews). Remove that context in the protection settings. A job rename in ci.yml or render-artifacts.yml orphans a required check the same way, so any rename of those jobs must change the protection setting in the same step. nextupdate has no protection. Found by the documentation audit (McCorrect); .agents/MAINTAINER.md section 3 cites this id.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-21T09:54:06Z",
+      "updated_at": "2026-09-21T09:54:06Z"
+    },
+    {
       "id": "T56",
       "title": "Mark a review rationale superseded when a later cycle replaces it",
       "status": "blocked",
