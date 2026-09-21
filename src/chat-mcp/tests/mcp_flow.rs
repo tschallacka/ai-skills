@@ -193,17 +193,14 @@ impl Harness {
         if let Some(notice) = self.notices.pop_front() {
             return Some(notice);
         }
-        let deadline = Instant::now() + wait;
-        loop {
-            let left = deadline.checked_duration_since(Instant::now())?;
-            let line = self.lines.recv_timeout(left).ok()?;
-            let message: Value =
-                serde_json::from_str(&line).unwrap_or_else(|_| panic!("not JSON: {line}"));
-            if message.get("id").is_none() && message.get("method").is_some() {
-                return Some(message);
-            }
-            panic!("a response arrived while waiting for a notice: {line}");
-        }
+        let line = self.lines.recv_timeout(wait).ok()?;
+        let message: Value =
+            serde_json::from_str(&line).unwrap_or_else(|_| panic!("not JSON: {line}"));
+        assert!(
+            message.get("id").is_none() && message.get("method").is_some(),
+            "a response arrived while waiting for a notice: {line}"
+        );
+        Some(message)
     }
 
     /// A tool call's payload, parsed back out of the text content the MCP
