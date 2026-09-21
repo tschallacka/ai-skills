@@ -119,10 +119,19 @@ fn diff_name_only(repo_root: &Path, extra_args: &[&str]) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Unions the branch diff (when a base resolved), the worktree diff and the
-/// index diff, deduplicated and sorted, filtered by `pattern` (an extended
-/// regular expression, matching bash's own `grep -E`/`grep` filters).
+/// The change set filtered by `pattern` (an extended regular expression,
+/// matching bash's own `grep -E`/`grep` filters).
 pub fn changed(repo_root: &Path, base: Option<&str>, pattern: &str) -> Vec<String> {
+    let re = Regex::new(pattern).expect("pre-push-check: internal error: invalid pattern");
+    changed_files(repo_root, base)
+        .into_iter()
+        .filter(|f| re.is_match(f))
+        .collect()
+}
+
+/// Unions the branch diff (when a base resolved), the worktree diff and the
+/// index diff, deduplicated and sorted.
+pub fn changed_files(repo_root: &Path, base: Option<&str>) -> Vec<String> {
     let mut files = Vec::new();
     if let Some(base) = base {
         let range = format!("{base}..HEAD");
@@ -132,8 +141,7 @@ pub fn changed(repo_root: &Path, base: Option<&str>, pattern: &str) -> Vec<Strin
     files.extend(diff_name_only(repo_root, &["--cached"]));
     files.sort();
     files.dedup();
-    let re = Regex::new(pattern).expect("pre-push-check: internal error: invalid pattern");
-    files.into_iter().filter(|f| re.is_match(f)).collect()
+    files
 }
 
 #[cfg(test)]

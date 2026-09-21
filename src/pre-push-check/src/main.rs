@@ -11,7 +11,7 @@ use gates::full_suite::gate_full_suite;
 use gates::manifest::gate_skill_manifest;
 use gates::npm_baseline::gate_npm_baseline;
 use gates::register_soundness::gate_register_soundness;
-use gates::registers::gate_registers_branch;
+use gates::registers::{gate_register_branch_scope, gate_registers_branch, on_register_branch};
 use gates::rust_crates::gate_rust_crates;
 use gates::shellcheck::gate_shellcheck;
 use gates::static_scans::gate_static_scans;
@@ -35,7 +35,8 @@ const USAGE: &str = r#"pre-push-check - the per-change gates and the PR hygiene 
 in one command.
 
 Run it before every push. It re-enters `nix develop` first, so without nix it
-exits 69 and runs no gate, --help included. The change set is everything that
+exits 69 and runs no gate, --help included (the `registers` branch is exempt,
+see the paragraph after the gate list). The change set is everything that
 differs from the merge base with origin/master (falling back to master, then
 to the branch's upstream) - the branch's commits plus the worktree and the
 index - and the gates run in this order:
@@ -78,6 +79,11 @@ index - and the gates run in this order:
                           --declarations-only: a tracked skill file that
                           installer/src/50-manifest.sh's skill_files() does
                           not declare fails
+On the `registers` branch none of the above runs, and neither does the nix
+re-entry: the one gate is that every changed path is BUGS.json or TODO.json,
+and anything else fails. The base is resolved after the fetch. The registers
+workflow (.github/workflows/registers.yml) checks ids and parents when the
+push lands.
 The registers update, the plan validator and the role-drift tests stay with
 .agents/MAINTAINER.md section 2 (and planning/MAINTAINER.md section 4 for a
 change to the planning skill): they need judgement about what changed, which a
@@ -134,14 +140,45 @@ fn discover_repo_root() -> Option<PathBuf> {
     (!text.is_empty()).then(|| PathBuf::from(text))
 }
 
+/// A push from `registers` runs the file-scope gate and nothing else. The
+/// base is resolved AFTER the fetch here, so a stale origin/master cannot
+/// make master's own commits, already merged into this branch, read as its
+/// changes.
+fn run_register_branch(repo_root: &std::path::Path, report: &mut Report) -> ExitCode {
+    if let Err(code) = fetch_master(repo_root, report) {
+        return ExitCode::from(code as u8);
+    }
+    let resolved = resolve_base(repo_root);
+    println!(
+        "pre-push-check (base: {}; registers branch)",
+        resolved
+            .label
+            .as_deref()
+            .unwrap_or("no master or upstream; worktree only")
+    );
+    gate_register_branch_scope(repo_root, resolved.base.as_deref(), report);
+    if report.failures == 0 {
+        println!("pre-push-check: PASS");
+        ExitCode::SUCCESS
+    } else {
+        println!("pre-push-check: {} failure(s)", report.failures);
+        ExitCode::FAILURE
+    }
+}
+
 fn run() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     // The nix re-exec runs before repo-root discovery: it needs no git
     // context of its own, only the flake at the repo root the re-exec'd
-    // process is told to develop against.
+    // process is told to develop against. The `registers` branch skips it:
+    // its one gate needs only git, and its flake may be the stale master one
+    // whose dev shell does not build on every host (B333).
     let reexec_root = discover_repo_root().unwrap_or_else(|| PathBuf::from("."));
-    reexec::maybe_reexec(&reexec_root);
+    let on_registers = on_register_branch(&reexec_root);
+    if !on_registers {
+        reexec::maybe_reexec(&reexec_root);
+    }
 
     let full = match parse_args(&args) {
         ParseOutcome::Exit(code) => return ExitCode::from(code),
@@ -158,6 +195,9 @@ fn run() -> ExitCode {
     }
 
     let mut report = Report::new();
+    if on_registers {
+        return run_register_branch(&repo_root, &mut report);
+    }
     let resolved = resolve_base(&repo_root);
     let base = resolved.base.as_deref();
     let base_label = resolved.label.as_deref();

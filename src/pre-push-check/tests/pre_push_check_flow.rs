@@ -147,21 +147,115 @@ fn registers_branch_gate_blocks_with_its_own_exact_terminal_line() {
     assert!(!out.contains("git diff --check"));
 }
 
-#[test]
-fn registers_branch_gate_is_bypassed_on_the_registers_branch_itself() {
-    let repo = Repo::new("registers-branch-ok");
+/// A repository already on `registers`, with one committed file to diff from.
+fn registers_repo(tag: &str) -> Repo {
+    let repo = Repo::new(tag);
     write_file(&repo.dir.join("README.md"), "hello\n");
+    write_file(&repo.dir.join("BUGS.json"), "[]\n");
+    write_file(&repo.dir.join("TODO.json"), "[]\n");
     repo.commit("initial");
     git(&repo.dir, &["checkout", "-q", "-b", "registers"]);
-    repo.stub_portability_ok();
+    repo
+}
 
-    write_file(&repo.dir.join("BUGS.json"), "[]\n");
+#[test]
+fn registers_branch_passes_on_register_changes_and_runs_no_other_gate() {
+    let repo = registers_repo("registers-branch-ok");
+    write_file(&repo.dir.join("BUGS.json"), "[ ]\n");
+    write_file(&repo.dir.join("TODO.json"), "[ ]\n");
     git(&repo.dir, &["add", "BUGS.json"]);
 
     let output = repo.run(&[]);
     let out = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(0), "{out}");
     assert!(!out.contains("a register is modified outside"));
-    assert!(out.contains("regenerated PORTABILITY.md"));
+    assert!(out.contains("only registers changed on the registers branch (BUGS.json, TODO.json)"));
+    assert!(out.ends_with("pre-push-check: PASS\n"));
+    // None of the ordinary gates ran: not whitespace, not cargo, not soundness.
+    for gate in ["git diff --check", "PORTABILITY.md", "cargo", "soundness"] {
+        assert!(
+            !out.contains(gate),
+            "{gate} ran on the registers branch: {out}"
+        );
+    }
+}
+
+#[test]
+fn registers_branch_refuses_any_other_changed_file() {
+    let repo = registers_repo("registers-branch-stray");
+    write_file(&repo.dir.join("BUGS.json"), "[ ]\n");
+    write_file(&repo.dir.join("README.md"), "changed\n");
+    write_file(&repo.dir.join("flake.nix"), "{}\n");
+    git(&repo.dir, &["add", "-A"]);
+
+    let output = repo.run(&[]);
+    let out = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(1), "{out}");
+    assert!(out.contains("the registers branch may only change BUGS.json and TODO.json"));
+    assert!(out.contains("    README.md"));
+    assert!(out.contains("    flake.nix"));
+    assert!(
+        !out.contains("    BUGS.json"),
+        "a register was listed as stray: {out}"
+    );
+    assert!(out.ends_with("pre-push-check: 1 failure(s)\n"));
+}
+
+#[test]
+fn registers_branch_refuses_an_unstaged_stray_edit_too() {
+    let repo = registers_repo("registers-branch-unstaged");
+    write_file(&repo.dir.join("README.md"), "edited, not staged\n");
+
+    let output = repo.run(&[]);
+
+    assert_eq!(output.status.code(), Some(1), "{}", stdout(&output));
+    assert!(stdout(&output).contains("    README.md"));
+}
+
+#[test]
+fn registers_branch_with_nothing_changed_passes() {
+    let repo = registers_repo("registers-branch-empty");
+
+    let output = repo.run(&[]);
+    let out = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(0), "{out}");
+    assert!(out.contains("nothing differs from master"));
+}
+
+/// The stale master flake's dev shell does not build on Apple Silicon, so a
+/// push from `registers` must never reach `nix develop`. A `nix` that records
+/// its own call and fails stands in for it, with no marker variable set.
+#[cfg(unix)]
+#[test]
+fn registers_branch_never_re_enters_nix() {
+    let repo = registers_repo("registers-branch-no-nix");
+    write_file(&repo.dir.join("BUGS.json"), "[ ]\n");
+    let fake_bin = repo.dir.join(".fake-bin");
+    let marker = repo.dir.join(".nix-was-called");
+    write_executable(
+        &fake_bin.join("nix"),
+        &format!("#!/bin/sh\ntouch '{}'\nexit 97\n", marker.display()),
+    );
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_pre-push-check"))
+        .current_dir(&repo.dir)
+        .env("PATH", path)
+        .env_remove("AI_SKILLS_PREPUSH_IN_NIX")
+        .env_remove("IN_NIX_SHELL")
+        .env("PRE_PUSH_SKIP_FETCH", "1")
+        .output()
+        .unwrap();
+
+    assert!(!marker.exists(), "nix was called from the registers branch");
+    assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
 }
 
 #[test]

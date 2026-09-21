@@ -445,17 +445,26 @@ the CI map.
      run: a guard refusal prints `registers-guard: REFUSED: <reason>`, and a branch
      that is not a fast-forward of `master` is refused and needs a human to
      rebase `registers` onto `master`.
-  - **A push from `registers` can die in the hook before any gate runs**, and
-    that has stranded a worker. The hook re-enters `nix develop` (1.17), and
-    `registers` carries `master`'s `flake.nix`. As of 2026-09-21 `master` lacks
-    the `-fcommon` fix (`BUGS.json` B333, commit `ce08f36f`, only on `nextupdate`
-    and `windows`), so on aarch64-darwin the dev shell cannot be built and the
-    push fails there. It is not a problem with the entry. Run `bugs check` (or
-    `todo check`) yourself first; the hook's own text allows `git push
-    --no-verify` "when you truly must", and `registers.yml`'s guard still gates
-    the landing server-side. Or file from a machine where the dev shell builds.
-    Do not "fix" it by putting other files on `registers`: the guard refuses
-    anything but `BUGS.json` and `TODO.json`.
+  - **A push from `registers` runs one check, and never enters nix** (1.17):
+    every path changed since the merge base with `origin/master`, in the
+    worktree or in the index, must be `BUGS.json` or `TODO.json`. Anything else
+    fails and is named, and no other gate runs. It does not validate the
+    entries: run `bugs check` (or `todo check`) yourself, and `registers.yml`
+    checks ids and parents when the push lands. It fetches `origin master`
+    first, so it needs the network.
+  - **That is only in force where the checkout has the new script.** A
+    `registers` checkout carries `master`'s files, so it gets this behaviour
+    when it reaches `master`; as of 2026-09-21 it is only on `nextupdate`.
+    Until then the hook on `registers` re-enters `nix develop`, and `master`
+    lacks the `-fcommon` fix (`BUGS.json` B333, commit `ce08f36f`, only on
+    `nextupdate` and `windows`), so on aarch64-darwin the dev shell cannot be
+    built and the push dies there, before any check. That has stranded a
+    worker; it is not a problem with the entry. Run `bugs check` yourself,
+    then `git push --no-verify` (the hook's own text allows it "when you truly
+    must"; `registers.yml`'s guard still gates the landing), or file from a
+    machine where the dev shell builds. Do not "fix" it by putting other files
+    on `registers`: both checks refuse anything but `BUGS.json` and
+    `TODO.json`.
   - A worker's **uncommitted `BUGS.json` edit on another machine is not filed**
     until it is pushed. If someone else filed in the meantime the ids move (the
     CLI mints the next free one), so discard the local edit, `git pull --ff-only`,
@@ -582,10 +591,16 @@ the CI map.
     to `BUGS.json` or `TODO.json` from any branch but `registers` is refused
     (1.14). `PRE_PUSH_ALLOW_REGISTERS=1` accepts register changes already in
     flight; it is for transport, never for filing an entry.
+  - **On `registers` it is a different, one-gate run**: no nix re-entry, no
+    gate but the file scope (every changed path is `BUGS.json` or `TODO.json`,
+    anything else fails), and the base is resolved after the fetch. The
+    compiled binary and the bash script both do this, and
+    `tests/test-register-branch-gate.sh` and the crate's own integration tests
+    pin it, including that a `nix` on `PATH` is never called.
   - It **regenerates `PORTABILITY.md` on every run**; that file is untracked
     (1.10).
-  - **It re-enters the flake.** Unless `AI_SKILLS_PREPUSH_IN_NIX` or
-    `IN_NIX_SHELL` is set, it `exec`s `nix develop`, because git runs hooks with
+  - **It re-enters the flake** (not on `registers`, above). Unless
+    `AI_SKILLS_PREPUSH_IN_NIX` or `IN_NIX_SHELL` is set, it `exec`s `nix develop`, because git runs hooks with
     the caller's environment, which may carry a different cargo than the pinned
     one. Nix is mandatory (1.9): the gate exits 69 without it, and
     `AI_SKILLS_PREPUSH_IN_NIX` is the marker the re-entry sets on itself, not a

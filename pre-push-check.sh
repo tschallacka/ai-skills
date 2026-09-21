@@ -4,7 +4,8 @@
 # in one command.
 #
 # Run it before every push. It re-enters `nix develop` first, so without nix it
-# exits 69 and runs no gate, --help included. The change set is everything that
+# exits 69 and runs no gate, --help included (the `registers` branch is exempt,
+# see the paragraph after the gate list). The change set is everything that
 # differs from the merge base with origin/master (falling back to master, then
 # to the branch's upstream) - the branch's commits plus the worktree and the
 # index - and the gates run in this order:
@@ -47,6 +48,11 @@
 #                           --declarations-only: a tracked skill file that
 #                           installer/src/50-manifest.sh's skill_files() does
 #                           not declare fails
+# On the `registers` branch none of the above runs, and neither does the nix
+# re-entry: the one gate is that every changed path is BUGS.json or TODO.json,
+# and anything else fails. The base is resolved after the fetch. The registers
+# workflow (.github/workflows/registers.yml) checks ids and parents when the
+# push lands.
 # The registers update, the plan validator and the role-drift tests stay with
 # .agents/MAINTAINER.md section 2 (and planning/MAINTAINER.md section 4 for a
 # change to the planning skill): they need judgement about what changed, which a
@@ -98,8 +104,13 @@ full=false
 
 # Git runs hooks with the caller's environment, which may provide a different
 # Cargo than the repository's pinned toolchain. Re-enter the flake once; the
-# marker prevents recursion inside the development shell.
-if [ -z "${AI_SKILLS_PREPUSH_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ]; then
+# marker prevents recursion inside the development shell. The `registers`
+# branch is exempt: its one gate needs only git, and its flake is the stale
+# master one, whose dev shell does not build on every host (B333).
+register_branch=registers
+current_branch="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+if [ -z "${AI_SKILLS_PREPUSH_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ] &&
+    [ "$current_branch" != "$register_branch" ]; then
     command -v nix >/dev/null 2>&1 || {
         printf '%s: nix develop .#default is required for Rust pre-push checks\n' "${0##*/}" >&2
         exit 69
@@ -144,19 +155,22 @@ note() { printf '  note  %s\n' "$1"; }
 #
 # The merge base rather than origin/master itself, so a master that has moved
 # ahead does not show its own commits as part of this branch's diff.
-base=""
-base_label=""
-for ref in origin/master master; do
-    if git rev-parse --verify "$ref" >/dev/null 2>&1; then
-        base="$(git merge-base "$ref" HEAD 2>/dev/null || printf '%s' "$ref")"
-        base_label="$ref"
-        break
+resolve_base() {
+    base=""
+    base_label=""
+    for ref in origin/master master; do
+        if git rev-parse --verify "$ref" >/dev/null 2>&1; then
+            base="$(git merge-base "$ref" HEAD 2>/dev/null || printf '%s' "$ref")"
+            base_label="$ref"
+            break
+        fi
+    done
+    if [ -z "$base" ]; then
+        base="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+        base_label="$base"
     fi
-done
-if [ -z "$base" ]; then
-    base="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
-    base_label="$base"
-fi
+}
+resolve_base
 
 # ---- master is refreshed before anything is measured ------------------------
 # Every gate below measures the change set against master. A master ref that is
@@ -192,6 +206,37 @@ changed() { # <pathspec-filter...> -> changed files matching the filter
         2>/dev/null | sort -u | grep "$@" || true
 }
 
+# ---- the registers branch: file scope only ----------------------------------
+# A push from `registers` carries register changes and nothing else, so this is
+# the only gate it runs: every changed path must be BUGS.json or TODO.json.
+# .github/workflows/registers.yml refuses the same thing before landing on
+# master, and checks ids and parents; this refuses it before the push leaves.
+# The base is resolved again here, after the fetch above, so a stale
+# origin/master cannot make master's own commits look like this branch's.
+if [ "$current_branch" = "$register_branch" ]; then
+    resolve_base
+    printf 'pre-push-check (base: %s; registers branch)\n' \
+        "${base_label:-no master or upstream; worktree only}"
+    stray="$(changed -v -E '^(BUGS|TODO)\.json$' || true)"
+    if [ -z "$stray" ]; then
+        files="$(changed -E '.' || true)"
+        if [ -z "$files" ]; then
+            note "nothing differs from master"
+        else
+            ok "only registers changed on the $register_branch branch ($(printf '%s\n' "$files" | tr '\n' ',' | sed 's/,$//; s/,/, /g'))"
+        fi
+        note "registers branch: no other gate runs; registers.yml checks ids and parents when it lands"
+        printf 'pre-push-check: PASS\n'
+        exit 0
+    fi
+    bad "the $register_branch branch may only change BUGS.json and TODO.json"
+    printf '%s\n' "$stray" | sed 's/^/    /'
+    note "register changes reach master without review, so anything else is refused"
+    note "put the other change on its own branch: git switch -c <name> from the commit before it"
+    printf 'pre-push-check: %s failure(s)\n' "$failures"
+    exit 1
+fi
+
 printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; worktree only}"
 
 # ---- 0. the registers live on their own branch ------------------------------
@@ -213,9 +258,7 @@ printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; workt
 # branch exists -- git refuses a ref and a ref directory of the same name, and
 # bugs/close-b95 is unmerged and checked out. Work branches use the `bug/`
 # prefix, so `registers` cannot collide with them either.
-register_branch=registers
 register_changes="$(changed -E '^(BUGS|TODO)\.json$' || true)"
-current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
 # PRE_PUSH_ALLOW_REGISTERS=1 is for transport, not authoring: the one-off
 # transition that introduces this rule while register work is already in
 # flight, and an integration branch that merges someone else's entries rather
