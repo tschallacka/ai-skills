@@ -788,15 +788,20 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
             // FIN: `ConnectionReset`/`ConnectionAborted` here, where a clean
             // close reads as Ok(0). Windows does this for every killed
             // process and Linux for one that died with unread data. Ignoring
-            // it left the dead connection open and its nick held for good. A
-            // read that merely ran out its timeout is `WouldBlock` on unix
-            // and `TimedOut` on Windows, and means only "nothing yet".
+            // it left the dead connection open and its nick held for good.
+            // Only the kinds that mean the peer is gone end the connection:
+            // any other error (a read that ran out its timeout, or rustls's
+            // own "buffer full, process what you have first" refusal, which
+            // is `Other`) is not a loss of the peer, and ending on those
+            // dropped healthy connections mid-join under load.
             Err(e)
-                if !matches!(
+                if matches!(
                     e.kind(),
-                    std::io::ErrorKind::WouldBlock
-                        | std::io::ErrorKind::TimedOut
-                        | std::io::ErrorKind::Interrupted
+                    std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::NotConnected
+                        | std::io::ErrorKind::UnexpectedEof
                 ) =>
             {
                 done = true
