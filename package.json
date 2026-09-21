@@ -52,6 +52,8 @@
     "!planning/PACKAGE-MAP.tsv",
     "!planning/rust-migration.tsv",
     "!planning/MODE-MANIFEST.tsv",
+    "!.agents/MAINTAINER.md",
+    "!.agents/MAINTAINER-STYLE-CONTRACT.md",
     "!.agents/knowledge/**",
     "!.agents/skill-loading-experiment/**",
     "!.agents/skill-loading-findings.md",

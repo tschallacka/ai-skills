@@ -1,4 +1,4 @@
-<!-- MODE: PROD -->
+<!-- MODE: DEV -->
 # Repository Handbook — behavior rules & change checklist
 
 **Audience: agents and maintainers.** This is the repo-wide, agent-facing
@@ -9,10 +9,11 @@ this file holds what applies to the repository as a whole, and is the one home
 for those rules: `planning/MAINTAINER.md` keeps only the planning skill's own
 material and points here for the rest.
 
-This file ships in the npm package (it is `MODE: PROD`, added to `package.json`
-`files` on purpose), but the documents it links to (`.agents/knowledge/`,
-`docs/`, `CODE-STYLE.md` and most others) do not ship: those links resolve only
-in the repository.
+**This file does not ship.** What ships to end users is pure binaries and the
+skills that use them. The maintainer documents, this file and everything it
+links to (`.agents/knowledge/`, `docs/`, `CODE-STYLE.md` and the rest), are
+`MODE: DEV` or otherwise left out of the release and the npm package; they exist
+in a full git checkout of the repository, and only there.
 
 ## Start here
 
@@ -292,14 +293,15 @@ the CI map.
 - **The baseline pins packaged files' byte sizes.**
   `planning/tests/fixtures/overview/npm-package-baseline.tsv` has a row per
   pinned file, keyed as `package/<path>` with its size in bytes.
-  **Editing any file that has a row (this
-  handbook, `README.md`, a `SKILL.md`, a shipped script) fails the gate's
-  `npm package baseline drift` check until its row is refreshed.** To
+  **Editing any file that has a row (`README.md`, a `SKILL.md`, a shipped
+  script) fails the gate's `npm package baseline drift` check until its row is
+  refreshed.** To
   refresh: put the file's new `wc -c` size in its row, then confirm with
   `planning/tests/test-npm-package.sh`, which runs `npm pack` and takes minutes.
   A **new** packaged file has no row to disagree with, so the gate cannot catch
   a wrong selection; only that full test does. Files excluded from the package
-  (`.agents/knowledge/**`, `planning/MAINTAINER.md`, tests) have no row.
+  (`.agents/MAINTAINER.md`, `.agents/MAINTAINER-STYLE-CONTRACT.md`,
+  `.agents/knowledge/**`, `planning/MAINTAINER.md`, tests) have no row.
 
 ### 1.11 CI runs: a push cancels the run it supersedes
 - The workflow's concurrency group is keyed by ref
@@ -734,7 +736,8 @@ What the table cannot say:
   job of that name, so it can never report and a pull request cannot go green
   without an admin bypass (`enforce_admins` is off, `strict` is off, no reviews
   are required). Removing it is the repository owner's job, tracked as `TODO.json`
-  T149. Everything else is advisory, not required: `shellcheck`, `native`,
+  T149, and it blocks nothing yet, because nothing is merged to `master` (as of
+  2026-09-21). Everything else is advisory, not required: `shellcheck`, `native`,
   `cygwin`, `msys2`, each shard job on its own (only the aggregate is required),
   `test-windows`'s shards likewise, and `windows.yml`. `nextupdate` has no
   protection. **A required check is matched by its job's `name:`, so renaming
