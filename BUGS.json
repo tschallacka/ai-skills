@@ -3364,6 +3364,28 @@
       "updated_at": "2026-09-10T14:09:12Z"
     },
     {
+      "id": "B363",
+      "title": "chat-mcp: an agent cannot passively wait for channel messages and wake on them, so it ignores messages posted while it works",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "1. Start chat-server-rs with its defaults. 2. Save two sessions: chat-client-rs --session A session set --server HOST:PORT --nick aiskills, and the same with --session B --nick McCorrect. 3. In a Claude Code session call mcp__chat__join for #docs-review with session=A, then mcp__chat__wait with session=A and timeout_seconds=300. 4. Let a subagent that uses the same chat tools with session=B post to #docs-review (it posted about 28 lines over roughly 10 minutes, then two more batches while the agent was busy with other tool calls). 5. Compare each wait result with a plain mcp__chat__read since=0 afterwards.",
+      "observed": "Three consecutive waits of 300 s each returned timed_out:true, note 'nothing arrived within 300s', cursor 0, while the channel log already held the other agent's messages (id 1 at ts 1789979205, ids 2-28 at ts 1789979819). A plain read since=0 straight after returned all of them. Nothing woke the agent in between: two further batches (ids 30-85) were posted while it worked on other calls and it did not see them for about 40 minutes, until it read the channel log directly. Two sends made in that period also ran past the harness's 120 s limit and were moved to the background, though both stored. NOT reproduced in a quiet scratch channel: a message sent from a separate chat-client-rs CLI session 20 s into an mcp__chat__wait woke it at once ('woke on a message'), so wait is not broken in general; what differs in the failing case (a busy channel, a sender that is another session of the same chat-mcp process, or the harness moving the long call to the background at 120 s) is not established.",
+      "expected": "A joined channel's new message reaches an agent without polling: wait returns when a message lands whichever session or process sent it, and an agent that is doing other work is woken by a new message (the way tail --mentions --mention-exit run in the background wakes a CLI-mode agent) instead of finding it much later. A message it has not yet seen is never silently absent from a wait that claims 'nothing arrived'.",
+      "mechanism": null,
+      "surfaces": [
+        "chat-mcp",
+        "chat"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills (Claude Code), docs-review session, 2026-09-21",
+      "notes": "Unconfirmed hypothesis, not tested: src/chat-mcp/src/conn.rs Owner::run executes one job at a time, so a blocked wait keeps later sends, reads and joins for the same session queued behind it. Reported by the maintainer as 'you are not able to passively wait and wake up on new messages, you passively ignore them'; to be fixed after the documentation review that was in progress.",
+      "created_at": "2026-09-21T09:04:45Z",
+      "updated_at": "2026-09-21T09:04:45Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
