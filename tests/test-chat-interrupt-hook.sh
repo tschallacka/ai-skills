@@ -55,14 +55,19 @@ case "$first" in
     *) t_fail 'the notices are not in time order' ;;
 esac
 
-# Valid JSON, with the quote and the backslash escaped: jq if there is one.
-if command -v jq >/dev/null 2>&1; then
-    if printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | contains("\"quoted\"")' >/dev/null 2>&1; then
-        :
-    else
-        t_fail 'the output is not valid JSON, or the quoted text did not survive'
-    fi
-fi
+# The output is one JSON object on one line, with the quote and the backslash a
+# notice carried escaped rather than left to break it. (Checked by shape, not by
+# a JSON parser: none is guaranteed to be on the PATH of every leg.)
+t_assert_contains 'a double quote in a notice is escaped' '\"quoted\"' "$out"
+t_assert_contains 'a backslash in a notice is escaped' '\\ backslash' "$out"
+case "$out" in
+    '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"'*'"}}') : ;;
+    *) t_fail 'the output is not the expected JSON object shape' ;;
+esac
+case "$out" in
+    *$'\n'*) t_fail 'the output spans lines, so a newline was not escaped' ;;
+    *) : ;;
+esac
 
 # Shown once: reading it emptied the spool.
 again="$(run_hook sess-1)"
