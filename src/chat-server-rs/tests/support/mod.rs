@@ -220,6 +220,22 @@ pub fn run_client(home: &Path, args: &[&str]) -> std::process::Output {
         .unwrap_or_else(|error| panic!("running {} failed: {error}", binary.display()))
 }
 
+/// A UDP port nothing holds right now, as a string ready for an env var or an
+/// argv slot. Discovery tests need a beacon port of their own: a literal shared
+/// by two overlapping test runs (the pre-push gate beside a suite run, two
+/// worktrees) makes each run hear the other's beacon or fail to bind, and the
+/// loser reports a bare `cargo test` failure that vanishes when re-run alone.
+/// Bound on the wildcard address because that is what the client binds.
+pub fn free_udp_port() -> String {
+    let probe =
+        std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)).expect("a free UDP port");
+    probe
+        .local_addr()
+        .expect("bound address")
+        .port()
+        .to_string()
+}
+
 pub fn stdout_string(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }

@@ -21,7 +21,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use support::{
-    run_client, spawn_server, stderr_string, stdout_string, ChatServer, ChildGuard, ScratchDir,
+    free_udp_port, run_client, spawn_server, stderr_string, stdout_string, ChatServer, ChildGuard,
+    ScratchDir,
 };
 
 fn client_dir(server_home: &ScratchDir, suffix: &str) -> std::path::PathBuf {
@@ -33,12 +34,13 @@ fn client_dir(server_home: &ScratchDir, suffix: &str) -> std::path::PathBuf {
 // ---- discovery -------------------------------------------------------------
 #[test]
 fn discovery_finds_the_announcing_server() {
+    let beacon_port = free_udp_port();
     let server = spawn_server(
         "e2e-disco",
         &[
             ("CHAT_ANNOUNCE", "1"),
             ("CHAT_BCAST", "127.0.0.1"),
-            ("CHAT_BEACON_PORT", "47997"),
+            ("CHAT_BEACON_PORT", beacon_port.as_str()),
             ("CHAT_NAME", "test-beacon"),
         ],
     );
@@ -50,7 +52,7 @@ fn discovery_finds_the_announcing_server() {
             "--bcast",
             "127.0.0.1",
             "--beacon-port",
-            "47997",
+            &beacon_port,
             "--wait",
             "3",
             "--json",

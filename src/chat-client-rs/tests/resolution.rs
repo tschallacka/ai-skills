@@ -29,7 +29,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use support::{resolve_workspace_binary, run_client, ChildGuard, ScratchDir};
+use support::{free_udp_port, resolve_workspace_binary, run_client, ChildGuard, ScratchDir};
 
 fn wait_port(home: &std::path::Path) -> Option<u16> {
     let port_file = home.join("server.port");
@@ -198,11 +198,12 @@ fn the_server_prefers_its_session_port_across_restarts_and_argv_overrides() {
 fn the_beacon_carries_a_connectable_host_never_bare_localhost() {
     let server_binary = resolve_workspace_binary("chat-server-rs");
     let home = ScratchDir::new("resolution-beacon");
+    let beacon_port = free_udp_port();
     let server = Command::new(&server_binary)
         .env("AI_CHAT_HOME", home.path())
         .env("CHAT_ANNOUNCE", "1")
         .env("CHAT_BCAST", "127.0.0.1")
-        .env("CHAT_BEACON_PORT", "47995")
+        .env("CHAT_BEACON_PORT", &beacon_port)
         .env("CHAT_ANNOUNCE_HOST", "203.0.113.7")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -219,7 +220,7 @@ fn the_beacon_carries_a_connectable_host_never_bare_localhost() {
             "--bcast",
             "127.0.0.1",
             "--beacon-port",
-            "47995",
+            &beacon_port,
             "--wait",
             "3",
             "--json",
@@ -249,7 +250,8 @@ fn the_beacon_carries_a_connectable_host_never_bare_localhost() {
 fn the_client_ladder_heals_a_dead_session_via_discovery() {
     let server_binary = resolve_workspace_binary("chat-server-rs");
     let client_binary = resolve_workspace_binary("chat-client-rs");
-    let ladder_beacon_port = "47996";
+    let ladder_beacon_port = free_udp_port();
+    let ladder_beacon_port = ladder_beacon_port.as_str();
     let home = ScratchDir::new("resolution-ladder-server");
     let _server = Command::new(&server_binary)
         .env("AI_CHAT_HOME", home.path())
