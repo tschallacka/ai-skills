@@ -31,12 +31,22 @@ const PROGRAM: &str = "pre-push-check.sh";
 // stripping the leading `# `; this port embeds the identical text as a
 // literal constant instead of re-deriving it from a comment, matching
 // ci-failures's own precedent).
-const USAGE: &str = r#"pre-push-check - the per-change gates from MAINTAINER.md section 4 and the
-PR hygiene rules in AGENTS.md, in one command.
+const USAGE: &str = r#"pre-push-check - the per-change gates and the PR hygiene rules in AGENTS.md,
+in one command.
 
-Run it before every push. The change set is everything that differs from
-master - the branch's commits plus the worktree and the index - and the fast,
-mechanical gates are applied to that:
+Run it before every push. It re-enters `nix develop` first, so without nix it
+exits 69 and runs no gate, --help included. The change set is everything that
+differs from the merge base with origin/master (falling back to master, then
+to the branch's upstream) - the branch's commits plus the worktree and the
+index - and the gates run in this order:
+  git fetch origin master  refreshes the base first; a failed fetch ends the
+                          run (PRE_PUSH_SKIP_FETCH=1 skips it, for a throwaway
+                          clone or no network, and the change set may then be
+                          stale)
+  registers-branch guard  BUGS.json or TODO.json changed on any branch but
+                          `registers` is refused and ends the run
+                          (PRE_PUSH_ALLOW_REGISTERS=1 accepts changes already
+                          in flight; never use it to file an entry)
   git diff --check        whitespace, in the worktree, the index and the
                           branch's committed diff
   PORTABILITY.md          regenerated unconditionally, so it always matches
@@ -47,19 +57,30 @@ mechanical gates are applied to that:
                           `source=` resolves from disk. CI lints the whole
                           live set; see the note at that gate for why the
                           two agree and where they cannot
+  static scans            a function newly over CODE-STYLE.md's 40-line cap,
+                          and a construct PORTABILITY.md bans in a changed
+                          script
   cargo fmt --check +     each crate under src/ touched by the change
   cargo test              (skipped with a note when no crate changed)
+  cargo clippy            the whole workspace, --all-targets -D warnings,
+                          whenever any crate changed
   register soundness      TODO.json and BUGS.json through reg_findings, the
                           shipped implementation: ids, statuses, severities,
                           priorities, parents, timestamps, reproductions,
                           mechanism-on-confirmed, verification-on-fixed
                           (needs rjq on PATH)
   npm package baseline    every pinned byte size in
-                          npm-package-baseline.tsv against the working tree.
-                          Not npm's file selection - the full
-                          test-npm-package.sh still owns that
+                          planning/tests/fixtures/overview/npm-package-baseline.tsv
+                          against the working tree. Not npm's file selection -
+                          the full planning/tests/test-npm-package.sh still
+                          owns that
+  skill_files() check     tests/test-skill-files-manifest.sh
+                          --declarations-only: a tracked skill file that
+                          installer/src/50-manifest.sh's skill_files() does
+                          not declare fails
 The registers update, the plan validator and the role-drift tests stay with
-MAINTAINER.md section 4: they need judgement about what changed, which a
+.agents/MAINTAINER.md section 2 (and planning/MAINTAINER.md section 4 for a
+change to the planning skill): they need judgement about what changed, which a
 pre-push helper deliberately does not guess at.
 
 Usage:

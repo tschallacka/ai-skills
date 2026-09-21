@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# pre-push-check - the per-change gates from MAINTAINER.md section 4 and the
-# PR hygiene rules in AGENTS.md, in one command.
+# pre-push-check - the per-change gates and the PR hygiene rules in AGENTS.md,
+# in one command.
 #
-# Run it before every push. The change set is everything that differs from
-# master - the branch's commits plus the worktree and the index - and the fast,
-# mechanical gates are applied to that:
+# Run it before every push. It re-enters `nix develop` first, so without nix it
+# exits 69 and runs no gate, --help included. The change set is everything that
+# differs from the merge base with origin/master (falling back to master, then
+# to the branch's upstream) - the branch's commits plus the worktree and the
+# index - and the gates run in this order:
+#   git fetch origin master  refreshes the base first; a failed fetch ends the
+#                           run (PRE_PUSH_SKIP_FETCH=1 skips it, for a throwaway
+#                           clone or no network, and the change set may then be
+#                           stale)
+#   registers-branch guard  BUGS.json or TODO.json changed on any branch but
+#                           `registers` is refused and ends the run
+#                           (PRE_PUSH_ALLOW_REGISTERS=1 accepts changes already
+#                           in flight; never use it to file an entry)
 #   git diff --check        whitespace, in the worktree, the index and the
 #                           branch's committed diff
 #   PORTABILITY.md          regenerated unconditionally, so it always matches
@@ -16,19 +26,30 @@
 #                           `source=` resolves from disk. CI lints the whole
 #                           live set; see the note at that gate for why the
 #                           two agree and where they cannot
+#   static scans            a function newly over CODE-STYLE.md's 40-line cap,
+#                           and a construct PORTABILITY.md bans in a changed
+#                           script
 #   cargo fmt --check +     each crate under src/ touched by the change
 #   cargo test              (skipped with a note when no crate changed)
+#   cargo clippy            the whole workspace, --all-targets -D warnings,
+#                           whenever any crate changed
 #   register soundness      TODO.json and BUGS.json through reg_findings, the
 #                           shipped implementation: ids, statuses, severities,
 #                           priorities, parents, timestamps, reproductions,
 #                           mechanism-on-confirmed, verification-on-fixed
 #                           (needs rjq on PATH)
 #   npm package baseline    every pinned byte size in
-#                           npm-package-baseline.tsv against the working tree.
-#                           Not npm's file selection - the full
-#                           test-npm-package.sh still owns that
+#                           planning/tests/fixtures/overview/npm-package-baseline.tsv
+#                           against the working tree. Not npm's file selection -
+#                           the full planning/tests/test-npm-package.sh still
+#                           owns that
+#   skill_files() check     tests/test-skill-files-manifest.sh
+#                           --declarations-only: a tracked skill file that
+#                           installer/src/50-manifest.sh's skill_files() does
+#                           not declare fails
 # The registers update, the plan validator and the role-drift tests stay with
-# MAINTAINER.md section 4: they need judgement about what changed, which a
+# .agents/MAINTAINER.md section 2 (and planning/MAINTAINER.md section 4 for a
+# change to the planning skill): they need judgement about what changed, which a
 # pre-push helper deliberately does not guess at.
 #
 # Usage:
@@ -210,7 +231,7 @@ if [ -n "$register_changes" ] && [ "$current_branch" != "$register_branch" ]; th
     printf '%s\n' "$register_changes" | sed 's/^/    /'
     note "branch: $current_branch"
     note "THE TARGET BRANCH IS: $register_branch"
-    note "  git switch $register_branch   (git switch -c $register_branch origin/master if it is not local yet)"
+    note "  git switch $register_branch   (git switch -c $register_branch origin/$register_branch if it is not local yet)"
     note "  then file the entry with the shipped tools -- bin/<triple>/bugs add ... or"
     note "  bin/<triple>/todo add ... -- and push; the entry reaches master from there"
     note "a fix's resolution keys (fix, verification, status) go the same way, after the"
@@ -305,7 +326,7 @@ fi
 # no row to disagree with. The full test remains authoritative for the file set.
 #
 # An absent file is NOT drift. Six baseline rows name generated, untracked
-# artifacts (MAINTAINER.md 2.16) -- planning/REVIEWER.md and the five
+# artifacts (.agents/MAINTAINER.md 1.10) -- planning/REVIEWER.md and the five
 # plan-*-lib.sh -- which `npm pack` builds in its prepack and a fresh checkout
 # simply does not have. Counting those as failures made this gate red on a
 # clean clone, which is the same shape of uselessness as a gate that can never
@@ -355,7 +376,7 @@ if [ -x "$manifest_test" ]; then
     else
         bad "a skill file is tracked but not declared in skill_files()"
         printf '%s\n' "$manifest_out" | sed -n 's/^ *FAIL: /  /p'
-        note "add it to the right arm in installer/src/50-manifest.sh, then installer/build.sh"
+        note "add it to the right arm of skill_files() in installer/src/50-manifest.sh"
     fi
 else
     note "no $manifest_test to check skill declarations with"

@@ -227,7 +227,7 @@ fn git_ignored(repo: &Path, path: &Path) -> bool {
 /// the tool that committed: it takes `.git/objects/maintenance.lock` (and, when
 /// it repacks, temporary pack and bitmap files) in and out under whatever reads,
 /// copies or removes the plan next. Foreground keeps the maintenance and drops
-/// the stray process. `.agents/MAINTAINER.md` 1.15 has the measurement.
+/// the stray process.
 ///
 /// Only for a repository this tool has just created: an existing project's own
 /// repository keeps whatever the user configured.

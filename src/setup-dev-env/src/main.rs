@@ -36,13 +36,13 @@ const PROGRAM: &str = "setup-dev-env.sh";
 const USAGE: &str = "\
 setup-dev-env.sh \u{2014} build the crates under src/ into a working local tree.
 
-A fresh clone carries Rust source but almost no binaries: only one artifact is
-committed, and the skills look for compiled helpers that are not there. The
-suite still passes, because every one of them degrades honestly \u{2014} which is
-exactly what hides the fact that the compiled path is never being exercised.
-This builds each crate for THIS machine into one bin/<target triple> at the
-repository root, which is where the skills look, so a local tree runs the same
-code a target does.
+A fresh clone carries Rust source but no binaries: nothing machine-produced is
+committed, and the skills look for compiled helpers that are not there.
+run-tests.sh is a shim over the compiled run-tests and exits 69 without it, so
+an unbuilt tree cannot run the suite at all. This builds each binary listed by
+--list for THIS machine into one bin/<target triple> at the repository root,
+which is where the skills look, so a local tree runs the same code a target
+does.
 
 It also builds the generated shell artifacts a clean checkout lacks \u{2014} the five
 plan-*-lib.sh that planning/scripts/*.sh source, and planning/REVIEWER.md \u{2014} on

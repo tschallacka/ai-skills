@@ -279,7 +279,9 @@ fn run() -> i32 {
             .unwrap_or_default(),
         platform::utc_stamp()
     );
-    println!("Runner order: sorted test files under planning/tests then benchmark/planning/tests");
+    println!(
+        "Runner order: sorted shell tests from every suite directory, then each crate's cargo test"
+    );
     println!();
 
     let mut counts = Counts::default();

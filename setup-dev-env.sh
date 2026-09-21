@@ -2,13 +2,13 @@
 # MODE: DEV
 # setup-dev-env.sh — build the crates under src/ into a working local tree.
 #
-# A fresh clone carries Rust source but almost no binaries: only one artifact is
-# committed, and the skills look for compiled helpers that are not there. The
-# suite still passes, because every one of them degrades honestly — which is
-# exactly what hides the fact that the compiled path is never being exercised.
-# This builds each crate for THIS machine into one bin/<target triple> at the
-# repository root, which is where the skills look, so a local tree runs the same
-# code a target does.
+# A fresh clone carries Rust source but no binaries: nothing machine-produced is
+# committed, and the skills look for compiled helpers that are not there.
+# run-tests.sh is a shim over the compiled run-tests and exits 69 without it, so
+# an unbuilt tree cannot run the suite at all. This builds each binary listed by
+# --list for THIS machine into one bin/<target triple> at the repository root,
+# which is where the skills look, so a local tree runs the same code a target
+# does.
 #
 # It also builds the generated shell artifacts a clean checkout lacks — the five
 # plan-*-lib.sh that planning/scripts/*.sh source, and planning/REVIEWER.md — on
@@ -251,7 +251,7 @@ EOF
 rm -f "$repo_root/.setup-dev-env.log"
 
 # The generated shell artifacts, on the same build-if-missing terms as the
-# crates above. They are never committed (MAINTAINER.md section 2.16), and a
+# crates above. They are never committed (.agents/MAINTAINER.md 1.10), and a
 # fresh clone therefore has none of them — which is the same gap this script
 # exists to close: planning/scripts/*.sh `source` the five plan-*-lib.sh files,
 # so a freshly cloned tree cannot run a planning helper at all until they are
@@ -282,7 +282,7 @@ if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then
         printf 'setup-dev-env: generate-reviewer.sh failed; the reviewer contract is missing\n' >&2
     fi
 fi
-# PORTABILITY.md is untracked (MAINTAINER.md section 2.16), cheap to rebuild,
+# PORTABILITY.md is untracked (.agents/MAINTAINER.md 1.10), cheap to rebuild,
 # and unlike the artifacts above it is a live catalogue rather than a
 # load-bearing dependency -- regenerated unconditionally, every run, so it is
 # never more than one setup-dev-env.sh away from matching the tree exactly.

@@ -39,9 +39,7 @@ pub fn gate_skill_manifest(repo_root: &Path, report: &mut Report) {
                     println!("  {rest}");
                 }
             }
-            report.note(
-                "add it to the right arm in installer/src/50-manifest.sh, then installer/build.sh",
-            );
+            report.note("add it to the right arm of skill_files() in installer/src/50-manifest.sh");
         }
         Err(_) => {
             report.bad("a skill file is tracked but not declared in skill_files()");

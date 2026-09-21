@@ -41,7 +41,7 @@ pub fn gate_registers_branch(
         report.note(&format!("branch: {branch}"));
         report.note(&format!("THE TARGET BRANCH IS: {REGISTER_BRANCH}"));
         report.note(&format!(
-            "  git switch {REGISTER_BRANCH}   (git switch -c {REGISTER_BRANCH} origin/master if it is not local yet)"
+            "  git switch {REGISTER_BRANCH}   (git switch -c {REGISTER_BRANCH} origin/{REGISTER_BRANCH} if it is not local yet)"
         ));
         report.note("  then file the entry with the shipped tools -- bin/<triple>/bugs add ... or");
         report.note("  bin/<triple>/todo add ... -- and push; the entry reaches master from there");
