@@ -7496,9 +7496,9 @@
       "fix": null,
       "verification": null,
       "found_by": "aiskills, CI run 35614711962, 2026-09-21",
-      "notes": "Hypothesis, not checked on macOS: serve_on_host_port sets the listener non-blocking and respond() reads the request from the accepted stream with unwrap_or(0). If the accepted socket is non-blocking there (from memory: BSD-derived systems let an accepted socket inherit the listener's O_NONBLOCK, Linux does not), an accept that lands before the request bytes arrive makes read() return WouldBlock, so the request reads as empty and any path gets the overview page, and the server then shuts the connection down, which is the client's Broken pipe. If so it is a server bug that a real browser could hit, not only a test flake. A check: after accept, stream.set_nonblocking(false), then loop the test on macOS.",
+      "notes": "Hypothesis, not checked on macOS: serve_on_host_port sets the listener non-blocking and respond() reads the request from the accepted stream with unwrap_or(0). If the accepted socket is non-blocking there (from memory: BSD-derived systems let an accepted socket inherit the listener's O_NONBLOCK, Linux does not), an accept that lands before the request bytes arrive makes read() return WouldBlock, so the request reads as empty and any path gets the overview page, and the server then shuts the connection down, which is the client's Broken pipe. If so it is a server bug that a real browser could hit, not only a test flake. A check: after accept, stream.set_nonblocking(false), then loop the test on macOS. Correction to the observed text: the 'no earlier failure' check covered the seven failed nextupdate runs 35342032200 through 35545991115 plus 35614711962 itself (about 2026-09-18 to 2026-09-21), not everything since 2026-09-15.",
       "created_at": "2026-09-21T17:11:42Z",
-      "updated_at": "2026-09-21T17:11:42Z"
+      "updated_at": "2026-09-21T17:11:54Z"
     },
     {
       "id": "B25",
