@@ -556,13 +556,100 @@ jobs:
   # by two consecutive green macOS runs (32474258670, 32476867183) -- so both
   # macOS legs above are now blocking.
 
+  test-windows:
+    # Proves: the deterministic shell suite passes on Windows under Git for
+    # Windows' bash. The `native` job's windows leg proves the Rust crates
+    # build and pass there; this proves the bash skills and their tests do too,
+    # which is the half of the product a cargo run never touches.
+    #
+    # Sharded like the other suite jobs (measured on the windows branch: about
+    # 30 minutes unsharded, most of it process spawns, which Windows makes
+    # slow), and it takes the same selective test list from the scope job.
+    name: Test suite passes on windows-latest (Git bash, shard ${{ matrix.shard }})
+    runs-on: windows-latest
+    needs: scope
+    timeout-minutes: 60
+    # SHARD_TOTAL must equal the length of the shard array below, for the
+    # reason spelled out on the `test` job.
+    env:
+      SHARD_TOTAL: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      # Before the checkout: the runner's git converts to CRLF by default, and
+      # a bash script with CRLF endings fails on its first line.
+      - name: Check out with LF endings
+        shell: bash
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          # benchmark/results holds paths past what Windows can check out.
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/benchmark/results/
+
+      - name: Pin the toolchain
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      # Without this, `bash` resolves to System32's WSL launcher, which is not
+      # the shell the scripts are written for; Git's coreutils come first for
+      # the same reason (find, sort and friends, not their Windows namesakes).
+      - name: Put Git for Windows' bash and coreutils first on PATH
+        shell: bash
+        run: |
+          {
+            echo 'C:\Program Files\Git\bin'
+            echo 'C:\Program Files\Git\usr\bin'
+          } >> "$GITHUB_PATH"
+
+      - name: Build every compiled helper into bin/<triple>
+        shell: bash
+        run: |
+          SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
+          triple="$(./setup-dev-env.sh --list | sed -n 's/^host target: //p')"
+          [ -n "$triple" ] || { echo "::error::setup-dev-env.sh --list named no host target"; exit 1; }
+          echo "AI_SKILLS_BIN_ROOT=$PWD/bin/$triple" >> "$GITHUB_ENV"
+
+      - name: Write the selected test list (T116)
+        if: needs.scope.outputs.tests_scope == 'selective'
+        shell: bash
+        run: printf '%s\n' '${{ needs.scope.outputs.tests }}' | tr ' ' '\n' > selected-tests.txt
+
+      - name: Run this shard of the deterministic test suite
+        shell: bash
+        run: |
+          set -o pipefail
+          select_flag=()
+          [ '${{ needs.scope.outputs.tests_scope }}' != 'selective' ] \
+              || select_flag=(--select-file selected-tests.txt)
+          ./run-tests.sh "${select_flag[@]}" --shard "${{ matrix.shard }}/$SHARD_TOTAL" 2>&1 \
+              | tee windows-shell-suite.log
+
+      - name: Keep the suite log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-shell-suite-log-shard-${{ matrix.shard }}
+          path: windows-shell-suite.log
+          if-no-files-found: ignore
+
   test-suite-ok:
-    # T116: `test` and `test-bash32` are each sharded (2 os * 4 shards, plus 4
-    # more for the bash-3.2 leg), so their own check names carry a shard
-    # number and change if SHARD_TOTAL ever does. Branch protection needs ONE
-    # stable name to require regardless of shard count, which is this job's
-    # only reason to exist -- it proves nothing itself, it only reports
-    # whether every shard of both jobs actually passed.
+    # T116: `test`, `test-bash32` and `test-windows` are each sharded (2 os * 4
+    # shards, plus 4 more for the bash-3.2 leg and 4 for Windows), so their own
+    # check names carry a shard number and change if SHARD_TOTAL ever does.
+    # Branch protection needs ONE stable name to require regardless of shard
+    # count, which is this job's only reason to exist -- it proves nothing
+    # itself, it only reports whether every shard of all three jobs actually
+    # passed.
     #
     # `if: always()` is required for a job whose own dependencies might fail:
     # GitHub skips a job's default `if` (`success()`) the moment any `needs`
@@ -570,14 +657,15 @@ jobs:
     # a FAILED one does -- exactly the silent-pass this job exists to prevent.
     name: Shell test suite (all shards) passes
     runs-on: ubuntu-latest
-    needs: [test, test-bash32]
+    needs: [test, test-bash32, test-windows]
     if: always()
     steps:
       - name: Check every shard succeeded
         run: |
           if [ '${{ needs.test.result }}' != 'success' ] \
-              || [ '${{ needs['test-bash32'].result }}' != 'success' ]; then
-            echo "::error::one or more test-suite shards did not succeed (test: ${{ needs.test.result }}, test-bash32: ${{ needs['test-bash32'].result }})"
+              || [ '${{ needs['test-bash32'].result }}' != 'success' ] \
+              || [ '${{ needs['test-windows'].result }}' != 'success' ]; then
+            echo "::error::one or more test-suite shards did not succeed (test: ${{ needs.test.result }}, test-bash32: ${{ needs['test-bash32'].result }}, test-windows: ${{ needs['test-windows'].result }})"
             exit 1
           fi
 
