@@ -45,6 +45,44 @@ finer: the next step inside a running turn. One sample, so do not build on it.
 - Nothing tells the server whether anyone received a push. `notification()`
   resolving means only "written to the transport".
 
+## What the binary says about the gate
+
+Read out of the 2.1.278 binary (`strings` on the executable, then reading the
+minified code around each key), 2026-09-21. **Read, not run**: none of this was
+exercised except the `--dangerously-load-development-channels` path.
+
+- A `server:<name>` entry given to `--channels` is **never** admitted: the code
+  answers "server X is not on the approved channels allowlist (use
+  --dangerously-load-development-channels for local dev)". The dev flag is the only
+  route for a bare MCP server.
+- A `plugin:<name>@<marketplace>` entry is admitted when that pair is on the
+  allowlist. The allowlist is the managed setting `allowedChannelPlugins` when
+  one is set (it **replaces** the default, so it must list the approved ones too),
+  else the default, which is the remote feature flag `tengu_harbor_ledger`: a list
+  Anthropic controls, with nothing local that can add to it. The plugin must also
+  be installed from that marketplace.
+- `allowedChannelPlugins` and `channelsEnabled` are managed-settings keys
+  (Linux: `/etc/claude-code/managed-settings.json` or `managed-settings.d/`; the
+  directory does not exist on this machine). `channelsEnabled` blocks channels only
+  for a claude.ai Team or Enterprise login (and, on a Console key, when managed
+  settings exist without it), so a personal Pro or Max login is not blocked.
+- The confirmation dialog belongs to the dev flag alone and has no memory: it is
+  shown at every start whenever channels are on, and nothing in the code stores an
+  acceptance. `--help` text for the flag says "Shows a confirmation dialog at
+  startup".
+- There is **no** setting or environment variable that turns channels on without
+  the command-line flag: no key or variable with "channel" in it other than the
+  two managed ones above and `CLAUDE_CODE_REMOTE_TOOLS_SESSION_CHANNEL`, which is
+  unrelated.
+- Channels are also gated by the remote flag `tengu_harbor` and by a first-party
+  provider; a third-party provider, or the flag off, drops them without a message.
+
+So the only ways to receive a push without `--dangerously-...`: be on Anthropic's
+list, or package the server as a Claude Code plugin in a marketplace, install it,
+put `plugin@marketplace` in `allowedChannelPlugins` in a managed-settings file
+(root-owned, system-wide) and still pass `--channels plugin:...` at every start.
+Neither has been tried.
+
 ## What does not work
 
 - `claude -p` with the dev flag: the server connected and the notification was
