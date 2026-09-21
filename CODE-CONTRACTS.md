@@ -143,9 +143,14 @@ finding names the rebuild helper).
 |---|---|---|
 | `PORTABILITY.md` | `generate-portability.sh` | `test-portability-contract.sh` |
 | `planning/REVIEWER.md` | `planning/scripts/generate-reviewer.sh` (pins `SKILL.md`'s SHA-256) | `test-reviewer-projection.sh` |
+| the five `planning/scripts/plan-*-lib.sh` | `planning/scripts/build-plan-libs.sh` | nothing but their users: a missing one cannot be sourced |
 
-Regenerate `PORTABILITY.md` **last** in any batch touching `*.sh`: its staleness
-signal is commit ordering.
+None of these is committed: each is untracked and gitignored, and is built on
+demand (`setup-dev-env.sh`, or the pre-push gate for `PORTABILITY.md`). The
+files, their generators and what fails when one is stale are in
+`.agents/MAINTAINER.md` section 1.10. Never edit one by hand, and never track
+one: a generated file in git is what produces the merge conflicts and the
+per-clone staleness described below.
 
 A generator's inputs must be **tracked sources only**. When it walks the
 filesystem, prune everything that is not the repo's own source — `.git`,
@@ -163,7 +168,7 @@ fresh on the machine that generated it and stale in every clone —
 `test-portability-contract` passed for one person and failed for everyone else.
 Verifying in a clean clone is what surfaced it; the working tree cannot.
 
-**Enforced** by the three tests above — but only when they run somewhere that
+**Enforced** by the tests above — but only when they run somewhere that
 does not carry the local state. Run the suite in a clean clone before trusting a
 generated artifact's freshness check.
 

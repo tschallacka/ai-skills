@@ -254,7 +254,7 @@
               echo "Portability checks:"
               echo "  ./run-tests.sh                    # your bash"
               echo "  bash32-run-tests                  # the floor"
-              echo "  shellcheck -s bash --severity=error \$(git ls-files '*.sh' | grep -v '^benchmark/results/')"
+              echo "  ./pre-push-check.sh               # the gates, shellcheck at warning severity included"
             '';
           };
 

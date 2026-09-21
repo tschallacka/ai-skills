@@ -970,7 +970,7 @@ hold.
 ```bash
 bash -n <every edited script>
 shellcheck -s bash <every edited script>      # 0 new findings
-./run-tests.sh                                # 30+ PASS, 0 FAIL
+./run-tests.sh                                # 0 FAIL
 git diff --check
 ```
 
