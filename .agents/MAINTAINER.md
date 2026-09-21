@@ -582,7 +582,10 @@ the CI map.
   printing). `pre-push-check.sh` prefers the compiled `pre-push-check`
   (`src/pre-push-check`) and otherwise falls back to a bash implementation
   (`pre-push-check-lib.sh`) that prints less (1.12). What `--help` does not say:
-  - It **fetches `origin master` first**, and a failed fetch is itself a gate
+  - It **fetches `origin master` first**, before it resolves the base or
+    measures anything: master is the branch every change set is measured
+    against, so the freshest one is used, and it is a fetch, never a merge into
+    your branch. A failed fetch is itself a gate
     failure, because the change set would be measured against a stale ref. Retry
     before anything else: a dropped fetch is usually the network. With no
     `origin` remote it notes that and carries on. `PRE_PUSH_SKIP_FETCH=1` skips
@@ -601,7 +604,7 @@ the CI map.
     flight; it is for transport, never for filing an entry.
   - **On `registers` it is a different, one-gate run**: no nix re-entry, no
     gate but the file scope (every changed path is `BUGS.json` or `TODO.json`,
-    anything else fails), and the base is resolved after the fetch. The
+    anything else fails). The
     compiled binary and the bash script both do this, and
     `tests/test-register-branch-gate.sh` and the crate's own integration tests
     pin it, including that a `nix` on `PATH` is never called.

@@ -40,10 +40,11 @@ see the paragraph after the gate list). The change set is everything that
 differs from the merge base with origin/master (falling back to master, then
 to the branch's upstream) - the branch's commits plus the worktree and the
 index - and the gates run in this order:
-  git fetch origin master  refreshes the base first; a failed fetch ends the
-                          run (PRE_PUSH_SKIP_FETCH=1 skips it, for a throwaway
-                          clone or no network, and the change set may then be
-                          stale)
+  git fetch origin master  refreshes master before anything is measured, and
+                          the base is resolved from what it fetched; a failed
+                          fetch ends the run (PRE_PUSH_SKIP_FETCH=1 skips it,
+                          for a throwaway clone or no network, and the change
+                          set may then be stale)
   registers-branch guard  BUGS.json or TODO.json changed on any branch but
                           `registers` is refused and ends the run
                           (PRE_PUSH_ALLOW_REGISTERS=1 accepts changes already
@@ -81,7 +82,7 @@ index - and the gates run in this order:
                           not declare fails
 On the `registers` branch none of the above runs, and neither does the nix
 re-entry: the one gate is that every changed path is BUGS.json or TODO.json,
-and anything else fails. The base is resolved after the fetch. The registers
+and anything else fails. The registers
 workflow (.github/workflows/registers.yml) checks ids and parents when the
 push lands.
 The registers update, the plan validator and the role-drift tests stay with
@@ -140,23 +141,8 @@ fn discover_repo_root() -> Option<PathBuf> {
     (!text.is_empty()).then(|| PathBuf::from(text))
 }
 
-/// A push from `registers` runs the file-scope gate and nothing else. The
-/// base is resolved AFTER the fetch here, so a stale origin/master cannot
-/// make master's own commits, already merged into this branch, read as its
-/// changes.
-fn run_register_branch(repo_root: &std::path::Path, report: &mut Report) -> ExitCode {
-    if let Err(code) = fetch_master(repo_root, report) {
-        return ExitCode::from(code as u8);
-    }
-    let resolved = resolve_base(repo_root);
-    println!(
-        "pre-push-check (base: {}; registers branch)",
-        resolved
-            .label
-            .as_deref()
-            .unwrap_or("no master or upstream; worktree only")
-    );
-    gate_register_branch_scope(repo_root, resolved.base.as_deref(), report);
+/// The verdict line and exit code every path ends on.
+fn finish(report: &Report) -> ExitCode {
     if report.failures == 0 {
         println!("pre-push-check: PASS");
         ExitCode::SUCCESS
@@ -194,22 +180,32 @@ fn run() -> ExitCode {
         return ExitCode::from(65);
     }
 
+    // master is the branch every change set is measured against, so it is
+    // refreshed before anything else, and the base is resolved from what that
+    // fetch brought in. Resolving first would measure against a stale
+    // origin/master and list master's own newer commits as this branch's.
     let mut report = Report::new();
-    if on_registers {
-        return run_register_branch(&repo_root, &mut report);
+    if let Err(code) = fetch_master(&repo_root, &mut report) {
+        return ExitCode::from(code as u8);
     }
     let resolved = resolve_base(&repo_root);
     let base = resolved.base.as_deref();
     let base_label = resolved.label.as_deref();
 
-    if let Err(code) = fetch_master(&repo_root, &mut report) {
-        return ExitCode::from(code as u8);
-    }
-
     println!(
-        "pre-push-check (base: {})",
-        base_label.unwrap_or("no master or upstream; worktree only")
+        "pre-push-check (base: {}{})",
+        base_label.unwrap_or("no master or upstream; worktree only"),
+        if on_registers {
+            "; registers branch"
+        } else {
+            ""
+        }
     );
+
+    if on_registers {
+        gate_register_branch_scope(&repo_root, base, &mut report);
+        return finish(&report);
+    }
 
     if let Err(code) = gate_registers_branch(&repo_root, base, &mut report) {
         return ExitCode::from(code as u8);
@@ -228,13 +224,7 @@ fn run() -> ExitCode {
     gate_skill_manifest(&repo_root, &mut report);
     gate_full_suite(&repo_root, full, &mut report);
 
-    if report.failures == 0 {
-        println!("pre-push-check: PASS");
-        ExitCode::SUCCESS
-    } else {
-        println!("pre-push-check: {} failure(s)", report.failures);
-        ExitCode::FAILURE
-    }
+    finish(&report)
 }
 
 fn main() -> ExitCode {

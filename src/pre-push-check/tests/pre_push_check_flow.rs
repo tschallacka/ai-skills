@@ -225,6 +225,75 @@ fn registers_branch_with_nothing_changed_passes() {
     assert!(out.contains("nothing differs from master"));
 }
 
+/// master is refreshed BEFORE the base is resolved. `registers` is levelled
+/// with master by a workflow, so it carries master's own newer commits; with a
+/// stale origin/master ref those commits would read as this branch's changes.
+/// The clone below has exactly that: origin/master pinned to the first commit
+/// while its `registers` branch sits on top of the second and adds one register.
+#[test]
+fn master_is_fetched_before_the_base_is_resolved() {
+    let origin = Repo::new("fetch-first-origin");
+    git(&origin.dir, &["checkout", "-q", "-b", "master"]);
+    write_file(&origin.dir.join("README.md"), "one\n");
+    origin.commit("first");
+    let first = String::from_utf8(
+        Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&origin.dir)
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    write_file(&origin.dir.join("other.txt"), "master moved on\n");
+    origin.commit("second, on master only");
+
+    let mut clone_dir = std::env::temp_dir();
+    clone_dir.push(format!(
+        "pre-push-check-flow-fetch-first-clone-{}-{:?}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let status = Command::new("git")
+        .args(["clone", "-q"])
+        .arg(&origin.dir)
+        .arg(&clone_dir)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    git(
+        &clone_dir,
+        &["update-ref", "refs/remotes/origin/master", &first],
+    );
+    git(&clone_dir, &["checkout", "-q", "-b", "registers"]);
+    write_file(&clone_dir.join("BUGS.json"), "[]\n");
+    git(&clone_dir, &["add", "-A"]);
+    git(&clone_dir, &["commit", "-q", "-m", "file a bug"]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_pre-push-check"))
+        .current_dir(&clone_dir)
+        .env("AI_SKILLS_PREPUSH_IN_NIX", "1")
+        .env_remove("PRE_PUSH_SKIP_FETCH")
+        .output()
+        .unwrap();
+    let out = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(0), "{out}");
+    assert!(out.contains("fetched origin master"), "{out}");
+    assert!(
+        out.contains("only registers changed on the registers branch (BUGS.json)"),
+        "master's own commit was counted as this branch's: {out}"
+    );
+    assert!(!out.contains("other.txt"), "{out}");
+
+    let _ = fs::remove_dir_all(&clone_dir);
+}
+
 /// The stale master flake's dev shell does not build on Apple Silicon, so a
 /// push from `registers` must never reach `nix develop`. A `nix` that records
 /// its own call and fails stands in for it, with no marker variable set.

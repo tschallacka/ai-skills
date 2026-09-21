@@ -9,10 +9,11 @@
 # differs from the merge base with origin/master (falling back to master, then
 # to the branch's upstream) - the branch's commits plus the worktree and the
 # index - and the gates run in this order:
-#   git fetch origin master  refreshes the base first; a failed fetch ends the
-#                           run (PRE_PUSH_SKIP_FETCH=1 skips it, for a throwaway
-#                           clone or no network, and the change set may then be
-#                           stale)
+#   git fetch origin master  refreshes master before anything is measured, and
+#                           the base is resolved from what it fetched; a failed
+#                           fetch ends the run (PRE_PUSH_SKIP_FETCH=1 skips it,
+#                           for a throwaway clone or no network, and the change
+#                           set may then be stale)
 #   registers-branch guard  BUGS.json or TODO.json changed on any branch but
 #                           `registers` is refused and ends the run
 #                           (PRE_PUSH_ALLOW_REGISTERS=1 accepts changes already
@@ -50,7 +51,7 @@
 #                           not declare fails
 # On the `registers` branch none of the above runs, and neither does the nix
 # re-entry: the one gate is that every changed path is BUGS.json or TODO.json,
-# and anything else fails. The base is resolved after the fetch. The registers
+# and anything else fails. The registers
 # workflow (.github/workflows/registers.yml) checks ids and parents when the
 # push lands.
 # The registers update, the plan validator and the role-drift tests stay with
@@ -170,9 +171,11 @@ resolve_base() {
         base_label="$base"
     fi
 }
-resolve_base
 
 # ---- master is refreshed before anything is measured ------------------------
+# master is the branch every change set is measured against, so it comes first,
+# and the base is resolved from what the fetch brought in (resolve_base, below
+# the fetch): resolving first would measure against a stale origin/master.
 # Every gate below measures the change set against master. A master ref that is
 # behind the remote therefore makes already-merged work look like this branch's,
 # and the gates report on a change set that does not exist: a register commit
@@ -200,6 +203,7 @@ elif git rev-parse --git-dir >/dev/null 2>&1 && git remote get-url origin >/dev/
 else
     note "no origin remote; master cannot be refreshed and the change set may be stale"
 fi
+resolve_base
 
 changed() { # <pathspec-filter...> -> changed files matching the filter
     { [ -n "$base" ] && git diff --name-only "$base..HEAD"; git diff --name-only; git diff --cached --name-only; } \
@@ -211,10 +215,7 @@ changed() { # <pathspec-filter...> -> changed files matching the filter
 # the only gate it runs: every changed path must be BUGS.json or TODO.json.
 # .github/workflows/registers.yml refuses the same thing before landing on
 # master, and checks ids and parents; this refuses it before the push leaves.
-# The base is resolved again here, after the fetch above, so a stale
-# origin/master cannot make master's own commits look like this branch's.
 if [ "$current_branch" = "$register_branch" ]; then
-    resolve_base
     printf 'pre-push-check (base: %s; registers branch)\n' \
         "${base_label:-no master or upstream; worktree only}"
     stray="$(changed -v -E '^(BUGS|TODO)\.json$' || true)"
