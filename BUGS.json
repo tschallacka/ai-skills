@@ -363,9 +363,9 @@
       "fix": "flake.nix's mkBash32 gained -fcommon in both places -std=gnu89 was already duplicated: CFLAGS and the preBuild CC= line (the Makefile compiles its own helper tools like mkbuiltins/mksyntax via CC directly, bypassing CFLAGS).",
       "verification": "PR #164 (commit f03a035c, merged ce08f36f): aarch64-apple-darwin builds and runs every subject in scope passed on real CI, direct proof the devShell now realises and setup-dev-env.sh produces bin/aarch64-apple-darwin/ binaries on this platform. x86_64-linux (nix build .#bash32, nix develop) unaffected. Full pre-push-check.sh PASS.",
       "found_by": "migration of the dev environment to Apple Silicon; first attempt to run setup-dev-env.sh on aarch64-apple-darwin",
-      "notes": "FIX IS PROVEN, NOT PROPOSED: add -fcommon to mkBash32 in two places, CFLAGS and the preBuild CC= line. Both, for the same reason -std=gnu89 is already duplicated across both and the derivation own comments explain: the Makefile compiles its helper tools (mkbuiltins, mksyntax) with CC directly and they never see CFLAGS. Verified by building bash 3.2.57 out of tree with only that flag added, which produced a working \"GNU bash, version 3.2.57(1)-release (aarch64-apple-darwin25.6.0)\" Mach-O arm64 executable. The mutation is the flag itself: without -fcommon the link fails as observed, with it the build completes. WHY IT WENT UNNOTICED: the derivation was written and debugged on Linux (its comments reference glibc and \"a current gcc\") and has never been built on Apple Silicon, where the nixpkgs stdenv is a much newer clang. Two things also mask it. First, --list and --check return before the script touches nix at all, so ./setup-dev-env.sh --check succeeds on this platform and reports every artifact MISSING, which reads as \"not built yet\" rather than \"cannot be built\". Second, bash32 exists precisely so the suite can be exercised against the macOS bash 3.2 floor of CODE-STYLE.md section 1 — so the one platform it cannot be built on is the platform it exists to emulate, and the one where /bin/bash already is 3.2.57. SECONDARY OBSERVATION, possibly its own entry: this path exits 1, outside the script documented exit vocabulary (64 bad usage, 69 nix missing, 70 a crate failed to build). setup-dev-env.sh line 139 execs nix develop, so nix own exit code replaces the script and a caller checking for 69 or 70 sees an undocumented 1. require_nix passes, because nix IS present; it is the devShell that cannot be realised, which the vocabulary has no code for.",
+      "notes": "FIX IS PROVEN, NOT PROPOSED: add -fcommon to mkBash32 in two places, CFLAGS and the preBuild CC= line. Both, for the same reason -std=gnu89 is already duplicated across both and the derivation own comments explain: the Makefile compiles its helper tools (mkbuiltins, mksyntax) with CC directly and they never see CFLAGS. Verified by building bash 3.2.57 out of tree with only that flag added, which produced a working \"GNU bash, version 3.2.57(1)-release (aarch64-apple-darwin25.6.0)\" Mach-O arm64 executable. The mutation is the flag itself: without -fcommon the link fails as observed, with it the build completes. WHY IT WENT UNNOTICED: the derivation was written and debugged on Linux (its comments reference glibc and \"a current gcc\") and has never been built on Apple Silicon, where the nixpkgs stdenv is a much newer clang. Two things also mask it. First, --list and --check return before the script touches nix at all, so ./setup-dev-env.sh --check succeeds on this platform and reports every artifact MISSING, which reads as \"not built yet\" rather than \"cannot be built\". Second, bash32 exists precisely so the suite can be exercised against the macOS bash 3.2 floor of CODE-STYLE.md section 1 — so the one platform it cannot be built on is the platform it exists to emulate, and the one where /bin/bash already is 3.2.57. SECONDARY OBSERVATION, possibly its own entry: this path exits 1, outside the script documented exit vocabulary (64 bad usage, 69 nix missing, 70 a crate failed to build). setup-dev-env.sh line 139 execs nix develop, so nix own exit code replaces the script and a caller checking for 69 or 70 sees an undocumented 1. require_nix passes, because nix IS present; it is the devShell that cannot be realised, which the vocabulary has no code for. 2026-09-21: the fix is not on master. Commit ce08f36f (PR #164) is reachable only from origin/nextupdate and origin/windows; flake.nix has no -fcommon on origin/master or origin/registers (verified by aiskills), so every branch cut from master, registers included, still fails to realise the dev shell on aarch64-darwin with duplicate symbol _PC (readline terminal.o vs termcap.o), as reported by another worker on macOS. A git push from registers on such a Mac dies in the pre-push hook, whose nix re-entry cannot build the dev shell, before any gate runs. Either land the fix on master or push from a working tree that carries it.",
       "created_at": "2026-09-14T13:57:31Z",
-      "updated_at": "2026-09-14T15:46:54Z"
+      "updated_at": "2026-09-21T13:02:25Z"
     },
     {
       "id": "B337",
@@ -385,6 +385,31 @@
       "notes": null,
       "created_at": "2026-09-15T09:13:01Z",
       "updated_at": "2026-09-15T09:13:11Z"
+    },
+    {
+      "id": "B365",
+      "title": "An installed planning skill has no working helper: every scripts/*.sh wrapper exits 69 because the installer copies the compiled commands beside the wrappers, where plan_bin_dir never looks",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "installer install --agent claude --source . --skill planning --yes; then ~/.claude/skills/planning/scripts/verify-skill-load.sh --help; ls -la ~/.claude/skills/planning/scripts/verify-skill-load ~/.config/tsch-ai-skills/bin/",
+      "observed": "verify-skill-load.sh: verify-skill-load: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it (exit 69). The Mach-O binary verify-skill-load (302592 bytes) sits next to the wrapper in the installed scripts/ dir; the shared bin holds only ai-text-editor*, bugs, chat-*, interactive-shell*, rjq, todo. Same for role-context.sh, create-plan.sh and every other wrapper; ./verify-skill-load called directly works. Measured 2026-09-21 on aarch64-apple-darwin from checkout ac463fb7 by another worker; not re-run by aiskills.",
+      "expected": "Every documented scripts/<cmd>.sh invocation runs after a plain install, with no checkout and no AI_SKILLS_BIN_ROOT.",
+      "mechanism": "install.rs routes only <skill>/bin/<triple>/* into the shared bin (shared_binary_filename in src/installer/src/shared_bin.rs accepts only paths that start with bin/<triple>/); setup-dev-env-lib.sh stages the planning commands as planning/scripts/<cmd>, which the installer copies as ordinary files. plan_bin_dir (plan-crypt-lib.sh) returns AI_SKILLS_BIN_ROOT or the shared dir as soon as that directory exists and never checks the caller script dir, so plan_exec_compiled_binary_if_present falls through to the exit-69 branch. planning/binaries.tsv lists only plan-overview, rjq and plan-crypt, and only rjq of those is staged (as reported). Source claims verified by aiskills 2026-09-21.",
+      "surfaces": [
+        "src/installer/src/install.rs",
+        "setup-dev-env-lib.sh",
+        "planning/binaries.tsv",
+        "planning/scripts/plan-crypt-lib.sh",
+        "planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "testing-stories planning, brainstorm and post-implementation-review runs on macOS (another worker), 2026-09-21; mechanism verified in source by aiskills",
+      "notes": "All 108 scripts/ references in the installed planning docs use the .sh form, none the extensionless one, so agents only ever hit the failing path (as reported). brainstorm Phase 2 and post-implementation-review Phases 2 and 3 die on role-context.sh with it. The exit-69 hint sends an installed user to ./setup-dev-env.sh, which does not exist outside a checkout. Went unnoticed because every developer machine has a checkout and the tests export AI_SKILLS_BIN_ROOT. The lookup rule that causes it is documented in .agents/MAINTAINER.md 1.9. Reports by the other worker: ~/.config/tsch-ai-skills/tmp/stories/{planning,brainstorm,post-implementation-review}/report.md on its machine.",
+      "created_at": "2026-09-21T13:02:25Z",
+      "updated_at": "2026-09-21T13:02:25Z"
     },
     {
       "id": "B33",
