@@ -7524,6 +7524,27 @@
       "updated_at": "2026-09-21T20:38:05Z"
     },
     {
+      "id": "B369",
+      "title": "update-step's retry test failed on a loaded macOS runner: a 30 ms writer thread against a roughly 80 ms retry window",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "CI run 35660433933 (a5e07a5c), job 'x86_64-apple-darwin builds and runs every subject in scope': cargo test -p update-step. Not reproduced locally.",
+      "observed": "tests::read_progress_file_recovers_once_the_file_appears_mid_retry panicked at src/update-step/src/main.rs:418:46 (the unwrap on read_progress_file), test result: FAILED. 4 passed; 1 failed.",
+      "expected": "The test passes whatever the runner's load: it is about the loop retrying until a file appears, not about how fast a thread starts.",
+      "mechanism": "The test started a thread that wrote the file after 30 ms and read with production's budget of 5 attempts 20 ms apart (about 80 ms). On a loaded runner the thread ran later than that, so every attempt saw NotFound.",
+      "surfaces": [
+        "src/update-step/src/main.rs"
+      ],
+      "fix": "8c5631e6 on nextupdate: the retry loop's attempts and delay became arguments of read_with_retry; production still calls it with 5 x 20 ms, and the test gives it 200 x 10 ms.",
+      "verification": "cargo test -p update-step passes locally (5 tests). The failure was a timing race on a slow runner, so a green CI run on the x86_64 macOS leg is the real confirmation; see the run that follows the push of 8c5631e6.",
+      "found_by": "aiskills, CI run 35660433933, 2026-09-21",
+      "notes": "The same shape as B349's own mitigation (a bounded retry against a transient disappearance): the retry is unchanged, only the test's patience.",
+      "created_at": "2026-09-21T22:37:21Z",
+      "updated_at": "2026-09-21T22:37:21Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
