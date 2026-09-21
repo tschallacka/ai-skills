@@ -43,6 +43,35 @@ Code's screen shows nothing** when a reminder is delivered, so a person watching
 cannot tell (the reminder is in the transcript). A small model asked to "quote the
 reminder you were shown" sometimes misreported it, so do not use that as a test.
 
+### Waking an idle agent: `chat-spool-watch`
+
+The hook runs only when the agent makes a tool call, so an idle agent leaves its
+notices in the spool. `chat-spool-watch` (mcp installs ship it beside `chat-mcp`)
+watches that spool and prints **one line** when notices have sat unread for five
+minutes (`--after`), which is how you know the agent is idle and not consuming
+them. Arm it as a Claude Code Monitor and that line is a notification:
+
+```
+Monitor(command: "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-spool-watch",
+        description: "chat interrupts unread", timeout_ms: 1800000)
+```
+
+- It only looks and never empties the spool, so an agent that is working still
+  sees its notices through the hook, and the watcher stays silent for it. It
+  speaks only for one that has gone idle.
+- It speaks at most three times per unread stretch, five minutes apart
+  (`--max-alerts`, `--repeat`), and not at all while the spool is empty.
+  `--once` exits after the first line, for a background Bash command.
+- It touches `interrupts/<session>/.watcher` on every look and removes it on a
+  clean exit, so anything can tell whether one is armed.
+- **A Monitor lives at most 30 minutes and nothing re-arms it.** The agent has to
+  arm it again when it ends, and agents forget; this is the weak point of the
+  design, not something the binary can fix.
+
+Measured on Claude Code 2.1.278 on 2026-09-21, once: with the session idle, the
+watcher's line arrived as a notification and started a turn on its own, 21 s
+after a stale notice was placed in the spool.
+
 ### `push`: straight into the session
 
 The push is Claude Code's *channels* feature (a research preview), started with

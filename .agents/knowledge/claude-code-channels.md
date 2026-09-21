@@ -129,8 +129,18 @@ Measured 2026-09-21 on 2.1.278 in a real interactive session, one run each.
   `resources/updated`, `elicitation/complete` and `claude/channel`. Of these only a
   channel push puts text in front of the model on the server's initiative.
 
-So nothing here except a channel push wakes an idle session; a hook and a skill
+So nothing above except a channel push wakes an idle session; a hook and a skill
 change both wait for the next model request or tool call.
+
+**What does wake one, without the flag: a background task's output.** The Monitor
+tool (a long-running command whose stdout lines become notifications) delivered a
+line to an idle session and started a turn on its own, one sample, 2026-09-21.
+Bash `run_in_background` completions and finished background agents behave the
+same way (seen repeatedly in the session that wrote this). Limits: a Monitor is
+killed at its timeout, 30 minutes at most, and a one-shot background command ends
+at its first event, so **something has to arm it again**, and agents that are
+asked to re-arm consistently forget. `chat-spool-watch` is the chat skill's use of
+this.
 
 ## What does not work
 

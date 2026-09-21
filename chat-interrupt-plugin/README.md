@@ -31,9 +31,11 @@ call and returns it as `additionalContext`, which the model reads.
 ## What it cannot do
 
 It only reaches an agent that is using tools. An idle agent sees nothing until
-its next call; `wait` and channels (`interrupt_settings` with `delivery: push`)
-are the ways to reach one. A notice written in the instant the hook empties the
-spool may be shown a call late.
+its next call. To wake one, arm `chat-spool-watch` as a Claude Code Monitor: it
+prints a line when notices have sat in the spool unread for five minutes, and that
+line starts a turn (`chat/docs/interrupts.md`). Channels (`interrupt_settings`
+with `delivery: push`) are the other way and need a start-up flag. A notice
+written in the instant the hook empties the spool may be shown a call late.
 
 ## Turning it on
 
