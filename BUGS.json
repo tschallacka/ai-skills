@@ -7501,6 +7501,29 @@
       "updated_at": "2026-09-21T17:11:54Z"
     },
     {
+      "id": "B368",
+      "title": "Tests that copy a compiled binary and run it can fail with 'Text file busy' (ETXTBSY) when two of them run at once",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Intermittent, seen once in ~250 whole-suite cases on Linux (2026-09-21, ./run-tests.sh, cargo-build-plan-libs). Not reproduced in 8 further local runs of cargo test -p build-plan-libs. The suspects share one shape: relocated_binary() in src/build-plan-libs/tests/build_plan_libs_flow.rs, src/verify-skill-load/tests/verify_skill_load_flow.rs and src/generate-skill-docs/tests/generate_skill_docs_flow.rs, each doing fs::copy then set_permissions then Command::new(dest) in tests that run on parallel threads.",
+      "observed": "skill_root_failure_path_exits_69_with_the_exact_message panicked at src/build-plan-libs/tests/build_plan_libs_flow.rs:46:10: run the relocated binary: Os { code: 26, kind: ExecutableFileBusy, message: \"Text file busy\" }.",
+      "expected": "The relocated binary runs, whatever the other test in the file is doing at that moment.",
+      "mechanism": null,
+      "surfaces": [
+        "src/build-plan-libs/tests/build_plan_libs_flow.rs",
+        "src/verify-skill-load/tests/verify_skill_load_flow.rs",
+        "src/generate-skill-docs/tests/generate_skill_docs_flow.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, whole-suite run 2026-09-21",
+      "notes": "Hypothesis, not measured: the classic fork/exec race. Thread A has the copy open for writing while thread B forks a child for its own Command; the child holds A's write descriptor until it execs, so A's exec of the just-written file fails with ETXTBSY. A fix that fits the cause is to serialize copy-and-run in these tests with a static Mutex, or to retry the spawn on ETXTBSY a few times. Not fixed.",
+      "created_at": "2026-09-21T20:38:05Z",
+      "updated_at": "2026-09-21T20:38:05Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
