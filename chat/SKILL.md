@@ -817,19 +817,15 @@ and the key is resolved per invocation from the first of these that applies.
    own. **Claude Code does not give a subagent its own id** (B303, measured
    2026-09-08): `CLAUDE_CODE_SESSION_ID` and every other identifying variable
    are identical between a main agent and its subagents, so the identity alone
-   cannot tell them apart. That is why **the nick is appended to the key** on
-   this rung and on the two below it, as a visible suffix: `h-<hash>-<nick>`,
-   `w-<hash>-<nick>`, `shared-<nick>`. A subagent that joins under its own nick
-   therefore gets its own session file without `--session`. An invocation with
-   no `--nick` gets the bare key, with no suffix. Use `--session ID` (rung 1)
-   only when two agents would use the same nick, or when no nick is given and
-   they need to differ. A `--session` id is used as given, with no suffix, so
-   two callers who name the same one share it.
+   cannot tell them apart. So **the nick is appended to the key** on this rung
+   and the two below it: `h-<hash>-<nick>`, `w-<hash>-<nick>`, `shared-<nick>`
+   (bare with no `--nick`). A subagent that joins under its own nick gets its
+   own session file without `--session`. Use `--session ID` (rung 1, taken as
+   given, no suffix) only when two agents share a nick or give none.
 3. **The worktree root.** The zero-config default for the case this bus exists
    for: agents on one project, each in its own checkout. Sibling worktrees get
    separate sessions; the shared repository directory is deliberately not part
-   of the key, because sibling worktrees must not share one. Two agents in one
-   worktree are separated by their nicks and nothing else.
+   of the key, because sibling worktrees must not share one.
 4. **Otherwise one shared session**, named `shared`. Outside a repository with
    no harness and no id given, there is nothing to tell two agents apart.
 

@@ -160,8 +160,11 @@ t_assert_contains 'a caller_script_dir AT the repo root resolves PLANNING_SKILL_
 #      scripts/ directory, beside the wrapper, while the shared bin exists but
 #      does not hold it. plan_bin_dir answers with the first directory that
 #      EXISTS, so before the fix this fell through and every installed wrapper
-#      exited 69 with the binary sitting next to it. The override and the shared
-#      bin must still win over a copy beside the wrapper.
+#      exited 69 with the binary sitting next to it. The shared bin must still
+#      win over a copy beside the wrapper, and an explicit AI_SKILLS_BIN_ROOT is
+#      authoritative: nothing beside the wrapper is tried, which is what lets
+#      the tests that point it at an empty directory simulate a missing binary
+#      inside a checkout that stages a copy next to every wrapper.
 installed_dir="$work/installed-skill/scripts"
 mkdir -p "$installed_dir"
 side_out="$work/side.out"
@@ -170,11 +173,13 @@ cat >"$installed_dir/side-binary" <<STUB
 printf 'side argv:%s\n' "\$*" > "$side_out"
 STUB
 chmod +x "$installed_dir/side-binary"
-empty_shared="$work/empty-shared-bin"
-mkdir -p "$empty_shared"
+xdg_home="$work/xdg"
+shared_bin="$xdg_home/tsch-ai-skills/bin"
+mkdir -p "$shared_bin"
 (
-    AI_SKILLS_BIN_ROOT="$empty_shared"
-    export AI_SKILLS_BIN_ROOT
+    unset AI_SKILLS_BIN_ROOT
+    XDG_CONFIG_HOME="$xdg_home"
+    export XDG_CONFIG_HOME
     plan_exec_compiled_binary_if_present 'side-binary' "$installed_dir" alpha beta
     printf 'SIDE_FALLTHROUGH_MARKER\n'
 ) >"$work/side-run.out" 2>&1 || true
@@ -184,27 +189,42 @@ case "$(cat "$work/side-run.out")" in
     *) ;;
 esac
 
-# A copy beside the wrapper never shadows the one the override names.
+# An explicit override that lacks the binary does not fall back to the
+# wrapper's own directory.
 : >"$side_out"
-cat >"$empty_shared/side-binary" <<STUB
-#!/usr/bin/env bash
-printf 'override argv:%s\n' "\$*" > "$side_out"
-STUB
-chmod +x "$empty_shared/side-binary"
+empty_override="$work/empty-override"
+mkdir -p "$empty_override"
 (
-    AI_SKILLS_BIN_ROOT="$empty_shared"
+    AI_SKILLS_BIN_ROOT="$empty_override"
     export AI_SKILLS_BIN_ROOT
+    plan_exec_compiled_binary_if_present 'side-binary' "$installed_dir" delta
+    printf 'OVERRIDE_FALLS_THROUGH\n'
+) >"$work/override-run.out" 2>&1 || true
+t_assert_contains 'an override without the binary falls through, not to the wrapper directory' 'OVERRIDE_FALLS_THROUGH' "$(cat "$work/override-run.out")"
+t_assert_eq 'and the copy beside the wrapper was not run' "$(cat "$side_out")" ''
+
+# A copy beside the wrapper never shadows the shared bin's.
+cat >"$shared_bin/side-binary" <<STUB
+#!/usr/bin/env bash
+printf 'shared argv:%s\n' "\$*" > "$side_out"
+STUB
+chmod +x "$shared_bin/side-binary"
+(
+    unset AI_SKILLS_BIN_ROOT
+    XDG_CONFIG_HOME="$xdg_home"
+    export XDG_CONFIG_HOME
     plan_exec_compiled_binary_if_present 'side-binary' "$installed_dir" gamma
 ) >/dev/null 2>&1 || true
-t_assert_contains 'the override still wins over a copy beside the wrapper' 'override argv:gamma' "$(cat "$side_out")"
+t_assert_contains 'the shared bin still wins over a copy beside the wrapper' 'shared argv:gamma' "$(cat "$side_out")"
 
 # With nothing beside the wrapper and nothing in the shared bin it still falls
 # through, so the wrapper's own exit-69 message stays reachable.
 side_fall="$work/side-fall.out"
 (
-    AI_SKILLS_BIN_ROOT="$work/empty-shared-bin-2"
-    mkdir -p "$AI_SKILLS_BIN_ROOT"
-    export AI_SKILLS_BIN_ROOT
+    unset AI_SKILLS_BIN_ROOT
+    XDG_CONFIG_HOME="$work/xdg-empty"
+    mkdir -p "$XDG_CONFIG_HOME/tsch-ai-skills/bin"
+    export XDG_CONFIG_HOME
     plan_exec_compiled_binary_if_present 'not-installed-anywhere' "$installed_dir"
     printf 'STILL_FALLS_THROUGH\n'
 ) >"$side_fall" 2>&1 || true

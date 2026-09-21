@@ -236,7 +236,10 @@ the CI map.
   every `scripts/*.sh` wrapper calls, then tries an executable of that name
   beside the wrapper, because an installed skill keeps its compiled commands in
   its own `scripts/` next to the wrappers. It comes last, so it never shadows
-  the override or the shared bin.) A
+  the shared bin, and it is skipped whenever `AI_SKILLS_BIN_ROOT` is set: an
+  override is authoritative, which is also what lets a test point it at an
+  empty directory to simulate a missing binary in a checkout that stages a copy
+  beside every wrapper.) A
   machine with skills installed has the second one, and it holds the shipped
   tools (`bugs`, `todo`, `rjq`, the chat and editor binaries), not the dev
   tools. So without `AI_SKILLS_BIN_ROOT`: `./run-tests.sh` exits 69 with "no

@@ -70,8 +70,11 @@ pecbip_find_skill_root() {
 # plan_bin_dir answers with the first directory that EXISTS, not the first that
 # holds this binary -- so the moment a shared bin exists every installed wrapper
 # would otherwise fall through to the exit-69 branch with its binary sitting
-# next to it. Beside the wrapper comes only after the override, the shared bin
-# and the development tree, so none of those can be shadowed by a stray copy.
+# next to it. Beside the wrapper comes only after the shared bin and the
+# development tree, so neither can be shadowed by a stray copy, and never when
+# AI_SKILLS_BIN_ROOT is set: an explicit override names where the binaries are,
+# and the tests that point it at an empty directory to simulate a missing binary
+# would otherwise find the copy a checkout stages beside every wrapper.
 #
 # A Windows build is `<name>.exe`. Git for Windows' bash usually resolves
 # `<name>` to it on its own, but asking for the suffixed name outright does not
@@ -81,6 +84,7 @@ pecbip_pick() {
     side="$(cd "$3" && pwd)"
     for dir in "$1" "$side"; do
         [ -n "$dir" ] || continue
+        [ "$dir" = "$side" ] && [ "$dir" != "$1" ] && [ -n "${AI_SKILLS_BIN_ROOT:-}" ] && continue
         for candidate in "$2" "$2.exe"; do
             if [ -f "$dir/$candidate" ] && [ -x "$dir/$candidate" ]; then
                 printf '%s\n' "$dir/$candidate"
