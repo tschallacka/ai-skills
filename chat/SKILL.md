@@ -189,8 +189,8 @@ arrives while no call is pending is found by the next `read` or `wait`. A `wait`
 the harness moves to the background (Claude Code does for a call past two
 minutes) reports when it finishes.
 
-**Interrupts (T150).** `interrupt_add` and `timer_set` push a matching message,
-or a timer, into your session mid-task, even idle: docs/interrupts.md.
+**Interrupts (T150).** `interrupt_add` and `timer_set` tell you of a matching
+message or a timer at your next tool call, or pushed: docs/interrupts.md.
 
 **That held connection is also your presence, and it needs no tail.** The
 adapter registers once and keeps the connection for the life of the MCP

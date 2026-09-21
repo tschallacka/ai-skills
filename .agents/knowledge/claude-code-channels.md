@@ -83,6 +83,26 @@ put `plugin@marketplace` in `allowedChannelPlugins` in a managed-settings file
 (root-owned, system-wide) and still pass `--channels plugin:...` at every start.
 Neither has been tried.
 
+## The flag-free alternative: a PreToolUse hook
+
+Measured the same day, same Claude Code, driving `chat-mcp` and
+`chat-interrupt-plugin` from a real interactive session, no channels flag:
+
+| behaviour | measured |
+|---|---|
+| a hook's `additionalContext` reaches the model | yes: it is rendered as `<system-reminder>PreToolUse:<Tool> hook additional context: ...` before the tool result, once per delivery |
+| delivered to an **idle** session | no: the terminal was byte-identical before and after; the notice waited for the next tool call |
+| **Claude Code's screen** | shows nothing at all when hook context is delivered; only the transcript records it (`hook_additional_context`), so a person watching cannot tell |
+| a plugin loaded with `--plugin-dir` | loads silently and is visible only in `/hooks` (`Plugin Hooks (chat-interrupt@inline)`); no dialog, no confirmation |
+| fires for | every tool that matches, MCP tools and ToolSearch included (matcher `*`) |
+| timing | 29-98 ms per call; runs before the permission dialog |
+| the MCP process and the hook agree on the session | yes: both saw the same `CLAUDE_CODE_SESSION_ID`, the session's transcript UUID, so a spool directory named by it is found by both; the hook also gets it as `session_id` in its payload |
+| the model | read the reminder every time, but a small model asked to "quote the reminder you were shown" misreported it on 2 of 3 tries (once said none was shown, once quoted a stale one); asked for the newest one with a unique token it was right. Verify delivery from the transcript, not from the model's answer |
+
+The hook path needs no flag, but it reaches only an agent that is using tools;
+the push reaches an idle one and needs the flag. `chat-mcp` offers both and lets
+the agent choose (`interrupt_settings`, `delivery`).
+
 ## What does not work
 
 - `claude -p` with the dev flag: the server connected and the notification was

@@ -22,6 +22,7 @@
 use crate::conn::wildcard_match;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -85,10 +86,45 @@ struct Timer {
     fired: u64,
 }
 
+/// How a notice reaches the agent. `Hook` writes it to a spool that a Claude
+/// Code PreToolUse hook reads at the agent's next tool call, which needs no
+/// start-up flag but only reaches an agent that is using tools; `Push` sends
+/// it as a channel notification, which reaches an idle agent too but needs
+/// Claude Code started with a development-channels flag; `Both` does both, and
+/// shows the message twice when both work.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Delivery {
+    Hook,
+    Push,
+    Both,
+}
+
+impl Delivery {
+    fn parse(text: &str) -> Result<Delivery, String> {
+        match text {
+            "hook" => Ok(Delivery::Hook),
+            "push" => Ok(Delivery::Push),
+            "both" => Ok(Delivery::Both),
+            other => Err(format!(
+                "delivery must be \"hook\", \"push\" or \"both\", not {other:?}"
+            )),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Delivery::Hook => "hook",
+            Delivery::Push => "push",
+            Delivery::Both => "both",
+        }
+    }
+}
+
 struct Settings {
     enabled: bool,
     max_per_minute: u64,
     snooze_until: Option<Instant>,
+    delivery: Delivery,
 }
 
 pub struct Engine {
@@ -109,6 +145,7 @@ impl Default for Engine {
                 enabled: true,
                 max_per_minute: DEFAULT_MAX_PER_MINUTE,
                 snooze_until: None,
+                delivery: Delivery::Hook,
             },
             next_id: 1,
             recent: VecDeque::new(),
@@ -362,6 +399,10 @@ impl Timer {
 // ─────────────────────────────────────────────────────────────────────────────
 
 impl Engine {
+    pub fn delivery(&self) -> Delivery {
+        self.settings.delivery
+    }
+
     fn take_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -515,7 +556,7 @@ impl Engine {
         self.rules.push(rule);
         Ok(Reply {
             note: format!(
-                "interrupt rule {id} added. A matching message now pushes a notice; it does not mark anything read."
+                "interrupt rule {id} added. A matching message now sends you a notice (delivery: see interrupt_settings); it does not mark anything read."
             ),
             data: json,
         })
@@ -560,8 +601,14 @@ impl Engine {
         let enabled = bool_of(args, "enabled")?;
         let per_minute = u64_of(args, "max_per_minute")?;
         let snooze = u64_of(args, "snooze_seconds")?;
+        let delivery = text_of(args, "delivery")
+            .map(|text| Delivery::parse(&text))
+            .transpose()?;
         if let Some(v) = enabled {
             self.settings.enabled = v;
+        }
+        if let Some(v) = delivery {
+            self.settings.delivery = v;
         }
         if let Some(v) = per_minute {
             self.settings.max_per_minute = v;
@@ -670,6 +717,7 @@ impl Engine {
                 "settings": {
                     "enabled": self.settings.enabled,
                     "max_per_minute": self.settings.max_per_minute,
+                    "delivery": self.settings.delivery.name(),
                     "snoozed_for_seconds": snoozed,
                     "held_back_since_last_notice": self.suppressed,
                 },
@@ -721,6 +769,87 @@ pub fn set_notifier(send: impl Fn(Value) + Send + Sync + 'static) {
 pub fn emit(notice: &Notice) {
     if let Some(send) = NOTIFIER.get() {
         send(notice.to_notification());
+    }
+}
+
+/// The most a spool file may hold; past it a notice is dropped, so an agent that
+/// never uses a tool cannot grow a file without bound. The messages themselves
+/// are stored by the server and `read` still returns them.
+const SPOOL_MAX_BYTES: u64 = 256 * 1024;
+
+/// Where a Claude Code hook finds what is waiting for it: one directory per
+/// Claude Code session, named by the session id the harness exports, so the hook
+/// (which is handed that same id) needs none of this adapter's own identity
+/// logic. Where there is no such id it is the adapter's own session key.
+pub fn spool_dir(state_dir: &Path, session_key: &str) -> PathBuf {
+    let id = std::env::var("CLAUDE_CODE_SESSION_ID")
+        .ok()
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| session_key.to_string());
+    state_dir.join("interrupts").join(safe_name(&id))
+}
+
+fn safe_name(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(96)
+        .collect()
+}
+
+/// One spool line: when, then what the notice says, on a single line.
+pub fn spool_line(notice: &Notice, at_epoch_seconds: u64) -> String {
+    let second = at_epoch_seconds % 86_400;
+    let clock = format!(
+        "{:02}:{:02}:{:02}Z",
+        second / 3600,
+        second % 3600 / 60,
+        second % 60
+    );
+    let flat = notice.content.replace(['\r', '\n'], " / ");
+    match notice.meta.get("kind").and_then(Value::as_str) {
+        Some("timer") => format!("[{clock}] timer: {flat}"),
+        _ => format!("[{clock}] {flat}"),
+    }
+}
+
+/// Append a notice to this identity's spool. Best effort: a notice that cannot be
+/// written is dropped, never an error for the connection that produced it.
+fn spool(state_dir: &Path, session_key: &str, notice: &Notice) {
+    let dir = spool_dir(state_dir, session_key);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let file = dir.join(format!("{}.log", safe_name(session_key)));
+    if std::fs::metadata(&file).is_ok_and(|m| m.len() >= SPOOL_MAX_BYTES) {
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let Ok(mut out) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+    else {
+        return;
+    };
+    use std::io::Write;
+    let _ = writeln!(out, "{}", spool_line(notice, now));
+}
+
+/// Send a notice the way the agent asked: pushed, spooled for the hook, or both.
+pub fn deliver(state_dir: &Path, session_key: &str, delivery: Delivery, notice: &Notice) {
+    if delivery != Delivery::Hook {
+        emit(notice);
+    }
+    if delivery != Delivery::Push {
+        spool(state_dir, session_key, notice);
     }
 }
 
@@ -1172,6 +1301,95 @@ mod tests {
         assert_eq!(list["rules"][0]["channels"], json!(["#ops"]));
         assert_eq!(list["timers"][0]["every_seconds"], json!(600));
         assert_eq!(list["settings"]["enabled"], json!(true));
+    }
+
+    #[test]
+    fn delivery_defaults_to_the_hook_and_can_be_changed_and_a_bad_value_is_refused() {
+        let now = Instant::now();
+        let mut engine = Engine::default();
+        assert_eq!(engine.delivery(), Delivery::Hook);
+        for (word, want) in [
+            ("push", Delivery::Push),
+            ("both", Delivery::Both),
+            ("hook", Delivery::Hook),
+        ] {
+            let reply = engine
+                .apply("interrupt_settings", &json!({"delivery": word}), now)
+                .unwrap();
+            assert_eq!(engine.delivery(), want);
+            assert_eq!(reply.data["settings"]["delivery"], json!(word));
+        }
+        let error = engine
+            .apply("interrupt_settings", &json!({"delivery":"pigeon"}), now)
+            .err()
+            .unwrap();
+        assert!(error.contains("hook"), "{error}");
+        assert_eq!(
+            engine.delivery(),
+            Delivery::Hook,
+            "a refusal changes nothing"
+        );
+    }
+
+    #[test]
+    fn a_spool_line_is_the_time_then_the_notice_on_one_line() {
+        let mut meta = Map::new();
+        meta.insert("kind".into(), json!("message"));
+        let notice = Notice {
+            content: "#ops <alice> two\nlines".to_string(),
+            meta,
+        };
+        // 1_000_000 s is 11 days and 13:46:40 after the epoch.
+        assert_eq!(
+            spool_line(&notice, 1_000_000),
+            "[13:46:40Z] #ops <alice> two / lines"
+        );
+        let mut meta = Map::new();
+        meta.insert("kind".into(), json!("timer"));
+        let timer = Notice {
+            content: "check the build".to_string(),
+            meta,
+        };
+        assert_eq!(spool_line(&timer, 0), "[00:00:00Z] timer: check the build");
+    }
+
+    #[test]
+    fn hook_delivery_spools_and_does_not_push_and_push_delivery_does_not_spool() {
+        let dir = std::env::temp_dir().join(format!(
+            "chat-mcp-spool-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut meta = Map::new();
+        meta.insert("kind".into(), json!("message"));
+        let notice = Notice {
+            content: "#a <x> hello".to_string(),
+            meta,
+        };
+        let spooled = |key: &str| -> String {
+            std::fs::read_to_string(spool_dir(&dir, key).join(format!("{}.log", safe_name(key))))
+                .unwrap_or_default()
+        };
+
+        deliver(&dir, "spool-test-push", Delivery::Push, &notice);
+        assert_eq!(spooled("spool-test-push"), "", "push must not spool");
+
+        deliver(&dir, "spool-test-hook", Delivery::Hook, &notice);
+        deliver(&dir, "spool-test-hook", Delivery::Both, &notice);
+        let text = spooled("spool-test-hook");
+        assert_eq!(text.lines().count(), 2, "{text}");
+        assert!(text.lines().all(|l| l.ends_with("#a <x> hello")), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_spool_name_cannot_leave_its_directory() {
+        assert_eq!(safe_name("../../etc"), "______etc");
+        assert_eq!(safe_name("h-4474b93c059ebd63"), "h-4474b93c059ebd63");
+        assert_eq!(safe_name(&"x".repeat(500)).len(), 96);
     }
 
     #[test]

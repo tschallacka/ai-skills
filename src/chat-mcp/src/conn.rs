@@ -433,9 +433,16 @@ impl Owner {
             return;
         };
         let notices = engine.tick(Instant::now(), &self.nick);
+        let delivery = engine.delivery();
         drop(engine);
-        for notice in &notices {
-            interrupt::emit(notice);
+        self.send_notices(delivery, &notices);
+    }
+
+    /// Hand notices to the agent the way it asked: pushed, spooled for the
+    /// PreToolUse hook, or both (see `interrupt::Delivery`).
+    fn send_notices(&self, delivery: interrupt::Delivery, notices: &[interrupt::Notice]) {
+        for notice in notices {
+            interrupt::deliver(&self.state_dir, &self.session_key, delivery, notice);
         }
     }
 
@@ -447,10 +454,9 @@ impl Owner {
             return;
         };
         let notices = engine.on_message(Instant::now(), &self.nick, chan, nick, text);
+        let delivery = engine.delivery();
         drop(engine);
-        for notice in &notices {
-            interrupt::emit(notice);
-        }
+        self.send_notices(delivery, &notices);
     }
 
     // ---- the operations ---------------------------------------------------

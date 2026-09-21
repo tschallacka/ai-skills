@@ -746,6 +746,7 @@ fn a_rule_pushes_a_notice_for_a_matching_message_and_read_still_returns_it() {
         return;
     };
     harness.call("join", json!({"channel":"#flow"}));
+    harness.call("interrupt_settings", json!({"delivery":"push"}));
     let added = harness.call(
         "interrupt_add",
         json!({"name":"deploys","channels":["#flow"],"from":["@other"],"contains":["deploy"]}),
@@ -787,6 +788,7 @@ fn a_rule_can_be_changed_and_removed_while_the_agent_is_running() {
         return;
     };
     harness.call("join", json!({"channel":"#flow"}));
+    harness.call("interrupt_settings", json!({"delivery":"push"}));
     harness.call("interrupt_add", json!({"contains":["alpha"]}));
 
     harness.other_sends("#flow", "beta");
@@ -820,7 +822,10 @@ fn a_snooze_holds_notices_back_and_ending_it_lets_the_next_one_through() {
     };
     harness.call("join", json!({"channel":"#flow"}));
     harness.call("interrupt_add", json!({}));
-    harness.call("interrupt_settings", json!({"snooze_seconds":300}));
+    harness.call(
+        "interrupt_settings",
+        json!({"snooze_seconds":300,"delivery":"push"}),
+    );
 
     harness.other_sends("#flow", "held back");
     assert!(harness.notice(QUIET_WAIT).is_none());
@@ -847,6 +852,7 @@ fn a_timer_interrupts_and_can_be_rescheduled_and_cancelled() {
     let Some(mut harness) = Harness::new("interrupt-timer") else {
         return;
     };
+    harness.call("interrupt_settings", json!({"delivery":"push"}));
     let set = harness.call(
         "timer_set",
         json!({"name":"stretch","after_seconds":1,"message":"stand up and stretch"}),
@@ -898,4 +904,82 @@ fn a_bad_interrupt_argument_is_refused_by_name() {
     assert_eq!(missing["result"]["isError"], json!(true));
     let list = harness.call("interrupt_list", json!({}));
     assert_eq!(list["state"]["rules"], json!([]));
+    let bad = harness.request(
+        "tools/call",
+        json!({"name":"interrupt_settings","arguments":{"delivery":"carrier-pigeon"}}),
+    );
+    assert_eq!(bad["result"]["isError"], json!(true), "{bad}");
+}
+
+/// Every spool file the adapter has written for a Claude Code hook: the lines
+/// of `<home>/interrupts/<session>/*.log`, whichever session directory the
+/// environment made it.
+fn spooled(home: &Path) -> Vec<String> {
+    let mut lines = Vec::new();
+    let Ok(sessions) = std::fs::read_dir(home.join("interrupts")) else {
+        return lines;
+    };
+    for session in sessions.flatten() {
+        let Ok(files) = std::fs::read_dir(session.path()) else {
+            continue;
+        };
+        for file in files.flatten() {
+            if let Ok(text) = std::fs::read_to_string(file.path()) {
+                lines.extend(text.lines().map(str::to_string));
+            }
+        }
+    }
+    lines
+}
+
+/// The default is the hook: a matching message and a timer are queued for the
+/// PreToolUse hook, one line each, and NOTHING is pushed, so a client that does
+/// not run channels sees no difference on stdout.
+#[test]
+fn by_default_notices_are_queued_for_the_hook_and_nothing_is_pushed() {
+    let Some(mut harness) = Harness::new("interrupt-hook") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#flow"}));
+    let settings = harness.call("interrupt_list", json!({}));
+    assert_eq!(settings["state"]["settings"]["delivery"], json!("hook"));
+    harness.call("interrupt_add", json!({"contains":["deploy"]}));
+    harness.call(
+        "timer_set",
+        json!({"after_seconds":1,"message":"check the build"}),
+    );
+
+    harness.other_sends("#flow", "lunch anyone");
+    harness.other_sends("#flow", "the deploy failed");
+    let deadline = Instant::now() + NOTICE_WAIT;
+    let mut lines = spooled(&harness.home);
+    while Instant::now() < deadline && lines.len() < 2 {
+        std::thread::sleep(Duration::from_millis(100));
+        lines = spooled(&harness.home);
+    }
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.ends_with("#flow <other> the deploy failed")),
+        "the matching message was not queued: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.ends_with("timer: check the build")),
+        "the timer was not queued: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("lunch anyone")),
+        "a message no rule matches was queued: {lines:?}"
+    );
+    assert!(
+        harness.notice(QUIET_WAIT).is_none(),
+        "hook delivery must not also push"
+    );
+
+    harness.call("interrupt_settings", json!({"delivery":"both"}));
+    harness.other_sends("#flow", "another deploy failed");
+    assert!(
+        harness.notice(NOTICE_WAIT).is_some(),
+        "both delivers by push as well"
+    );
 }
