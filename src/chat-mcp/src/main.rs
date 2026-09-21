@@ -28,6 +28,11 @@ fn respond(out: &Out, response: serde_json::Value) {
 fn main() {
     let stdin = io::stdin();
     let out: Out = Arc::new(Mutex::new(BufWriter::new(io::stdout())));
+    // A message or timer that an agent asked to be interrupted by leaves as a
+    // notification, through the same lock as a response so the two never
+    // interleave inside a line. The connection's owner thread is what calls it.
+    let notifier_out = Arc::clone(&out);
+    chat_mcp::set_notifier(move |notification| respond(&notifier_out, notification));
     let mut in_flight: Vec<JoinHandle<()>> = Vec::new();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };

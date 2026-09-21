@@ -20,10 +20,12 @@
 //! Windows.)
 
 use serde_json::{json, Value};
+use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
 const SESSION: &str = "t90flow";
@@ -34,7 +36,10 @@ struct Harness {
     server: Child,
     adapter: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    /// Every line the adapter writes to stdout, read on a thread of its own so
+    /// a test can wait for a notification with a deadline instead of blocking.
+    lines: Receiver<String>,
+    notices: VecDeque<Value>,
     next_id: u64,
 }
 
@@ -121,13 +126,22 @@ impl Harness {
             .expect("chat-mcp starts");
         let stdin = adapter.stdin.take().expect("adapter stdin");
         let stdout = BufReader::new(adapter.stdout.take().expect("adapter stdout"));
+        let (sender, lines) = channel();
+        std::thread::spawn(move || {
+            for line in stdout.lines().map_while(Result::ok) {
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
         Some(Harness {
             home,
             port,
             server,
             adapter,
             stdin,
-            stdout,
+            lines,
+            notices: VecDeque::new(),
             next_id: 1,
         })
     }
@@ -138,11 +152,7 @@ impl Harness {
         let line = json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}).to_string();
         writeln!(self.stdin, "{line}").expect("write request");
         self.stdin.flush().expect("flush request");
-        let mut response = String::new();
-        self.stdout
-            .read_line(&mut response)
-            .expect("read a response");
-        serde_json::from_str(&response).unwrap_or_else(|_| panic!("not JSON: {response}"))
+        self.next_response()
     }
 
     /// Write a `tools/call` without reading its answer, so two can be in flight
@@ -158,13 +168,42 @@ impl Harness {
         id
     }
 
-    /// The next response line, whichever request it answers.
+    /// The next response line, whichever request it answers. A notification
+    /// that arrives first is kept for `notice`, not returned as a response.
     fn next_response(&mut self) -> Value {
-        let mut response = String::new();
-        self.stdout
-            .read_line(&mut response)
-            .expect("read a response");
-        serde_json::from_str(&response).unwrap_or_else(|_| panic!("not JSON: {response}"))
+        loop {
+            let line = self
+                .lines
+                .recv_timeout(Duration::from_secs(60))
+                .expect("a response within a minute");
+            let message: Value =
+                serde_json::from_str(&line).unwrap_or_else(|_| panic!("not JSON: {line}"));
+            if message.get("id").is_none() && message.get("method").is_some() {
+                self.notices.push_back(message);
+                continue;
+            }
+            return message;
+        }
+    }
+
+    /// The next `notifications/claude/channel` the adapter pushed, or None
+    /// when none arrives within `wait`. Only the wait is bounded: a real push
+    /// lands in well under a second.
+    fn notice(&mut self, wait: Duration) -> Option<Value> {
+        if let Some(notice) = self.notices.pop_front() {
+            return Some(notice);
+        }
+        let deadline = Instant::now() + wait;
+        loop {
+            let left = deadline.checked_duration_since(Instant::now())?;
+            let line = self.lines.recv_timeout(left).ok()?;
+            let message: Value =
+                serde_json::from_str(&line).unwrap_or_else(|_| panic!("not JSON: {line}"));
+            if message.get("id").is_none() && message.get("method").is_some() {
+                return Some(message);
+            }
+            panic!("a response arrived while waiting for a notice: {line}");
+        }
     }
 
     /// A tool call's payload, parsed back out of the text content the MCP
@@ -691,4 +730,175 @@ fn a_long_wait_does_not_hold_up_the_same_identitys_next_call() {
     );
     let second = harness.next_response();
     assert_eq!(second["id"], json!(wait_id), "{second}");
+}
+
+// ---- T150: interrupts and timers, pushed as channel notifications ----------
+
+const NOTICE_WAIT: Duration = Duration::from_secs(10);
+const QUIET_WAIT: Duration = Duration::from_millis(1200);
+
+fn content_of(notice: &Value) -> &str {
+    notice["params"]["content"].as_str().unwrap_or("")
+}
+
+/// A rule pushes a notice for the message it matches and for nothing else, and
+/// the notice does not consume what it announced: `read` still returns it.
+#[test]
+fn a_rule_pushes_a_notice_for_a_matching_message_and_read_still_returns_it() {
+    let Some(mut harness) = Harness::new("interrupt-match") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#flow"}));
+    let added = harness.call(
+        "interrupt_add",
+        json!({"name":"deploys","channels":["#flow"],"from":["@other"],"contains":["deploy"]}),
+    );
+    assert_eq!(added["state"]["id"], json!(1), "{added}");
+
+    harness.other_sends("#flow", "lunch anyone");
+    assert!(
+        harness.notice(QUIET_WAIT).is_none(),
+        "a message no rule matches must not interrupt"
+    );
+
+    harness.other_sends("#flow", "the deploy failed");
+    let notice = harness.notice(NOTICE_WAIT).expect("a notice for the match");
+    assert_eq!(notice["method"], json!("notifications/claude/channel"));
+    assert_eq!(content_of(&notice), "#flow <other> the deploy failed");
+    let meta = &notice["params"]["meta"];
+    assert_eq!(meta["kind"], json!("message"));
+    assert_eq!(meta["channel"], json!("#flow"));
+    assert_eq!(meta["from"], json!("other"));
+    assert_eq!(meta["rule"], json!("1"));
+    assert_eq!(meta["rule_name"], json!("deploys"));
+
+    let read = harness.call("read", json!({"channel":"#flow"}));
+    let texts: Vec<&str> = read["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .map(|m| m["text"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(texts, ["lunch anyone", "the deploy failed"]);
+}
+
+/// The rules are the agent's to change while it works: modify one and the very
+/// next message is judged by the new version; remove it and it stops.
+#[test]
+fn a_rule_can_be_changed_and_removed_while_the_agent_is_running() {
+    let Some(mut harness) = Harness::new("interrupt-modify") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#flow"}));
+    harness.call("interrupt_add", json!({"contains":["alpha"]}));
+
+    harness.other_sends("#flow", "beta");
+    assert!(harness.notice(QUIET_WAIT).is_none());
+
+    let updated = harness.call("interrupt_update", json!({"id":1,"contains":["beta"]}));
+    assert_eq!(updated["state"]["contains"], json!(["beta"]));
+    harness.other_sends("#flow", "beta again");
+    let notice = harness
+        .notice(NOTICE_WAIT)
+        .expect("the modified rule fires");
+    assert!(content_of(&notice).ends_with("beta again"), "{notice}");
+
+    harness.call("interrupt_remove", json!({"id":1}));
+    harness.other_sends("#flow", "beta once more");
+    assert!(
+        harness.notice(QUIET_WAIT).is_none(),
+        "a removed rule is silent"
+    );
+
+    let list = harness.call("interrupt_list", json!({}));
+    assert_eq!(list["state"]["rules"], json!([]));
+}
+
+/// A snooze holds message notices back without losing the messages, and
+/// ending it lets the next one through.
+#[test]
+fn a_snooze_holds_notices_back_and_ending_it_lets_the_next_one_through() {
+    let Some(mut harness) = Harness::new("interrupt-snooze") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#flow"}));
+    harness.call("interrupt_add", json!({}));
+    harness.call("interrupt_settings", json!({"snooze_seconds":300}));
+
+    harness.other_sends("#flow", "held back");
+    assert!(harness.notice(QUIET_WAIT).is_none());
+
+    let settings = harness.call("interrupt_settings", json!({"snooze_seconds":0}));
+    assert_eq!(
+        settings["state"]["settings"]["held_back_since_last_notice"],
+        json!(1)
+    );
+    harness.other_sends("#flow", "let through");
+    let notice = harness.notice(NOTICE_WAIT).expect("a notice once awake");
+    assert_eq!(
+        notice["params"]["meta"]["suppressed"],
+        json!("1"),
+        "{notice}"
+    );
+    let read = harness.call("read", json!({"channel":"#flow"}));
+    assert_eq!(read["messages"].as_array().map(Vec::len), Some(2));
+}
+
+/// A timer interrupts by itself, and can be rescheduled and cancelled.
+#[test]
+fn a_timer_interrupts_and_can_be_rescheduled_and_cancelled() {
+    let Some(mut harness) = Harness::new("interrupt-timer") else {
+        return;
+    };
+    let set = harness.call(
+        "timer_set",
+        json!({"name":"stretch","after_seconds":1,"message":"stand up and stretch"}),
+    );
+    assert_eq!(set["state"]["id"], json!(1), "{set}");
+    let notice = harness.notice(NOTICE_WAIT).expect("the timer fires");
+    assert_eq!(content_of(&notice), "stand up and stretch");
+    assert_eq!(notice["params"]["meta"]["kind"], json!("timer"));
+    assert_eq!(notice["params"]["meta"]["timer_name"], json!("stretch"));
+
+    // Set far off, then pulled in: the reschedule is what makes it fire now.
+    harness.call(
+        "timer_set",
+        json!({"after_seconds":600,"message":"pulled in"}),
+    );
+    harness.call("timer_update", json!({"id":2,"after_seconds":1}));
+    let notice = harness
+        .notice(NOTICE_WAIT)
+        .expect("the rescheduled timer fires");
+    assert_eq!(content_of(&notice), "pulled in");
+
+    harness.call("timer_set", json!({"after_seconds":2,"message":"never"}));
+    harness.call("timer_cancel", json!({"id":3}));
+    assert!(
+        harness.notice(Duration::from_secs(4)).is_none(),
+        "a cancelled timer is silent"
+    );
+}
+
+/// A bad value is refused by name and leaves nothing behind.
+#[test]
+fn a_bad_interrupt_argument_is_refused_by_name() {
+    let Some(mut harness) = Harness::new("interrupt-refuse") else {
+        return;
+    };
+    let refused = harness.request(
+        "tools/call",
+        json!({"name":"interrupt_add","arguments":{"match":"most"}}),
+    );
+    assert_eq!(refused["result"]["isError"], json!(true), "{refused}");
+    assert!(refused["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or("")
+        .contains("match must be"));
+    let missing = harness.request(
+        "tools/call",
+        json!({"name":"interrupt_remove","arguments":{}}),
+    );
+    assert_eq!(missing["result"]["isError"], json!(true));
+    let list = harness.call("interrupt_list", json!({}));
+    assert_eq!(list["state"]["rules"], json!([]));
 }

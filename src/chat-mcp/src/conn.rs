@@ -16,8 +16,10 @@
 //! subscriber whose outbox passes a megabyte, and that is indistinguishable
 //! from message loss.
 
+use crate::interrupt::{self, SharedEngine};
 use chat_client_rs as client;
 use chat_proto::{Message, FETCH_END};
+use serde_json::Value;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -137,6 +139,13 @@ pub enum Op {
         enabled: bool,
     },
     Triggers,
+    /// An interrupt or timer tool: the state lives in this identity's engine
+    /// (see `interrupt`), but the call still goes through the owner thread, so
+    /// a dead connection is noticed and reopened like any other tool's.
+    Engine {
+        tool: String,
+        arguments: Value,
+    },
 }
 
 /// What an operation answers: rows the caller should see, plus the facts a
@@ -149,6 +158,9 @@ pub struct Answer {
     pub note: Option<String>,
     pub trigger_id: Option<u64>,
     pub triggers: Vec<TriggerInfo>,
+    /// What an interrupt or timer tool reports back: the rule, the timer, or
+    /// the whole list.
+    pub data: Option<Value>,
 }
 
 impl Answer {
@@ -161,6 +173,7 @@ impl Answer {
             note: None,
             trigger_id: None,
             triggers: Vec::new(),
+            data: None,
         }
     }
 }
@@ -242,6 +255,7 @@ impl Held {
             mention_seen: std::collections::HashMap::new(),
             triggers: Vec::new(),
             next_trigger_id: 1,
+            engine: interrupt::engine_for(session_key),
             closed: false,
         };
         std::thread::spawn(move || owner.run(queue));
@@ -348,6 +362,9 @@ struct Owner {
     /// mention is: `pending`/`deliver` OR it in, never in place of it.
     triggers: Vec<Trigger>,
     next_trigger_id: u64,
+    /// The interrupt rules and timers this identity set. Shared with the
+    /// process-wide map rather than owned, so they outlive this connection.
+    engine: SharedEngine,
     closed: bool,
 }
 
@@ -356,6 +373,7 @@ impl Owner {
     /// handle or the server closes the link.
     fn run(mut self, queue: Receiver<Job>) {
         loop {
+            self.fire_timers();
             match queue.try_recv() {
                 Ok((op, reply)) => {
                     let answer = self.execute(op);
@@ -389,6 +407,49 @@ impl Owner {
             Op::TriggerRemove { id } => self.trigger_remove(id),
             Op::TriggerToggle { id, enabled } => self.trigger_toggle(id, enabled),
             Op::Triggers => self.triggers_list(),
+            Op::Engine { tool, arguments } => self.engine_call(&tool, &arguments),
+        }
+    }
+
+    // ---- interrupts -------------------------------------------------------
+
+    fn engine_call(&mut self, tool: &str, arguments: &Value) -> Result<Answer, String> {
+        let reply = self
+            .engine
+            .lock()
+            .map_err(|_| "the interrupt state is poisoned; restart the adapter".to_string())?
+            .apply(tool, arguments, Instant::now())?;
+        Ok(Answer {
+            note: Some(reply.note),
+            data: Some(reply.data),
+            ..Answer::empty()
+        })
+    }
+
+    /// Push a notice for every timer that has run out. Runs on every turn of
+    /// the owner loop, so a timer is late by at most one tick.
+    fn fire_timers(&self) {
+        let Ok(mut engine) = self.engine.lock() else {
+            return;
+        };
+        let notices = engine.tick(Instant::now(), &self.nick);
+        drop(engine);
+        for notice in &notices {
+            interrupt::emit(notice);
+        }
+    }
+
+    /// A message arrived: push a notice when one of this agent's rules wants it.
+    /// It never touches the inbox or the cursors, so `read` and `wait` see the
+    /// message exactly as they would have without the notice.
+    fn interrupt_for(&self, chan: &str, nick: &str, text: &str) {
+        let Ok(mut engine) = self.engine.lock() else {
+            return;
+        };
+        let notices = engine.on_message(Instant::now(), &self.nick, chan, nick, text);
+        drop(engine);
+        for notice in &notices {
+            interrupt::emit(notice);
         }
     }
 
@@ -847,11 +908,9 @@ impl Owner {
         if self.inbox.len() >= INBOX_MAX {
             self.inbox.remove(0);
         }
-        self.inbox.push(Push {
-            chan,
-            nick,
-            text: message.trailing.unwrap_or_default(),
-        });
+        let text = message.trailing.unwrap_or_default();
+        self.interrupt_for(&chan, &nick, &text);
+        self.inbox.push(Push { chan, nick, text });
         true
     }
 }
@@ -877,7 +936,7 @@ fn wakes_on_trigger(triggers: &[Trigger], nick: &str, text: &str) -> bool {
 /// regex, unless a caller asks for a regex" -- the wildcards ARE the regex
 /// opt-in, not a fixed anchor). Case-insensitive: a trigger phrase is prose
 /// a human typed, not a pattern language they chose to be exact in.
-fn wildcard_match(pattern: &str, text: &str) -> bool {
+pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
     fn matches(pattern: &[char], text: &[char]) -> bool {
         match pattern.first() {
             None => text.is_empty(),

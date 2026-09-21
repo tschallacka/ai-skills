@@ -597,6 +597,7 @@ EDITOR_EOF
             cat <<'CHATEOF'
 SKILL.md
 docs/README.md
+docs/interrupts.md
 requires.tsv
 binaries.tsv
 integration.tsv
