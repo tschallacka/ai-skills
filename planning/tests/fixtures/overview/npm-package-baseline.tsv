@@ -192,7 +192,7 @@ package/planning/scripts/overview-state.sh	1842
 package/planning/scripts/plan-content.sh	2117
 package/planning/scripts/plan-context-wrapper.sh	1638
 package/planning/scripts/plan-context.sh	2111
-package/planning/scripts/plan-core-lib.sh	22929
+package/planning/scripts/plan-core-lib.sh	23938
 package/planning/scripts/plan-crypt-lib.sh	10784
 package/planning/scripts/plan-document-lib.sh	23104
 package/planning/scripts/plan-env.sh	2232

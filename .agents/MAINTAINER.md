@@ -231,7 +231,12 @@ the CI map.
   fall through.** `plan_bin_dir` returns the first of: `$AI_SKILLS_BIN_ROOT`
   (when it names a directory), then `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/bin`
   (when that exists), then the outermost `bin/<triple>` found walking up from
-  the script, and looks for a binary by name in that one directory only. A
+  the script, and looks for a binary by name in that one directory only. (The
+  one exception, added for B365: `plan_exec_compiled_binary_if_present`, which
+  every `scripts/*.sh` wrapper calls, then tries an executable of that name
+  beside the wrapper, because an installed skill keeps its compiled commands in
+  its own `scripts/` next to the wrappers. It comes last, so it never shadows
+  the override or the shared bin.) A
   machine with skills installed has the second one, and it holds the shipped
   tools (`bugs`, `todo`, `rjq`, the chat and editor binaries), not the dev
   tools. So without `AI_SKILLS_BIN_ROOT`: `./run-tests.sh` exits 69 with "no

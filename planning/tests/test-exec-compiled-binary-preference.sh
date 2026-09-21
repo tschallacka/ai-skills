@@ -156,4 +156,58 @@ root_caller_out="$work/root-caller.out"
 ) >"$root_caller_out" 2>&1 || true
 t_assert_contains 'a caller_script_dir AT the repo root resolves PLANNING_SKILL_ROOT to the repo root itself' "PLANNING_SKILL_ROOT:$repo_root" "$(cat "$stub_out")"
 
+# ---- case (h): B365 -- an installed skill keeps its compiled command in its own
+#      scripts/ directory, beside the wrapper, while the shared bin exists but
+#      does not hold it. plan_bin_dir answers with the first directory that
+#      EXISTS, so before the fix this fell through and every installed wrapper
+#      exited 69 with the binary sitting next to it. The override and the shared
+#      bin must still win over a copy beside the wrapper.
+installed_dir="$work/installed-skill/scripts"
+mkdir -p "$installed_dir"
+side_out="$work/side.out"
+cat >"$installed_dir/side-binary" <<STUB
+#!/usr/bin/env bash
+printf 'side argv:%s\n' "\$*" > "$side_out"
+STUB
+chmod +x "$installed_dir/side-binary"
+empty_shared="$work/empty-shared-bin"
+mkdir -p "$empty_shared"
+(
+    AI_SKILLS_BIN_ROOT="$empty_shared"
+    export AI_SKILLS_BIN_ROOT
+    plan_exec_compiled_binary_if_present 'side-binary' "$installed_dir" alpha beta
+    printf 'SIDE_FALLTHROUGH_MARKER\n'
+) >"$work/side-run.out" 2>&1 || true
+t_assert_contains 'a binary beside the wrapper runs when the shared bin exists but lacks it (B365)' 'side argv:alpha beta' "$(cat "$side_out" 2>/dev/null || true)"
+case "$(cat "$work/side-run.out")" in
+    *SIDE_FALLTHROUGH_MARKER*) t_fail 'B365: the wrapper fell through although its binary sits beside it' ;;
+    *) ;;
+esac
+
+# A copy beside the wrapper never shadows the one the override names.
+: >"$side_out"
+cat >"$empty_shared/side-binary" <<STUB
+#!/usr/bin/env bash
+printf 'override argv:%s\n' "\$*" > "$side_out"
+STUB
+chmod +x "$empty_shared/side-binary"
+(
+    AI_SKILLS_BIN_ROOT="$empty_shared"
+    export AI_SKILLS_BIN_ROOT
+    plan_exec_compiled_binary_if_present 'side-binary' "$installed_dir" gamma
+) >/dev/null 2>&1 || true
+t_assert_contains 'the override still wins over a copy beside the wrapper' 'override argv:gamma' "$(cat "$side_out")"
+
+# With nothing beside the wrapper and nothing in the shared bin it still falls
+# through, so the wrapper's own exit-69 message stays reachable.
+side_fall="$work/side-fall.out"
+(
+    AI_SKILLS_BIN_ROOT="$work/empty-shared-bin-2"
+    mkdir -p "$AI_SKILLS_BIN_ROOT"
+    export AI_SKILLS_BIN_ROOT
+    plan_exec_compiled_binary_if_present 'not-installed-anywhere' "$installed_dir"
+    printf 'STILL_FALLS_THROUGH\n'
+) >"$side_fall" 2>&1 || true
+t_assert_contains 'with no binary anywhere the wrapper still falls through' 'STILL_FALLS_THROUGH' "$(cat "$side_fall")"
+
 t_end

@@ -61,25 +61,49 @@ pecbip_find_skill_root() {
     done
 }
 
+# pecbip_pick <bin-dir, or empty> <name> <caller-script-dir> -- print the
+# executable to run, or return 1.
+#
+# It is `<name>` in the bin directory plan_bin_dir chose, then, last, beside the
+# wrapper itself (B365). An installed skill carries its compiled commands in its
+# own scripts/ directory, next to the .sh wrappers that front them, while
+# plan_bin_dir answers with the first directory that EXISTS, not the first that
+# holds this binary -- so the moment a shared bin exists every installed wrapper
+# would otherwise fall through to the exit-69 branch with its binary sitting
+# next to it. Beside the wrapper comes only after the override, the shared bin
+# and the development tree, so none of those can be shadowed by a stray copy.
+#
+# A Windows build is `<name>.exe`. Git for Windows' bash usually resolves
+# `<name>` to it on its own, but asking for the suffixed name outright does not
+# depend on that, and costs nothing anywhere else.
+pecbip_pick() {
+    local dir candidate side
+    side="$(cd "$3" && pwd)"
+    for dir in "$1" "$side"; do
+        [ -n "$dir" ] || continue
+        for candidate in "$2" "$2.exe"; do
+            if [ -f "$dir/$candidate" ] && [ -x "$dir/$candidate" ]; then
+                printf '%s\n' "$dir/$candidate"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
 plan_exec_compiled_binary_if_present() {
-    local binary_name="$1" caller_script_dir="$2" pecbip_bin_dir pecbip_lib_dir pecbip_skill_root
+    local binary_name="$1" caller_script_dir="$2" pecbip_bin_dir pecbip_lib_dir pecbip_skill_root pecbip_target
     shift 2
     pecbip_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     # shellcheck source=planning/scripts/plan-crypt-lib.sh
     source "$pecbip_lib_dir/plan-crypt-lib.sh"
-    # A Windows build is `<name>.exe`. Git for Windows' bash usually resolves
-    # `<name>` to it on its own, but asking for the suffixed name outright does
-    # not depend on that, and costs nothing anywhere else.
-    if pecbip_bin_dir="$(plan_bin_dir)" && [ ! -x "$pecbip_bin_dir/$binary_name" ] \
-        && [ -x "$pecbip_bin_dir/$binary_name.exe" ]; then
-        binary_name="$binary_name.exe"
-    fi
-    if [ -n "${pecbip_bin_dir:-}" ] && [ -x "$pecbip_bin_dir/$binary_name" ]; then
+    pecbip_bin_dir="$(plan_bin_dir)" || pecbip_bin_dir=""
+    if pecbip_target="$(pecbip_pick "$pecbip_bin_dir" "$binary_name" "$caller_script_dir")"; then
         pecbip_skill_root="$(pecbip_find_skill_root "$(cd "$caller_script_dir" && pwd)")" || pecbip_skill_root=""
         PLANNING_SKILL_ROOT="$pecbip_skill_root" \
-            exec "$pecbip_bin_dir/$binary_name" "$@"
+            exec "$pecbip_target" "$@"
     fi
     unset -f plan_bin_dir plan_crypt_bin plan_crypt_resolve plan_crypt_target_triple \
-        plan_fix_key plan_random_hex plan_sha256_chain plan_sha256_hex pecbip_find_skill_root
+        plan_fix_key plan_random_hex plan_sha256_chain plan_sha256_hex pecbip_find_skill_root pecbip_pick
     unset PLAN_CRYPT_LIB_LOADED
 }
