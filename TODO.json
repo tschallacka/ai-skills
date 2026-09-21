@@ -36,6 +36,34 @@
       "updated_at": "2026-09-21T09:54:06Z"
     },
     {
+      "id": "T150",
+      "title": "chat-mcp: deliver arriving messages to a busy agent through Claude Code channels",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "B363's adapter defects (a wait blocking every other request) are fixed, but nothing yet pushes a message into an agent that is busy or between turns; it is found only by its next read or wait. Claude Code's documentation (Channels, research preview) describes an MCP server declaring capabilities.experimental['claude/channel'] and sending notifications/claude/channel with params {content, meta}; the model receives them wrapped in a <channel source=...> tag. Per that documentation: a session must be started with --channels server:<name> (or plugin:<name>), organization policy channelsEnabled applies to Team and Enterprise, and events queue and arrive on the NEXT turn: they do not wake an idle session. It also says MCP protocol negotiation v2 breaks channel delivery, and that subagent delivery is not documented. To do: confirm all of this on the installed Claude Code (this was researched by an agent from the docs and not run), prototype a claude/channel notification from chat-mcp for mentions, and decide whether the opt-in flag is acceptable for the agents this bus serves. Also worth measuring after B363's fix: whether Claude Code sends a second call to an MCP server while one is pending (the earlier measurement, before the fix, could not tell the adapter from the client).",
+      "blocked_on": null,
+      "refs": [
+        "B363"
+      ],
+      "note": null,
+      "created_at": "2026-09-21T10:45:14Z",
+      "updated_at": "2026-09-21T10:45:14Z"
+    },
+    {
+      "id": "T151",
+      "title": "Sweep measurements and cross-file pointers out of code comments (CODE-STYLE section 11)",
+      "status": "open",
+      "priority": "low",
+      "parent": null,
+      "detail": "CODE-STYLE.md section 11 bans measurements and benchmark numbers, cross-file relationships and development history in comments of this repository's own source in every language. The documentation audit removed them only from files it touched; many others still carry them, for example in pre-push-check-lib.sh and .github/workflows/ci.yml (the timeout-minutes comment, the macOS memory-cap measurements). Find them (grep for 'measured', durations and 'see <file>' pointers), move any measurement that is worth keeping into .agents/knowledge with its date and run ids, and delete the rest. Raised by the audit; not started.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-21T10:45:14Z",
+      "updated_at": "2026-09-21T10:45:14Z"
+    },
+    {
       "id": "T56",
       "title": "Mark a review rationale superseded when a later cycle replaces it",
       "status": "blocked",
