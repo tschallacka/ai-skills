@@ -3366,7 +3366,7 @@
     {
       "id": "B363",
       "title": "chat-mcp: an agent cannot passively wait for channel messages and wake on them, so it ignores messages posted while it works",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3378,12 +3378,12 @@
         "chat-mcp",
         "chat"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Commit ac463fb7 (nextupdate), CI run 35591256435 all green. src/chat-mcp/src/main.rs answers each tools/call on its own thread with stdout behind a lock; src/chat-mcp/src/lib.rs with_connection holds the connection map's lock only to find or open the connection (Held is a cloneable handle with an id, and a dead connection is forgotten only if it is still the one registered); src/chat-mcp/src/conn.rs serves a wait as 100 ms Poll jobs from Held::submit, so the owner thread is free between ticks. chat/SKILL.md documents it.",
+      "verification": "Mutation: src/chat-mcp/tests/mcp_flow.rs gained a_long_wait_does_not_hold_up_a_request_from_another_identity and a_long_wait_does_not_hold_up_the_same_identitys_next_call. On the parent tree both fail, the 6 s wait's answer arriving before the other request's (2 of 2). With the fix both pass, and the whole file passes 14/14 in each of 9 runs, three of them in parallel; the existing wait_returns_when_a_message_lands_not_on_the_next_poll still passes. NOT verified: that Claude Code itself sends a second call to an MCP server while one is pending. The pre-fix measurement (a send stored when a wait ended) cannot tell the adapter from the client; re-measure after reconnecting the MCP server. Pushing arriving messages to a busy or idle agent is not part of this fix: T150.",
       "found_by": "aiskills (Claude Code), docs-review session, 2026-09-21",
-      "notes": "Unconfirmed hypothesis, not tested: src/chat-mcp/src/conn.rs Owner::run executes one job at a time, so a blocked wait keeps later sends, reads and joins for the same session queued behind it. Reported by the maintainer as 'you are not able to passively wait and wake up on new messages, you passively ignore them'; to be fixed after the documentation review that was in progress. Confirmed by experiment 2026-09-21 (commit a3a5df90 tree). Two tool calls issued together: mcp__chat__wait as session aiskills for 25 s in a scratch channel, and mcp__chat__send as session probe to the same channel. The wait returned timed_out with 'nothing arrived within 25s'; the send was stored with a timestamp about 10 s before the channel log was inspected, i.e. at the END of the wait, not at its start. Earlier in the same session, sends called in parallel from one session also stalled past 120 s while another call returned at once. Not yet verified: whether the serialization is only in chat-mcp or also in the harness; a stdio test that runs a long wait and a send on two sessions concurrently would settle it. Fix plan: handle each tools/call on its own thread with a mutex on stdout, let a session's non-wait jobs run between a wait's ticks, and ask whether Claude Code channels (MCP notifications into a running session) can deliver a wake.",
+      "notes": "Unconfirmed hypothesis, not tested: src/chat-mcp/src/conn.rs Owner::run executes one job at a time, so a blocked wait keeps later sends, reads and joins for the same session queued behind it. Reported by the maintainer as 'you are not able to passively wait and wake up on new messages, you passively ignore them'; to be fixed after the documentation review that was in progress. Confirmed by experiment 2026-09-21 (commit a3a5df90 tree). Two tool calls issued together: mcp__chat__wait as session aiskills for 25 s in a scratch channel, and mcp__chat__send as session probe to the same channel. The wait returned timed_out with 'nothing arrived within 25s'; the send was stored with a timestamp about 10 s before the channel log was inspected, i.e. at the END of the wait, not at its start. Earlier in the same session, sends called in parallel from one session also stalled past 120 s while another call returned at once. Not yet verified: whether the serialization is only in chat-mcp or also in the harness; a stdio test that runs a long wait and a send on two sessions concurrently would settle it. Fix plan: handle each tools/call on its own thread with a mutex on stdout, let a session's non-wait jobs run between a wait's ticks, and ask whether Claude Code channels (MCP notifications into a running session) can deliver a wake. Closed 2026-09-21 after the documentation audit. The expected behaviour 'an agent that is doing other work is woken by a new message' is not delivered by this fix and cannot be by MCP alone (Claude Code's documented channels deliver on the next turn and do not wake an idle session); that is T150.",
       "created_at": "2026-09-21T09:04:45Z",
-      "updated_at": "2026-09-21T09:32:36Z"
+      "updated_at": "2026-09-21T11:44:56Z"
     },
     {
       "id": "B14",
