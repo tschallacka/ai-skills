@@ -7456,6 +7456,51 @@
       "updated_at": "2026-09-21T14:21:11Z"
     },
     {
+      "id": "B366",
+      "title": "Test helper ensure_built reported a binary it had just built as missing (macOS legs; Windows leg without the .exe suffix)",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "CI only. gh run view <id> --log-failed | grep 'still missing at' on runs 35261973247, 35276323249, 35285680469 (2026-09-17), 35517360868 (e12890e5, 2026-09-20 14:43; macOS legs) and 35522416176 (6362d335, 2026-09-20 16:20; x86_64-pc-windows-msvc).",
+      "observed": "planning-server handlers tests panicked at src/planning-server/src/handlers.rs:431: 'verify-fix-keys still missing at .../target/debug/verify-fix-keys after building it' after a successful cargo build, while update-progress, built the same way, was found (macOS). On the Windows leg the chat tests said 'chat-server-rs still missing at D:\\a\\ai-skills\\ai-skills\\target\\x86_64-pc-windows-msvc\\debug\\chat-server-rs after building it', with no .exe.",
+      "expected": "The helper finds the binary it has just built, on every platform.",
+      "mechanism": "Windows: the expected path lacked the platform executable suffix. macOS: never identified; aed26725 made the helper independent of it.",
+      "surfaces": [
+        "src/planning-server/src/handlers.rs",
+        "src/planning-server/tests/integration.rs",
+        "src/chat-server-rs/tests/support/mod.rs"
+      ],
+      "fix": "aed26725 (2026-09-20, planning-server tests: builds are serialized, the executable path is read from cargo's own JSON messages and copied into place if it is elsewhere, and cargo's output is shown when it is still absent) and 69b8c334 (2026-09-20, chat tests look for the binary with its platform suffix), both on nextupdate.",
+      "verification": "Failed logs of the last 30 ci runs on nextupdate scanned 2026-09-21: the message appears in five runs, the last at 2026-09-20 16:20, before 69b8c334 (17:28); none after. The macOS cause is unknown, so this is a worked-around defect and a recurrence is possible.",
+      "found_by": "aiskills, scanning nextupdate CI failures 2026-09-21",
+      "notes": null,
+      "created_at": "2026-09-21T17:11:42Z",
+      "updated_at": "2026-09-21T17:11:42Z"
+    },
+    {
+      "id": "B367",
+      "title": "plan-overview serve_routing failed once on macOS with a Broken pipe on the request write",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "CI run 35614711962 (b7258bb4), job 'Test suite passes on macos-latest (default bash, shard 1)', attempt 1: cargo test -p plan-overview --test serve_routing. The re-run of that job passed. Not reproduced locally (Linux).",
+      "observed": "each_path_is_routed_and_rendered_independently panicked at src/plan-overview/tests/serve_routing.rs:21:70: called Result::unwrap() on an Err value: Os { code: 32, kind: BrokenPipe, message: \"Broken pipe\" } -- the write! of the request in get(). No earlier failure of this test in the failed nextupdate runs since 2026-09-15.",
+      "expected": "The client's request is written and the server routes on its path.",
+      "mechanism": null,
+      "surfaces": [
+        "src/plan-overview/src/serve.rs",
+        "src/plan-overview/tests/serve_routing.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, CI run 35614711962, 2026-09-21",
+      "notes": "Hypothesis, not checked on macOS: serve_on_host_port sets the listener non-blocking and respond() reads the request from the accepted stream with unwrap_or(0). If the accepted socket is non-blocking there (from memory: BSD-derived systems let an accepted socket inherit the listener's O_NONBLOCK, Linux does not), an accept that lands before the request bytes arrive makes read() return WouldBlock, so the request reads as empty and any path gets the overview page, and the server then shuts the connection down, which is the client's Broken pipe. If so it is a server bug that a real browser could hit, not only a test flake. A check: after accept, stream.set_nonblocking(false), then loop the test on macOS.",
+      "created_at": "2026-09-21T17:11:42Z",
+      "updated_at": "2026-09-21T17:11:42Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
