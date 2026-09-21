@@ -24,13 +24,17 @@ asks you to confirm on every start. Without the flag nothing is pushed and
 nothing breaks: `wait`, `read` and the rest work as before, and the bridge
 cannot tell that no one is listening.
 
-Measured on Claude Code 2.1.278 (2026-09-21, one sample each, with a stand-in
-server rather than this one): a push wakes an idle session, and reaches a busy
-one between its tool calls, not at the end of the turn. It does not work under
-`claude -p` or any headless run, it is not known to reach a subagent, and an
-organisation policy can switch it off without telling the server. The contract
-is a preview and may change, so treat delivery as best effort and keep `wait`
-as the thing you can rely on.
+Measured on Claude Code 2.1.278 on 2026-09-21, one run each, driving this bridge
+from a real interactive session: a matching message woke an idle session with no
+key pressed, and showed up while a foreground tool was still running. A
+non-matching one did not interrupt, `read` still returned every message, a
+modified rule applied to the very next message, a repeating timer with `count: 2`
+fired exactly twice, and a snooze held notices back until it ended. Claude Code
+shows a notice as `← chat: <text>` and hides the attributes. Earlier, with a
+stand-in server, `claude -p` (headless) received nothing. It is not known to reach
+a subagent, and an organisation policy can switch it off without telling the
+server. The contract is a preview and may change, so treat delivery as best
+effort and keep `wait` as the thing you can rely on.
 
 ## What arrives
 
