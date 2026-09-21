@@ -7545,6 +7545,27 @@
       "updated_at": "2026-09-21T22:37:21Z"
     },
     {
+      "id": "B370",
+      "title": "chat-server-rs message_tags tests failed together on the Windows leg: openssl s_client produced no reply within 5 s",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "CI run 35664485010 (a8f92428), job 'x86_64-pc-windows-msvc builds and runs every subject in scope', attempt 1: cargo test -p chat-server-rs --test message_tags. The same test file passed in the runs before it (111ebaf4 and earlier) and my change in that push did not touch chat-server-rs. Not reproduced locally (Linux).",
+      "observed": "4 of 9 tests failed in 10.87 s, each with no reply from the server: cap_ls_lists_exactly_message_tags (message_tags.rs:108 'CAP LS produced no reply at all: '), cap_req_mixed_naks_the_whole_set (:160), a_plain_client_with_no_cap_registers_normally (:198), a_negotiated_peer_gets_msgid_a_plain_peer_does_not (:249). The other 5 passed.",
+      "expected": "Each test's raw TLS client gets the server's reply inside its wait, or the test says why not.",
+      "mechanism": null,
+      "surfaces": [
+        "src/chat-server-rs/tests/message_tags.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, CI run 35664485010, 2026-09-21",
+      "notes": "Hypothesis, not measured: the tests drive the server through a spawned 'openssl s_client' subprocess and wait 5 s for output (wait_for). On a slow Windows runner, running several of them in parallel, starting openssl and finishing the TLS handshake can take longer than that, so the output is still empty when the wait ends. The empty output in the failure message (nothing at all, not even the handshake banner) fits a client that had not got that far. A rerun of the failed job was started; if it passes this is a timing flake, and a fix would wait for the handshake first or use a longer, event-driven wait.",
+      "created_at": "2026-09-21T23:19:48Z",
+      "updated_at": "2026-09-21T23:19:48Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
