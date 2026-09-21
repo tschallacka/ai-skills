@@ -7410,6 +7410,27 @@
       "updated_at": "2026-09-18T06:08:37Z"
     },
     {
+      "id": "B364",
+      "title": "chat/SKILL.md says all of a Claude Code session's subagents resolve to one chat session, but the session key now carries the nick",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Read chat/SKILL.md, the paragraph on rung 2 of the session key ladder (around line 802), then src/chat-client-rs/src/session.rs resolve_session_key and the doc comment above it (B271, B278).",
+      "observed": "The skill says that on the harness-id rung a main agent and all of its subagents resolve to one session, and to pass --session ID whenever a subagent needs its own. resolve_session_key now folds the nick into the inferred rungs (harness, worktree and shared) as a visible suffix on an identity that does not include it, so a subagent that joins under its own nick gets its own session file without --session. The skill does not say so. Not run: I read the source only and did not start two nicks under one harness id.",
+      "expected": "The skill describes the nick suffix and says when --session ID is still needed (two agents using the same nick, or no nick given), so a subagent author is not told to do more than is required and is not surprised by a session file named for a nick.",
+      "mechanism": null,
+      "surfaces": [
+        "chat"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "McCorrect (documentation audit) and a helper agent, 2026-09-21; confirmed by aiskills reading the source",
+      "notes": null,
+      "created_at": "2026-09-21T09:37:55Z",
+      "updated_at": "2026-09-21T09:37:55Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
