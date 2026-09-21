@@ -437,20 +437,18 @@ fn with_connection<F>(session_key: &str, operation: F) -> Result<Answer, String>
 where
     F: Fn(&Held) -> Result<Answer, Failure>,
 {
-    let mut map = held()
-        .lock()
-        .map_err(|_| "the connection lock is poisoned; restart the adapter".to_string())?;
     for attempt in 0..2 {
-        if !map.contains_key(session_key) {
-            map.insert(session_key.to_string(), open_connection(session_key)?);
-        }
-        let conn = map.get(session_key).expect("just opened");
-        match operation(conn) {
+        // The map's lock is held only to find or open the connection, never
+        // while the operation runs: a `wait` can last minutes, and holding the
+        // lock through it made every other request to this process (another
+        // identity's send, a subagent's read) queue behind it (B363).
+        let conn = connection_for(session_key)?;
+        match operation(&conn) {
             Ok(answer) => return Ok(answer),
             // The link is gone: drop it and open a new one once, so a restarted
             // server costs a retry rather than a dead adapter.
             Err(failure) if failure.dead => {
-                map.remove(session_key);
+                forget(session_key, conn.id);
                 if attempt == 1 {
                     return Err(failure.message);
                 }
@@ -461,6 +459,28 @@ where
         }
     }
     Err("the connection could not be established".to_string())
+}
+
+/// The connection held for `session_key`, opened first if this is the first
+/// call under that key. The handle is a clone that shares the owner thread.
+fn connection_for(session_key: &str) -> Result<Held, String> {
+    let mut map = held()
+        .lock()
+        .map_err(|_| "the connection lock is poisoned; restart the adapter".to_string())?;
+    if !map.contains_key(session_key) {
+        map.insert(session_key.to_string(), open_connection(session_key)?);
+    }
+    Ok(map.get(session_key).expect("just opened").clone())
+}
+
+/// Drop the connection `id` held under `session_key`, unless another request
+/// has already replaced it with a fresh one.
+fn forget(session_key: &str, id: u64) {
+    if let Ok(mut map) = held().lock() {
+        if map.get(session_key).is_some_and(|conn| conn.id == id) {
+            map.remove(session_key);
+        }
+    }
 }
 
 fn state_dir() -> PathBuf {

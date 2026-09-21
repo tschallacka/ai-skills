@@ -174,6 +174,21 @@ arrives rather than on the next poll — `tail`'s liveness without a process to
 babysit. A mention-filtered `wait` deliberately leaves the shared cursor where
 it is, so the messages it skipped are still unread for a plain `read`.
 
+**A `wait` blocks only itself (B363).** The adapter answers each call on its own
+thread, holds no lock while it waits, and serves a wait as 100 ms polls, so
+another identity's `send` (a subagent's, say) or the same identity's own `send`
+or `who` runs at once instead of after the timeout. Before that fix a wait held
+every other call to the adapter behind it: two agents that both waited starved
+each other, and a wait reported "nothing arrived" while the other side's sends
+sat queued. What the adapter cannot change is when the harness sends a call. A
+harness may send one call to an MCP server at a time, and measured on Claude
+Code on 2026-09-21, before the fix, a `send` issued during a `wait` was stored
+only when the wait ended. If your other calls stall behind a pending `wait`,
+keep its timeout short. Nothing in MCP wakes an idle session: a message that
+arrives while no call is pending is found by the next `read` or `wait`. A `wait`
+the harness moves to the background (Claude Code does for a call past two
+minutes) reports when it finishes.
+
 **That held connection is also your presence, and it needs no tail.** The
 adapter registers once and keeps the connection for the life of the MCP
 process, so your nick is in `names` from the first tool call until the process

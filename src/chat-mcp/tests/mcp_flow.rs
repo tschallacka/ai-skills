@@ -145,6 +145,28 @@ impl Harness {
         serde_json::from_str(&response).unwrap_or_else(|_| panic!("not JSON: {response}"))
     }
 
+    /// Write a `tools/call` without reading its answer, so two can be in flight
+    /// at once; returns the id its answer will carry.
+    fn start_call(&mut self, name: &str, arguments: Value) -> u64 {
+        self.next_id += 1;
+        let id = self.next_id;
+        let line = json!({"jsonrpc":"2.0","id":id,"method":"tools/call",
+            "params":{"name":name,"arguments":arguments}})
+        .to_string();
+        writeln!(self.stdin, "{line}").expect("write request");
+        self.stdin.flush().expect("flush request");
+        id
+    }
+
+    /// The next response line, whichever request it answers.
+    fn next_response(&mut self) -> Value {
+        let mut response = String::new();
+        self.stdout
+            .read_line(&mut response)
+            .expect("read a response");
+        serde_json::from_str(&response).unwrap_or_else(|_| panic!("not JSON: {response}"))
+    }
+
     /// A tool call's payload, parsed back out of the text content the MCP
     /// result carries. Panics on an error result, naming it: a tool that
     /// refused is never the thing a caller wanted.
@@ -601,4 +623,72 @@ fn an_empty_session_argument_falls_back_to_the_default_identity() {
         .map(|m| m.as_str().unwrap_or_default().to_string())
         .collect();
     assert!(members.contains(&"tester".to_string()), "{who}");
+}
+
+/// B363: a blocked `wait` used to hold up every other request to the adapter,
+/// because the transport read one request at a time and the connection map's
+/// lock was held for the whole call. Two agents that each waited then starved
+/// each other. With a 6 s wait in flight, a request from another identity must
+/// be answered in well under that, and before the wait.
+#[test]
+fn a_long_wait_does_not_hold_up_a_request_from_another_identity() {
+    let Some(mut harness) = Harness::new("wait-other-identity") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#b363a"}));
+    harness.call("join", json!({"channel":"#b363a","session":"sub-a"}));
+
+    let wait_id = harness.start_call("wait", json!({"channel":"#b363a","timeout_seconds":6}));
+    std::thread::sleep(Duration::from_millis(300));
+    let started = Instant::now();
+    let send_id = harness.start_call(
+        "send",
+        json!({"channel":"#b363a","text":"while you wait","session":"sub-a"}),
+    );
+
+    let first = harness.next_response();
+    assert_eq!(
+        first["id"],
+        json!(send_id),
+        "the other identity's send must be answered before the 6 s wait ends: {first}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "the send took {:?} with a wait in flight",
+        started.elapsed()
+    );
+    // The waiting identity's own connection is not sent to itself: the wait
+    // has to run out its time, and is answered last.
+    let second = harness.next_response();
+    assert_eq!(second["id"], json!(wait_id), "{second}");
+}
+
+/// B363: the same holds within one identity. A `wait` occupied the owner
+/// thread, so the identity's own next call queued behind it for the whole
+/// timeout; it must instead be served between the wait's ticks.
+#[test]
+fn a_long_wait_does_not_hold_up_the_same_identitys_next_call() {
+    let Some(mut harness) = Harness::new("wait-same-identity") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#b363b"}));
+
+    let wait_id = harness.start_call("wait", json!({"channel":"#b363b","timeout_seconds":6}));
+    std::thread::sleep(Duration::from_millis(300));
+    let started = Instant::now();
+    let who_id = harness.start_call("who", json!({"channel":"#b363b"}));
+
+    let first = harness.next_response();
+    assert_eq!(
+        first["id"],
+        json!(who_id),
+        "the identity's own who must be answered before its 6 s wait ends: {first}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "the who took {:?} with a wait in flight",
+        started.elapsed()
+    );
+    let second = harness.next_response();
+    assert_eq!(second["id"], json!(wait_id), "{second}");
 }

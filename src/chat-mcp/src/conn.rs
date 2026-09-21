@@ -20,6 +20,7 @@ use chat_client_rs as client;
 use chat_proto::{Message, FETCH_END};
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
@@ -115,6 +116,12 @@ pub enum Op {
         mentions: bool,
         timeout: Duration,
     },
+    /// One tick of a wait: what `Held::submit` runs in a loop for `Wait`, so a
+    /// long wait never occupies the owner thread for longer than a tick.
+    Poll {
+        chan: Option<String>,
+        mentions: bool,
+    },
     Who {
         chan: String,
     },
@@ -177,13 +184,21 @@ impl Failure {
     }
 }
 
-/// The adapter's handle on the owner thread.
+/// The adapter's handle on the owner thread. Cloning it shares the same owner
+/// thread, which is what lets a caller drop the connection map's lock before it
+/// runs a long operation.
+#[derive(Clone)]
 pub struct Held {
+    /// Tells two connections opened under the same key apart, so a caller that
+    /// found its connection dead forgets that one and not a fresh replacement.
+    pub id: u64,
     pub server: String,
     pub nick: String,
     pub state_dir: PathBuf,
     jobs: Sender<Job>,
 }
+
+static NEXT_HELD_ID: AtomicU64 = AtomicU64::new(1);
 
 impl Held {
     /// Connect, register, and hand the stream to its owner thread.
@@ -231,6 +246,7 @@ impl Held {
         };
         std::thread::spawn(move || owner.run(queue));
         Ok(Held {
+            id: NEXT_HELD_ID.fetch_add(1, Ordering::Relaxed),
             server: server.to_string(),
             nick: nick.to_string(),
             state_dir: state_dir.to_path_buf(),
@@ -238,19 +254,60 @@ impl Held {
         })
     }
 
-    /// Submit one operation and wait for its answer. The wait is bounded by
-    /// the operation's own deadline plus a margin, so a wedged owner thread
-    /// surfaces as an error rather than a hung tool call.
+    /// Submit one operation and wait for its answer. Each job the owner thread
+    /// is given is bounded (twenty seconds), so a wedged owner thread surfaces
+    /// as an error rather than a hung tool call; a `Wait` is many short jobs.
     ///
     /// `dead` separates "this connection is gone" from "this operation did not
     /// work", because only the first is worth reconnecting for. Deciding that
     /// by matching on the error text would be reading tea leaves from our own
     /// prose; the owner thread's disappearance is the fact.
     pub fn submit(&self, op: Op) -> Result<Answer, Failure> {
-        let budget = match &op {
-            Op::Wait { timeout, .. } => *timeout + Duration::from_secs(10),
-            _ => Duration::from_secs(20),
-        };
+        match op {
+            Op::Wait {
+                chan,
+                mentions,
+                timeout,
+            } => self.wait_by_polling(chan, mentions, timeout),
+            other => self.submit_one(other),
+        }
+    }
+
+    /// A wait, assembled from one-tick polls. Each poll is its own job, so the
+    /// owner thread is free between ticks and any other operation for this
+    /// identity (its own `send`, `who`, a second `wait`) is served then rather
+    /// than after the whole timeout. The long wait itself holds no lock: it is
+    /// only this loop, on the caller's own thread.
+    fn wait_by_polling(
+        &self,
+        chan: Option<String>,
+        mentions: bool,
+        timeout: Duration,
+    ) -> Result<Answer, Failure> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let answer = self.submit_one(Op::Poll {
+                chan: chan.clone(),
+                mentions,
+            })?;
+            if !answer.timed_out {
+                return Ok(answer);
+            }
+            if Instant::now() >= deadline {
+                return Ok(Answer {
+                    timed_out: true,
+                    note: Some(format!(
+                        "nothing arrived within {}s",
+                        timeout.as_secs().max(1)
+                    )),
+                    ..Answer::empty()
+                });
+            }
+        }
+    }
+
+    fn submit_one(&self, op: Op) -> Result<Answer, Failure> {
+        let budget = Duration::from_secs(20);
         let (reply, answer) = channel();
         if self.jobs.send((op, reply)).is_err() {
             return Err(Failure::dead(
@@ -325,11 +382,8 @@ impl Owner {
                 since,
                 mentions,
             } => self.read(&chan, since, mentions),
-            Op::Wait {
-                chan,
-                mentions,
-                timeout,
-            } => self.wait(chan.as_deref(), mentions, timeout),
+            Op::Wait { .. } => Err("a wait is served as polls by Held::submit".to_string()),
+            Op::Poll { chan, mentions } => self.poll(chan.as_deref(), mentions),
             Op::Who { chan } => self.who(&chan),
             Op::TriggerAdd { pattern, sender } => self.trigger_add(pattern, sender),
             Op::TriggerRemove { id } => self.trigger_remove(id),
@@ -475,34 +529,27 @@ impl Owner {
     /// This is the affordance the CLI has no way to offer. The connection is
     /// already subscribed, so the wake-up is the push itself; the rows are then
     /// read back from history so they carry ids and the cursor moves.
-    fn wait(
-        &mut self,
-        chan: Option<&str>,
-        mentions: bool,
-        timeout: Duration,
-    ) -> Result<Answer, String> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if let Some(woken) = self.pending(chan, mentions) {
-                let mut answer = self.deliver(&woken, mentions)?;
-                answer.note = Some(format!("woke on a message in {}", woken));
-                return Ok(answer);
-            }
-            if Instant::now() >= deadline {
-                return Ok(Answer {
-                    timed_out: true,
-                    note: Some(format!(
-                        "nothing arrived within {}s",
-                        timeout.as_secs().max(1)
-                    )),
-                    ..Answer::empty()
-                });
-            }
-            self.next_line(Instant::now() + TICK);
-            if self.closed {
-                return Err("the server closed the link".to_string());
-            }
+    fn poll(&mut self, chan: Option<&str>, mentions: bool) -> Result<Answer, String> {
+        if let Some(woken) = self.pending(chan, mentions) {
+            return self.woken_answer(&woken, mentions);
         }
+        self.next_line(Instant::now() + TICK);
+        if self.closed {
+            return Err("the server closed the link".to_string());
+        }
+        match self.pending(chan, mentions) {
+            Some(woken) => self.woken_answer(&woken, mentions),
+            None => Ok(Answer {
+                timed_out: true,
+                ..Answer::empty()
+            }),
+        }
+    }
+
+    fn woken_answer(&mut self, woken: &str, mentions: bool) -> Result<Answer, String> {
+        let mut answer = self.deliver(woken, mentions)?;
+        answer.note = Some(format!("woke on a message in {}", woken));
+        Ok(answer)
     }
 
     /// Hand back what a wake-up is worth. The pushes it accounts for are
