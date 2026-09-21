@@ -163,7 +163,7 @@ t_assert_eq "the builder's --list matches the derived set" \
 
 # ── property 2: every file byte-identical to its source of truth ────────────
 # For the generated compiled libraries that source of truth is a fresh build,
-# not a repository copy: they are never tracked (MAINTAINER.md section 2.16),
+# not a repository copy: they are never tracked (.agents/MAINTAINER.md 1.10),
 # so a clean tree has none, and a stale present one must not silently pass
 # here - the lib test owns staleness, this test owns what the tarball carries.
 fresh_scripts="$work/fresh-scripts"

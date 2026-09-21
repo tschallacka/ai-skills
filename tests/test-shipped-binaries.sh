@@ -125,9 +125,9 @@ ROWS
 done
 
 # No generated binary may be tracked: per-target artifacts are CI-delivered
-# (planning/MAINTAINER.md section 2.15). A re-committed blob fails here rather
+# (.agents/MAINTAINER.md 1.10). A re-committed blob fails here rather
 # than passing quietly.
 tracked_bins="$(git -C "$root" ls-files planning/bin chat/bin todo/bin bug-report/bin 2>/dev/null || true)"
-t_assert_eq 'no bundled binary is tracked in git (MAINTAINER.md section 2.15)' "$tracked_bins" ''
+t_assert_eq 'no bundled binary is tracked in git (.agents/MAINTAINER.md 1.10)' "$tracked_bins" ''
 
 t_end

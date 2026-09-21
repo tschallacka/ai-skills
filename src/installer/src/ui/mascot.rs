@@ -1,7 +1,7 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! The Minecraft-mascot sprite -- ported from installer/src/05-config.sh's
-//! `ART` and 30-render.sh's `detect_color_mode`/`fg_sgr`/`color_for`/
+//! `ART` and installer/bootstrap.sh's `detect_color_mode`/`fg_sgr`/`color_for`/
 //! `eye_row_for`. Painted as a colored overlay at an absolute terminal
 //! position AFTER render.rs's plain-ASCII frame draws, rather than embedded
 //! in it: render.rs's cell-width accounting (`pad`/`wrap`, the "every line

@@ -6,18 +6,18 @@
 # This is what `curl -fsSL .../bootstrap.sh | bash` actually runs. It knows
 # nothing about skills or manifests -- only "figure out which release asset
 # this host needs, download it while the splash plays, then hand off to the
-# installer binary that asset carries." The full bash installer (install.sh)
-# is still the fallback for a host bootstrap.sh does not cover (Windows
-# cmd/PowerShell, an offline mirror, or someone who wants no binary at all).
+# installer binary that asset carries." A host it does not cover (Windows
+# cmd/PowerShell, an offline mirror) downloads the release asset for its
+# platform by hand; the bash installer install.sh is retired.
 #
 # It must be entirely self-contained: at the moment this script runs, NOTHING
 # else from this repository is on disk yet, so the mascot pixels (ART),
 # palette (color_for/fg_sgr/detect_color_mode) and the eye states
-# (eye_row_for) are copied here verbatim from installer/src/05-config.sh and
-# installer/src/30-render.sh rather than sourced. Keep the two in sync by
-# hand if the sprite or palette ever changes -- there is no third place for
-# either to live that both a piped script and the full installer can reach
-# before their own payload exists locally.
+# (eye_row_for) are written out here rather than sourced: the sprite is a copy
+# of ART in installer/src/05-config.sh, and the palette and eye functions live
+# only here and in the Rust port src/installer/src/ui/mascot.rs. Keep those
+# three in sync by hand if the sprite or palette ever changes -- there is no
+# other place a piped script can reach before its own payload exists locally.
 #
 # The animation and the download are deliberately decoupled: the splash has
 # its own minimum play time (BOOTSTRAP_MIN_SPLASH_SECONDS) independent of how
@@ -86,9 +86,9 @@ bootstrap_release_url() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# The mascot (copied from installer/src/05-config.sh's ART and
-# installer/src/30-render.sh's detect_color_mode/fg_sgr/color_for/
-# eye_row_for -- see the file header for why this cannot be sourced instead)
+# The mascot (ART is copied from installer/src/05-config.sh; detect_color_mode,
+# fg_sgr, color_for and eye_row_for live only here and in src/installer/src/ui/
+# mascot.rs -- see the file header for why this cannot be sourced instead)
 # ─────────────────────────────────────────────────────────────────────────────
 
 ART=(

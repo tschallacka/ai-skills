@@ -382,7 +382,7 @@ case "$mode" in
             fi
         done
         # The compiled plan libraries are generated and never tracked
-        # (MAINTAINER.md section 2.15), so a clean tree has none. Build-if-missing
+        # (.agents/MAINTAINER.md 1.10), so a clean tree has none. Build-if-missing
         # here; staleness stays the tests' job. A listed file still missing after
         # this is the hard error below.
         libs_missing=0
@@ -393,8 +393,8 @@ case "$mode" in
             "$repo_root/planning/scripts/build-plan-libs.sh" \
                 || { printf '%s: build-plan-libs.sh failed\n' "${0##*/}" >&2; exit 66; }
         fi
-        # REVIEWER.md is generated and never tracked (MAINTAINER.md section
-        # 2.16); generation needs the compiled plan-crypt-lib.sh, so the library
+        # REVIEWER.md is generated and never tracked (.agents/MAINTAINER.md
+        # 1.10); generation needs the compiled plan-crypt-lib.sh, so the library
         # step above must have run first. A present file is left alone - the
         # projection test owns staleness.
         if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then

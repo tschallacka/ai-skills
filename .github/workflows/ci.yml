@@ -562,9 +562,8 @@ jobs:
     # build and pass there; this proves the bash skills and their tests do too,
     # which is the half of the product a cargo run never touches.
     #
-    # Sharded like the other suite jobs (measured on the windows branch: about
-    # 30 minutes unsharded, most of it process spawns, which Windows makes
-    # slow), and it takes the same selective test list from the scope job.
+    # Sharded like the other suite jobs, and it takes the same selective test
+    # list from the scope job.
     name: Test suite passes on windows-latest (Git bash, shard ${{ matrix.shard }})
     runs-on: windows-latest
     needs: scope
@@ -1506,15 +1505,9 @@ jobs:
       - name: Drive a real Cygwin bash through the built wrapper
         shell: pwsh
         run: |
-          # actions/checkout on this Windows runner checked the script out
-          # with CRLF line endings (no .gitattributes forces LF repo-wide);
-          # Cygwin's bash then read "set -euo pipefail\r" as an option named
-          # "pipefail<CR>", which does not match the real "pipefail" and
-          # fails as an invalid option name -- the exact shape of the
-          # embedded-newline corruption W19's own scratch run hit with
-          # rustup's --no-self-update flag. Strip the CRs before handing
-          # the file to bash, rather than a repo-wide .gitattributes change
-          # for one script.
+          # A CRLF checkout makes Cygwin's bash read "set -euo pipefail\r" as an
+          # option named "pipefail<CR>" and fail as an invalid option name, so
+          # strip the CRs before handing the file to bash.
           $winPath = "$env:GITHUB_WORKSPACE/.github/cygwin-drive-bash-check.sh"
           (Get-Content -Raw $winPath) -replace "`r`n", "`n" | Set-Content -NoNewline -Path $winPath
 

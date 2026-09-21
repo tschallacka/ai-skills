@@ -5,7 +5,7 @@
 # planning/scripts/lib/<group>/*.sh is the maintained form, one function per
 # file; the five plan-*-lib.sh files are compiled from it and are what ships.
 # That makes them generated artifacts under CODE-CONTRACTS.md contract 7 and
-# MAINTAINER.md section 2.15: regenerated, never hand-edited, never committed,
+# .agents/MAINTAINER.md 1.10: regenerated, never hand-edited, never committed,
 # and a stale one has to fail rather than drift.
 #
 # Also pins the properties that make the split worth having: every function file
@@ -36,7 +36,7 @@ trap 'rm -rf "$work"' EXIT
 libraries='plan-core-lib.sh plan-document-lib.sh plan-table-lib.sh plan-progress-lib.sh plan-crypt-lib.sh'
 
 # ---- the libraries are what the sources compile to, with no committed copy --
-# The libraries are generated and never tracked (MAINTAINER.md section 2.15), so
+# The libraries are generated and never tracked (.agents/MAINTAINER.md 1.10), so
 # this test builds them when missing and then lets --check prove determinism:
 # --check rebuilds prod to a temp path and compares, so two builds agreeing is
 # the freshness contract, not a comparison against a committed file.

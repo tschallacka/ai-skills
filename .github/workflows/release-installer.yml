@@ -15,13 +15,9 @@
 # ONE JOB PER PLATFORM, same reasoning as ci.yml's `native` job: each asset is
 # built by installer/build-installer-release.sh on that platform's own native
 # runner, because a cross build that cannot run is not the same claim as one
-# that was actually executed there. Windows HAS a leg here even though
-# installer/bootstrap.sh (the curl-piped launcher) is POSIX-only and cannot
-# download it yet: that is a statement about the launcher script, not about
-# whether the installer binary itself builds and runs on Windows, which
-# ci.yml's native job already proves on windows-latest. Shipping the asset
-# now means a maintainer (or a future Windows-capable launcher) has it the
-# day it is needed, instead of this workflow needing a second retrofit.
+# that was actually executed there. Windows has a leg too: installer/bootstrap.sh
+# maps x86_64 Git for Windows' bash, MSYS and Cygwin to the
+# x86_64-pc-windows-msvc asset, so this is the asset that launcher downloads.
 #
 # Triggered by publishing a GitHub Release (covers both a fresh tag and
 # republishing an existing draft), and by workflow_dispatch for a maintainer

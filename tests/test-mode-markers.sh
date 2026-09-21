@@ -44,7 +44,7 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/mode-markers.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
 # The compiled libraries and REVIEWER.md are generated and never tracked
-# (MAINTAINER.md section 2.16), so a clean checkout has none and the marker
+# (.agents/MAINTAINER.md 1.10), so a clean checkout has none and the marker
 # scans would read missing files. Build/generate-if-missing; a present-but-wrong
 # file still fails its scan.
 libs_missing=0

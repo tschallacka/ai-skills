@@ -2,14 +2,9 @@ name: windows
 
 # The dedicated Windows leg: a push to the `windows` branch, or a manual run,
 # builds, lints and tests the whole workspace on x86_64-pc-windows-msvc and runs
-# the unsharded shell suite, and nothing else. The workspace is clean there and
-# ci.yml carries the same target (its `native` matrix and the sharded
-# `test-windows` job), so this is the quick loop for one Windows problem, not
-# the gate. See .agents/MAINTAINER.md section 1.16.
-#
-# It runs alone on purpose: ci.yml's full matrix (eight shell shards, macOS,
-# aarch64, cygwin) takes most of an hour and answers nothing about Windows, and
-# a Windows fix needs a verdict in one job's time, not a queue's.
+# the unsharded shell suite, and nothing else. It gates nothing; the same target
+# is also covered by the main workflow. Put content in .github/windows-focus.txt
+# to run one thing only (see the first job).
 
 on:
   push:
@@ -90,8 +85,7 @@ jobs:
       # content, the run builds and does ONLY that: line 1 is passed to cargo
       # (e.g. `test -p chat-server-rs --test end_to_end -- --nocapture`), any
       # further lines are a bash script run afterwards from the repository
-      # root. Empty or absent means the full run below. It turns a 25-minute
-      # workspace build-and-test into a few minutes for the crate at hand.
+      # root. Empty or absent means the full run below.
       - name: Read the focus file
         id: focus
         shell: bash
@@ -173,8 +167,8 @@ jobs:
             /*
             !/benchmark/results/
 
-      # A focused run (see the first job) is about one thing; the 30-minute
-      # suite would only delay its answer.
+      # A focused run (see the first job) is about one thing, so it skips the
+      # shell suite.
       - name: Skip when a focused run is requested
         id: focus
         shell: bash
