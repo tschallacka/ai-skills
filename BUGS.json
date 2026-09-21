@@ -389,7 +389,7 @@
     {
       "id": "B365",
       "title": "An installed planning skill has no working helper: every scripts/*.sh wrapper exits 69 because the installer copies the compiled commands beside the wrappers, where plan_bin_dir never looks",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -404,12 +404,12 @@
         "planning/scripts/plan-crypt-lib.sh",
         "planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "plan_exec_compiled_binary_if_present (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh, via new pecbip_pick) now tries an executable of the command's name beside the wrapper last, after AI_SKILLS_BIN_ROOT, the shared bin and the development tree. Commit 40d51bdb on nextupdate.",
+      "verification": "Linux, 2026-09-21: installing planning into a scratch HOME with an existing shared bin and running the installed verify-skill-load.sh --help gave exit 69 with the old helper and its usage text with the fixed one. planning/tests/test-exec-compiled-binary-preference.sh case (h) fails against the old helper and passes on bash 5 and bash 3.2. Not re-measured on macOS, where it was reported.",
       "found_by": "testing-stories planning, brainstorm and post-implementation-review runs on macOS (another worker), 2026-09-21; mechanism verified in source by aiskills",
       "notes": "All 108 scripts/ references in the installed planning docs use the .sh form, none the extensionless one, so agents only ever hit the failing path (as reported). brainstorm Phase 2 and post-implementation-review Phases 2 and 3 die on role-context.sh with it. The exit-69 hint sends an installed user to ./setup-dev-env.sh, which does not exist outside a checkout. Went unnoticed because every developer machine has a checkout and the tests export AI_SKILLS_BIN_ROOT. The lookup rule that causes it is documented in .agents/MAINTAINER.md 1.9. Reports by the other worker: ~/.config/tsch-ai-skills/tmp/stories/{planning,brainstorm,post-implementation-review}/report.md on its machine.",
       "created_at": "2026-09-21T13:02:25Z",
-      "updated_at": "2026-09-21T13:02:25Z"
+      "updated_at": "2026-09-21T14:21:11Z"
     },
     {
       "id": "B33",
@@ -7437,7 +7437,7 @@
     {
       "id": "B364",
       "title": "chat/SKILL.md says all of a Claude Code session's subagents resolve to one chat session, but the session key now carries the nick",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7448,12 +7448,12 @@
       "surfaces": [
         "chat"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "chat/SKILL.md rung 2 now says the nick is appended to the inferred keys (h-<hash>-<nick>, w-<hash>-<nick>, shared-<nick>), no --nick gives the bare key, --session is used as given, and --session is needed only when two agents share a nick. Commit b9722382 on nextupdate.",
+      "verification": "Text checked against resolve_session_key in src/chat-client-rs/src/session.rs (suffix from safe_key(nick), rungs 2, 3 and 4, explicit ids unsuffixed). Not run with two live nicks under one harness id; the claims are the function's own.",
       "found_by": "McCorrect (documentation audit) and a helper agent, 2026-09-21; confirmed by aiskills reading the source",
       "notes": null,
       "created_at": "2026-09-21T09:37:55Z",
-      "updated_at": "2026-09-21T09:37:55Z"
+      "updated_at": "2026-09-21T14:21:11Z"
     },
     {
       "id": "B25",

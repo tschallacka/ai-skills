@@ -33,9 +33,9 @@
       "refs": [
         "B363"
       ],
-      "note": null,
+      "note": "Spike 2026-09-21 (a delegated agent; Claude Code 2.1.278, interactive tmux TUI, a 40-line python stdio server declaring experimental claude/channel and sending notifications/claude/channel). VERIFIED: an idle session IS woken by a push (twice), which contradicts the original 'does not wake an idle session'; on a busy turn the push showed between tool calls (one sample, model self-report), not held to the next turn; claude -p ignores channels (nonInteractive, no registration); --dangerously-load-development-channels shows a blocking consent dialog every start and its server:NAME must come from a project .mcp.json, not --mcp-config; the client negotiated protocol 2025-11-25 and registered the channel. DOCUMENTED (code.claude.com/docs/en/channels): needs --channels, own channels need the dev flag during the preview, blocked for Team/Enterprise until an admin sets channelsEnabled, not on Bedrock/Vertex/Foundry, blocked events dropped silently, meta keys [A-Za-z0-9_]+. UNVERIFIED: delivery to subagents, chat-mcp's fixed 2025-06-18 initialize, per-session identity and fan-out, whether Claude Code sends a second call while one is pending. Reshape: an optional, interactive-only, additive feature (capability + instructions in initialize, an id-less notification through the existing stdout lock); wait and read stay the baseline. Full report was in the session scratchpad (t150-spike.md, may be gone).",
       "created_at": "2026-09-21T10:45:14Z",
-      "updated_at": "2026-09-21T10:45:14Z"
+      "updated_at": "2026-09-21T14:21:31Z"
     },
     {
       "id": "T149",
@@ -78,97 +78,6 @@
       "note": "Attempted and reverted, deliberately. I built the staleness signal on the archived cycle number and it does not carry the meaning the entry assumed: archive 'Cycle N' names the state BEFORE run N, while a rationale saying 'Cycle N' names the review cycle whose findings just landed. Measured on a fixture — after two update runs the archive holds Cycle 1 and Cycle 2 while the rationale legitimately still reads Cycle 1 — so a warning keyed on the difference fires on the normal path, which is the T67 failure I had just fixed elsewhere. Correcting for the off-by-one then made it silent on the real case. B44 records that the numbering breaks after gaps and is closed as not-a-defect, so the counter is not a sound basis for this and no arithmetic on it will be. What would work is a stamp recording which cycle a rationale describes, written when the rationale is written rather than inferred from prose — that is a review-document format change and belongs with whoever owns the format. Reverted rather than shipping a warning that misfires in both directions.",
       "created_at": "2026-08-27T22:38:42Z",
       "updated_at": "2026-08-31T14:59:45Z"
-    },
-    {
-      "id": "T74",
-      "title": "Re-verify the stale-documentation findings after the documentation reorganisation lands",
-      "status": "blocked",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Six documents made claims that did not match the tree when measured at 11f4cef on 2026-09-01. The reorganisation may fix, move or re-word any of them, so each gets re-checked against the code rather than assumed fixed or assumed still broken. Sub-tasks carry the individual claims. Found while fact-checking for the GitHub wiki; none is blocking.",
-      "blocked_on": "the documentation reorganisation currently in progress",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:13:37Z",
-      "updated_at": "2026-09-01T15:13:37Z"
-    },
-    {
-      "id": "T75",
-      "title": "AGENTS.md states the shellcheck gate is error severity; both gates are warning",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "AGENTS.md says the pre-push gate and CI use shellcheck at error severity. pre-push-check.sh and the ci.yml shellcheck job both run --severity=warning. CONTRIBUTING.md was corrected already and flags its own looser local line; AGENTS.md and the flake shell banner were not.",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
-    },
-    {
-      "id": "T76",
-      "title": "DEVELOPMENT.md and CODE-STYLE.md state a test count of 30; the real count is 123",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "DEVELOPMENT.md says 'all 30 tests' and CODE-STYLE.md section 13 says '30+ PASS'. Measured at 11f4cef: 123 test-*.sh files across the four directories run-tests.sh discovers (planning/tests 106, benchmark/planning/tests 9, tests 6, chat/tests 2), reported as 122 gate cases plus one cargo case. DEVELOPMENT.md and AGENTS.md also describe run-tests.sh as covering two directories; it covers four.",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
-    },
-    {
-      "id": "T77",
-      "title": "RELEASE.md miscounts the compiled libraries and the test scripts",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "RELEASE.md step 4 says 'the four plan-*-lib.sh'; there are five since crypt was split out of core when core hit 506 lines against the 500-line cap. RELEASE.md also says 'the 70 test scripts'.",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
-    },
-    {
-      "id": "T78",
-      "title": "CODE-CONTRACTS.md contract 7 still describes committed generated artifacts",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "Contract 7's table lists PORTABILITY.md and REVIEWER.md as freshness-checked by diffing against a committed copy, and instructs regenerating PORTABILITY.md last because 'its staleness signal is commit ordering'. Neither file is committed since the generated-files migration, the commit-ordering report_age function was deleted, and the five compiled libraries are absent from the table entirely.",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
-    },
-    {
-      "id": "T79",
-      "title": "planning/MAINTAINER.md cites a Rust pin and two chat symbols that no longer exist",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "Section 2.15 says the flake pins Rust 1.86.0; the flake takes the newest stable the locked nixpkgs offers and all seven rust-toolchain.toml files under src/ pin 1.98. Sections 2.8a and 2.15 refer to chat-server.sh's rust_bin() and to the chat server dropping to an interpreter tier; the chat skill ships no scripts at all and rust_bin appears nowhere tracked.",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
-    },
-    {
-      "id": "T80",
-      "title": "flake.nix's dev-shell banner probes the removed cargo186 and advertises the old lint line",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "The shellHook echoes a cargo186 version, but the floor toolchain was deliberately removed, so every nix develop prints 'cargo186: command not found'. The same banner's last line advertises the shellcheck invocation at --severity=error over git ls-files alone, which is neither the severity CI gates at nor the file set it uses (the generated libraries must be named on the command line for source= to resolve).",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
     },
     {
       "id": "T1e",
@@ -784,6 +693,19 @@
       "updated_at": "2026-09-12T17:35:26Z"
     },
     {
+      "id": "T74",
+      "title": "Re-verify the stale-documentation findings after the documentation reorganisation lands",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Six documents made claims that did not match the tree when measured at 11f4cef on 2026-09-01. The reorganisation may fix, move or re-word any of them, so each gets re-checked against the code rather than assumed fixed or assumed still broken. Sub-tasks carry the individual claims. Found while fact-checking for the GitHub wiki; none is blocking.",
+      "blocked_on": "the documentation reorganisation currently in progress",
+      "refs": [],
+      "note": "The documentation reorganisation landed (.agents/MAINTAINER.md is the entry point). T75-T80 each re-checked against the tree on 2026-09-21 and closed.",
+      "created_at": "2026-09-01T15:13:37Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
       "id": "T81e",
       "title": "Split the tests per skill and retire planning/scripts/register-resolve.sh in favour of the two shipped resolvers, so there is one way to do the job",
       "status": "done",
@@ -1226,6 +1148,84 @@
       "note": "Both goals of .plans/postmortem-template shipped this session (goal 1: generate-postmortem crate implemented and wired; goal 2: installer manifest/package sync fixed as B359). Plan progress.md shows 100% complete.",
       "created_at": "2026-08-28T15:33:14Z",
       "updated_at": "2026-09-18T01:56:22Z"
+    },
+    {
+      "id": "T75",
+      "title": "AGENTS.md states the shellcheck gate is error severity; both gates are warning",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "AGENTS.md says the pre-push gate and CI use shellcheck at error severity. pre-push-check.sh and the ci.yml shellcheck job both run --severity=warning. CONTRIBUTING.md was corrected already and flags its own looser local line; AGENTS.md and the flake shell banner were not.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "Checked against nextupdate 2026-09-21: AGENTS.md points at pre-push-check.sh --help and CONTRIBUTING.md states the warning severity and flags its own looser local line; the flake banner line went in b9722382.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
+      "id": "T76",
+      "title": "DEVELOPMENT.md and CODE-STYLE.md state a test count of 30; the real count is 123",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "DEVELOPMENT.md says 'all 30 tests' and CODE-STYLE.md section 13 says '30+ PASS'. Measured at 11f4cef: 123 test-*.sh files across the four directories run-tests.sh discovers (planning/tests 106, benchmark/planning/tests 9, tests 6, chat/tests 2), reported as 122 gate cases plus one cargo case. DEVELOPMENT.md and AGENTS.md also describe run-tests.sh as covering two directories; it covers four.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "Checked against nextupdate 2026-09-21: DEVELOPMENT.md and AGENTS.md no longer state a test count or two directories; CODE-STYLE.md 13 dropped the '30+ PASS' pin in b9722382.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
+      "id": "T77",
+      "title": "RELEASE.md miscounts the compiled libraries and the test scripts",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "RELEASE.md step 4 says 'the four plan-*-lib.sh'; there are five since crypt was split out of core when core hit 506 lines against the 500-line cap. RELEASE.md also says 'the 70 test scripts'.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "Checked against nextupdate 2026-09-21: RELEASE.md no longer says 'the four plan-*-lib.sh' or '70 test scripts'.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
+      "id": "T78",
+      "title": "CODE-CONTRACTS.md contract 7 still describes committed generated artifacts",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "Contract 7's table lists PORTABILITY.md and REVIEWER.md as freshness-checked by diffing against a committed copy, and instructs regenerating PORTABILITY.md last because 'its staleness signal is commit ordering'. Neither file is committed since the generated-files migration, the commit-ordering report_age function was deleted, and the five compiled libraries are absent from the table entirely.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "CODE-CONTRACTS.md contract 7 rewritten in b9722382: it no longer lists PORTABILITY.md/REVIEWER.md as committed or cites commit ordering, adds the five plan-*-lib.sh, and points at .agents/MAINTAINER.md 1.10.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
+      "id": "T79",
+      "title": "planning/MAINTAINER.md cites a Rust pin and two chat symbols that no longer exist",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "Section 2.15 says the flake pins Rust 1.86.0; the flake takes the newest stable the locked nixpkgs offers and all seven rust-toolchain.toml files under src/ pin 1.98. Sections 2.8a and 2.15 refer to chat-server.sh's rust_bin() and to the chat server dropping to an interpreter tier; the chat skill ships no scripts at all and rust_bin appears nowhere tracked.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "Checked against nextupdate 2026-09-21: neither planning/MAINTAINER.md nor .agents/MAINTAINER.md carries the 1.86 pin, rust_bin or the interpreter-tier claim any more.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
+      "id": "T80",
+      "title": "flake.nix's dev-shell banner probes the removed cargo186 and advertises the old lint line",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "The shellHook echoes a cargo186 version, but the floor toolchain was deliberately removed, so every nix develop prints 'cargo186: command not found'. The same banner's last line advertises the shellcheck invocation at --severity=error over git ls-files alone, which is neither the severity CI gates at nor the file set it uses (the generated libraries must be named on the command line for source= to resolve).",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "flake.nix: cargo186 was already gone; the shellcheck --severity=error banner line was replaced by ./pre-push-check.sh in b9722382.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
     },
     {
       "id": "T84",
