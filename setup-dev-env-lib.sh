@@ -123,6 +123,7 @@ add-work-unit	add-work-unit
 chat-client-rs	chat-client-rs
 chat-mcp	chat-mcp
 chat-server-rs	chat-server-rs
+chat-spool-watch	chat-spool-watch
 configure-ui-story-cache	configure-ui-story-cache
 create-adversarial-review	create-adversarial-review
 create-plan	create-plan

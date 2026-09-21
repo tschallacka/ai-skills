@@ -334,16 +334,20 @@ case "$mode" in
                 || { printf '%s: cargo build chat-client-rs failed\n' "${0##*/}" >&2; exit 66; }
             ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-mcp ) \
                 || { printf '%s: cargo build chat-mcp failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-spool-watch ) \
+                || { printf '%s: cargo build chat-spool-watch failed\n' "${0##*/}" >&2; exit 66; }
             mkdir -p "$repo_root/chat/bin/$chat_dir"
             chat_release="$repo_root/target/$chat_dir/release"
             cp "$chat_release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
             cp "$chat_release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
             cp "$chat_release/chat-mcp" "$repo_root/chat/bin/$chat_dir/chat-mcp"
+            cp "$chat_release/chat-spool-watch" "$repo_root/chat/bin/$chat_dir/chat-spool-watch"
         else
             # Prebuilt binaries must already be in place (CI build step).
             ls "$repo_root/chat/bin/"*/chat-server-rs >/dev/null 2>&1 \
                 && ls "$repo_root/chat/bin/"*/chat-client-rs >/dev/null 2>&1 \
-                && ls "$repo_root/chat/bin/"*/chat-mcp >/dev/null 2>&1 || {
+                && ls "$repo_root/chat/bin/"*/chat-mcp >/dev/null 2>&1 \
+                && ls "$repo_root/chat/bin/"*/chat-spool-watch >/dev/null 2>&1 || {
                 printf '%s: cargo not found and chat/bin binaries absent\n' "${0##*/}" >&2
                 exit 66
             }

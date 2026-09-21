@@ -609,15 +609,15 @@ CHATEOF
             # down with it.
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    skill_artifact_files chat bin/x86_64-unknown-linux-musl/chat-server-rs bin/x86_64-unknown-linux-musl/chat-client-rs bin/x86_64-unknown-linux-musl/chat-mcp ;;
+                    skill_artifact_files chat bin/x86_64-unknown-linux-musl/chat-server-rs bin/x86_64-unknown-linux-musl/chat-client-rs bin/x86_64-unknown-linux-musl/chat-mcp bin/x86_64-unknown-linux-musl/chat-spool-watch ;;
                 Linux:aarch64|Linux:arm64)
-                    skill_artifact_files chat bin/aarch64-unknown-linux-musl/chat-server-rs bin/aarch64-unknown-linux-musl/chat-client-rs bin/aarch64-unknown-linux-musl/chat-mcp ;;
+                    skill_artifact_files chat bin/aarch64-unknown-linux-musl/chat-server-rs bin/aarch64-unknown-linux-musl/chat-client-rs bin/aarch64-unknown-linux-musl/chat-mcp bin/aarch64-unknown-linux-musl/chat-spool-watch ;;
                 Darwin:x86_64)
-                    skill_artifact_files chat bin/x86_64-apple-darwin/chat-server-rs bin/x86_64-apple-darwin/chat-client-rs bin/x86_64-apple-darwin/chat-mcp ;;
+                    skill_artifact_files chat bin/x86_64-apple-darwin/chat-server-rs bin/x86_64-apple-darwin/chat-client-rs bin/x86_64-apple-darwin/chat-mcp bin/x86_64-apple-darwin/chat-spool-watch ;;
                 Darwin:arm64)
-                    skill_artifact_files chat bin/aarch64-apple-darwin/chat-server-rs bin/aarch64-apple-darwin/chat-client-rs bin/aarch64-apple-darwin/chat-mcp ;;
+                    skill_artifact_files chat bin/aarch64-apple-darwin/chat-server-rs bin/aarch64-apple-darwin/chat-client-rs bin/aarch64-apple-darwin/chat-mcp bin/aarch64-apple-darwin/chat-spool-watch ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    skill_artifact_files chat bin/x86_64-pc-windows-msvc/chat-server-rs.exe bin/x86_64-pc-windows-msvc/chat-client-rs.exe bin/x86_64-pc-windows-msvc/chat-mcp.exe ;;
+                    skill_artifact_files chat bin/x86_64-pc-windows-msvc/chat-server-rs.exe bin/x86_64-pc-windows-msvc/chat-client-rs.exe bin/x86_64-pc-windows-msvc/chat-mcp.exe bin/x86_64-pc-windows-msvc/chat-spool-watch.exe ;;
                 *)
                     printf 'skill_files: no chat artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;

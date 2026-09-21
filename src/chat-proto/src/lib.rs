@@ -3,5 +3,6 @@
 //! Shared IRC-grammar message model for the chat server and client.
 
 pub mod message;
+pub mod spool;
 
 pub use message::{fetch_end, numeric, numerics, Message, ParseError, Tag, FETCH_END};

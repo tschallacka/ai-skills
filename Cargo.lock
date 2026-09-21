@@ -284,6 +284,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "chat-spool-watch"
+version = "0.1.0"
+dependencies = [
+ "chat-proto",
+]
+
+[[package]]
 name = "ci-failures"
 version = "0.1.0"
 dependencies = [

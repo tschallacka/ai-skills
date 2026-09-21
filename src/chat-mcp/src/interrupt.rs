@@ -786,21 +786,10 @@ pub fn spool_dir(state_dir: &Path, session_key: &str) -> PathBuf {
         .ok()
         .filter(|id| !id.is_empty())
         .unwrap_or_else(|| session_key.to_string());
-    state_dir.join("interrupts").join(safe_name(&id))
+    chat_proto::spool::dir(state_dir, &id)
 }
 
-fn safe_name(text: &str) -> String {
-    text.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .take(96)
-        .collect()
-}
+use chat_proto::spool::safe_name;
 
 /// One spool line: when, then what the notice says, on a single line.
 pub fn spool_line(notice: &Notice, at_epoch_seconds: u64) -> String {
@@ -1383,13 +1372,6 @@ mod tests {
         assert_eq!(text.lines().count(), 2, "{text}");
         assert!(text.lines().all(|l| l.ends_with("#a <x> hello")), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_spool_name_cannot_leave_its_directory() {
-        assert_eq!(safe_name("../../etc"), "______etc");
-        assert_eq!(safe_name("h-4474b93c059ebd63"), "h-4474b93c059ebd63");
-        assert_eq!(safe_name(&"x".repeat(500)).len(), 96);
     }
 
     #[test]
