@@ -445,6 +445,21 @@ the CI map.
      run: a guard refusal prints `registers-guard: REFUSED: <reason>`, and a branch
      that is not a fast-forward of `master` is refused and needs a human to
      rebase `registers` onto `master`.
+  - **A push from `registers` can die in the hook before any gate runs**, and
+    that has stranded a worker. The hook re-enters `nix develop` (1.17), and
+    `registers` carries `master`'s `flake.nix`. As of 2026-09-21 `master` lacks
+    the `-fcommon` fix (`BUGS.json` B333, commit `ce08f36f`, only on `nextupdate`
+    and `windows`), so on aarch64-darwin the dev shell cannot be built and the
+    push fails there. It is not a problem with the entry. Run `bugs check` (or
+    `todo check`) yourself first; the hook's own text allows `git push
+    --no-verify` "when you truly must", and `registers.yml`'s guard still gates
+    the landing server-side. Or file from a machine where the dev shell builds.
+    Do not "fix" it by putting other files on `registers`: the guard refuses
+    anything but `BUGS.json` and `TODO.json`.
+  - A worker's **uncommitted `BUGS.json` edit on another machine is not filed**
+    until it is pushed. If someone else filed in the meantime the ids move (the
+    CLI mints the next free one), so discard the local edit, `git pull --ff-only`,
+    and re-file through the CLI, as was done for B365.
 - **Always mint the id through the CLI (`bugs add`, `todo add`), never by
   hand.** The CLI resolves the next free id against the register's own
   current state; a hand-assigned id can silently collide with one already
