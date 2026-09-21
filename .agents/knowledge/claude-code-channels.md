@@ -103,6 +103,35 @@ The hook path needs no flag, but it reaches only an agent that is using tools;
 the push reaches an idle one and needs the flag. `chat-mcp` offers both and lets
 the agent choose (`interrupt_settings`, `delivery`).
 
+## Other things that reach a running session, and what they do not do
+
+Measured 2026-09-21 on 2.1.278 in a real interactive session, one run each.
+
+- **Editing a watched skill file** (`~/.claude/skills`, the commands directory or
+  the project's `.claude/skills`) does **not** wake an idle session: nothing on
+  screen and nothing in the transcript for 60 s. The change is noticed while idle
+  and held. It reaches the model at the **next model request**, as an incremental
+  `skill_listing` attachment naming only the changed skill, including inside a
+  running turn (after a tool result, before the next tool call). It never
+  interrupts a tool that is still running. The terminal shows a dim
+  "1 skill available" line under the next prompt, and nothing when it arrives
+  mid-turn.
+- Under the default listing budget, user and project skills are listed by **name
+  only**, so a changed *description* is not what reaches the model; the test
+  needed `SLASH_COMMAND_TOOL_CHAR_BUDGET` raised to see the text. Whether a change
+  to a name-only skill still sends an attachment was not measured. So a skill file
+  is a poor carrier for a message: the text is dropped, and only a name would get
+  through. A `ConfigChange` hook with source `skills` can also block the reload.
+- **What an MCP server can do to the client** (read from the binary, not run): the
+  client advertises `roots` and `elicitation` only, and no `sampling`, so a server
+  cannot ask the model to run a prompt. It handles `tools/list_changed`,
+  `resources/list_changed`, `prompts/list_changed`, `progress`, `message`,
+  `resources/updated`, `elicitation/complete` and `claude/channel`. Of these only a
+  channel push puts text in front of the model on the server's initiative.
+
+So nothing here except a channel push wakes an idle session; a hook and a skill
+change both wait for the next model request or tool call.
+
 ## What does not work
 
 - `claude -p` with the dev flag: the server connected and the notification was
