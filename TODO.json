@@ -23,21 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T150",
-      "title": "chat-mcp: deliver arriving messages to a busy agent through Claude Code channels",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "B363's adapter defects (a wait blocking every other request) are fixed, but nothing yet pushes a message into an agent that is busy or between turns; it is found only by its next read or wait. Claude Code's documentation (Channels, research preview) describes an MCP server declaring capabilities.experimental['claude/channel'] and sending notifications/claude/channel with params {content, meta}; the model receives them wrapped in a <channel source=...> tag. Per that documentation: a session must be started with --channels server:<name> (or plugin:<name>), organization policy channelsEnabled applies to Team and Enterprise, and events queue and arrive on the NEXT turn: they do not wake an idle session. It also says MCP protocol negotiation v2 breaks channel delivery, and that subagent delivery is not documented. To do: confirm all of this on the installed Claude Code (this was researched by an agent from the docs and not run), prototype a claude/channel notification from chat-mcp for mentions, and decide whether the opt-in flag is acceptable for the agents this bus serves. Also worth measuring after B363's fix: whether Claude Code sends a second call to an MCP server while one is pending (the earlier measurement, before the fix, could not tell the adapter from the client).",
-      "blocked_on": null,
-      "refs": [
-        "B363"
-      ],
-      "note": "Spike 2026-09-21 (a delegated agent; Claude Code 2.1.278, interactive tmux TUI, a 40-line python stdio server declaring experimental claude/channel and sending notifications/claude/channel). VERIFIED: an idle session IS woken by a push (twice), which contradicts the original 'does not wake an idle session'; on a busy turn the push showed between tool calls (one sample, model self-report), not held to the next turn; claude -p ignores channels (nonInteractive, no registration); --dangerously-load-development-channels shows a blocking consent dialog every start and its server:NAME must come from a project .mcp.json, not --mcp-config; the client negotiated protocol 2025-11-25 and registered the channel. DOCUMENTED (code.claude.com/docs/en/channels): needs --channels, own channels need the dev flag during the preview, blocked for Team/Enterprise until an admin sets channelsEnabled, not on Bedrock/Vertex/Foundry, blocked events dropped silently, meta keys [A-Za-z0-9_]+. UNVERIFIED: delivery to subagents, chat-mcp's fixed 2025-06-18 initialize, per-session identity and fan-out, whether Claude Code sends a second call while one is pending. Reshape: an optional, interactive-only, additive feature (capability + instructions in initialize, an id-less notification through the existing stdout lock); wait and read stay the baseline. Full report was in the session scratchpad (t150-spike.md, may be gone).",
-      "created_at": "2026-09-21T10:45:14Z",
-      "updated_at": "2026-09-21T14:21:31Z"
-    },
-    {
       "id": "T149",
       "title": "Remove the retired required check 'install.sh matches installer/build.sh output' from master's branch protection",
       "status": "open",
@@ -1133,6 +1118,21 @@
       "note": "Closed: the persona-profile-migration plan's own 4 goals are all committed (goal 1: e20183d6/30bd3446 -- benny/chris/christian/christoph; goal 2: 34313a7b -- dana/frank/maintainer/installer/oracle/eve, alex deferred; goal 3: 7a4269e5 -- installer wiring for all 10; goal 4: f9059625, this session -- the actual cutover). Goal 4's own decomposition found the plan's original risk analysis (role-context.sh needing new capability built) was stale: role-context.sh was already a compiled Rust binary since 2026-09-02, before the plan existed. Repurposed it from a live dispatch-time dependency into a build-time content generator (new src/generate-profile-content/ crate, mirroring build-plan-libs.sh's own --check/--write contract) instead of building anything from scratch. part-3.md's reviewer-dispatch protocol now spawns the installed chris subagent by name instead of a manual ROLE_ID=chris + role-context.sh prompt instruction. The two persona drift tests were updated to match (test-persona-drift.sh now checks build-vs-shipped profile freshness; test-voice-artifact-drift.sh needed no change). alex is permanently excluded from profile extraction (documented in ROLES.md, not re-deferred) -- its own live payload is the entire planning skill, not a role-specific persona. Two real bugs found and fixed along the way: B361 (role-context's REVIEWER.md staleness check hashed the wrong file) and B362 (major -- role-context's own skill_dir() used a fixed-depth path guess instead of reading PLANNING_SKILL_ROOT like every other wired binary, so the documented ROLE_ID=X + role-context.sh dispatch pattern silently returned near-empty scoped context for every persona; this was the actual mechanism behind an 'environment quirk' independent reviewers hit and worked around ad hoc earlier this same session without knowing the root cause).",
       "created_at": "2026-09-14T19:04:10Z",
       "updated_at": "2026-09-18T06:32:40Z"
+    },
+    {
+      "id": "T150",
+      "title": "chat-mcp: deliver arriving messages to a busy agent through Claude Code channels",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "B363's adapter defects (a wait blocking every other request) are fixed, but nothing yet pushes a message into an agent that is busy or between turns; it is found only by its next read or wait. Claude Code's documentation (Channels, research preview) describes an MCP server declaring capabilities.experimental['claude/channel'] and sending notifications/claude/channel with params {content, meta}; the model receives them wrapped in a <channel source=...> tag. Per that documentation: a session must be started with --channels server:<name> (or plugin:<name>), organization policy channelsEnabled applies to Team and Enterprise, and events queue and arrive on the NEXT turn: they do not wake an idle session. It also says MCP protocol negotiation v2 breaks channel delivery, and that subagent delivery is not documented. To do: confirm all of this on the installed Claude Code (this was researched by an agent from the docs and not run), prototype a claude/channel notification from chat-mcp for mentions, and decide whether the opt-in flag is acceptable for the agents this bus serves. Also worth measuring after B363's fix: whether Claude Code sends a second call to an MCP server while one is pending (the earlier measurement, before the fix, could not tell the adapter from the client).",
+      "blocked_on": null,
+      "refs": [
+        "B363"
+      ],
+      "note": "Built 2026-09-21 (nextupdate, deba619a and after; docs in chat/docs/interrupts.md, measurements in .agents/knowledge/claude-code-channels.md). chat-mcp declares experimental claude/channel plus instructions, and has interrupt_add/update/remove/list/settings and timer_set/update/cancel: optional channel, people and string filters (with not_ versions, any/all, mentions_me), cooldown, once, expiry, a master switch, snooze and a rate limit, one-shot and repeating timers, all modifiable while running. State is per identity and survives a reconnect, not a process restart. Checked against a real interactive Claude Code 2.1.278 (haiku): idle wake, mid-tool delivery, filters, update, timers, snooze all as documented; 52 unit and 19 end-to-end tests. Not covered: subagents, claude -p (does not work), org policy, Team/Enterprise.",
+      "created_at": "2026-09-21T10:45:14Z",
+      "updated_at": "2026-09-21T20:49:16Z"
     },
     {
       "id": "T69",
