@@ -92,6 +92,14 @@ this file holds what applies to the repository as a whole.
   target actually runs is never exercised locally.
 - `rjq` is invoked by name, so the root `bin/<triple>` must be on PATH for the
   helpers to find it (or the tree falls back to whatever `rjq` the machine has).
+- **An installed copy shadows the tree you just built.** `plan_bin_dir` takes
+  the first of: `$AI_SKILLS_BIN_ROOT` (when it names a directory), then
+  `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/bin` (when that exists), then the
+  outermost `bin/<triple>` found walking up from the script. So on a machine
+  that has the skills installed, a local test run or gate run exercises the
+  *installed* binaries, not yours. Export `AI_SKILLS_BIN_ROOT=$PWD/bin/<triple>`
+  when running `./run-tests.sh` or `./pre-push-check.sh`; every CI shard does
+  the same after `setup-dev-env.sh`.
 
 ### 1.10 Generated files are CI's job, not the repo's
 - Every binary and compiled output is built by a CI runner and delivered as a
@@ -161,6 +169,19 @@ this file holds what applies to the repository as a whole.
 - When a suite's result is surprising, read its raw output rather than its
   summary. A skipped test still prints `PASS` (`BUGS.json` B268), so a green
   summary does not by itself prove every test ran.
+- **The pre-push gate shows why a crate failed.** `./pre-push-check.sh` runs
+  `cargo fmt --check` and `cargo test` on each crate the change touches, and
+  when one fails it prints, indented under the `FAIL` line, what the run said:
+  for `cargo test`, up to 80 lines from its `failures:` section (each failed
+  test's captured output), or the last 80 lines when there is none (a build
+  error); for `cargo fmt --check`, the last 40 lines of its diff. Clippy
+  prints its first 40 lines. The gate used to keep
+  only the exit status, which left a failure that depends on the machine as a
+  bare `FAIL cargo test: <crate>` that vanished on re-run. Read that output
+  before re-running; a push that fails and then passes unchanged is a finding
+  to chase (see 1.15), not luck. The gate's base is `origin/master`, so on a
+  long-lived branch almost every crate counts as touched and a run takes
+  several minutes.
 
 ### 1.13 Compiled-binary wiring must survive a fresh, unbootstrapped checkout
 - Wiring a script onto `plan_exec_compiled_binary_if_present` means sourcing
@@ -192,6 +213,74 @@ this file holds what applies to the repository as a whole.
   hand-numbered bugs (meant to be B336-B338) collided with three real,
   differently-titled bugs already on `registers` at those exact ids. The
   branch-boundary check catches the write; it does not catch the collision.
+
+### 1.15 A test never shares a machine-wide resource by literal
+- A TCP or UDP port, a well-known path or a fixed name is shared with every
+  *other* copy of the same test running on the machine: the pre-push gate
+  beside a suite run, two worktrees, another agent. Ask the OS for a free one
+  and pass it down (`free_udp_port()` in
+  `src/chat-server-rs/tests/support/mod.rs`, `free_port()` in
+  `src/chat-mcp/tests/mcp_flow.rs`); never write the number in the test.
+- Measured 2026-09-21: `chat-client-rs`'s resolution suite passes run alone
+  and, run twice at once, fails the same two tests every time. The cause was
+  the literal beacon ports 47995-47997. It had surfaced as a bare
+  `FAIL cargo test: chat-client-rs` at a push that passed unchanged on the
+  retry. A "flaky" test that only fails while something else is running is a
+  collision, so look for the shared literal before calling it flaky or adding
+  a retry.
+- `./run-tests.sh` takes a machine-wide lock for this reason
+  (`AI_SKILLS_ALLOW_CONCURRENT=1` bypasses it and accepts the collisions).
+  The gate's per-crate `cargo test` does not, so do not run the suite and the
+  gate at the same time.
+
+### 1.16 Windows is proved by CI legs, and it has its own conventions
+- **A Linux run says nothing about Windows.** The target is
+  `x86_64-pc-windows-msvc`, with the bash skills run under Git for Windows'
+  bash. The evidence is these CI legs:
+  - `native`'s `x86_64-pc-windows-msvc` leg builds the workspace and runs
+    `cargo test --workspace --all-targets --no-fail-fast`;
+  - `test-windows` in `ci.yml` runs the shell suite in 4 shards, taking the
+    scope job's selective test list like the Linux and macOS legs, and
+    `test-suite-ok` ("Shell test suite (all shards) passes") requires it.
+    Unsharded the suite took about 30 minutes there, mostly process spawns;
+  - the two cygwin legs build the `x86_64-pc-cygwin` target and drive a real
+    Cygwin bash and a real MSYS2 bash (the MSYS2 one links against MSYS2).
+- **A quick verdict on one Windows problem:** push to the `windows` branch (or
+  run `windows.yml` by hand). It runs alone (fmt, clippy, the workspace tests
+  and the unsharded shell suite) instead of `ci.yml`'s matrix, which takes most
+  of an hour. Put content in `.github/windows-focus.txt` to run only one thing:
+  line 1 is passed to cargo, any further lines are a bash script run from the
+  repository root; empty or absent means the full run. While the file has
+  content both `windows.yml` jobs skip everything else, so delete it when the
+  focused question is answered (`ci.yml` never reads it).
+- **Conventions, each of which was a real failure** (symptoms and causes are in
+  `.agents/knowledge/windows-under-git-bash.md`):
+  - Git for Windows' `bash` and coreutils go first on PATH
+    (`C:\Program Files\Git\bin`, `...\usr\bin`); System32's `bash.exe` is the
+    WSL launcher.
+  - Text is LF: `.gitattributes` pins it, and CI sets `core.autocrlf false`
+    before checkout. `benchmark/results/` is left out of the checkout (paths
+    longer than Windows allows).
+  - Binaries carry `.exe`: use `planning_core::exe_name(name)` or
+    `std::env::consts::EXE_SUFFIX`, never a bare `join(name)`. A test that
+    needs a fake external command installs `tests/rust-support/script_stub.rs`'s
+    shim (a compiled `.exe` that runs `bash <sibling script>`; a shebang script
+    is not executable there). Its shell twin is
+    `planning/tests/lib-script-stub.sh`, declared in `skill_files()`.
+  - A path that crosses from bash to a native program, or into JSON, uses
+    forward slashes (`C:/...`): `run-tests` hands scripts
+    `PLANNING_AGENT_TMPDIR` that way, and shell tests use `t_is_windows`,
+    `t_native_path`, `t_slashes` and `t_enable_symlinks` from
+    `planning/tests/lib-test.sh` rather than their own `uname` checks.
+  - Sockets: `planning-server`'s `transport.rs` is a Unix socket where there is
+    one and loopback TCP with a nonce file where there is not. A socket read
+    timeout is `TimedOut` on Windows, not `WouldBlock`
+    (`chat-client-rs`'s `net::is_timeout` covers both), and a killed peer is
+    `ConnectionReset`. End a connection on those lost-peer kinds only, never on
+    every read error: that broader rule dropped live connections on macOS.
+  - No mode bits on NTFS, no `ps -o`, no SIGHUP: gate the assertion or use the
+    portable call (`Child::try_wait`; `verify-both-shells` installs a console
+    control handler where unix installs signal handlers).
 
 ## 2. Change checklist (minimum, per change)
 

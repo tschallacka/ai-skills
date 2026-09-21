@@ -1,9 +1,11 @@
 name: windows
 
-# The dedicated Windows leg. Lives on the long-running `windows` branch until
-# the whole workspace builds, lints and tests clean on x86_64-pc-windows-msvc,
-# then merges back into nextupdate, where ci.yml's `native` matrix carries the
-# same Windows target from then on.
+# The dedicated Windows leg: a push to the `windows` branch, or a manual run,
+# builds, lints and tests the whole workspace on x86_64-pc-windows-msvc and runs
+# the unsharded shell suite, and nothing else. The workspace is clean there and
+# ci.yml carries the same target (its `native` matrix and the sharded
+# `test-windows` job), so this is the quick loop for one Windows problem, not
+# the gate. See .agents/MAINTAINER.md section 1.16.
 #
 # It runs alone on purpose: ci.yml's full matrix (eight shell shards, macOS,
 # aarch64, cygwin) takes most of an hour and answers nothing about Windows, and
