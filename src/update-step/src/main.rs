@@ -258,16 +258,24 @@ fn atomicity_check(
 /// regardless of the exact underlying mechanism, and costs nothing on the
 /// ordinary path where the file is simply there.
 fn read_progress_file(path: &Path) -> std::io::Result<String> {
-    const ATTEMPTS: u32 = 5;
-    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+    read_with_retry(path, 5, std::time::Duration::from_millis(20))
+}
+
+/// The retry loop behind `read_progress_file`, with its budget as arguments so a
+/// test can give a slow machine room without changing what production waits.
+fn read_with_retry(
+    path: &Path,
+    attempts: u32,
+    retry_delay: std::time::Duration,
+) -> std::io::Result<String> {
     let mut last_error = None;
-    for attempt in 0..ATTEMPTS {
+    for attempt in 0..attempts.max(1) {
         match fs::read_to_string(path) {
             Ok(content) => return Ok(content),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 last_error = Some(error);
-                if attempt + 1 < ATTEMPTS {
-                    std::thread::sleep(RETRY_DELAY);
+                if attempt + 1 < attempts {
+                    std::thread::sleep(retry_delay);
                 }
             }
             Err(error) => return Err(error),
@@ -360,7 +368,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{all_declared_targets, read_progress_file};
+    use super::{all_declared_targets, read_progress_file, read_with_retry};
 
     #[test]
     fn read_progress_file_succeeds_on_a_present_file() {
@@ -415,7 +423,14 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(30));
             std::fs::write(&write_path, "late content").unwrap();
         });
-        assert_eq!(read_progress_file(&path).unwrap(), "late content");
+        // Production waits about 80 ms; a loaded CI runner can start the writer
+        // thread later than that, which failed this test on x86_64 macOS
+        // (run 35660433933). The behaviour under test is "retries until the file
+        // appears", so the test gives the retry loop two seconds to see it.
+        assert_eq!(
+            read_with_retry(&path, 200, std::time::Duration::from_millis(10)).unwrap(),
+            "late content"
+        );
         handle.join().unwrap();
         std::fs::remove_dir_all(&dir).ok();
     }
