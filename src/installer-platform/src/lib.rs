@@ -1,9 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Resolve the running host to one of the five target triples this repository
-//! ships binaries for. Mirrors `normalize_platform()` in `install.sh` (B94's
-//! Windows_NT/MINGW*/MSYS*/CYGWIN* handling included) so the two stay in
-//! agreement while both exist.
+//! Resolve the running host to one of the five target triples this
+//! repository ships binaries for (B94's Windows_NT/MINGW*/MSYS*/CYGWIN*
+//! handling included).
 
 use std::fmt;
 
@@ -66,9 +65,8 @@ impl fmt::Display for UnsupportedHost {
 impl std::error::Error for UnsupportedHost {}
 
 /// Resolve `(uname -s, uname -m)` to a shipped target triple. Takes the two
-/// strings rather than calling `uname` itself so the match logic is testable
-/// without a subprocess, the same reason `install.sh` accepts
-/// `PLAN_OVERVIEW_TEST_OS`/`_ARCH` overrides.
+/// strings rather than calling `uname` itself so the match logic is
+/// testable without a subprocess.
 pub fn resolve(os: &str, arch: &str) -> Result<Target, UnsupportedHost> {
     let arch_is_x86_64 = matches!(arch, "x86_64" | "amd64" | "AMD64");
     let arch_is_aarch64 = matches!(arch, "aarch64" | "arm64");
@@ -85,8 +83,8 @@ pub fn resolve(os: &str, arch: &str) -> Result<Target, UnsupportedHost> {
         _ if os == "Darwin" && arch_is_aarch64 => Ok(Target::Aarch64AppleDarwin),
         // B94: Git Bash reports MINGW64_NT-..., MSYS2 reports MSYS_NT-...,
         // Cygwin reports CYGWIN_NT-...; only cmd/PowerShell report the bare
-        // Windows_NT. Matched by prefix for the same reason install.sh's glob
-        // case does: this must refuse no host those report.
+        // Windows_NT. Matched by prefix so this refuses no host those
+        // report.
         _ if windows_like && arch_is_x86_64 => Ok(Target::X86_64PcWindowsMsvc),
         _ => Err(UnsupportedHost {
             os: os.to_string(),

@@ -1,10 +1,9 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! The full-screen skill picker's event loop -- the seam installer/src/
-//! 37-ui-input.sh calls iui_select_skills(). Ties layout, model, render,
+//! The full-screen skill picker's event loop. Ties layout, model, render,
 //! input, terminal and the mascot together; see each submodule's own doc
-//! comment for what it ports and what it deliberately leaves out (no
-//! mouse, no "right-top" mascot placement).
+//! comment for what it deliberately leaves out (no mouse, no "right-top"
+//! mascot placement).
 
 pub mod input;
 pub mod layout;
@@ -20,11 +19,11 @@ use model::{Focus, PickerState, SkillEntry};
 use std::path::Path;
 
 /// `None` when fd 0 is not a tty (the caller's cue to fall back to a plain
-/// listing, same as install.sh's iui_run returning 69) or the user quit
-/// (q/Esc/Ctrl-C/EOF); `Some(names_and_modes)` in original skill order once
-/// `i` confirms, the mode being whatever `m` last cycled it to (or the
-/// run's already-resolved default, if `m` was never pressed for that skill).
-/// `source_root` is only used by `r` (reverify).
+/// listing) or the user quit (q/Esc/Ctrl-C/EOF); `Some(names_and_modes)` in
+/// original skill order once `i` confirms, the mode being whatever `m`
+/// last cycled it to (or the run's already-resolved default, if `m` was
+/// never pressed for that skill). `source_root` is only used by `r`
+/// (reverify).
 pub fn run_picker(skills: Vec<SkillEntry>, source_root: &Path) -> Option<Vec<(String, String)>> {
     if !terminal::is_tty() {
         return None;
@@ -32,9 +31,8 @@ pub fn run_picker(skills: Vec<SkillEntry>, source_root: &Path) -> Option<Vec<(St
     let mut state = PickerState::new(skills);
     let saved = terminal::enter();
     let rx = terminal::spawn_reader();
-    // Probed once, same as install.sh's COLOR_MODE cache: the picker
-    // redraws on every keypress and tick, and a per-frame `tput` shellout
-    // would be one process spawn per second at minimum.
+    // Probed once: the picker redraws on every keypress and tick, and a
+    // per-frame `tput` shellout would spawn a process on every redraw.
     let color_mode = mascot::detect_color_mode();
     let mut eyes = EyeAnimator::new();
 
@@ -86,8 +84,7 @@ fn draw_mascot(layout: &layout::Layout, mode: ColorMode, eye: mascot::EyeState) 
 
 /// The info pane's own line count depends on the current skill's
 /// description length, so its max scroll is recomputed every frame rather
-/// than tracked as separate state -- same reasoning as
-/// 35-ui-model.sh's iui_clamp_info_scroll.
+/// than tracked as separate state.
 fn clamp_info_scroll(state: &mut PickerState, layout: &layout::Layout) {
     let width = if layout.narrow {
         layout.left_w
@@ -124,8 +121,8 @@ fn handle_key(state: &mut PickerState, key: Key, layout: &layout::Layout, source
         Key::Char('a') => state.select_all(),
         Key::Char('n') => state.select_none(),
         // d/r/m are focus-gated: the ACTIONS lines are only usable when the
-        // info pane holds focus, same as install.sh's iui_handle_key ('i'
-        // already means "install", so cycling the mode could not reuse it).
+        // info pane holds focus ('i' already means "install", so cycling
+        // the mode could not reuse it).
         Key::Char('d') if state.focus == Focus::Info => state.dep_hint(),
         Key::Char('r') if state.focus == Focus::Info => state.reverify(source_root),
         Key::Char('m') if state.focus == Focus::Info => state.cycle_integration_mode(),

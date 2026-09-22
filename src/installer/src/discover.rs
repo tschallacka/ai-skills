@@ -1,12 +1,10 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! Which top-level directories under a release tree are skills. No shipped
-//! manifest to read yet (install.sh's SKILL_NAMES table lives in
-//! installer/src/05-config.sh, hand-maintained, not yet ported) — a
-//! directory counts as a skill purely by having its own `SKILL.md`, the same
-//! signal install.sh's own skill_files() ultimately answers to. This is
-//! looser than the real selection (no kind/description/hidden-skill
-//! handling yet), a known gap until the manifest ports.
+//! manifest to read yet -- a directory counts as a skill purely by having
+//! its own `SKILL.md`. This is looser than the real selection (no
+//! kind/description/hidden-skill handling yet), a known gap until the
+//! manifest ports.
 
 use std::fs;
 use std::path::Path;

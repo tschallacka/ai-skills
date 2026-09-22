@@ -96,8 +96,7 @@ fn no_github_output_set_leaves_stdout_unaffected() {
 
 #[test]
 fn an_unwritable_github_output_still_exits_zero() {
-    // AR-84: real bash's own unconditional `exit 0` means a GITHUB_OUTPUT
-    // write failure never changes the exit code.
+    // AR-84: a GITHUB_OUTPUT write failure never changes the exit code.
     let bad_path = "/definitely/does/not/exist/output-file";
     let output = Command::new(env!("CARGO_BIN_EXE_ci-subjects"))
         .args(["--scope", "full"])

@@ -111,10 +111,9 @@ fn append_github_output(subjects: &Subjects) {
     if path.is_empty() {
         return;
     }
-    // AR-84: real bash's own final statement is an unconditional `exit 0`,
-    // so a failure to open/write this file never changes the exit code.
-    // Replicate that fail-open behavior: note the failure on stderr, never
-    // propagate it as a non-zero exit or a panic.
+    // AR-84: a failure to open/write this file never changes the exit
+    // code. Fail-open: note the failure on stderr, never propagate it as a
+    // non-zero exit or a panic.
     let result = OpenOptions::new()
         .append(true)
         .create(true)

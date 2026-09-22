@@ -3,8 +3,8 @@
 //! The transitive reverse-dependency closure: start with the changed crates,
 //! repeatedly add any crate that depends on something already selected,
 //! until a full pass adds nothing new. Order-independent (a least fixed
-//! point), so batching every pass's additions together rather than mimicking
-//! bash's own per-pass awk scan produces the identical result.
+//! point), so batching every pass's additions together produces the
+//! identical result.
 
 use std::collections::BTreeSet;
 

@@ -305,11 +305,9 @@ fn main() -> ExitCode {
     let action = match parse_args(&raw_args) {
         Ok(action) => action,
         Err(code) => {
-            // AR-85: bash's own usage() prints the full embedded usage text
-            // to stdout on EVERY exit path (a missing flag value, an
-            // unknown flag, or -h/--help alike) before exiting -- not only
-            // on the help path. Reproduce that here rather than silently
-            // exiting with no stdout output.
+            // AR-85: the full usage text prints to stdout on EVERY exit
+            // path (a missing flag value, an unknown flag, or -h/--help
+            // alike) before exiting -- not only on the help path.
             print!("{USAGE}");
             return ExitCode::from(code as u8);
         }

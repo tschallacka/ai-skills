@@ -2,7 +2,7 @@
 # MODE: DEV
 # test-bootstrap-default.sh — installer/bootstrap.sh's own argv default.
 #
-# install.sh's bare `curl ... | bash` launched the interactive skill picker.
+# A bare `curl ... | bash` launched the interactive skill picker.
 # The compiled installer's argv parsing does not special-case an empty argv
 # the same way (main.rs prints --help and exits 0), so bootstrap.sh supplies
 # the default itself: no arguments means `interactive`, anything given is

@@ -26,8 +26,8 @@ impl Subjects {
 
 /// `scope == "none"` -> every flag false; `scope == "selective"` -> the
 /// crate-matching loop decides; anything else (including `"full"`, an empty
-/// string, or an unrecognized value) -> every flag true, matching bash's
-/// own fail-safe default exactly.
+/// string, or an unrecognized value) -> every flag true, a fail-safe
+/// default.
 pub fn decide(scope: &str, crates: &str) -> Subjects {
     match scope {
         "none" => Subjects::default(),
@@ -42,15 +42,14 @@ pub fn decide(scope: &str, crates: &str) -> Subjects {
     }
 }
 
-/// AR-83: bash's own default `$IFS` is exactly space, tab, and newline --
-/// NOT every ASCII whitespace character (vertical tab, form feed, and
-/// carriage return are NOT separators under bash's own unquoted
-/// word-splitting).
+/// AR-83: splits on space, tab, and newline only -- NOT every ASCII
+/// whitespace character (vertical tab, form feed, and carriage return are
+/// NOT separators).
 fn split_ifs(s: &str) -> impl Iterator<Item = &str> {
     s.split([' ', '\t', '\n']).filter(|word| !word.is_empty())
 }
 
-/// First-match-wins, mirroring bash's own `case` statement exactly.
+/// First-match-wins.
 fn apply(subjects: &mut Subjects, crate_name: &str) {
     if crate_name == "rjq" {
         subjects.rjq = true;
@@ -193,8 +192,7 @@ mod tests {
     #[test]
     fn vertical_tab_form_feed_and_carriage_return_are_not_separators() {
         // AR-83: only space, tab, and newline split; other whitespace bytes
-        // stay embedded in whatever word they fall within, exactly like
-        // bash's own default $IFS.
+        // stay embedded in whatever word they fall within.
         let weird = "some\u{000B}crate";
         let s = decide("selective", weird);
         assert!(

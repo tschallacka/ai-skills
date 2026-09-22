@@ -132,10 +132,9 @@ fn emit_all(lines: Vec<Line>, failures: &mut usize, warnings: &mut usize) {
 }
 
 /// Returns `(base, positional_paths)` on success, or `Err(exit_code)` when
-/// argument parsing itself fails (64). Matches bash's own loop exactly:
-/// `--base <ref>` / `--base=<ref>` / any other `-*` rejected with 64 (the
-/// OPPOSITE of generate-portability.sh's silent-ignore) / bare tokens
-/// collected as positional paths.
+/// argument parsing itself fails (64): `--base <ref>` / `--base=<ref>` /
+/// any other `-*` rejected with 64 / bare tokens collected as positional
+/// paths.
 fn parse_args(args: &[String]) -> Result<(String, Vec<String>), i32> {
     let mut base = "master".to_string();
     let mut paths = Vec::new();

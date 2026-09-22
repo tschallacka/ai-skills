@@ -2,38 +2,33 @@
 // PACKAGE: PROD
 //! Where the planning-server daemon's socket lives.
 //!
-//! One shared daemon serves every plan directory (unlike ai-text-editor,
-//! which starts one server per open file/tab) -- each Request carries its own
-//! `plan_dir`, so the socket path itself needs no per-plan identity, only a
-//! single well-known location this session's client and server both resolve
-//! the same way.
+//! One shared daemon serves every plan directory: each Request carries its
+//! own `plan_dir`, so the socket path itself needs no per-plan identity,
+//! only a single well-known location this session's client and server both
+//! resolve the same way.
 
 use std::path::{Path, PathBuf};
 
 // Unix domain socket paths have a small platform-defined limit (sun_path is
-// 104 bytes on macOS, 108 on Linux, the null terminator included) --
-// ai-text-editor/src/transport.rs already hit this and falls back to a
-// short root under plain /tmp rather than honor a long XDG_RUNTIME_DIR (or
-// TMPDIR, which -- once TMPDIR is itself the long path -- std::temp_dir()
-// would only reintroduce). Found here the same way: a real bind failure
-// ("path must be shorter than SUN_LEN") under this repo's own nix-shell
-// scratch layout, not a hypothetical. Conservative bound: 90, leaving room
-// for the socket's own filename under the computed root.
+// 104 bytes on macOS, 108 on Linux, the null terminator included). A long
+// XDG_RUNTIME_DIR (or TMPDIR, which -- once TMPDIR is itself the long path
+// -- std::temp_dir() would only reintroduce) can exceed it: a real bind
+// failure ("path must be shorter than SUN_LEN"), not a hypothetical.
+// Conservative bound: 90, leaving room for the socket's own filename under
+// the computed root.
 const SUN_PATH_SAFE_LIMIT: usize = 90;
 
 fn preferred_root(runtime_dir: &Path) -> PathBuf {
     runtime_dir.join("tsch-ai-skills-planning-server")
 }
 
-/// Mirrors ai-text-editor/src/transport.rs's own short_root: falls back to
-/// plain /tmp (never TMPDIR, which being long is the very condition that
-/// got us here) but still hashes the ORIGINAL runtime_dir into the
-/// directory name. Without that hash every caller whose preferred root was
-/// too long would collapse onto the identical fallback path -- harmless for
-/// the single real daemon a real host runs, but wrong the moment more than
-/// one caller (this crate's own concurrent integration tests, most
-/// concretely) legitimately wants its OWN distinct socket and each computes
-/// its own runtime_dir to get one.
+/// Falls back to plain /tmp (never TMPDIR, which being long is the very
+/// condition that got us here) but still hashes the ORIGINAL runtime_dir
+/// into the directory name. Without that hash every caller whose preferred
+/// root was too long would collapse onto the identical fallback path --
+/// harmless for the single real daemon a real host runs, but wrong the
+/// moment more than one caller legitimately wants its OWN distinct socket
+/// and each computes its own runtime_dir to get one.
 fn short_root(runtime_dir: &Path) -> PathBuf {
     let root_key = blake3::hash(runtime_dir.to_string_lossy().as_bytes()).to_hex();
     #[cfg(unix)]
@@ -51,8 +46,8 @@ fn short_root(runtime_dir: &Path) -> PathBuf {
 }
 
 /// Only a unix domain socket has a length limit. Elsewhere the endpoint is a
-/// plain discovery file (see `transport`), which any ordinary path can hold,
-/// and a Windows temp directory plus this file's name already exceeds 90.
+/// plain discovery file, which any ordinary path can hold, and a Windows
+/// temp directory plus this file's name already exceeds the safe limit.
 fn fits(root: &Path) -> bool {
     !cfg!(unix) || root.join("planning-server.sock").to_string_lossy().len() <= SUN_PATH_SAFE_LIMIT
 }
@@ -121,11 +116,10 @@ mod tests {
 
     #[test]
     fn two_different_runtime_dirs_never_collapse_onto_the_same_fallback_root() {
-        // Regression: a fallback keyed only on uid, not on the runtime dir,
-        // made every caller whose preferred root was too long collide on one
+        // A fallback keyed only on uid, not on the runtime dir, would make
+        // every caller whose preferred root was too long collide on one
         // shared socket -- harmless for a single real daemon, but a genuine
-        // cross-test collision for this crate's own concurrent integration
-        // tests, found via a real run-tests.sh failure, not a unit test.
+        // collision the moment more than one caller wants its own socket.
         let a = short_root(Path::new(
             "/tmp/one/long/enough/runtime/dir/to/trigger/fallback/a",
         ));

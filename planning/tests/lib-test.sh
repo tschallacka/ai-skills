@@ -72,12 +72,11 @@
 #   than emitting a tree nobody will read.
 #
 #   BREAKPOINTS are for a local run, and are inert anywhere else. They exist so
-#   `bash -x` on a whole 400-line test is not the only option: it drowns the
-#   thing you are looking for in the 380 lines you are not.
+#   `bash -x` on a whole test file is not the only option: it drowns the
+#   thing you are looking for in everything else the test does.
 #
 # Everything here is opt-in through the environment, so a test file needs no
-# changes to benefit and CI behaviour cannot be altered by accident. The flags,
-# their defaults and the measurements behind them: docs/DEBUGGING-TESTS.md.
+# changes to benefit and CI behaviour cannot be altered by accident.
 t_evidence_files="${AI_SKILLS_TEST_EVIDENCE_FILES:-40}"
 t_evidence_bytes="${AI_SKILLS_TEST_EVIDENCE_BYTES:-16384}"
 
@@ -106,14 +105,13 @@ t_keep_test_root() {
 # Printable? A core dump or a build artifact in the root would otherwise spray
 # the log with control bytes and bury the text files that matter.
 #
-# NUL bytes, not ASCII-printability: install.sh's own diagnostics use real
-# UTF-8 punctuation (an em dash in a soft-requirement warning, for one), which
+# NUL bytes, not ASCII-printability: some diagnostics use real UTF-8
+# punctuation (an em dash in a soft-requirement warning, for one), which
 # `tr -d '[:print:][:space:]'` under LC_ALL=C treats as junk because every
-# multi-byte UTF-8 byte has its high bit set -- so a perfectly readable
-# install.sh log was misfiled as "(binary, not shown)" on exactly the runs
-# that most needed to be read. A core dump or compiled binary reliably carries
-# a NUL within its first few bytes; legitimate text, UTF-8 included, never
-# does.
+# multi-byte UTF-8 byte has its high bit set -- so a perfectly readable log
+# was misfiled as "(binary, not shown)" on exactly the runs that most needed
+# to be read. A core dump or compiled binary reliably carries a NUL within
+# its first few bytes; legitimate text, UTF-8 included, never does.
 t_evidence_is_text() { # <path>
     local total stripped
     total="$(LC_ALL=C head -c 4096 "$1" 2>/dev/null | LC_ALL=C wc -c | tr -d ' ')"
@@ -287,13 +285,11 @@ t_trace_off() {
 }
 
 if [ -z "${T_TMPDIR:-}" ]; then
-    # Directly under /tmp, and short. A unix socket path is capped near 104 bytes
-    # and chromium (via mmdc) appends about 50 for its profile and singleton
-    # socket, so the room a test may use is small. Nesting inside nix develop's
-    # TMPDIR *and* run-tests.sh's own scratch reached 75 characters and crossed
-    # the limit: test-mermaid-accuracy failed with "Socket path too long" on the
-    # bash 3.2 leg only. Measured -- 75 failed, 62 passed -- so this stays far
-    # under rather than close to it: /tmp/t.XXXXX is 12 characters.
+    # Directly under /tmp, and short. A unix socket path is capped near 104
+    # bytes, and chromium (via mmdc) appends its own profile and singleton
+    # socket path on top, so the room a test may use is small -- nesting
+    # inside a deep TMPDIR has crossed that limit before. This stays far
+    # under it instead: /tmp/t.XXXXX is short and directly under /tmp.
     #
     # The `t.` prefix is kept so a leaked root is still attributable; the CI leak
     # scan looks for it.
@@ -313,10 +309,7 @@ if [ -z "${T_TMPDIR:-}" ]; then
     # such problem, and its own TMPDIR is actively hostile: it points at
     # /var/folders/<...>, and /var is a symlink to /private/var, so a fixture git
     # repo created there has two names and anything comparing paths disagrees
-    # with itself. test-atomicity-flow failed on BOTH macOS legs the moment this
-    # honoured TMPDIR, while every Linux leg stayed green - a fixture repo whose
-    # uncommitted edit git reported under one path and the flow looked for under
-    # the other.
+    # with itself.
     case "$(uname -s)" in
         Darwin) T_TMPDIR="$(mktemp -d /tmp/t.XXXXX)" ;;
         *)      T_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/t.XXXXX")" ;;
@@ -326,14 +319,12 @@ if [ -z "${T_TMPDIR:-}" ]; then
     fi
 
     # Sockets only, and deliberately NOT under TMPDIR. A unix socket path is
-    # capped near 104 bytes and chromium (via mmdc) appends about 50 for its
-    # profile and singleton socket, so the room a caller has is small: nesting
-    # inside nix develop's TMPDIR *and* run-tests.sh's own scratch reached 75
-    # characters and crossed the limit, and test-mermaid-accuracy failed with
-    # "Socket path too long" on the bash 3.2 leg only. Measured -- 75 failed,
-    # 62 passed -- so /tmp/s.XXXXX at 12 characters stays far under rather than
-    # close to it. Nothing but a socket or a socket-bearing profile belongs
-    # here; it is tmpfs on a developer workstation.
+    # capped near 104 bytes, and chromium (via mmdc) appends its own profile
+    # and singleton socket path on top, so the room a caller has is small --
+    # nesting inside a deep TMPDIR has crossed that limit before. /tmp/s.XXXXX
+    # stays short and far under it instead. Nothing but a socket or a
+    # socket-bearing profile belongs here; it is tmpfs on a developer
+    # workstation.
     if [ -d /tmp ] && [ -w /tmp ]; then
         T_SOCKET_TMPDIR="$(mktemp -d /tmp/s.XXXXX)"
     else

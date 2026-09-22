@@ -75,19 +75,14 @@ fn can_access(caller: &str, target: &str) -> bool {
             && matches!(target, "chris" | "christian" | "christoph")
 }
 
-/// Mirrors src/plan-mutate/src/main.rs's own skill_root(), and this repo's
-/// build-plan-libs/generate-skill-docs/verify-skill-load precedent:
-/// PLANNING_SKILL_ROOT first (exported by plan_exec_compiled_binary_if_present
-/// before every exec), then an ancestor walk of the running binary's own path
-/// and the current working directory, looking for the first ancestor whose
-/// planning/scripts subdirectory exists. A fixed current_exe()-relative
-/// "two parents up" guess (the previous implementation) is wrong the moment
-/// the binary is exec'd from anywhere other than planning/scripts itself --
-/// which is always, since plan_exec_compiled_binary_if_present execs it from
-/// plan_bin_dir()'s own bin/<triple> location, not planning/scripts/. Every
-/// registered persona's scope docs silently came back "missing" through the
-/// real role-context.sh wrapper as a result, confirmed by direct comparison
-/// against invoking the bare planning/scripts/role-context copy.
+/// PLANNING_SKILL_ROOT first, then an ancestor walk of the running binary's
+/// own path and the current working directory, looking for the first
+/// ancestor whose planning/scripts subdirectory exists. A fixed
+/// current_exe()-relative "two parents up" guess (the previous
+/// implementation) is wrong the moment the binary is exec'd from anywhere
+/// other than planning/scripts itself: every registered persona's scope
+/// docs then silently came back "missing" (confirmed by direct testing, not
+/// a hypothetical).
 fn skill_root_from(
     env_root: Option<&Path>,
     exe_path: Option<&Path>,
@@ -299,9 +294,8 @@ mod tests {
 
     /// Regression: skill_root_from must resolve the real repo root when the
     /// binary is exec'd from a bin/<triple> directory that is NOT two
-    /// parents below the repo root -- exactly what
-    /// plan_exec_compiled_binary_if_present's own exec does, and what the
-    /// previous current_exe()-relative implementation got wrong.
+    /// parents below the repo root -- what the previous
+    /// current_exe()-relative implementation got wrong.
     #[test]
     fn skill_root_prefers_the_env_var_over_a_bin_dir_exe_path() {
         let dir = scratch("skill-root-env");
@@ -330,9 +324,9 @@ mod tests {
         dir
     }
 
-    /// Regression for B361: the REVIEWER.md staleness check must hash the
-    /// same file generate-reviewer.sh pins (skill-source.txt), not SKILL.md
-    /// -- hashing the wrong file made every fresh REVIEWER.md report stale.
+    /// Regression for B361: the REVIEWER.md staleness check must hash
+    /// skill-source.txt, not SKILL.md -- hashing the wrong file made every
+    /// fresh REVIEWER.md report stale.
     #[test]
     fn reviewer_stale_check_hashes_skill_source_not_skill_md() {
         let dir = scratch("reviewer-stale");

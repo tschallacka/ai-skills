@@ -45,11 +45,10 @@ skill_artifact_files() {
     # skill that quietly installed without its binary). Gating existence
     # here too, against the shipped location alone, would omit the row
     # before source_file() ever got to check the dev-build root or die --
-    # exactly what B317 caused it to do (B318, test-installer-dev-build.sh
-    # section 3). Skip the gate under --dev-build and let that existing
-    # check own it, the way it did before B317; keep gating for the
-    # default path, where a missing binary should degrade the skill
-    # rather than abort the whole install (B317's own reason for existing).
+    # exactly what B317 caused it to do. Skip the gate under --dev-build and
+    # let that existing check own it; keep gating for the default path,
+    # where a missing binary should degrade the skill rather than abort the
+    # whole install (B317's own reason for existing).
     if [ "${DEV_BUILD:-0}" -eq 1 ]; then
         printf '%s\n' "$@"
         return 0

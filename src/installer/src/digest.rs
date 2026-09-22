@@ -2,12 +2,8 @@
 // PACKAGE: PROD
 //! A change detector for installed content, recorded per file so a later
 //! install can tell "we wrote this and nobody touched it" from "the user
-//! edited it" -- the same problem install.sh's content_digest/record_digests
-//! solve (60-install.sh). Different mechanism: blake3 rather than cksum's
-//! CRC32+byte-count, since this manifest is this installer's own and never
-//! compared against install.sh's -- the two are not on-disk compatible, and
-//! do not need to be, as this replaces that script rather than running
-//! alongside it.
+//! edited it". Digests are blake3 hashes of this installer's own manifest
+//! format, not required to be on-disk compatible with any other tool's.
 
 use std::fs;
 use std::io;
@@ -55,10 +51,9 @@ pub fn recorded_digest(skill_dest: &Path, relative: &str) -> Option<String> {
     })
 }
 
-/// Every relative path a prior install recorded a digest for, in file order
-/// -- used by `uninstall::uninstall_skill` to warn about a user's edits
-/// before deleting the whole directory rather than silently discarding them
-/// unremarked.
+/// Every relative path a prior install recorded a digest for, in file
+/// order, so a caller can warn about a user's edits before deleting a
+/// whole directory rather than silently discarding them unremarked.
 pub fn recorded_relative_paths(skill_dest: &Path) -> Vec<String> {
     let Ok(content) = fs::read_to_string(manifest_path(skill_dest)) else {
         return Vec::new();

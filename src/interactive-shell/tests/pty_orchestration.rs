@@ -1,25 +1,15 @@
 // MODE: DEV
 #![cfg(unix)]
-//! Real PTY-driven program orchestration, migrated from
-//! interactive-shell/tests/test-interactive-shell.sh (nano end to end) and
-//! interactive-shell/tests/test-interactive-shell-exploration.sh (nano, mc,
-//! and less through the wrapper's own socket protocol) (T145 goal 25, W137).
+//! Real PTY-driven program orchestration (T145 goal 25, W137).
 //!
-//! The material difference from protocol.rs's own coverage (spot-checked
-//! before writing this file, AR-110 cycle 44's own redundancy requirement):
-//! protocol.rs already spawns interactive-shell/interactive-shell-input via
-//! CARGO_BIN_EXE_ dozens of times, including real PTY plumbing, but always
-//! against the synthetic `interactive-shell-fixture` binary. Every test here
-//! instead drives a REAL external program (nano, mc, less) -- the fixture-
-//! vs-real-program distinction, not spawning-vs-not, is what separates the
-//! two files' own scope. No overlap was found: protocol.rs never spawns
-//! nano/mc/less, and nothing here re-proves a fixture-driven protocol
-//! contract protocol.rs already covers.
+//! Every test here drives a REAL external program (nano, mc, less) rather
+//! than a synthetic fixture binary, so what runs is real PTY plumbing against
+//! a program whose own screen behavior is out of this suite's control.
 //!
 //! A missing nano/mc/less (or a non-GNU nano, whose bindings this drives
 //! directly -- META-RIGHT for next-word, CTRL-E for end-of-line, CTRL-O for
 //! write-out, none of which macOS's stock Pico shares) is a loud SKIP, not a
-//! failure, mirroring the bash originals' own posture.
+//! failure.
 
 use interactive_shell_core::ClientStream;
 use serde_json::Value;
@@ -36,7 +26,7 @@ const READY_POLLS: usize = 3000;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// The wrapper refuses a socket whose parent directory is not private (0700)
-/// and owned by the current user -- matching protocol.rs's own `temp_dir()`.
+/// and owned by the current user.
 fn temp_dir(label: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "interactive-shell-pty-{label}-{}",
@@ -138,11 +128,11 @@ fn wait_for_socket(dir: &Path) {
 
 /// `connect_in_directory` reaches the socket by NAME from inside its own
 /// directory. An absolute `UnixStream::connect` overflows sun_path (104 bytes
-/// on macOS, 108 on Linux) under the long scratch directory run-tests.sh
-/// hands every test -- the failure `could not connect ... path must be
-/// shorter than SUN_LEN`, with the socket present the whole time. The move
-/// is an fchdir, and the cwd is per PROCESS while the two tests here run as
-/// threads, so it is serialised exactly as protocol.rs does.
+/// on macOS, 108 on Linux) under a long enough scratch directory -- the
+/// failure `could not connect ... path must be shorter than SUN_LEN`, with
+/// the socket present the whole time. The move is an fchdir, and the cwd is
+/// per PROCESS while the two tests here run as threads, so it has to be
+/// serialised.
 static CWD_LOCK: Mutex<()> = Mutex::new(());
 
 fn connect(dir: &Path) -> ClientStream {
@@ -401,8 +391,7 @@ fn observation_driven_exploration_across_nano_mc_and_less() {
 
     send_key(&mc_dir_sock, "F4");
     wait_for_rows(&mc_dir_sock, "Hello World");
-    // B125-verified live (2026-09-10, per the migrated bash comment): F4
-    // opens the $EDITOR-named program (nano here) on the discovered file,
+    // F4 opens the $EDITOR-named program (nano here) on the discovered file,
     // not mc's own built-in mcedit.
     send_text(&mc_dir_sock, " EDITED");
     send_key(&mc_dir_sock, "CTRL-O");

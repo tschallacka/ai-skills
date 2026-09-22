@@ -9,8 +9,7 @@ use std::path::Path;
 /// AR-71: callers must compute both the "no changes to analyse" decision and
 /// the changed-path(s) banner count from [`non_blank_count`], never from
 /// `Vec::len()` directly -- a blank entry (e.g. an explicit empty positional
-/// argument) must not count as a changed path, matching bash's own
-/// `grep -c .` semantics.
+/// argument) must not count as a changed path.
 pub fn changed_paths(repo_root: &Path, explicit: &[String]) -> Vec<String> {
     if !explicit.is_empty() {
         return explicit.to_vec();

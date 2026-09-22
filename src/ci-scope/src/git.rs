@@ -1,9 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! Real `git` subprocess helpers, run with `repo_root` as the working
-//! directory -- reproducing bash's own `cd "$repo_root"` once, up front,
-//! without an actual process-wide chdir (every command here takes its
-//! working directory explicitly instead).
+//! directory: no process-wide chdir, since every command here takes its
+//! working directory explicitly instead.
 
 use std::path::Path;
 use std::process::{Command, Stdio};

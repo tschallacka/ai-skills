@@ -14,9 +14,7 @@ pub fn run_pass(repo_root: &Path, registry: &Path, changed: &[String]) -> Vec<Li
     let contents = std::fs::read_to_string(registry)
         .unwrap_or_else(|e| panic!("reading {}: {e}", registry.display()));
     let mut lines = Vec::new();
-    // AR-69: a HashSet exact-match dedup is a deliberate, documented
-    // simplification of bash's own whitespace-delimited SUBSTRING
-    // `ran_checks` match -- see goal section 8.1.
+    // AR-69: exact-match dedup, so the same check command never runs twice.
     let mut ran_checks: HashSet<String> = HashSet::new();
 
     for row in contents.lines() {
@@ -55,15 +53,12 @@ pub fn run_pass(repo_root: &Path, registry: &Path, changed: &[String]) -> Vec<Li
     lines
 }
 
-/// AR-72: this spawns `check` in a FRESH subprocess, unlike real bash's
-/// `eval`, which runs it in-process inside blast-radius.sh's own shell
-/// (visible to that shell's own local variables/functions). No current
-/// coupling.tsv check relies on shell-local state, so this divergence is
-/// explicitly out of scope for byte-for-byte parity beyond exported
-/// environment variables. The `( check ) 2>&1` wrapping reproduces
-/// `eval "$check" 2>&1`'s merged-stream semantics: a single real
-/// redirection inside the spawned bash, not two separately-captured Rust
-/// pipes, which could not reconstruct the true interleaving order.
+/// AR-72: this spawns `check` in a FRESH subprocess rather than running it
+/// in-process, so no current coupling.tsv check may rely on shell-local
+/// state, only on exported environment variables. The `( check ) 2>&1`
+/// wrapping gives merged-stream semantics: a single real redirection inside
+/// the spawned bash, not two separately-captured Rust pipes, which could
+/// not reconstruct the true interleaving order.
 fn run_check(repo_root: &Path, check: &str) -> (bool, String) {
     let script = format!("( {check} ) 2>&1");
     let output = Command::new(crate::shell::bash())

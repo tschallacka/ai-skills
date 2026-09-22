@@ -1,7 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
 
-//! ok/bad/note, matching pre-push-check.sh's own printf formatting exactly.
+//! Three report line kinds -- ok, FAIL, and note -- each with a fixed
+//! prefix.
 
 pub struct Report {
     pub failures: u32,

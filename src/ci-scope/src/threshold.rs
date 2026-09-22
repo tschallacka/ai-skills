@@ -4,22 +4,15 @@
 //! overridden by `--threshold`/`CI_SCOPE_THRESHOLD` with a genuinely usable
 //! (non-empty, all-digit) value.
 //!
-//! Deliberate simplification: bash's own coercion also tracks a
-//! `"derived (ignored an unusable override)"` source string for a
-//! non-numeric override, but that string never actually reaches any
-//! `decide()` reason -- the real script's own `threshold_label` is only ever
-//! built from the "given" branch (non-empty threshold) or the plain derived
-//! formula, never from that intermediate source string. It is dead
-//! bookkeeping in the original; this port drops it rather than reproduce an
-//! internal value with no observable effect.
+//! Deliberate simplification: a distinct source label for a non-numeric
+//! override is not tracked, since `label` is only ever built from the
+//! "given" branch (non-empty threshold) or the plain derived formula --
+//! that intermediate value would have no observable effect.
 //!
-//! Also deliberate: `divisor`'s bash coercion only special-cases the literal
-//! string `"0"`; a leading-zero override like `"00"` passes bash's own
-//! all-digits check and is then evaluated in `$(( ))` arithmetic, where a
-//! leading zero means octal -- `00` is octal `0`, a division-by-zero bash
-//! itself does not guard against. This port treats any override whose
-//! PARSED numeric value is zero as unusable, which is strictly safer and
-//! does not reproduce that latent bash arithmetic hazard.
+//! Also deliberate: an override is treated as unusable when its PARSED
+//! numeric value is zero, not just when it is literally the string `"0"` --
+//! a leading-zero spelling like `"00"` is caught the same way, so no
+//! divide-by-zero can slip through under a different spelling.
 
 pub struct Resolved {
     pub value: u64,
@@ -133,9 +126,9 @@ mod tests {
 
     #[test]
     fn an_empty_flag_value_is_treated_as_no_override() {
-        // bash: --threshold "" leaves threshold empty, and the coercion's
-        // first case arm (`''`) resets threshold_source to "derived"
-        // regardless of how it got there.
+        // An empty flag value is treated as no override: is_all_digits("")
+        // is false, so resolution falls through to the derived formula
+        // regardless of how the empty value got there.
         let r = resolve("", Some(""), 78, 4, 5);
         assert_eq!(r.value, 20);
         assert_eq!(r.label, "20 = ceil(78/4), floor 5");

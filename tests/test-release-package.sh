@@ -78,10 +78,9 @@ REPO_REF='test'
 # those same binaries itself and writes them into this same checkout
 # ($repo_root/chat/bin/<triple>/…, not a scratch dir), so it has to run BEFORE
 # "expected" is derived below -- otherwise a checkout where nothing had
-# pre-built them sees skill_files() list none of them (correctly, for install.sh's
-# own runtime), while the tarball the builder produces a few lines later has
-# them anyway, and the two "expected" vs "actual" sets disagree over files
-# that were always going to ship.
+# pre-built them sees skill_files() list none of them, while the tarball the
+# builder produces a few lines later has them anyway, and the two "expected"
+# vs "actual" sets disagree over files that were always going to ship.
 "$builder" --out "$work/dist" >/dev/null
 tarball="$work/dist/ai-skills-$version.tar.gz"
 [ -f "$tarball" ] || t_fail "the builder wrote no $tarball"

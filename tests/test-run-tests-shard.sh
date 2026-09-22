@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# test-run-tests-shard.sh — run-tests.sh's own --list-only/--select-file/--shard
-# flags (T116), independent of .github/ci-test-scope.sh's own test: that one
-# proves the SELECTOR picks the right tests from a change set; this one proves
-# run-tests.sh's OWN flag parsing and shard math are correct for whatever
-# list and N they are given, which a CI-only literal (the workflow's
-# SHARD_TOTAL) cannot cover on its own.
+# test-run-tests-shard.sh — the --list-only/--select-file/--shard flags
+# run-tests.sh implements, independent of the change-set SELECTOR: this
+# proves the flag parsing and shard math are correct for whatever list and N
+# they are given, which a CI-only literal (the workflow's SHARD_TOTAL)
+# cannot cover on its own.
 #
 # Every case drives the real script with --list-only, so nothing here actually
 # executes a test -- discovery and filtering are proven without paying for a

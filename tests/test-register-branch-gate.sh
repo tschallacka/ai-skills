@@ -7,10 +7,9 @@
 # BUGS.json and TODO.json are append-mostly arrays, so two branches that each
 # file an entry both take the same next free id. Git cannot see that collision:
 # the additions land at different array positions, so it merges them textually
-# with NO conflict and the result carries two unrelated entries under one id.
-# One merge on 2026-09-04 produced eight duplicate ids that way, invisible
-# until reg_findings ran, and the resolvers' advice in the textual case is to
-# take one side — which drops the other side's entries.
+# with NO conflict and the result carries two unrelated entries under one id,
+# invisible until reg_findings ran, and the resolvers' advice in the textual
+# case is to take one side — which drops the other side's entries.
 #
 # The gate exists so that collision cannot be created. This test exists because
 # a gate nobody fault-injects is how several failing-open gates got shipped: it

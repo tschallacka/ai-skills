@@ -3,15 +3,14 @@
 //! A loopback-TCP `Listener`/`Transport` for the crate's shared `client()`/
 //! `run()` dispatch, available on every platform: the ONLY transport on
 //! Windows (there is no Unix domain socket there -- T84 goal 3), and an
-//! explicit `--tcp` opt-in alongside `posix.rs`'s Unix-domain-socket
-//! transport on Unix, for a sandbox that lets a program run but blocks
-//! `AF_UNIX` socket creation for it (observed directly: codex's own command
-//! sandbox, even with Docker's own confinement fully opened up, refused
+//! explicit `--tcp` opt-in on Unix for a sandbox that lets a program run but
+//! blocks `AF_UNIX` socket creation for it (observed directly: a command
+//! sandbox, even with its confinement otherwise fully opened up, refused
 //! every Unix-socket bind/connect attempt while loopback TCP worked).
 //!
 //! Nothing here is platform-specific -- no `windows-sys` call, no `libc`
-//! call -- so unlike `posix.rs`/`windows.rs` this module compiles and runs
-//! unconditionally.
+//! call -- so this module compiles and runs unconditionally on every
+//! target.
 use crate::{Listener, Transport};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -207,9 +206,8 @@ mod tests {
     use super::*;
 
     // Hand-rolled per-test temp dirs (std::env::temp_dir() + pid + a
-    // test-specific prefix), matching posix.rs's own #[cfg(test)] convention
-    // rather than pulling in the tempfile crate this crate does not
-    // otherwise depend on.
+    // test-specific prefix) rather than pulling in the tempfile crate this
+    // crate does not otherwise depend on.
     fn scratch_dir(prefix: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("is-tcp-{prefix}-{}", std::process::id()));
         make_usable(&dir);
@@ -217,10 +215,10 @@ mod tests {
     }
 
     /// Creates `dir` and makes sure it is searchable and writable by us.
-    /// posix.rs binds its sockets under a temporary `umask(0o177)`, which is
-    /// process-wide, so a directory another test thread creates in that window
-    /// comes out mode 0600 and every write into it fails with EACCES. chmod is
-    /// not subject to the umask.
+    /// Another test module in this binary binds sockets under a temporary
+    /// `umask(0o177)`, which is process-wide, so a directory another test
+    /// thread creates in that window comes out mode 0600 and every write
+    /// into it fails with EACCES. chmod is not subject to the umask.
     fn make_usable(dir: &std::path::Path) {
         fs::create_dir_all(dir).unwrap();
         #[cfg(unix)]

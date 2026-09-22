@@ -1,16 +1,14 @@
 // MODE: DEV
-//! chat-server-rs/chat-client-rs end-to-end flow, migrated from
-//! chat/tests/test-chat.sh (T145 goal 25, W132). Split into one #[test] per
-//! phase (rather than one monolithic test) so a single failure identifies
-//! which phase broke -- discovery, TLS-only enforcement, send/TOFU,
-//! read-delta, fail-closed TOFU, idle-tail wake, sessions/cursors,
+//! chat-server-rs/chat-client-rs end-to-end flow (T145 goal 25, W132). Split
+//! into one #[test] per phase (rather than one monolithic test) so a single
+//! failure identifies which phase broke -- discovery, TLS-only enforcement,
+//! send/TOFU, read-delta, fail-closed TOFU, idle-tail wake, sessions/cursors,
 //! join/leave, mentions, per-agent sessions sharing one home, dead-peer
 //! teardown, serverless local reads, the local channel-name guard, local
 //! cursors, and --version/malformed-argv refusal. Every phase spawns the
 //! real compiled binaries via `support::spawn_server`/`support::run_client`
 //! and asserts on real process exit status, stdout/stderr, and the real
-//! on-disk channel log -- no mocking any layer the bash original exercised
-//! for real.
+//! on-disk channel log -- no mocking any layer this suite exercises.
 
 mod support;
 

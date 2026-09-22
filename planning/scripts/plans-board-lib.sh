@@ -4,8 +4,8 @@
 #
 # Owns two jobs the board script does not: finding every plan under a root,
 # and reducing one plan directory to the handful of numbers a board row shows.
-# It reads the plan tree directly rather than calling overview-state.sh, which
-# costs 8-9 seconds per plan and would make a 25-plan root take minutes.
+# It reads the plan tree directly rather than calling overview-state.sh,
+# whose per-plan git calls scale badly on a root with many plans.
 #
 # Usage:
 #   source "$script_dir/plans-board-lib.sh"     # sourced, never executed

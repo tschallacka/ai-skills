@@ -177,9 +177,8 @@ fn an_unknown_flag_exits_64() {
     let repo = Repo::new("unknown-flag");
     let output = repo.run(&["--nonsense"]);
     assert_eq!(output.status.code(), Some(64));
-    // AR-85: bash's own usage() prints the full usage text to stdout on
-    // EVERY exit path, not only -h/--help -- confirm the Rust port does too,
-    // not just that it exits 64.
+    // AR-85: the full usage text prints to stdout on EVERY exit path, not
+    // only -h/--help -- confirm that, not just that it exits 64.
     assert!(stdout_of(&output).starts_with("ci-scope.sh"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("unknown argument: --nonsense"));
     repo.cleanup();
@@ -191,8 +190,8 @@ fn missing_value_flags_exit_64_and_print_usage_to_stdout() {
     for flag in ["--base", "--files-from", "--threshold", "--push-to"] {
         let output = repo.run(&[flag]);
         assert_eq!(output.status.code(), Some(64), "flag: {flag}");
-        // AR-85: matching bash's own usage() dumping the full text to
-        // stdout for a missing flag value too, not only for --help.
+        // AR-85: the full usage text dumps to stdout for a missing flag
+        // value too, not only for --help.
         assert!(
             stdout_of(&output).starts_with("ci-scope.sh"),
             "flag: {flag}, stdout: {}",
@@ -230,9 +229,8 @@ fn files_from_an_unreadable_path_forces_full() {
 
 #[test]
 fn a_relative_files_from_path_resolves_against_planning_skill_root_not_process_cwd() {
-    // AR-90: bash `cd`s into repo_root BEFORE reading a relative
-    // --files-from path, so it resolves against repo_root, not the
-    // caller's original working directory. Prove that genuinely, with a
+    // AR-90: a relative --files-from path resolves against repo_root, not
+    // the caller's original working directory. Prove that genuinely, with a
     // process cwd DIFFERENT from PLANNING_SKILL_ROOT and a relative
     // filename that exists only under the latter.
     let root = Repo::new("relative-root");

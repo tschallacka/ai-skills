@@ -27,10 +27,10 @@ fn lock_file() -> PathBuf {
 }
 
 /// run-tests's own lock path is a fixed, unconfigurable /tmp location by
-/// design (matching the bash original: a mutex only works if every run
-/// agrees on where it lives), so every test that touches it must be
-/// serialized against every other one -- cargo test's default parallelism
-/// would otherwise let two of these tests race over the same real file.
+/// design: a mutex only works if every run agrees on where it lives. So
+/// every test that touches it must be serialized against every other one --
+/// cargo test's default parallelism would otherwise let two of these tests
+/// race over the same real file.
 fn lock_test_guard() -> &'static Mutex<()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
     GUARD.get_or_init(|| Mutex::new(()))
@@ -39,10 +39,9 @@ fn lock_test_guard() -> &'static Mutex<()> {
 /// True when `lock_path` names a real, live run-tests holder -- mirroring
 /// the production lock_holder_is_live check. A test that would otherwise
 /// overwrite or delete this file must not, when the real, hardcoded,
-/// unconfigurable lock path this binary uses (by design, for bash parity)
-/// happens to already be held by a genuinely separate, still-running
-/// run-tests process (an enclosing run-tests.sh invocation of this very
-/// suite, most plausibly).
+/// unconfigurable lock path this binary uses by design happens to already
+/// be held by a genuinely separate, still-running run-tests process (an
+/// enclosing run-tests.sh invocation of this very suite, most plausibly).
 fn lock_is_held_by_a_live_process(lock_path: &Path) -> bool {
     let Ok(content) = fs::read_to_string(lock_path) else {
         return false;
@@ -165,8 +164,7 @@ impl Repo {
 
         // The other five suite directories + benchmark suite must exist as
         // real (even if empty) directories, or `find` on a missing path
-        // just yields nothing -- matching the bash original's own behavior,
-        // not a special case this test needs to construct.
+        // just yields nothing -- this needs no special case to construct.
         for suite in [
             "planning/tests",
             "editor-gate-plugin/tests",
@@ -193,15 +191,13 @@ impl Repo {
     /// Bypasses the machine-wide lock (AI_SKILLS_ALLOW_CONCURRENT=1):
     /// every caller of this helper is testing discovery/execution/reporting
     /// logic, not the lock itself, and the real, hardcoded, unconfigurable
-    /// /tmp/ai-skills-run-tests.lock this binary uses by design (matching
-    /// bash parity -- a mutex only works if every run agrees on where it
-    /// lives) is ALSO the exact lock an enclosing run-tests.sh invocation of
-    /// this very suite already holds for its own whole duration whenever
-    /// these tests run as this crate's own `cargo test` step within it.
-    /// Without this, a nested run wrongly observes lock refusal (exit 75)
-    /// as if it were a real test failure -- confirmed directly: this exact
-    /// collision was how run-tests's own full self-hosted run-tests.sh run
-    /// found it.
+    /// /tmp/ai-skills-run-tests.lock this binary uses by design (a mutex
+    /// only works if every run agrees on where it lives) is ALSO the exact
+    /// lock an enclosing run-tests.sh invocation of this very suite already
+    /// holds for its own whole duration whenever these tests run as this
+    /// crate's own `cargo test` step within it. Without this, a nested run
+    /// wrongly observes lock refusal (exit 75) as if it were a real test
+    /// failure.
     fn run(&self, args: &[&str]) -> Output {
         let binary = env!("CARGO_BIN_EXE_run-tests");
         Command::new(binary)

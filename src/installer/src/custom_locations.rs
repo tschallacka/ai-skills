@@ -1,12 +1,11 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! Persisted custom install roots a user typed once, offered again on a
-//! later interactive run -- ported from install.sh's
-//! `save_custom_location`/`load_custom_locations`
-//! (`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/custom-locations`,
-//! installer/src/05-config.sh/06-*.sh). One absolute path per line; a line
-//! starting with `#` or naming a directory that no longer exists is
-//! dropped silently on load rather than offered as a dead choice.
+//! later interactive run
+//! (`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/custom-locations`).
+//! One absolute path per line; a line starting with `#` or naming a
+//! directory that no longer exists is dropped silently on load rather than
+//! offered as a dead choice.
 
 use std::fs;
 use std::io;
@@ -19,7 +18,7 @@ fn file_path(home: &Path) -> PathBuf {
 }
 
 /// Every saved location that still exists as a directory, deduplicated in
-/// file order -- `contains` in install.sh's own `load_custom_locations`.
+/// file order.
 pub fn load(home: &Path) -> Vec<PathBuf> {
     let Ok(content) = fs::read_to_string(file_path(home)) else {
         return Vec::new();
@@ -41,8 +40,7 @@ pub fn load(home: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Appends `path` if it is not already recorded -- `grep -Fqx` before the
-/// append in install.sh's own `save_custom_location`.
+/// Appends `path` if it is not already recorded.
 pub fn save(home: &Path, path: &Path) -> io::Result<()> {
     let file = file_path(home);
     if let Some(parent) = file.parent() {

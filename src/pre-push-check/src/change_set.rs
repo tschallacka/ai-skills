@@ -5,10 +5,8 @@
 //! the worktree or the index, measured against master (or the merge base with
 //! it, so a master that has moved ahead does not show its own commits as part
 //! of this branch's diff). Falls back to the tracking upstream, and then to
-//! worktree-only mode with an empty base, mirroring pre-push-check.sh's own
-//! `base`/`base_label` resolution exactly -- including the real bash CODE,
-//! not its own header comment, which incorrectly claims the no-upstream case
-//! exits 65. It does not; it continues with an empty base.
+//! worktree-only mode with an empty base -- the no-upstream case does not
+//! exit early; it continues with an empty base.
 
 use crate::report::Report;
 use regex::Regex;
@@ -71,9 +69,8 @@ pub fn current_branch(repo_root: &Path) -> String {
 
 /// PRE_PUSH_SKIP_FETCH exists for two callers only: a test driving this
 /// script in a throwaway clone whose origin is a local path, and diagnosis
-/// with no network. Returns the failing-summary message (already printed) as
-/// an error when the fetch itself fails and was not skipped, matching bash's
-/// own immediate `exit 1`.
+/// with no network. Returns the failing-summary message (already printed)
+/// as an error when the fetch itself fails and was not skipped.
 pub fn fetch_master(repo_root: &Path, report: &mut Report) -> Result<(), i32> {
     if env::var("PRE_PUSH_SKIP_FETCH").as_deref() == Ok("1") {
         report.note("PRE_PUSH_SKIP_FETCH=1: master not refreshed, the change set may be stale");
@@ -119,8 +116,7 @@ fn diff_name_only(repo_root: &Path, extra_args: &[&str]) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The change set filtered by `pattern` (an extended regular expression,
-/// matching bash's own `grep -E`/`grep` filters).
+/// The change set filtered by `pattern`, an extended regular expression.
 pub fn changed(repo_root: &Path, base: Option<&str>, pattern: &str) -> Vec<String> {
     let re = Regex::new(pattern).expect("pre-push-check: internal error: invalid pattern");
     changed_files(repo_root, base)

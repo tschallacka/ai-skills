@@ -4,8 +4,7 @@
 //! Gate 5: register soundness via reg_findings, the shipped implementation
 //! (planning/scripts/register-lib.sh), needing rjq on PATH -- quietly
 //! skipped without it (CI runs test-register-schemas regardless). Shells to
-//! bash to source the real function rather than reimplementing it, matching
-//! the bash original's own delegation exactly.
+//! bash to source the real function rather than reimplementing it.
 
 use crate::platform::{bash, which};
 use crate::report::Report;

@@ -1,11 +1,9 @@
 // MODE: DEV
 // PACKAGE: PROD
 
-//! Reproduces planning/tests/test-mermaid-accuracy.sh's exact observable
-//! behavior (T145 goal 26): four mechanical checks over the tracked mermaid
-//! documents, plus the mmdc render check. No arguments: the bash original
-//! defines no usage()/argument parsing at all, so this binary takes none
-//! either and silently ignores any argv it is given, matching that.
+//! Four mechanical checks over the tracked mermaid documents, plus the
+//! mmdc render check (T145 goal 26). No arguments: this binary takes none
+//! and silently ignores any argv it is given.
 
 mod dirty;
 mod discovery;

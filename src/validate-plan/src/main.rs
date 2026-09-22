@@ -172,11 +172,10 @@ fn main() {
     );
 }
 
-/// Mirrors `plan_report_gates` in validate-plan.sh: under `--complete` the
-/// error count mixes structural defects with execution state and the two
-/// cannot be separated after the fact, so the structural gate says that
-/// rather than inferring yes/no from a number answering a different
-/// question (T55).
+/// Under `--complete` the error count mixes structural defects with
+/// execution state and the two cannot be separated after the fact, so the
+/// structural gate says that rather than inferring yes/no from a number
+/// answering a different question (T55).
 fn report_gates(
     complete_mode: bool,
     errors: usize,
@@ -269,12 +268,12 @@ fn parse(args: Vec<String>) -> Result<Options, i32> {
 }
 
 /// The directory the registries (goal-tables.json, placeholders.json, ...)
-/// live in. `PLANNING_SKILL_ROOT` is, for every other binary and for the
-/// wrapper that exports it, the directory that CONTAINS `planning/scripts`, so
-/// the registries sit in its `planning/` subdirectory; without the variable
-/// the cwd-relative `planning` already names that subdirectory. Reading the
-/// variable as the registry directory itself made every wrapper-launched run
-/// fail with "goal-tables.json registry is missing at <root>/goal-tables.json".
+/// live in. `PLANNING_SKILL_ROOT`, when set, is the directory that CONTAINS
+/// `planning/scripts`, so the registries sit in its `planning/`
+/// subdirectory; without the variable the cwd-relative `planning` already
+/// names that subdirectory. Reading the variable as the registry directory
+/// itself made every wrapper-launched run fail with "goal-tables.json
+/// registry is missing at <root>/goal-tables.json".
 fn skill_root() -> PathBuf {
     registry_dir(env::var_os("PLANNING_SKILL_ROOT").map(PathBuf::from))
 }

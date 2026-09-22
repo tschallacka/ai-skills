@@ -1,7 +1,6 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Completion and propagation validation formerly provided by
-//! `validate-plan-propagation-lib.sh`.
+//! Completion and propagation validation.
 
 use planning_table::table_cell;
 use planning_validator_common::Findings;
@@ -80,17 +79,13 @@ pub fn validate_reach(plan: &Path, inventory: &Inventory, findings: &mut Finding
 
 /// A step's Handoff prose must not promise a later unit something the
 /// dependency graph does not order: a consumer that reads the Handoff as a
-/// licence to run early needs an edge, not a sentence. Ported from
-/// `plan_validate_propagation_handoff` / `plan_handoff_units` in
-/// `validate-plan-propagation-lib.sh`, which this crate had not yet carried
-/// over (found as a parity gap alongside B335, goal 4 of
-/// planning-skill-rustify).
+/// licence to run early needs an edge, not a sentence.
+///
 /// The WNN ids a step's Handoff paragraphs actually claim, paragraph by
 /// paragraph (blank-line delimited, each paragraph's lines flattened to one
 /// line) -- a paragraph whose flattened text carries a history marker is
-/// dropped whole, so a corrective paragraph restating an old, disproven claim
-/// never re-triggers the ordering check it was written to retract. Mirrors
-/// `plan_handoff_units`'s own awk-based paragraph buffering exactly.
+/// dropped whole, so a corrective paragraph restating an old, disproven
+/// claim never re-triggers the ordering check it was written to retract.
 fn handoff_units(plan: &Path, unit: &Unit) -> Vec<String> {
     let section = read_section(plan, unit, "## Handoff");
     let mut paragraphs = Vec::new();
@@ -216,8 +211,7 @@ pub fn validate_leaves(inventory: &Inventory, findings: &mut Findings) {
 }
 
 /// Lines whose edit-intent verb makes a ::-symbol on them worth checking for
-/// ownership. Matches `plan_validate_propagation_symbols_unit`'s own
-/// `grep -iE '(create|add|implement|edit|change|update|modify|rewrite|replace|override)'`.
+/// ownership.
 const EDIT_INTENT_VERBS: &[&str] = &[
     "create",
     "add",
@@ -273,7 +267,7 @@ pub fn validate_symbols(plan: &Path, inventory: &Inventory, findings: &mut Findi
             let short = class.rsplit('\\').next().unwrap_or(class);
             // A Vendor_Module::path/to/template.phtml token is a template id,
             // not a Class::method call -- confirmed by a slash after `::` on
-            // the same edit line (plan_validate_propagation_symbols_token).
+            // the same edit line.
             if is_vendor_module_class(class)
                 && edit_lines
                     .lines()
@@ -284,9 +278,7 @@ pub fn validate_symbols(plan: &Path, inventory: &Inventory, findings: &mut Findi
             // A namespaced class (one with a `\` root) must sit under a
             // prefix the plan itself edits, or it is a vendor seam and drops
             // out. A bare, unnamespaced class carries no namespace to check
-            // against, so it is always treated as a candidate for ownership
-            // -- matching the shell case arm `"$klass_short")`, which always
-            // matches when klass has no namespace (klass == klass_short).
+            // against, so it is always treated as a candidate for ownership.
             if class != short
                 && !prefixes
                     .iter()
@@ -316,7 +308,7 @@ pub fn validate_symbols(plan: &Path, inventory: &Inventory, findings: &mut Findi
 }
 
 /// `Vendor_Module::...` shape: two capitalized, underscore-joined words
-/// ahead of `::` (`^[A-Z][a-zA-Z0-9]*_[A-Z][a-zA-Z0-9]*` in the shell pass).
+/// ahead of `::` (`^[A-Z][a-zA-Z0-9]*_[A-Z][a-zA-Z0-9]*`).
 fn is_vendor_module_class(class: &str) -> bool {
     let Some((first, second)) = class.split_once('_') else {
         return false;
@@ -578,13 +570,6 @@ mod tests {
 
     #[test]
     fn a_completed_plan_and_goal_progress_table_satisfies_the_completion_gate() {
-        // Regression: this crate once carried its own private, differently
-        // indexed `table_cell` (missing the canonical function's `- 1`
-        // adjustment), silently reading the wrong columns -- Goalname read
-        // back as the Description cell, Completion status as an empty
-        // trailing cell -- so a fully-completed plan always FAILed under
-        // --complete. Fixed by importing planning_table::table_cell instead
-        // of shadowing it locally.
         let root = std::env::temp_dir().join(format!(
             "validator-propagation-completion-{}",
             std::process::id()
@@ -693,8 +678,7 @@ mod tests {
     #[test]
     fn a_bare_class_with_no_namespace_is_always_checked_for_ownership() {
         // RenderBuffer carries no namespace root, so it cannot be matched
-        // against any project prefix -- bash's own case pattern always
-        // treats this shape as a candidate (B335-adjacent gap, goal 4).
+        // against any project prefix, and is always treated as a candidate.
         let (root, unit) = scratch_symbols_plan(
             "bare-class",
             "Create memory.rs against RenderBuffer::new in render/shell.rs.",

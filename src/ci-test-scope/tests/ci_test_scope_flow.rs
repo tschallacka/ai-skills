@@ -161,8 +161,7 @@ fn an_unknown_flag_exits_64() {
     let repo = Repo::new("unknown-flag");
     let output = repo.run(&["--nonsense"]);
     assert_eq!(output.status.code(), Some(64));
-    // Matching goal 21's own AR-85 lesson, applied proactively: bash's own
-    // usage() prints the full usage text to stdout on EVERY exit path, not
+    // AR-85: the full usage text prints to stdout on EVERY exit path, not
     // only -h/--help.
     assert!(stdout_of(&output).starts_with("ci-test-scope.sh"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("unknown argument: --nonsense"));
@@ -223,12 +222,10 @@ fn files_from_an_unreadable_path_forces_full() {
 
 #[test]
 fn a_relative_files_from_path_resolves_against_planning_skill_root_not_process_cwd() {
-    // Matching AR-90's lesson from goal 21, applied proactively: bash `cd`s
-    // into repo_root BEFORE reading a relative --files-from path, so it
-    // resolves against repo_root, not the caller's original working
-    // directory. Prove that genuinely, with a process cwd DIFFERENT from
-    // PLANNING_SKILL_ROOT and a relative filename that exists only under
-    // the latter.
+    // AR-90: a relative --files-from path resolves against repo_root, not
+    // the caller's original working directory. Prove that genuinely, with a
+    // process cwd DIFFERENT from PLANNING_SKILL_ROOT and a relative
+    // filename that exists only under the latter.
     let root = Repo::new("relative-root");
     let elsewhere = Repo::new("relative-elsewhere");
     root.stub_run_tests(&[]);
@@ -349,18 +346,16 @@ fn run_tests_list_only_listing_nothing_forces_full() {
 #[test]
 fn run_tests_list_only_is_invoked_with_lc_all_c_regardless_of_the_ambient_locale() {
     // A real bug found while writing this goal's own real-tree parity test:
-    // run-tests.sh's own shell-test discovery (`find ... | sort`) is a BARE
-    // `sort` that inherits whatever locale is ambient in ITS caller's
-    // environment, rather than forcing C collation itself. The real bash
-    // ci-test-scope.sh already exports LC_ALL=C at its own top before
-    // shelling to run-tests.sh, so that bare sort always inherits C there --
-    // but this crate's own process is not guaranteed to run under LC_ALL=C
-    // itself (a real CI runner, or a developer's own shell, may set any
-    // locale), so list_items::list_items must set LC_ALL=C explicitly on
-    // the run-tests.sh subprocess rather than letting it inherit whatever
-    // is ambient. Proven directly here: a stub run-tests.sh echoes its own
-    // $LC_ALL, and the ci-test-scope process is deliberately started under
-    // a DIFFERENT ambient locale to prove the subprocess still sees "C".
+    // the subprocess's own shell-test discovery step is a BARE `sort` that
+    // inherits whatever locale is ambient in its caller's environment,
+    // rather than forcing C collation itself. This crate's own process is
+    // not guaranteed to run under LC_ALL=C either (a real CI runner, or a
+    // developer's own shell, may set any locale), so list_items::list_items
+    // must set LC_ALL=C explicitly on the subprocess rather than letting it
+    // inherit whatever is ambient. Proven directly here: a stub
+    // run-tests.sh echoes its own $LC_ALL, and the ci-test-scope process is
+    // deliberately started under a DIFFERENT ambient locale to prove the
+    // subprocess still sees "C".
     let repo = Repo::new("lc-all-forced");
     repo.write(
         "run-tests.sh",

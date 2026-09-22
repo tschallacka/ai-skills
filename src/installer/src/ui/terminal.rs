@@ -1,15 +1,14 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Raw mode, the alternate screen, and a background byte reader -- ported in
-//! spirit from installer/src/37-ui-input.sh's iui_term_enter/iui_term_leave.
-//! Shells out to `stty`, same as the bash original and same reasoning: no
-//! termios crate in this workspace, and this repository's dependency
-//! ceiling does not admit one for a single ioctl wrapper.
+//! Raw mode, the alternate screen, and a background byte reader. Shells
+//! out to `stty`: no termios crate in this workspace, and this
+//! repository's dependency ceiling does not admit one for a single ioctl
+//! wrapper.
 //!
-//! Reads this process's own stdin directly rather than reopening /dev/tty on
-//! a separate fd (install.sh's fd 3, there so prompts survive `curl | bash`
-//! piping stdin away): this binary is never run that way, so a plain
-//! `[ -t 0 ]` equivalent (`IsTerminal`) is the whole story.
+//! Reads this process's own stdin directly rather than reopening /dev/tty
+//! on a separate fd: this binary is never run with stdin piped away from a
+//! script, so a plain `[ -t 0 ]` equivalent (`IsTerminal`) is the whole
+//! story.
 
 use std::io::{IsTerminal, Read};
 use std::process::{Command, Stdio};
@@ -55,7 +54,7 @@ pub fn leave(saved: &str) {
 }
 
 /// `stty size` against the inherited tty (`ROWS COLS`), falling back to
-/// 80x24 the same way install.sh's iui_measure does when even that fails.
+/// 80x24 when even that fails.
 pub fn size() -> (usize, usize) {
     let fallback = (80, 24);
     let Ok(output) = stty(&["size"]) else {

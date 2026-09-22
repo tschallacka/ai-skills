@@ -8,15 +8,15 @@
 //! Shared spawn/readiness/cleanup helpers for the chat/tests migration
 //! (T145 goal 25, W131). Every migrated chat/tests file -- in both
 //! chat-server-rs and chat-client-rs -- uses this module instead of
-//! duplicating the setup/teardown pattern the original bash files all shared:
-//! a scratch AI_CHAT_HOME, a real chat-server-rs subprocess, a readiness poll
-//! on `server.port`, and cleanup-on-drop.
+//! duplicating the setup/teardown pattern: a scratch AI_CHAT_HOME, a real
+//! chat-server-rs subprocess, a readiness poll on `server.port`, and
+//! cleanup-on-drop.
 //!
 //! chat-client-rs includes this file via `#[path = "../../chat-server-rs/tests/support/mod.rs"]
 //! mod support;` rather than a new shared crate: neither crate depends on the
 //! other in `[dependencies]`, and a real Cargo path dependency between them
 //! (even dev-only) would be a heavier answer than a test module genuinely
-//! needs. See 05-step-migrate-owner-socket's own handoff for this choice.
+//! needs.
 
 use serde_json::Value;
 use std::fs;
@@ -32,11 +32,9 @@ const READY_POLLS: usize = 100;
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Walks up from THIS test binary's own path to the workspace's shared
-/// target/{debug,release}[/<triple>] directory, mirroring
-/// src/planning-server/tests/integration.rs's own `sibling_bin_dir()`
-/// precedent -- the directory every sibling package's own binary lands in
-/// when built alongside this crate, with no Cargo dependency edge needed to
-/// find it.
+/// target/{debug,release}[/<triple>] directory -- the directory every
+/// sibling package's own binary lands in when built alongside this crate,
+/// with no Cargo dependency edge needed to find it.
 fn sibling_bin_dir() -> PathBuf {
     let mut dir = std::env::current_exe().expect("current test binary path");
     dir.pop(); // the test binary itself
@@ -53,8 +51,7 @@ fn sibling_bin_dir() -> PathBuf {
 /// no Cargo dependency edge between the two crates), so a cross-crate spawn
 /// that only LOCATED a path would pass after a full workspace build and fail
 /// non-deterministically on an isolated single-package run -- exactly the
-/// problem `src/planning-server/tests/integration.rs`'s own `ensure_built()`
-/// helper exists to solve, mirrored here (AR-114, cycle 46).
+/// problem this function exists to solve.
 pub fn resolve_workspace_binary(name: &str) -> PathBuf {
     let bin_dir = sibling_bin_dir();
     // A built binary carries the platform's executable suffix (.exe on
@@ -168,7 +165,7 @@ pub struct ChatServer {
 }
 
 /// Spawn chat-server-rs against a fresh scratch home, waiting for it to
-/// report a port. `extra_env` mirrors the bash originals' own
+/// report a port. `extra_env` sets the
 /// `CHAT_ANNOUNCE`/`CHAT_BCAST`/`CHAT_BEACON_PORT`/`CHAT_ANNOUNCE_HOST`
 /// overrides.
 pub fn spawn_server(label: &str, extra_env: &[(&str, &str)]) -> ChatServer {
@@ -208,9 +205,8 @@ pub fn spawn_server(label: &str, extra_env: &[(&str, &str)]) -> ChatServer {
 }
 
 /// Run chat-client-rs once, with its own scratch `AI_CHAT_HOME`, and return
-/// its captured stdout as a `String`. Mirrors the bash originals' own `cli()`
-/// helper: one client state dir per operation, since the TOFU cert pin and the
-/// session cursor are both per-directory.
+/// its captured stdout as a `String`. One client state dir per operation,
+/// since the TOFU cert pin and the session cursor are both per-directory.
 pub fn run_client(home: &Path, args: &[&str]) -> std::process::Output {
     let binary = resolve_workspace_binary("chat-client-rs");
     Command::new(&binary)

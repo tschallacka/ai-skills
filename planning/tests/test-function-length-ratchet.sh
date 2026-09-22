@@ -4,13 +4,13 @@
 #
 # Usage: test-function-length-ratchet.sh
 #
-# CODE-STYLE.md section on size limits caps a function at 40 lines ("extract a
-# helper"), but nothing enforced it: launch_agent reached 93 lines before T33
-# named it. Splitting all 67 then-over-cap functions in one sweep is not the
-# move — several are deliberate data tables or recently reviewed gates — so the
-# debt is ratcheted instead: the count of over-cap functions may shrink, never
-# grow. A new over-cap function fails here; pay the cap at the moment you add
-# the code. On a genuine split, lower the cap in the same commit. Never raise it.
+# A function is capped at 40 lines ("extract a helper"), but nothing enforced
+# it, and several already-over-cap functions are deliberate data tables or
+# recently reviewed gates — splitting them all in one sweep is not the move,
+# so the debt is ratcheted instead: the count of over-cap functions may
+# shrink, never grow. A new over-cap function fails here; pay the cap at the
+# moment you add the code. On a genuine split, lower the cap in the same
+# commit. Never raise it.
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
@@ -124,9 +124,7 @@ for f in $(git -C "$root" ls-files '*.sh' | grep -v '^benchmark/results/'); do
     # they are no longer code whose function length can be ratcheted.
     [ -f "$root/$f" ] || continue
     # A function runs from its `name() {` line to the first column-0 closing
-    # brace; that is the same convention test-duplication-ratchet.sh uses to
-    # extract functions, and CODE-STYLE.md section 12 forbids nothing here:
-    # this is measuring shape, not parsing semantics.
+    # brace. This is measuring shape, not parsing semantics.
     while read -r len line name_; do
         [ -n "$len" ] || continue
         count=$((count + 1))

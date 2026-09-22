@@ -10,7 +10,6 @@
 // Cross-platform on purpose: on Unix these flows ride the socket
 // transport; on Windows the same `open` autostarts onto the loopback TCP
 // fallback, so every assertion below doubles as the fallback's test.
-// tcp_flow.rs pins the port transport explicitly on top of that.
 //
 // UPDATE after the first Windows run: the six socket-flow regressions
 // cannot be honestly claimed against a transport they do not drive, and
@@ -18,8 +17,7 @@
 // short-lived client calls (endpoint record gone, port dead, registry
 // unreachable) — unreproduced on Unix and worth its own focused
 // investigation rather than a widened net of asserts. Unix only until
-// that is understood; the Windows port fallback is proven by
-// tcp_flow.rs, which compiles and runs everywhere.
+// that is understood.
 #![cfg(unix)]
 
 use serde_json::{json, Value};
@@ -3265,10 +3263,9 @@ fn an_index_naming_action_is_refused_and_the_scan_still_works() {
 
 /// T99: the verbosity ladder, on the wire.
 ///
-/// Michael measured the problem: `open` on a two-line file was 1199 bytes over
-/// 47 lines and a one-word `insert` 378 bytes whose entire actionable content
-/// was `revision` and `dirty`. The cost lands hardest on the MCP surface,
-/// where every response is context an agent pays for on every edit.
+/// An unbounded response spends tokens on fields the caller didn't need for
+/// this step. The cost lands hardest on the MCP surface, where every
+/// response is context an agent pays for on every edit.
 ///
 /// What this pins is the four properties the ladder has to have, because each
 /// one is a way the change could be wrong rather than merely verbose:

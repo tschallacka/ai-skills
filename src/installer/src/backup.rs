@@ -3,8 +3,7 @@
 //! A backup only earns its clutter where nothing else can recover the file.
 //! Inside a git work tree the user already has history, so this says what
 //! happened and lets git be the recovery path; outside one, the `.back` file
-//! IS the only path. Mirrors install.sh's backup_file/recoverable_from_git
-//! (installer/src/60-install.sh).
+//! IS the only path.
 
 use std::fs;
 use std::io;

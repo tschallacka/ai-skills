@@ -3,10 +3,9 @@
 # test-profile-files-manifest.sh — profile_files() lists what .agents/profiles/
 # actually has, in both directions (T102).
 #
-# Mirrors tests/test-skill-files-manifest.sh's own two-directional check, cut
-# down to what a profile actually is: one file per profile, no dev/prod split,
-# no per-platform artifact. A hand list only works if something notices when
-# it drifts:
+# A two-directional check, cut down to what a profile actually is: one file
+# per profile, no dev/prod split, no per-platform artifact. A hand list only
+# works if something notices when it drifts:
 #
 #   listed but absent    profile_files() promises a file the profile does not
 #                        have -- a rename that was not carried through here
@@ -20,8 +19,8 @@
 set -euo pipefail
 export LC_ALL=C
 
-# See test-skill-files-manifest.sh's own comment for why these three are
-# unset before this check derives its own root from BASH_SOURCE.
+# This check derives its own root from BASH_SOURCE, so an inherited git
+# environment has nothing to contribute: drop it.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,19 +1,14 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Machine-facing CLI-mode subcommands install.sh exposes for the planning
-//! skill's own self-update tooling -- ported from install.sh's
-//! `--print-skill-files`/`--resolve-source`/`--install-skill` and their
-//! handlers (`cli_print_skill_files`/`cli_resolve_source`/`cli_install_skill`,
-//! installer/src/55-cli-handlers.sh).
+//! Machine-facing CLI-mode subcommands for the planning skill's own
+//! self-update tooling
+//! (`--print-skill-files`/`--resolve-source`/`--install-skill`).
 //!
-//! Deliberately distinct from the normal install path (install.rs) rather
-//! than routing through it: install.sh's own CLI mode refuses the whole
-//! install on any unmanaged collision instead of backing up and
-//! overwriting, and tracks a single `.version` marker rather than
-//! install.rs's per-file `.filehashes` digest -- this ports that same,
-//! stricter contract as its own thing, matching what bash itself does (its
-//! CLI handlers are a separate code path from the interactive install.sh
-//! function too).
+//! Deliberately distinct from the normal install path rather than routing
+//! through it: this CLI mode refuses the whole install on any unmanaged
+//! collision instead of backing up and overwriting, and tracks a single
+//! `.version` marker rather than a per-file digest -- a separate, stricter
+//! contract, kept as its own code path from the interactive install.
 
 use crate::install;
 use crate::integration;
@@ -42,14 +37,8 @@ fn git_output(source_root: &Path, args: &[&str]) -> Option<String> {
     }
 }
 
-/// This binary's own answer to install.sh's `SOURCE_VERSION` -- ported from
-/// `download_source`'s local-checkout branch only. Unlike install.sh, this
-/// binary never downloads a source tree itself (`installer/bootstrap.sh`
-/// does that before this binary ever runs), so `download_source`'s curl/
-/// tarball branches (a tag, a bare commit, or a remote branch ref) have
-/// nothing to port here -- `--source` always names a directory already on
-/// disk, which is exactly bash's "found `planning/SKILL.md` next to
-/// `$BASH_SOURCE`" case.
+/// This binary never downloads a source tree itself; `--source` always
+/// names a directory already resolved onto disk before this binary runs.
 fn source_version(source_root: &Path) -> String {
     let commit = git_output(source_root, &["rev-parse", "--short=12", "HEAD"])
         .unwrap_or_else(|| "unknown".to_string());
@@ -66,10 +55,9 @@ fn source_version(source_root: &Path) -> String {
     }
 }
 
-/// `"version"` from `package.json`'s top level, the same sed-extractable
-/// shape install.sh's own version_marker_content reads (rjq is a declared
-/// runtime dependency of some skills, so this file has to be readable
-/// before any skill's own tools are known to exist).
+/// `"version"` from `package.json`'s top level, parsed by hand rather than
+/// through a declared dependency: some skills need this file readable
+/// before any skill's own tools are known to exist.
 fn package_version(source_root: &Path) -> String {
     let Ok(content) = fs::read_to_string(source_root.join("package.json")) else {
         return "unknown".to_string();
@@ -93,9 +81,8 @@ fn package_version(source_root: &Path) -> String {
     "unknown".to_string()
 }
 
-/// installer/src/50-manifest.sh's `version_marker_content`. `AI_SKILLS_REF`
-/// mirrors install.sh's own env var of the same name, defaulting to
-/// `master`.
+/// Builds the version marker content recorded after an install.
+/// `AI_SKILLS_REF` selects the source ref recorded, defaulting to `master`.
 pub fn version_marker_content(source_root: &Path) -> String {
     let repo_ref = std::env::var("AI_SKILLS_REF").unwrap_or_else(|_| "master".to_string());
     format!(
@@ -105,8 +92,7 @@ pub fn version_marker_content(source_root: &Path) -> String {
     )
 }
 
-/// `installer print-skill-files planning` -- ported from
-/// `cli_print_skill_files`. Refuses any skill but planning, same as bash:
+/// `installer print-skill-files planning`. Refuses any skill but planning:
 /// this is planning's own self-update tooling, not a general-purpose file
 /// lister.
 pub fn print_skill_files(source_root: &Path, skill: &str) -> Result<String, String> {
@@ -116,8 +102,7 @@ pub fn print_skill_files(source_root: &Path, skill: &str) -> Result<String, Stri
     fs::read_to_string(source_root.join("planning/PACKAGE-MANIFEST.tsv")).map_err(|e| e.to_string())
 }
 
-/// `installer resolve-source planning <relative>` -- ported from
-/// `cli_resolve_source`.
+/// `installer resolve-source planning <relative>`.
 pub fn resolve_source_file(
     source_root: &Path,
     skill: &str,
@@ -140,17 +125,16 @@ pub enum CliInstallOutcome {
     Collision,
 }
 
-/// `installer install-skill <skill> --target DIR --approval yes|no` --
-/// ported from `cli_install_skill`. Unlike install.rs's own `install_skill`
-/// (which backs up a changed file and overwrites it unconditionally), this
-/// refuses the whole install on ANY unmanaged collision -- an existing file
-/// or symlink this run does not already own -- unless every collision is
-/// exactly the shared `.version` marker showing this is an upgrade of an
-/// install this same mechanism made (`managed_version_transition`), and
-/// even then only when nothing collided is itself a symlink. Exit-code
-/// contract, mapped by the caller: 0 installed, 2 approval declined
-/// (nothing written), 3 an unsafe or unmanaged collision (nothing written)
-/// -- install.sh's own documented contract for this entry point.
+/// `installer install-skill <skill> --target DIR --approval yes|no`.
+/// Unlike the interactive install path (which backs up a changed file and
+/// overwrites it unconditionally), this refuses the whole install on ANY
+/// unmanaged collision -- an existing file or symlink this run does not
+/// already own -- unless every collision is exactly the shared `.version`
+/// marker showing this is an upgrade of an install this same mechanism
+/// made (`managed_version_transition`), and even then only when nothing
+/// collided is itself a symlink. Exit-code contract, mapped by the caller:
+/// 0 installed, 2 approval declined (nothing written), 3 an unsafe or
+/// unmanaged collision (nothing written).
 pub fn install_skill_cli(
     source_root: &Path,
     skill: &str,
@@ -229,8 +213,7 @@ pub fn install_skill_cli(
         let source_file = source_root.join(skill).join(relative);
         // T72: a `bin/<triple>/<file>` entry goes to the shared bin every
         // skill's binaries now live in, never under this skill's own
-        // destination -- see install.rs's own copy loop, which this
-        // mirrors, and shared_bin's doc comment.
+        // destination.
         if let Some(filename) = shared_bin::shared_binary_filename(relative) {
             let shared_dir = shared_bin::shared_bin_dir(home);
             fs::create_dir_all(&shared_dir).map_err(|e| e.to_string())?;
@@ -385,10 +368,10 @@ mod tests {
 
     #[test]
     fn install_skill_cli_reinstalling_unchanged_content_is_still_a_collision() {
-        // Bash's own rule: an identical .version marker means nothing
-        // changed, which is NOT the upgrade case -- managed_version_transition
-        // only fires when the marker DIFFERS. Re-running with nothing
-        // changed at all is an ordinary, unmanaged-looking collision.
+        // An identical .version marker means nothing changed, which is NOT
+        // the upgrade case -- managed_version_transition only fires when
+        // the marker DIFFERS. Re-running with nothing changed at all is an
+        // ordinary, unmanaged-looking collision.
         let dir = tempfile::tempdir().unwrap();
         write(&dir.path().join("todo/SKILL.md"), "# todo v1\n");
         let target = tempfile::tempdir().unwrap();
@@ -450,8 +433,7 @@ mod tests {
     // Windows symlinks need elevated privileges (or Developer Mode) and a
     // different API (std::os::windows::fs::symlink_file); this test's whole
     // point is unix symlink behavior, so it is skipped there rather than
-    // ported, the same shape interactive-shell's whole crate is excluded on
-    // Windows in ci.yml for a deeper platform reason.
+    // ported.
     #[cfg(unix)]
     #[test]
     fn install_skill_cli_refuses_even_a_managed_upgrade_over_a_symlink() {

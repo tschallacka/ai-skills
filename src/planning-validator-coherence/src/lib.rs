@@ -1,8 +1,6 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Intra-document self-coherence checks (B110) formerly provided by
-//! `validate-plan-coherence-lib.sh` and its two awk programs
-//! (`validate-plan-stale-wording.awk`, `validate-plan-countable-enumeration.awk`).
+//! Intra-document self-coherence checks (B110).
 
 use planning_validator_common::Findings;
 use planning_validator_stale::STALE_MARKERS;
@@ -17,8 +15,8 @@ struct Paragraph {
     is_retraction: bool,
 }
 
-/// `^#+ ` in the shared awk programs: one or more `#` immediately followed by
-/// a space, anchored at the start of the line.
+/// A heading line: one or more `#` immediately followed by a space,
+/// anchored at the start of the line.
 fn is_heading_line(line: &str) -> bool {
     let hashes = line.chars().take_while(|&c| c == '#').count();
     hashes >= 1 && line.as_bytes().get(hashes) == Some(&b' ')
@@ -43,10 +41,9 @@ fn flush_paragraph(
     current.clear();
 }
 
-/// Paragraphs after the first heading, blank-line and heading delimited, each
-/// flattened to one line -- the same buffering `flush()` uses in both awk
-/// programs (a heading flushes and starts a new paragraph; text before the
-/// first heading is never counted).
+/// Paragraphs after the first heading, blank-line and heading delimited,
+/// each flattened to one line: a heading flushes and starts a new
+/// paragraph; text before the first heading is never counted.
 fn paragraphs(text: &str) -> Vec<Paragraph> {
     let mut result = Vec::new();
     let mut current = String::new();
@@ -78,10 +75,7 @@ fn paragraphs(text: &str) -> Vec<Paragraph> {
 /// Double-quoted spans, or single-quoted spans whose opening quote is not
 /// itself a contraction's apostrophe (guarded by requiring the character
 /// before it not be a letter, and the character after its closing match not
-/// be a letter), at least 8 characters long. Mirrors `extract_claims` in
-/// `validate-plan-stale-wording.awk` exactly, character by character, since
-/// POSIX awk's char-scanned approach has no direct regex equivalent here that
-/// preserves the same contraction guard.
+/// be a letter), at least 8 characters long.
 fn extract_claims(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len();

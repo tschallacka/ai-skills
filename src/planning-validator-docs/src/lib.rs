@@ -1,7 +1,6 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Document-level validation passes formerly provided by
-//! `validate-plan-docs-lib.sh`.
+//! Document-level validation passes.
 
 use planning_validator_common::{get_single_field, require_heading, Findings};
 use regex::Regex;
@@ -28,7 +27,7 @@ pub struct DocumentState {
     pub plan_docs: Vec<PathBuf>,
 }
 
-/// Return the shell pass's status code while recording ordinary missing-input
+/// Returns a process status code while recording ordinary missing-input
 /// findings in the shared accumulator.
 pub fn validate_existence(plan: &Path, findings: &mut Findings) -> i32 {
     if !plan.is_dir() {
@@ -49,7 +48,7 @@ pub fn validate_existence(plan: &Path, findings: &mut Findings) -> i32 {
 }
 
 /// Check the marker used to retire old plans. `None` means validation may
-/// continue; `Some(65)` is the hard refusal used by the shell entry point.
+/// continue; `Some(65)` is a hard refusal.
 pub fn validate_obsolete(plan: &Path, script_name: &str) -> Option<i32> {
     let marker = plan.join("OBSOLETE");
     if !marker.is_file() {
@@ -75,8 +74,8 @@ pub fn validate_obsolete(plan: &Path, script_name: &str) -> Option<i32> {
     Some(65)
 }
 
-/// Detect duplicate numeric step prefixes within each goal and report the
-/// same collision description consumed by the shell pass.
+/// Detect duplicate numeric step prefixes within each goal and report a
+/// collision description for each.
 pub fn validate_step_numbers(plan: &Path, findings: &mut Findings) {
     let Ok(goals) = std::fs::read_dir(plan) else {
         return;
@@ -93,8 +92,7 @@ pub fn validate_step_numbers(plan: &Path, findings: &mut Findings) {
             };
             // A testing companion shares its step's number by design (B335) --
             // exclude it before counting rather than reporting it as a
-            // collision, matching plan_duplicate_step_numbers.sh's own
-            // `case ... in *-testing.md) continue ;; esac`.
+            // collision.
             if name.ends_with("-testing.md") {
                 continue;
             }
@@ -249,7 +247,7 @@ pub fn validate_plan_documents(
 
 /// Hardens every plan document against hand-edit damage:
 /// helper-flag-shaped text, duplicate paragraph labels, and shell-variable
-/// path fragments. Ported from `plan_validate_plan_docs_hardening`.
+/// path fragments.
 fn validate_hardening(plan_docs: &[PathBuf], findings: &mut Findings) {
     let swallowed_flag = swallowed_flag_regex();
     let label_line = paragraph_label_regex();

@@ -15,13 +15,9 @@ use std::time::Duration;
 /// How many 10ms polls a readiness wait is allowed: 3000, so thirty seconds.
 ///
 /// These loops were `0..100`, a ONE second budget, which is ample on a Linux
-/// runner and far too tight on the macOS one. In run 33793295763, 17 of 19
-/// tests here failed on it while the binary and its socket were both fine:
-/// `signal_cleanup_removes_socket` created and removed a socket successfully
-/// and `malformed_cli_arguments_do_not_panic` ran the CLI, so neither bind nor
-/// the executable was at fault. The macOS runner is a shared, oversubscribed
-/// VPS that pauses for other tenants, so a readiness budget has to cover the
-/// worst scheduling delay rather than the typical one.
+/// runner and far too tight on the macOS one. The macOS runner is a shared,
+/// oversubscribed VPS that pauses for other tenants, so a readiness budget
+/// has to cover the worst scheduling delay rather than the typical one.
 ///
 /// It is a CEILING, not a sleep: every loop returns the moment its condition
 /// holds, so a healthy run is no slower than it was. Only a genuine failure
@@ -40,12 +36,10 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 // makes the failure read as a missing socket rather than an expired child.
 //
 // These were 30 seconds, which is generous on a workstation and a bet on the
-// macOS runner. Measured 2026-09-04: this suite takes 1.05s here and 151.94s
-// on the aarch64-apple-darwin leg -- about 150x -- and
-// `cli_text_preserves_spaces_and_input_help_is_available` duly lost the bet,
-// reporting `socket present: false` with ENOENT because `sleep 30` had ended
-// and the wrapper had cleaned up behind it. See
-// .agents/knowledge/github-ci-runners.md.
+// macOS runner. A shared macOS CI runner needed a longer fixture value than
+// that original 30s: a fixture can outlive the socket-readiness wait on a
+// slow enough leg, and the failure then reads as a missing socket rather
+// than an expired child.
 //
 // 600 costs a healthy run nothing: every test that needs its wrapper gone
 // either kills it or asserts against its exit, so nothing waits out the
@@ -60,9 +54,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Where a wrapper's stderr is kept, inside the test's own directory.
 ///
 /// It was `Stdio::null()`. That is why a wrapper that failed before it could
-/// bind produced seventeen "socket did not appear" panics on the macOS runner
-/// and not one line saying what went wrong -- the diagnosis had to be guessed
-/// at from which tests failed. A FILE and not a pipe, because the wrapper
+/// bind produced only a "socket did not appear" panic and not one line saying
+/// what went wrong -- the diagnosis had to be guessed at from which tests
+/// failed. A FILE and not a pipe, because the wrapper
 /// outlives the assertion and a pipe nobody drains blocks it once the buffer
 /// fills; opened for append so several wrappers in one directory accumulate
 /// rather than truncating each other.
@@ -186,9 +180,9 @@ fn wait_for_socket(dir: &Path) {
 
 /// Poll `observe` until the screen carries `needle`, and return that snapshot.
 ///
-/// SKILL.md states the contract this exists to honour: an ack means the WRAPPER
-/// accepted the input, never that the program acted on it, so a state change is
-/// confirmed against the next screen. Text typed at a `sleep` appears only
+/// An ack means the WRAPPER accepted the input, never that the program acted
+/// on it, so a state change is confirmed against the next screen. Text typed
+/// at a `sleep` appears only
 /// because the tty line discipline echoes it, which means it has to travel
 /// input -> pty master -> echo -> the wrapper's read loop -> the screen model
 /// before any observe can see it. A single observe straight after the ack is
@@ -280,32 +274,26 @@ fn exchange(dir: &Path, stream: &mut ClientStream, body: &str) -> String {
 ///
 /// NOT `UnixStream::connect(dir.join("socket"))`. That is an absolute address,
 /// and sun_path caps a Unix socket address at 104 bytes. On macOS $TMPDIR is a
-/// per-user `/var/folders/<2>/<28>/T/` path, run-tests.sh adds its own scratch
-/// directory and each test names its own, so the address arrives at ~110 bytes
-/// and every connect fails with "path must be shorter than SUN_LEN". The
-/// library already answers this with `connect_in_directory`, whose other half
-/// is `bind_in_directory`; its own doc comment says both ends have to be
-/// relative or the shorter one just moves the failure. The tests are the third
-/// end of that rule and were still connecting absolutely.
+/// per-user, deeply nested path, and the scratch directory each test creates
+/// pushes the address past that cap, so every connect fails with "path must
+/// be shorter than SUN_LEN". The library already answers this with
+/// `connect_in_directory`, whose other half is `bind_in_directory`: both ends
+/// have to be relative or the shorter one just moves the failure. The tests
+/// are the third end of that rule and were still connecting absolutely.
 ///
-/// Reproduced on Linux by lengthening $TMPDIR alone -- 8 passed, 11 failed, the
-/// same eleven as the macOS legs, with `exists=true` printed beside the SUN_LEN
-/// error. The socket was present and connectable by name the whole time.
 /// WHY THE LOCK. `connect_in_directory` gets its relative address by moving the
 /// process into the directory with `fchdir`, and the cwd is per PROCESS, not per
 /// thread. The wrapper is single-threaded so it pays nothing for that; this
-/// binary runs nineteen tests as threads in one process, so an unguarded move
-/// lets one test's connect run while another test's cwd is in force. Measured,
-/// not feared: connecting by name with no lock failed 3 runs out of 3 with
-/// `Connection reset by peer`, and passed with `--test-threads=1`. The same
+/// binary runs its tests as threads in one process, so an unguarded move lets
+/// one test's connect run while another test's cwd is in force. The same
 /// hazard is why `the_socket_is_bound_by_name_inside_the_held_directory` and its
 /// sibling are serialised in the library's own unit tests.
 ///
 /// The lock covers the move and nothing else -- `exchange` reads and writes
-/// after it is released -- so the suite still finishes in about a second.
+/// after it is released -- so the suite still finishes quickly.
 /// A poisoned lock is recovered rather than propagated: the poison would come
-/// from some other test's panic, and turning that into eighteen further
-/// failures hides the one that matters.
+/// from some other test's panic, and propagating it would hide the failure
+/// that actually matters.
 static CWD_LOCK: Mutex<()> = Mutex::new(());
 
 fn connect_socket(dir: &Path) -> Result<ClientStream, String> {
@@ -682,17 +670,14 @@ fn view_is_compact_numbered_and_supports_rows_and_deltas() {
     let dir = temp_dir("view");
     let mut child = start(
         &dir,
-        // Driven by input, NOT by a timer. It was
-        // `printf ONE; sleep .1; printf '\\rTWO'; sleep 1`, which rewrites row 1
-        // a tenth of a second after start, whatever the test is doing -- so the
-        // two `view` assertions below only hold while the test outruns that
-        // sleep. On x86_64-apple-darwin it did not: the range assertion saw
-        // `001 [001-003] TWO` (reproduced locally by inserting a 300ms sleep
-        // before the range view), which read as "row 2 is missing" and is
-        // really "row 1 has already moved on". `read` makes the screen change
-        // exactly when this test sends a line and never before; `stty -echo`
-        // keeps that line off the screen, and the trailing `read` parks the
-        // shell until shutdown so no second timer can end it early.
+        // Driven by input, NOT by a timer. A timer-based rewrite races this
+        // test's own assertions, and a slow-enough runner can see row 1
+        // already moved on where a fast one still sees it fresh -- which
+        // reads as "row 2 is missing" when it is really "row 1 changed
+        // first". `read` makes the screen change exactly when this test
+        // sends a line and never before; `stty -echo` keeps that line off
+        // the screen, and the trailing `read` parks the shell until
+        // shutdown so no second timer can end it early.
         &[
             "sh",
             "-c",
@@ -1089,10 +1074,7 @@ fn observe_drops_osc8_elements_after_their_cells_are_erased() {
             "sh",
             "-c",
             // Input-driven, like the view test: the erase happens when this
-            // test asks for it. It was `sleep 0.2; printf '\\033[2J'; sleep 2`
-            // read by a blind `thread::sleep(500ms)`, which is a bet on both
-            // ends -- too early and the erase has not run, too late and the
-            // fixture has exited and taken the socket with it.
+            // test asks for it, not on a timer racing the assertion.
             "stty -echo; printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; read _go; printf '\\033[2J'; read _park",
         ],
         "600",
@@ -1150,24 +1132,21 @@ fn malformed_cli_arguments_do_not_panic() {
 
 /// A request whose body arrives after the connect is still served.
 ///
-/// This is the macOS failure of run 33890018179 turned into a test. The
-/// listener is non-blocking so the run loop can poll it between reads of the
-/// pty master, and BSD copies that O_NONBLOCK onto the socket `accept()`
-/// returns while Linux does not. So on macOS the wrapper's first read of a
-/// request that had not yet arrived returned EAGAIN, client() failed, the
-/// connection was dropped, and the caller's input never reached the program:
+/// This is a macOS-specific failure turned into a test. The listener is
+/// non-blocking so the run loop can poll it between reads of the pty master,
+/// and BSD copies that O_NONBLOCK onto the socket `accept()` returns while
+/// Linux does not. So on macOS the wrapper's first read of a request that had
+/// not yet arrived returned EAGAIN, client() failed, the connection was
+/// dropped, and the caller's input never reached the program:
 ///
 ///     interactive-shell client: Resource temporarily unavailable (os error 35)
 ///
 /// 35 is EAGAIN on macOS and 11 on Linux, so even the errno differs by leg.
 ///
 /// The delay is what makes the mechanism reachable on either platform. Without
-/// it the request is always already buffered by the time the wrapper reads, so
-/// the defect is invisible on a fast machine: injecting `set_nonblocking(true)`
-/// alone left all 19 tests passing here, and only the pause reproduced CI.
-/// Measured all three ways -- bug+delay fails with EAGAIN, fix+delay passes,
-/// bug without the delay passes, which is why Linux never saw it. One test pays
-/// the 150ms rather than every exchange in this file.
+/// it the request is always already buffered by the time the wrapper reads,
+/// so the defect is invisible on a fast machine. One test pays the delay
+/// rather than every exchange in this file.
 #[test]
 fn a_request_body_that_arrives_late_is_still_served() {
     let dir = temp_dir("late-body");
@@ -1183,7 +1162,7 @@ fn a_request_body_that_arrives_late_is_still_served() {
     );
     // Reaped, not just killed: clippy::zombie_processes is denied here, and a
     // fixture parked for 600 seconds is exactly the one worth not leaving
-    // behind on a runner that may go on to run another 200 tests.
+    // behind on a runner that goes on to run more tests.
     child.kill().ok();
     child.wait().ok();
 }

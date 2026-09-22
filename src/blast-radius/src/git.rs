@@ -65,8 +65,7 @@ pub fn merge_base(repo_root: &Path, base: &str) -> Option<String> {
     }
 }
 
-/// Count of non-blank lines of `git log --oneline <range> -- <path>`,
-/// matching bash's own `grep -c .`.
+/// Count of non-blank lines of `git log --oneline <range> -- <path>`.
 pub fn log_oneline_count(repo_root: &Path, range: &str, path: &str) -> usize {
     let output = Command::new("git")
         .args(["log", "--oneline", range, "--", path])

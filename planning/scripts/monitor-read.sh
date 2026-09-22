@@ -21,8 +21,8 @@
 # enforced per frame via supervision-frame.sh check.
 
 # NOTE: `usage` below prints lines 1-20 of this file as the help text, so the
-# docblock above MUST stay within the first 20 lines (CODE-STYLE.md section 2).
-# Anything added here goes below this comment, never into the docblock.
+# docblock above MUST stay within the first 20 lines. Anything added here
+# goes below this comment, never into the docblock.
 
 set -euo pipefail
 export LC_ALL=C
@@ -30,9 +30,8 @@ export LC_ALL=C
 # ─────────────────────────────────────────────────────────────────────────────
 # Compiled-binary preference
 # ─────────────────────────────────────────────────────────────────────────────
-# See plan_exec_compiled_binary_if_present's own doc comment
-# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
-# exec-vs-fall-through mechanism.
+# Exec into the compiled binary when one is present, falling through to the
+# bash implementation otherwise.
 mr_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$mr_script_dir/plan-core-lib.sh"
 plan_exec_compiled_binary_if_present monitor-read "$mr_script_dir" "$@"

@@ -2,10 +2,9 @@
 // PACKAGE: PROD
 
 //! Git runs hooks with the caller's environment, which may provide a
-//! different cargo than the repository's pinned toolchain. Mirrors
-//! pre-push-check.sh's own header: re-enter the flake once, using the same
-//! two marker variables the bash original checks, before any gate that shells
-//! to cargo, shellcheck, or bash32 runs.
+//! different cargo than the repository's pinned toolchain. Re-enter the
+//! flake once, using two marker variables, before any gate that shells to
+//! cargo, shellcheck, or bash32 runs.
 
 use std::env;
 use std::process::Command;
@@ -13,9 +12,7 @@ use std::process::Command;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
-// The bash original derives its own name from `${0##*/}`, which in every
-// real invocation (the git hook, a direct call) is "pre-push-check.sh" --
-// the literal file name, not the compiled binary's own bare name.
+// The literal script file name, not the compiled binary's own bare name.
 const PROGRAM: &str = "pre-push-check.sh";
 // The compiled binary's own file name, used only to resolve a fallback exec
 // target if this process cannot read its own path -- must NOT carry the

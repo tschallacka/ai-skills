@@ -8,24 +8,19 @@
 # bash implementation, completely unchanged.
 #
 # One owner for a block two dispatcher scripts each carried as a hand-written
-# copy: 45+ more scripts are due to wire onto this pattern, and copy-pasting
-# it into each is the same "one owner per concern" violation paid for
-# elsewhere. Mirrors plan_crypt_resolve.sh's own resolve-then-fall-through
-# shape: nothing breaks when no binary is present.
+# copy: copy-pasting it into each script is the same "one owner per concern"
+# violation paid for elsewhere. Resolve-then-fall-through: nothing breaks
+# when no binary is present.
 #
 # PLANNING_SKILL_ROOT is exported unconditionally before the exec: walk UP
 # from caller_script_dir (itself included) for the nearest ancestor
-# containing a planning/scripts subdirectory -- matching skill_root()'s own
-# convention on the binary side, so the two agree by construction rather
-# than a depth constant staying in sync with wherever a caller lives. NOT a
-# fixed two-levels-up computation: that worked for every caller through goal
-# 13 (planning/scripts, ci-failures/scripts, both two levels below root) but
-# broke goal 14's pre-push-check.sh, wired AT the repo root itself (B344 only
-# changed which fixed depth was hardcoded, never made it depth-independent;
-# found by adversarial review, confirmed by tracing the arithmetic directly).
-# Prints nothing and returns 1 if no such ancestor exists short of /, which
-# the caller treats as "could not resolve." A binary that never reads the
-# variable (confirmed for update-plan-content) simply ignores it.
+# containing a planning/scripts subdirectory, so resolution is by
+# construction rather than a depth constant staying in sync with wherever a
+# caller lives. NOT a fixed two-levels-up computation: a fixed depth breaks
+# for any caller that does not sit exactly that many levels below the repo
+# root. Prints nothing and returns 1 if no such ancestor exists short of /,
+# which the caller treats as "could not resolve." A binary that never reads
+# the variable simply ignores it.
 #
 # Sourcing plan-crypt-lib.sh is harmless even when the caller sources it
 # again later (only (re)defines functions, nothing readonly); every name it
@@ -34,16 +29,14 @@
 # NOT harmless, and not fixable from inside this function: plan-crypt-lib.sh
 # sets `set -euo pipefail` at its own top, and a `source` shares this shell's
 # option state rather than a subshell's -- so a caller that deliberately runs
-# without -e (run-tests.sh's own `set -uo pipefail`, so one failing
-# build-tool call does not abort the whole suite before its summary prints)
-# has that silently revoked on the fall-through path, regardless of whether
-# the exec above ever runs (found in goal 15/T145: this exact leak turned an
-# unguarded generate-portability.sh failure into a whole-script abort). Fix
-# belongs at the CALL SITE, not here, since -e is already on by the time this
-# function is even entered: force your own options back immediately after
-# calling this function (unreached on the exec path) -- e.g. run-tests.sh's
-# own `set +e; set -uo pipefail`. Skip it if `-euo pipefail` is already what
-# you want (ci-failures.sh, update-plan-content.sh, validate-plan.sh).
+# without -e (so one failing build-tool call does not abort the whole suite
+# before its summary prints) has that silently revoked on the fall-through
+# path, regardless of whether the exec above ever runs. Fix belongs at the
+# CALL SITE, not here, since -e is already on by the time this function is
+# even entered: force your own options back immediately after calling this
+# function (unreached on the exec path) -- e.g. `set +e; set -uo pipefail`.
+# Skip it if `-euo pipefail` is already what you want (ci-failures.sh,
+# update-plan-content.sh, validate-plan.sh).
 #
 # Resolved relative to THIS function's own definition file (BASH_SOURCE[0]
 # in a function is always where it was defined, not called from), not

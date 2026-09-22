@@ -1,18 +1,17 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Builds one frame as exactly `rows` lines of exactly `cols` display cells,
-//! independent of the terminal -- so it is unit-testable the way
-//! 36-ui-render.sh's IUI_POSITION=0 headless mode is, without a live tty.
-//! ASCII-only content (skill names/descriptions are ASCII in manifest.rs),
-//! so byte length is cell width throughout; the box-drawing is plain ASCII
-//! (+, -, |), not the Minecraft glyph set 35/36-ui-*.sh draw.
+//! Builds one frame as exactly `rows` lines of exactly `cols` display
+//! cells, independent of the terminal, so it is unit-testable without a
+//! live tty. ASCII-only content (skill names/descriptions are ASCII), so
+//! byte length is cell width throughout; the box-drawing is plain ASCII
+//! (+, -, |).
 //!
 //! The mascot itself is NOT drawn here: when `layout.mascot_on`, this just
 //! reserves its rows as blank cells (a separator line, then `mascot::HEIGHT`
-//! blank rows) in the list pane. mod.rs paints the actual sprite as a
-//! colored overlay at an absolute position after this frame is drawn --
-//! mixing SGR escapes into these strings would break the "every line is
-//! exactly `cols` display cells" invariant every test here checks.
+//! blank rows) in the list pane. The actual sprite is painted as a colored
+//! overlay at an absolute position after this frame is drawn -- mixing SGR
+//! escapes into these strings would break the "every line is exactly
+//! `cols` display cells" invariant every test here checks.
 
 use super::layout::Layout;
 use super::model::{Focus, PickerState};
@@ -31,8 +30,7 @@ pub(crate) fn pad(text: &str, width: usize) -> String {
     format!("{text:<width$}")
 }
 
-/// Word-wraps to `width`, hyphenating a token wider than the pane -- ported
-/// from installer/src/35-ui-model.sh's iui_wrap.
+/// Word-wraps to `width`, hyphenating a token wider than the pane.
 fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(8);
     let mut lines = Vec::new();
@@ -94,9 +92,8 @@ fn list_row(state: &PickerState, index: usize, width: usize) -> String {
 }
 
 /// Name, description, install status, DEPENDENCIES (when requires.tsv named
-/// any), and ACTIONS' `m` line (when the skill offers more than one
-/// integration mode) -- `d`/`r` (dependency-install-hint text, reverify)
-/// stay unported, since those read installer/tools.tsv's own hint table.
+/// any), and ACTIONS (dependency help, reverify, and the `m` line when the
+/// skill offers more than one integration mode).
 pub(crate) fn info_lines(state: &PickerState, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let skill = &state.skills[state.cursor];
@@ -144,9 +141,9 @@ pub(crate) fn info_lines(state: &PickerState, width: usize) -> Vec<String> {
             }
         }
     }
-    // Always listed, same as install.sh's iui_info_actions -- usable only
-    // when the info pane has focus, but named here regardless so a reader
-    // in the list pane already knows what focusing it offers.
+    // Always listed, usable only when the info pane has focus, but named
+    // here regardless so a reader in the list pane already knows what
+    // focusing it offers.
     lines.push(pad("", width));
     lines.push(pad("ACTIONS", width));
     lines.push(pad("  d  help me install dependencies", width));

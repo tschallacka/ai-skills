@@ -14,11 +14,8 @@ use std::process::{Command, ExitCode};
 
 const DEFAULT_REPO_SLUG: &str = "tschallacka/ai-skills";
 
-// The usage block above `set -euo pipefail` in ci-failures.sh's own header
-// comment, verbatim (the bash script derives this at runtime via an awk
-// one-liner stripping the leading `# `; this port embeds the identical text
-// as a literal constant instead of re-deriving it from a comment, per W73's
-// own Instructions).
+// The usage text, embedded here as a literal constant rather than derived
+// at runtime.
 const USAGE: &str = r#"ci-failures - what actually failed in a CI run or pipeline, from a run/
 pipeline id, a PR/MR number, or a branch. Works against GitHub (gh) and
 GitLab (glab), detecting which one this repository's remote calls for.
@@ -93,14 +90,11 @@ enum ParsedArgs {
 }
 
 /// Pure argument parsing: never exits the process, so tests can assert on
-/// the parse result directly. Mirrors ci-failures.sh's own parsing exactly,
-/// including its own real quirk (verified directly against the bash source,
-/// not assumed): position 1 is ALWAYS taken as the target, whatever it is --
-/// `target="${1:-}"` -- with the sole exception of literal -h/--help. This
-/// means `ci-failures.sh --all` with no real target sets target="--all" (a
-/// bogus value) and leaves want_all false, since the flag loop only sees
-/// $2 onward; it is not an error in bash (--all is never reached as a flag)
-/// and is not "fixed" here, since this port's scope is behavioral parity.
+/// the parse result directly. Position 1 is ALWAYS taken as the target,
+/// whatever it is, with the sole exception of literal -h/--help. This means
+/// `--all` with no real target sets target="--all" (a bogus value) and
+/// leaves want_all false, since the flag loop only sees position 2 onward;
+/// this is deliberate, not a bug.
 fn parse_args(argv: &[String]) -> ParsedArgs {
     let mut it = argv.iter();
     let mut args = Args::default();
@@ -239,10 +233,10 @@ mod tests {
         );
     }
 
-    // A --raw=DIR or --all with no real target is a real bash quirk, verified
-    // directly against the source, not assumed: position 1 is ALWAYS the
-    // target (target="${1:-}"), so the flag itself becomes a bogus target
-    // string and the flag loop never runs at all (nothing left after shift).
+    // A --raw=DIR or --all with no real target is a deliberate quirk, not a
+    // bug: position 1 is ALWAYS the target (target="${1:-}"), so the flag
+    // itself becomes a bogus target string and the flag loop never runs at
+    // all (nothing left after shift).
     #[test]
     fn raw_equals_form_with_no_explicit_target_becomes_the_bogus_target() {
         assert_eq!(

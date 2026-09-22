@@ -1,16 +1,10 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! Grants Claude Code and opencode permission to touch the planning skill's
-//! own scripts, plan root, and tmp directory without a per-call prompt --
-//! ported from installer/src/70-permissions.sh's `claude_permissions`/
-//! `claude_merge_allow` and `opencode_permissions`/`opencode_merge_permission`.
-//!
-//! install.sh shells out to `rjq` to edit each agent's JSON config; this
-//! installer is Rust already, so it edits the JSON directly with serde_json
-//! instead of spawning a JSON tool. The merge semantics are kept identical
-//! for each agent's own config shape. Still unported: codex (config.toml,
-//! not JSON), the worktrees/interactive-shell/tui-hint-plugin/editor-
-//! steering grants, and opencode's own worktree variant.
+//! own scripts, plan root, and tmp directory without a per-call prompt.
+//! Each agent's JSON config is edited directly with serde_json rather than
+//! shelling out to a JSON tool, with merge semantics kept identical for
+//! each agent's own config shape.
 
 use crate::backup;
 use serde_json::{Map, Value};
@@ -35,32 +29,28 @@ fn claude_settings_path(home: &Path) -> PathBuf {
     home.join(".claude").join("settings.json")
 }
 
-/// `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-worktrees` -- ported from
-/// `worktrees_permission_step` in installer/src/70-permissions.sh. Unlike
-/// `plan_migration::default_root`'s plan root, there is no dedicated
-/// override variable for this one in install.sh either.
+/// `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-worktrees`. There is no
+/// dedicated override variable for this root.
 pub fn default_worktrees_root(home: &Path) -> PathBuf {
     crate::shared_bin::xdg_config_home_or(home).join("tsch-ai-worktrees")
 }
 
-/// `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills` -- the shared, cross-
-/// project directory `project-specifics/SKILL.md` documents writing
-/// `<project-name>-deviations.md` directly under (this is its PARENT, not
-/// `plan_migration::default_root`'s own `.../tsch-ai-skills/plans`
-/// subdirectory). Nothing granted an agent write access here before this
-/// existed: verified directly under codex's `--sandbox workspace-write`,
-/// where the write was refused outright ("writing outside of the project"),
-/// and the agent silently relocated the note into the project workspace
-/// instead -- defeating the note's entire cross-project-persistence point,
-/// with no warning that it had done so.
+/// `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills` -- the shared,
+/// cross-project directory a project's own deviations note is written
+/// directly under (this is that PARENT directory, not a `plans`
+/// subdirectory of it). Nothing granted an agent write access here before
+/// this existed: verified directly under codex's `--sandbox
+/// workspace-write`, where the write was refused outright ("writing
+/// outside of the project"), and the agent silently relocated the note
+/// into the project workspace instead, defeating the note's
+/// cross-project-persistence point with no warning that it had done so.
 pub fn default_tsch_ai_skills_root(home: &Path) -> PathBuf {
     crate::shared_bin::xdg_config_home_or(home).join("tsch-ai-skills")
 }
 
-/// The eight entries install.sh's `claude_permissions` grants for the
-/// planning skill: read/write on the plan root and the tmp directory, plus
-/// read and execute (both a direct and a `bash `-prefixed form) on the
-/// installed planning scripts directory.
+/// The entries granted for the planning skill: read/write on the plan root
+/// and the tmp directory, plus read and execute (both a direct and a
+/// `bash `-prefixed form) on the installed planning scripts directory.
 fn planning_entries(scripts: &str, plans: &str, tmp: &str) -> Vec<String> {
     vec![
         format!("Read({plans}/**)"),
@@ -174,9 +164,9 @@ pub fn claude_env_setting(key: &str, value: &str, home: &Path) -> io::Result<Env
     })
 }
 
-/// A JSON document read as an object, same as install.sh's `objectify`:
-/// anything that isn't already an object (a scalar, an array, or a file that
-/// failed to parse at all) reads as `{}` rather than refusing.
+/// A JSON document read as an object: anything that isn't already an
+/// object (a scalar, an array, or a file that failed to parse at all)
+/// reads as `{}` rather than refusing.
 pub(crate) fn as_object(value: Option<Value>) -> Map<String, Value> {
     match value {
         Some(Value::Object(map)) => map,
@@ -352,11 +342,10 @@ pub enum OpencodePermissionOutcome {
     /// comments or a trailing comma) -- rewriting it would strip content the
     /// user wrote, so nothing was touched.
     NotStrictJson,
-    /// `legacy_removed` and `added` are reported independently, same as
-    /// install.sh's two separate print statements: a stray Claude-style
-    /// `permission.allow` array (not a valid opencode shape) can be dropped
-    /// on the very same run that also adds fresh rules, or on a run that
-    /// adds nothing at all.
+    /// `legacy_removed` and `added` are reported independently: a stray
+    /// Claude-style `permission.allow` array (not a valid opencode shape)
+    /// can be dropped on the very same run that also adds fresh rules, or
+    /// on a run that adds nothing at all.
     Merged {
         legacy_removed: bool,
         added: Vec<String>,
@@ -378,9 +367,8 @@ pub(crate) fn opencode_configfile(home: &Path) -> PathBuf {
 }
 
 /// Resolves the config, creating a minimal one if missing, and backs it up
-/// otherwise -- mirrors install.sh's `opencode_prepare_config`. Returns
-/// `None` (having touched nothing) when an existing, non-empty file is not
-/// strict JSON.
+/// otherwise. Returns `None` (having touched nothing) when an existing,
+/// non-empty file is not strict JSON.
 pub(crate) fn opencode_prepare_config(cfg: &Path) -> io::Result<Option<()>> {
     if !cfg.is_file() {
         if let Some(parent) = cfg.parent() {
@@ -400,9 +388,9 @@ pub(crate) fn opencode_prepare_config(cfg: &Path) -> io::Result<Option<()>> {
     Ok(Some(()))
 }
 
-/// `rules` in 70-permissions.sh: a tool's own permission entry, normalized
-/// to a pattern->decision map. A bare string (opencode's shorthand for "this
-/// decision for every pattern") becomes a single `"*"` entry.
+/// A tool's own permission entry, normalized to a pattern->decision map. A
+/// bare string (opencode's shorthand for "this decision for every
+/// pattern") becomes a single `"*"` entry.
 fn rules_of(value: Option<&Value>) -> Map<String, Value> {
     match value {
         Some(Value::Object(map)) => map.clone(),
@@ -415,9 +403,9 @@ fn rules_of(value: Option<&Value>) -> Map<String, Value> {
     }
 }
 
-/// `base` in 70-permissions.sh: the existing `.permission` block, with any
-/// top-level Claude-style `allow`/`deny`/`ask` keys dropped, and a bare
-/// string shorthand spread across only the tools this grant cares about.
+/// The existing `.permission` block, with any top-level Claude-style
+/// `allow`/`deny`/`ask` keys dropped, and a bare string shorthand spread
+/// across only the tools this grant cares about.
 fn base_permission(permission: Option<&Value>, wanted_tools: &[&str]) -> Map<String, Value> {
     match permission {
         Some(Value::String(s)) => wanted_tools
@@ -684,7 +672,7 @@ pub fn opencode_project_specifics_permissions_remove(
 // array wherever it appears (a root-level dotted key or inside a
 // `[sandbox_workspace_write]` table look identical on the matching line, so
 // one search covers both). A multi-line array falls back to
-// `NotSingleLineArray`, same as install.sh's manual-instructions fallback.
+// `NotSingleLineArray` rather than being guessed at.
 
 pub enum CodexOutcome {
     /// No config file existed; one was written with just this array.

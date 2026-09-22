@@ -1,31 +1,17 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Runtime tool requirements -- ported from installer/src/20-runtime-tools.sh,
-//! but reads each skill's own `requires.tsv` directly rather than replicating
-//! install.sh's build-time code generation (installer/build.sh bakes
-//! requires.tsv into literal `case` statements in runtime_requirements() and
-//! friends). requires.tsv itself ships per skill in the release payload
-//! (it is `MODE: PROD` and listed in skill_files()), so there is nothing
-//! generated for this installer to regenerate: parsing the TSV at runtime
-//! is the whole story, and it can never drift from the source of truth the
-//! bash generator reads from either.
+//! Runtime tool requirements, read from each skill's own `requires.tsv`
+//! directly at runtime.
 //!
-//! Every `verify` row in installer/tools.tsv reduces to `command -v <tool>`
-//! (checked: no shipped row does anything else) with one exception this
-//! module still has to know about: rjq. install.sh never demands a system
-//! rjq -- `prepend_bundled_rjq` in 20-runtime-tools.sh puts the source
-//! tree's own prebuilt `planning/bin/<target-triple>/rjq` ahead of PATH
-//! before any dependency check runs, so a host with no system-wide rjq
-//! still satisfies the requirement as long as the release shipped one for
-//! this host's triple. This installer adds one further rung install.sh does
-//! not have: rjq is a jq-compatible reimplementation, so a system `jq` on
-//! PATH also satisfies the requirement when neither rjq nor a bundled
-//! artifact is found. `tool_available` is where all three rungs live; every
-//! other tool is a plain PATH lookup. Install hints
-//! (`runtime_requirement_install_hint`) live in `tools.rs`, not here, which
-//! reads `installer/tools.tsv` for the picker's `d` key -- `d`/`r`/`m`
-//! (dependency hints, reverify, integration-mode cycling) are all ported;
-//! see `ui::model::PickerState`.
+//! Every `verify` row reduces to `command -v <tool>` with one exception
+//! this module still has to know about: rjq. A bundled, per-triple rjq
+//! binary shipped in the release satisfies the requirement even with no
+//! system-wide rjq installed, and a system `jq` on PATH also satisfies it
+//! when neither rjq nor a bundled artifact is found, since rjq is a
+//! jq-compatible reimplementation. `tool_available` is where all three
+//! rungs live; every other tool is a plain PATH lookup. Install hints live
+//! in `tools.rs`, not here; `d`/`r`/`m` (dependency hints, reverify,
+//! integration-mode cycling) are handled in `ui::model::PickerState`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -127,10 +113,9 @@ fn host_arch() -> &'static str {
 }
 
 /// Every requirement `skill` carries on this host, groups already folded:
-/// rows sharing a non-empty group id become one any-of `Requirement`, using
-/// the first member's strength/why (installer/build.sh's generator assumes
-/// the same, since a mixed-strength group has no single answer to "is this
-/// requirement met").
+/// rows sharing a non-empty group id become one any-of `Requirement`,
+/// using the first member's strength/why, since a mixed-strength group has
+/// no single answer to "is this requirement met".
 pub fn requirements_for(source_root: &Path, skill: &str) -> Vec<Requirement> {
     let path = source_root.join(skill).join("requires.tsv");
     let Ok(content) = fs::read_to_string(&path) else {
@@ -183,12 +168,9 @@ fn is_executable(candidate: &Path) -> bool {
     }
 }
 
-/// The bundled rjq binary this release shipped for the running host, if any
-/// -- `planning/bin/<target-triple>/rjq[.exe]`, the same path
-/// `bundled_rjq_artifact`/`prepend_bundled_rjq` in 20-runtime-tools.sh
-/// resolve, kept in sync with them by going through `installer_platform`
-/// (the same crate `build-installer-release.sh`'s own target list is built
-/// from) rather than a second copy of the os/arch match.
+/// The bundled rjq binary this release shipped for the running host, if
+/// any -- `planning/bin/<target-triple>/rjq[.exe]`, resolved through
+/// `installer_platform` rather than a second copy of the os/arch match.
 fn bundled_rjq_path(source_root: &Path) -> Option<PathBuf> {
     let target = installer_platform::current().ok()?;
     let name = if target.is_windows() {
@@ -205,19 +187,17 @@ fn bundled_rjq_path(source_root: &Path) -> Option<PathBuf> {
 }
 
 /// A tool is available when it is on PATH, or -- for rjq only -- via two
-/// further rungs, checked in the order install.sh itself checks them:
+/// further rungs:
 ///
-/// 1. this release's own bundled artifact first, same as
-///    `prepend_bundled_rjq` putting `planning/bin/<triple>/` ahead of PATH
-///    before any dependency check runs, so a bundled rjq wins even over a
-///    different rjq already on PATH;
+/// 1. this release's own bundled artifact first, so a bundled rjq wins
+///    even over a different rjq already on PATH;
 /// 2. PATH itself second;
 /// 3. a system `jq` last, since rjq is a jq-compatible reimplementation --
 ///    wherever rjq would satisfy this requirement, jq does too, but only
-///    once install.sh's own two rungs have both come up empty.
+///    once the first two rungs have both come up empty.
 ///
-/// Every other tool has no such fallback: install.sh's own generated
-/// `runtime_tool_verify()` is a plain `command -v` for everything but rjq.
+/// Every other tool has no such fallback: a plain `command -v` lookup is
+/// the whole story.
 fn tool_available(source_root: &Path, tool: &str) -> bool {
     if tool != "rjq" {
         return tool_on_path(tool);
@@ -256,15 +236,14 @@ pub enum SkillState {
 pub struct SkillStatus {
     pub state: SkillState,
     /// The first hard-missing tool for Blocked, or the first soft-missing
-    /// one for Degraded -- install.sh's IUI_SKILL_BLOCKER, named in both
-    /// states since a Degraded row still needs to say what triggered it.
+    /// one for Degraded -- named in both states since a Degraded row still
+    /// needs to say what triggered it.
     pub blocker: Option<String>,
     pub requirements: Vec<(Requirement, bool)>,
 }
 
 /// blocked beats degraded: an unmet hard requirement stops the install, an
-/// unmet soft one only costs capability -- same rule as install.sh's
-/// iui_skill_state.
+/// unmet soft one only costs capability.
 pub fn skill_status(source_root: &Path, skill: &str) -> SkillStatus {
     let reqs = requirements_for(source_root, skill);
     let mut state = SkillState::Ok;
@@ -312,9 +291,9 @@ mod tests {
         f.write_all(content.as_bytes()).unwrap();
     }
 
-    // tool_available("rjq", ...) reads the process-global PATH, so every test
-    // that overrides it takes this lock first -- same reasoning as
-    // plan_migration.rs's ENV_LOCK.
+    // tool_available("rjq", ...) reads the process-global PATH, so every
+    // test that overrides it takes this lock first, so tests setting the
+    // same env var cannot race each other.
     static PATH_LOCK: Mutex<()> = Mutex::new(());
 
     fn write_fake_tool(dir: &Path, name: &str) -> PathBuf {

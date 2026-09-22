@@ -10,11 +10,8 @@
 //! verbosity 3, all data as it is now" — and "editing two lines, getting 15
 //! lines or more json back seems wasteful of tokens".
 //!
-//! Measured before this existed: `open` on a TWO-LINE file was 1199 bytes over
-//! 47 lines, carrying a four-field resources block, a 64-character
-//! server_generation and a session token on every call; a one-word `insert` was
-//! 378 bytes over 25 lines whose entire actionable content was `revision` and
-//! `dirty`. The cost lands hardest on the MCP surface, where every response is
+//! Unbounded responses spend tokens on fields the caller didn't need for this
+//! step. The cost lands hardest on the MCP surface, where every response is
 //! context an agent pays for on every edit — so response shape is a token
 //! budget, not a formatting preference.
 //!

@@ -5,15 +5,15 @@
 #
 # Usage: test-skill-provenance.sh
 #
-# The failure was silent (T52): an installed copy 290 lines adrift of canonical
-# behaved like a working skill, and the drift surfaced only when a reader
-# concluded the reader itself lacked a feature and hand-patched around it.
-# Nothing said which build was speaking. Silence is asserted here as strictly as
-# the warning — a staleness warning that fires without evidence is worse than
+# The failure was silent: an installed copy adrift of canonical behaved like
+# a working skill, and the drift surfaced only when a reader concluded the
+# reader itself lacked a feature and hand-patched around it. Nothing said
+# which build was speaking. Silence is asserted here as strictly as the
+# warning — a staleness warning that fires without evidence is worse than
 # none, because the response to it is to reinstall.
 #
-# This file is shipped, so it holds to the shipped-runtime dependency rule in
-# CODE-STYLE.md §1: bash, POSIX coreutils, awk, sed, grep, rjq only. No python3.
+# This file is shipped, so it holds to the shipped-runtime dependency rule:
+# bash, POSIX coreutils, awk, sed, grep, rjq only. No python3.
 
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh

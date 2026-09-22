@@ -118,16 +118,15 @@ enum Offer {
 ///
 /// The split is the fix for B122. The broadcast path used to hold `hub.writers`
 /// and then lock a second connection's state and write to its socket from the
-/// sender's thread. Two things followed, both measured:
+/// sender's thread.
 ///
-/// * A socket write blocks for as long as the peer declines to read, and it was
-///   blocking while holding `hub.writers` -- which the accept loop must take to
-///   register a new connection. So connects completed through the kernel
-///   backlog and were then never serviced.
-/// * Even with nothing blocking, the target's own thread holds its state across
-///   a 200ms `read_tls`, so a broadcaster contending for it loses that race
-///   almost every time. One idle subscriber was enough to starve the
-///   broadcaster for tens of seconds while it held `hub.writers`.
+/// A socket write blocks while the peer declines to read, and it was
+/// blocking while holding `hub.writers` -- which the accept loop must take to
+/// register a new connection, so connects completed through the kernel
+/// backlog and were then never serviced. And the target's own thread holds
+/// its state across a `read_tls` bounded by its 200ms timeout, so a
+/// broadcaster contending for that lock loses the race almost every time it
+/// runs, stalling on every other connection's state in turn.
 ///
 /// Distinct mutexes were never what made that safe -- safety needs a lock
 /// order, which the comment there claimed was unnecessary. Now there is one:
@@ -950,9 +949,6 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                     // the nick's channel membership was never dropped, leaving
                     // ghosts in NAMES; and the peer's outbox went on accepting
                     // broadcasts for a connection that was gone.
-                    //
-                    // `chat-client-rs send` sends QUIT as its last act, so this
-                    // was one leaked descriptor per message on the bus.
                     w(st, "ERROR :bye");
                     st.closed = true;
                     sess.closed = true;
@@ -1537,9 +1533,8 @@ fn bind_address(bind: &str) -> Option<std::net::IpAddr> {
 
 // Whether the client can dial this host at all.
 //
-// chat-client-rs splits a HOST:PORT on a colon and hands the head to TLS SNI
-// (`server_host`, src/chat-client-rs/src/main.rs), so a bare IPv6 literal is
-// rejected as an invalid DNS name before it is ever connected. Announcing one
+// A client resolves this host for TLS SNI, which rejects a bare IPv6
+// literal as an invalid DNS name before ever connecting. Announcing one
 // advertises an address nothing can use; announcing an IPv4 address instead
 // would advertise one this listener does not answer on. So an IPv6 bind
 // announces nothing and says why. B118 tracks the client-side support.
@@ -2276,9 +2271,8 @@ mod outbox_tests {
 
 // T133 (CAP negotiation) and T134 (message-tags on broadcast PRIVMSG). Like
 // membership_relay_tests above, the live parts (LS/REQ/END over a real
-// connection, registration actually held) need a socket and are covered by
-// tests/message_tags.rs (migrated from chat/tests/test-chat-cap-negotiation.sh
-// in T145 goal 25); what is pure here is tested here.
+// connection, registration actually held) need a socket; what is pure here
+// is tested here.
 #[cfg(test)]
 mod cap_negotiation_tests {
     use super::{negotiate_req, Hub, Peer, CAPABILITIES};

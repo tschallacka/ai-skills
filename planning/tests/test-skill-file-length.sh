@@ -4,24 +4,18 @@
 #
 # Usage: test-skill-file-length.sh
 #
-# Claude Code returns a PREFIX of a file at roughly 25,000 tokens and says
-# nothing: no notice in the tool result, no notice anywhere. A skill past that
-# is partly read and reads as fully read, and the agent cannot tell you — one
-# asked why content was missing answered that it had "declined to load the rest,
-# since it's repetitive filler" when a single unbounded Read had handed it 1,078
-# of 1,502 lines. Measured 2026-09-03 across three harnesses; the numbers and
-# the method are in .agents/knowledge/agent-read-limits.md.
+# A reading agent can be handed a PREFIX of a file past a token budget and
+# told nothing: no notice in the tool result, no notice anywhere. A skill
+# past that is partly read and reads as fully read, and the agent cannot
+# tell you.
 #
-# BYTES ARE THE PROXY, and the budget is deliberately below the observed cut.
-# planning/SKILL.md is 89,860 bytes and 2 of 3 real runs received 977 of its
-# 1,502 lines, so the cut fell near 58 KB for that prose-and-code mix — about
-# 2.3 bytes per token. Denser content tokenises worse and would cut sooner, so
-# the budget assumes 2 bytes per token: 25,000 tokens, 50,000 bytes.
+# BYTES ARE THE PROXY: the budget is 50,000 bytes (roughly 25,000 tokens),
+# deliberately below the observed cut so denser content that tokenises worse
+# still stays inside it.
 #
-# Ratcheted, not a hard cap, for the same reason as the function-length ratchet:
-# planning/SKILL.md WAS over budget, and splitting it (T87) is what got CAP to
-# 0. The COUNT of over-budget skills may shrink and never grow, so a new one
-# fails here at the moment it is added. Never raise CAP.
+# Ratcheted, not a hard cap: the COUNT of over-budget skills may shrink and
+# never grow, so a new one fails here at the moment it is added. Never raise
+# CAP.
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"

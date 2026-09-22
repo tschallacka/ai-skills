@@ -2,11 +2,8 @@
 // PACKAGE: PROD
 
 //! portability-rules.json's data model, parsed in-process via serde_json --
-//! the compiled binary has no rjq dependency at all, unlike the bash
-//! original. Replaces bash's own "rjq is required" fatal check (exit 69,
-//! meaningless once JSON parsing happens in-process) with a new, analogous
-//! failure mode: a missing or unparseable rules file exits 66 (EX_NOINPUT,
-//! matching the exit code bash's own `[ -f "$rules" ]` check already uses).
+//! the compiled binary has no rjq dependency at all. A missing or
+//! unparseable rules file exits 66 (EX_NOINPUT).
 
 use serde::Deserialize;
 use std::path::Path;

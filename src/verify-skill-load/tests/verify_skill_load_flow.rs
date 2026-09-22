@@ -35,19 +35,36 @@ fn relocated_binary(tag: &str) -> PathBuf {
     dest
 }
 
+/// A just-copied binary's own exec can race a fork() on another test thread
+/// that still holds the copy's write handle open (ETXTBSY); retry rather
+/// than fail the test on that transient error.
+fn run_relocated(command: &mut Command) -> std::process::Output {
+    let mut retries_left = 4;
+    loop {
+        match command.output() {
+            Ok(output) => return output,
+            Err(err) if err.raw_os_error() == Some(26) && retries_left > 0 => {
+                retries_left -= 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(err) => panic!("run the relocated binary: {err}"),
+        }
+    }
+}
+
 #[test]
 fn skill_root_failure_path_exits_69_with_the_exact_message() {
     let binary = relocated_binary("failure");
     let cwd = binary.parent().unwrap().to_path_buf();
-    let output = Command::new(&binary)
+    let mut command = Command::new(&binary);
+    command
         .current_dir(&cwd)
         .env_remove("PLANNING_SKILL_ROOT")
         .arg("--part")
         .arg("part-1")
         .arg("--token")
-        .arg("deadbeef")
-        .output()
-        .expect("run the relocated binary");
+        .arg("deadbeef");
+    let output = run_relocated(&mut command);
     assert_eq!(output.status.code(), Some(69));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(
@@ -69,15 +86,15 @@ fn planning_skill_root_env_overrides_a_broken_ancestor_walk() {
         .to_path_buf();
     assert!(repo_root.join("planning/scripts").is_dir());
 
-    let output = Command::new(&binary)
+    let mut command = Command::new(&binary);
+    command
         .current_dir(&outside_cwd)
         .env("PLANNING_SKILL_ROOT", &repo_root)
         .arg("--part")
         .arg("part-1")
         .arg("--token")
-        .arg("deadbeef")
-        .output()
-        .expect("run the relocated binary with PLANNING_SKILL_ROOT set");
+        .arg("deadbeef");
+    let output = run_relocated(&mut command);
     // Exit code is either 0 (verified), 1 (wrong token), 65 or 66 -- any of
     // those means skill_root() resolved and the real check ran; 69 would
     // mean resolution itself failed.

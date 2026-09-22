@@ -103,8 +103,8 @@ pub struct BuildOutcome {
     pub failed: Vec<String>,
 }
 
-/// Runs the full build loop against `repo_root` for `triple`, printing the
-/// same shape of per-crate progress lines bash's own loop does.
+/// Runs the full build loop against `repo_root` for `triple`, printing one
+/// progress line per crate.
 pub fn run(repo_root: &Path, triple: &str, exe_suffix: &str) -> BuildOutcome {
     let mut built = 0u32;
     let mut failed = Vec::new();
@@ -146,12 +146,10 @@ pub fn run(repo_root: &Path, triple: &str, exe_suffix: &str) -> BuildOutcome {
                 // A failure staging the sibling/skill-dir copies (rare: it
                 // would need permissions or disk-space trouble right after
                 // the primary copy just succeeded) is reported and this one
-                // crate is marked failed, but the run continues -- a
-                // deliberate, documented improvement over bash's own
-                // set -euo pipefail, which would abort the ENTIRE remaining
-                // build over one crate's extra-copy failure. Matches the
-                // per-crate failure isolation the primary copy and the
-                // build step above already have.
+                // crate is marked failed, but the run continues rather than
+                // aborting the entire remaining build over one crate's
+                // extra-copy failure -- the same per-crate failure isolation
+                // the primary copy and the build step above already have.
                 if let Err(error) = stage_extras(repo_root, triple, exe_suffix, crate_name, binary)
                 {
                     eprintln!("      | staging failed: {error}");
@@ -186,11 +184,11 @@ fn built_artifact(repo_root: &Path, triple: &str, exe_suffix: &str, binary: &str
         .join(format!("{binary}{exe_suffix}"))
 }
 
-/// Just the bin/<triple>/ copy -- the ONE staging step bash's own script
-/// completes before printing "ok -> bin/...". Splitting this out from the
-/// sibling/skill-dir copies below is what makes that print ordering
-/// reproducible: bash's own printf for "ok -> ..." runs BEFORE the
-/// planning/scripts and skill-dir cp calls, not after them.
+/// Just the bin/<triple>/ copy -- the ONE staging step completed before
+/// printing "ok -> bin/...". Splitting this out from the sibling/skill-dir
+/// copies below is what makes that print ordering reproducible: the
+/// "ok -> ..." print runs BEFORE the planning/scripts and skill-dir cp
+/// calls, not after them.
 fn stage_primary(
     repo_root: &Path,
     triple: &str,
@@ -207,8 +205,7 @@ fn stage_primary(
 
 /// The planning/scripts sibling copy and the bug-report/todo/interactive-shell
 /// skill-dir copy, each printing its own "   -> ..." line -- called AFTER
-/// stage_primary and its own "ok -> bin/..." line have already printed,
-/// matching bash's real print order exactly.
+/// stage_primary and its own "ok -> bin/..." line have already printed.
 fn stage_extras(
     repo_root: &Path,
     triple: &str,

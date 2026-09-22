@@ -16,7 +16,7 @@
 #   register-command.sh [--plan-dir] <plan-directory> --list
 #   register-command.sh --help
 #
-# Requires rjq (declared in install.sh's runtime_requirements()).
+# Requires rjq.
 #
 # Exit codes: 64 bad invocation, 66 no plan directory, 69 rjq unavailable.
 
@@ -25,9 +25,8 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────────────────────
 # Compiled-binary preference
 # ─────────────────────────────────────────────────────────────────────────────
-# See plan_exec_compiled_binary_if_present's own doc comment
-# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
-# exec-vs-fall-through mechanism. Placed before this script's own
+# Exec into the compiled binary when one is present, falling through to the
+# bash implementation otherwise. Placed before this script's own
 # plan_hoist_plan_dir call below: that call rewrites a --plan-dir flag into a
 # positional argument, and the compiled binary must receive the caller's true
 # original argv, not the already-hoisted form.

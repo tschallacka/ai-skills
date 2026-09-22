@@ -13,11 +13,8 @@
 # It must be entirely self-contained: at the moment this script runs, NOTHING
 # else from this repository is on disk yet, so the mascot pixels (ART),
 # palette (color_for/fg_sgr/detect_color_mode) and the eye states
-# (eye_row_for) are written out here rather than sourced: the sprite is a copy
-# of ART in installer/src/05-config.sh, and the palette and eye functions live
-# only here and in the Rust port src/installer/src/ui/mascot.rs. Keep those
-# three in sync by hand if the sprite or palette ever changes -- there is no
-# other place a piped script can reach before its own payload exists locally.
+# (eye_row_for) are written out here rather than sourced -- there is no other
+# place a piped script can reach before its own payload exists locally.
 #
 # The animation and the download are deliberately decoupled: the splash has
 # its own minimum play time (BOOTSTRAP_MIN_SPLASH_SECONDS) independent of how
@@ -32,7 +29,7 @@ REPO_URL="${AI_SKILLS_REPO_URL:-https://github.com/tschallacka/ai-skills}"
 # GitHub's own "latest release" redirect -- no API call, no token, and it
 # always resolves to whatever was most recently published. AI_SKILLS_
 # RELEASE_URL overrides the whole URL outright (a local test server, a
-# pinned older version); AI_SKILLS_NO_SPLASH=1 (install.sh's own flag)
+# pinned older version); AI_SKILLS_NO_SPLASH=1
 # skips the animation but not the minimum-time wait, so scripted callers see
 # the same total time budget a human does. AI_SKILLS_NO_SPLASH=1 additionally
 # implies BOOTSTRAP_MIN_SPLASH_SECONDS=0.
@@ -44,9 +41,8 @@ bootstrap_die() {
     exit "${2:-1}"
 }
 
-# Mirrors installer-platform's Target::resolve (src/installer-platform/src/lib.rs)
-# and install.sh's normalize_platform, so all three name the same five hosts
-# the same way.
+# Resolves the local host to one of the target triples this project ships
+# prebuilt binaries for.
 bootstrap_target() {
     local os arch
     os="$(uname -s 2>/dev/null || echo unknown)"
@@ -69,8 +65,7 @@ bootstrap_target() {
             esac
             ;;
         MINGW* | MSYS* | CYGWIN* | Windows_NT)
-            # Git for Windows' bash (MSYS2/MinGW) and Cygwin. build-installer-
-            # release.sh packs installer.exe into this triple's tarball.
+            # Git for Windows' bash (MSYS2/MinGW) and Cygwin.
             case "$arch" in
                 x86_64) printf 'x86_64-pc-windows-msvc\n'; return 0 ;;
             esac
@@ -86,9 +81,7 @@ bootstrap_release_url() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# The mascot (ART is copied from installer/src/05-config.sh; detect_color_mode,
-# fg_sgr, color_for and eye_row_for live only here and in src/installer/src/ui/
-# mascot.rs -- see the file header for why this cannot be sourced instead)
+# The mascot
 # ─────────────────────────────────────────────────────────────────────────────
 
 ART=(
@@ -180,9 +173,8 @@ eye_row_for() {
 }
 
 # One sprite row, ASCII fill glyph ('#', not the Unicode block character):
-# ui/mascot.rs's own comment records why -- a real verification of the
-# Rust picker's identical sprite found U+2588 rendering blank in at least
-# one real terminal-emulation stack, so this never risks it either.
+# a real verification found U+2588 rendering blank in at least one real
+# terminal-emulation stack, so this never risks it either.
 render_art_row() {
     local art_y="$1" offset_x="$2" offset_y="$3" scale="$4" eye_state="$5"
     local row out='' pad blocks='' x i
@@ -241,7 +233,6 @@ bootstrap_bytes_so_far() {
 # Fixed-width label (LABEL_W) so " [<bar>]<label>" always comes out to
 # exactly `cols` cells -- a line even one cell over wraps onto the next row
 # in a real terminal, which corrupts every row this splash owns below it.
-# Caught live: a 100-column run wrapped onto 3-4 rows before this fix.
 bootstrap_draw_progress() {
     local row="$1" cols="$2" downloaded="$3" total="${4:-}" width bar filled pct label
     local label_w=14
@@ -361,11 +352,9 @@ done
 [ -n "$installer_bin" ] && [ -x "$installer_bin" ] \
     || bootstrap_die "the downloaded release has no executable 'installer'"
 
-# With no arguments this is the README's own one-liner
-# (`curl ... | bash`) -- install.sh defaulted that to the interactive skill
-# picker, and the compiled installer's own argv parsing does not special-case
-# an empty argv the same way (it prints --help instead), so bootstrap.sh is
-# what supplies the default here.
+# With no arguments, default to the interactive skill picker: the compiled
+# installer's own argv parsing does not special-case an empty argv (it
+# prints --help instead), so bootstrap.sh supplies that default here.
 if [ "$#" -eq 0 ]; then
     exec "$installer_bin" interactive
 fi

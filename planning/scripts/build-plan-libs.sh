@@ -5,9 +5,9 @@
 #
 # One function per file is the maintainable form: a change touches one file, a
 # review diff shows one function, and a test can source a single function
-# without pulling in the rest. Sourcing 47 files at runtime costs more than one
-# on every helper invocation, so the split is the source and the concatenation
-# is what ships, the same arrangement installer/build.sh uses for install.sh.
+# without pulling in the rest. Sourcing every file at runtime costs more than
+# sourcing the concatenation, so the split is the source and the
+# concatenation is what ships.
 #
 # Usage:
 #   build-plan-libs.sh                  # write the libraries (prod target)
@@ -41,9 +41,8 @@ export LC_ALL=C
 # ─────────────────────────────────────────────────────────────────────────────
 # Compiled-binary preference
 # ─────────────────────────────────────────────────────────────────────────────
-# See plan_exec_compiled_binary_if_present's own doc comment
-# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
-# exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
+# Exec into the compiled binary when one is present, falling through to the
+# bash implementation otherwise. This script takes no --plan-dir and does not
 # hoist one, so there is no hoist ordering to preserve; placed immediately
 # after both anchor lines above.
 #

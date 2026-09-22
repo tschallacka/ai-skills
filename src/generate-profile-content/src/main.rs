@@ -3,9 +3,8 @@
 //! Regenerates one `.agents/profiles/<id>.json` persona's own `instructions`
 //! field from the already-compiled `role-context` binary's live output,
 //! instead of the hand-authored, one-time snapshot goals 1/2 of the
-//! persona-profile-migration plan wrote by hand. Mirrors
-//! `build-plan-libs.sh`'s own generated-artifact contract: `--check` reports
-//! drift without writing, `--write` regenerates in place. `name` and
+//! persona-profile-migration plan wrote by hand. `--check` reports drift
+//! without writing, `--write` regenerates in place. `name` and
 //! `description` are never touched -- role-context has no analog of a
 //! profile's own hand-authored description blurb (AR-134), so only
 //! `instructions` is replaced.
@@ -46,9 +45,9 @@ struct ProfileSpec {
     instructions: String,
 }
 
-/// A page size comfortably larger than any real persona payload (the largest
-/// shipped profile today is ~32KB), so a single role-context invocation
-/// always returns page 1 of 1 -- no multi-page concatenation needed.
+/// A page size comfortably larger than any real persona payload, so a
+/// single role-context invocation always returns page 1 of 1 -- no
+/// multi-page concatenation needed.
 const PAGE_SIZE: &str = "10000000";
 
 /// Repo root: this binary is invoked from the repository root during
@@ -70,12 +69,10 @@ fn repo_root() -> PathBuf {
 }
 
 /// Locates the compiled `role-context` binary. It must be the copy staged at
-/// `planning/scripts/role-context` specifically, not a `bin/<triple>/`
-/// copy: role-context's own `skill_dir()` finds its scope docs by walking up
-/// two directories from `env::current_exe()`, which only lands on
-/// `planning/` when invoked from `planning/scripts/<name>` (two levels
-/// below it) -- the same install location `planning/scripts/role-context.sh`
-/// itself execs via `plan_exec_compiled_binary_if_present`. Invoking a
+/// `planning/scripts/role-context` specifically, not a `bin/<triple>/` copy:
+/// resolving scope docs requires walking up two directories from the running
+/// binary's own path, which only lands on `planning/` when invoked from
+/// `planning/scripts/<name>` (two levels below it). Invoking a
 /// `bin/<triple>/role-context` copy directly resolves the wrong directory
 /// (`bin/` instead of `planning/`) and silently reports every scope doc
 /// missing (confirmed by direct testing, not a hypothetical).

@@ -1,15 +1,12 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! The Minecraft-mascot sprite -- ported from installer/src/05-config.sh's
-//! `ART` and installer/bootstrap.sh's `detect_color_mode`/`fg_sgr`/`color_for`/
-//! `eye_row_for`. Painted as a colored overlay at an absolute terminal
-//! position AFTER render.rs's plain-ASCII frame draws, rather than embedded
-//! in it: render.rs's cell-width accounting (`pad`/`wrap`, the "every line
-//! is exactly `cols`" invariant its tests check) has no notion of an SGR
-//! escape's zero display width, so mixing the two would break it. Only the
-//! "left-bottom" placement (bash's `IUI_HEAD_PLACE=left-bottom`, an ordinary
-//! terminal) is ported -- "right-top" existed to make room for the hint
-//! carousel, which mod.rs doesn't have.
+//! The Minecraft-mascot sprite. Painted as a colored overlay at an absolute
+//! terminal position AFTER the plain-ASCII frame draws, rather than
+//! embedded in it: the frame's cell-width accounting (the "every line is
+//! exactly `cols`" invariant) has no notion of an SGR escape's zero display
+//! width, so mixing the two would break it. Only the "left-bottom"
+//! placement (an ordinary terminal) exists here -- a "right-top" placement
+//! for a hint carousel is out of scope for this slice.
 
 use std::process::Command;
 
@@ -20,10 +17,8 @@ pub enum EyeState {
     Right,
 }
 
-/// One entry per tick (a tick is one second, mod.rs's idle-tick interval).
-/// The dwell at the front is deliberate, same reasoning as install.sh's own
-/// comment: a sprite that moves immediately reads as a glitch, not an
-/// animation's start.
+/// One entry per tick. The dwell at the front is deliberate: a sprite that
+/// moves immediately reads as a glitch, not an animation's start.
 const EYE_FRAMES: &[EyeState] = &[
     EyeState::Front,
     EyeState::Front,
@@ -66,9 +61,8 @@ impl Default for EyeAnimator {
     }
 }
 
-/// 16 rows of 16 six-hex-digit pixels, one row per entry -- verbatim from
-/// installer/src/05-config.sh's ART. Rows 8 and 9 (the eyes) are
-/// substituted per frame by `eye_row`.
+/// 16 rows of 16 six-hex-digit pixels, one row per entry. Rows 8 and 9
+/// (the eyes) are substituted per frame by `eye_row`.
 const ART: [&str; 16] = [
     "f2cf38 f2cf38 fdc100 fdc100 fcf246 fcf246 e8b11a e8b11a fcdb28 fcdb28 fcd228 fcd228 fdfd5e fcfd5f fcf347 fcf347",
     "f2cf38 f2cf38 fdc100 fdc100 fcf246 fcf246 e8b11a e8b11a fcdb28 fcdb28 fcd228 fcd228 fbfb5d fdfd5e fcf347 fcf347",
@@ -107,8 +101,7 @@ pub enum ColorMode {
 }
 
 /// 24-bit SGR is not universal (macOS Terminal.app has never supported it),
-/// so this probes once and lets `fg_sgr` downgrade -- same reasoning as
-/// install.sh's `detect_color_mode`.
+/// so this probes once and lets `fg_sgr` downgrade.
 pub fn detect_color_mode() -> ColorMode {
     if matches!(
         std::env::var("COLORTERM").as_deref(),
@@ -161,13 +154,9 @@ fn fg_sgr(mode: ColorMode, rgb: (u8, u8, u8)) -> String {
 }
 
 /// One sprite row at scale 1 (32 display cells: 16 pixels of two `#`
-/// glyphs each -- install.sh's own ASCII fallback fill glyph, `IUI_G_FILL`
-/// in the `ascii` glyph set, used here unconditionally rather than the
-/// Unicode block character its `blocks` set prefers: verified live with the
-/// interactive-shell skill, `█` came out blank in that wrapper's own
-/// screen model, which documents non-ASCII glyphs as approximate). Blank
-/// (32 spaces) in `ColorMode::None`, mirroring install.sh's own "no colour,
-/// no mascot".
+/// glyphs each, used unconditionally rather than a Unicode block character,
+/// since non-ASCII glyphs render unreliably in some terminal wrappers).
+/// Blank (32 spaces) in `ColorMode::None`.
 pub fn head_line(mode: ColorMode, art_row: usize, eye: EyeState) -> String {
     if mode == ColorMode::None {
         return " ".repeat(32);

@@ -7,9 +7,8 @@
 # 02-step-remove-jq-renderer.md puts the word in the list without any code
 # calling jq. src/installer/src/requirements.rs is the one place a real jq
 # reference is intentional and permanent, not a migration leftover: rjq is a
-# jq-compatible reimplementation, so install.sh's own generated
-# runtime_tool_verify() falls back to a system jq only once a bundled and a
-# PATH rjq have both come up empty (tool_available's own doc comment), and
+# jq-compatible reimplementation, so runtime_tool_verify() falls back to a
+# system jq only once a bundled and a PATH rjq have both come up empty, and
 # a_missing_rjq_falls_back_to_a_system_jq is the test proving that fallback
 # actually works.
 set -euo pipefail

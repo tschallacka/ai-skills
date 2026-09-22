@@ -1,13 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Per-skill integration mode (`skill` vs `mcp`) -- ported from
-//! installer/src/05-config.sh's `integration_mode_for` and
-//! installer/src/50-manifest.sh's `integration_binary_mode`/
-//! `integration_modes`/`integration_installed_mode`/`integration_file_allowed`/
-//! `remove_stale_integration_binaries`, reading each skill's own
-//! `integration.tsv` directly at runtime rather than replicating
-//! install.sh's build-time code generation -- same reasoning as
-//! requirements.rs reading requires.tsv directly.
+//! Per-skill integration mode (`skill` vs `mcp`), read from each skill's own
+//! `integration.tsv` directly at runtime rather than generated at build
+//! time.
 //!
 //! Only `ai-text-editor` and `chat` ship an `integration.tsv` today; every
 //! other skill has exactly one mode (`skill`) and every function here is a
@@ -19,8 +14,7 @@
 //! `mcp_adapter_path` also lives here rather than in mcp.rs: it is the
 //! integration-mode question "which binary, if any, did this install leave
 //! in mcp mode" answered from the INSTALLED directory (not the source tree,
-//! which the mode gate has already decided against) -- ported from
-//! installer/src/72-mcp-registration.sh's function of the same name.
+//! which the mode gate has already decided against).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,9 +40,8 @@ fn parse_rows(source_root: &Path, skill: &str) -> Vec<(String, String)> {
 
 /// The mode a `bin/` filename declares, or `None` when it is mode-free (not
 /// named in `integration.tsv` at all, including every file when the skill
-/// has no `integration.tsv`). A trailing `.exe` is stripped before matching,
-/// same as install.sh's generated table listing both the bare and `.exe`
-/// name for every declared binary.
+/// has no `integration.tsv`). A trailing `.exe` is stripped before
+/// matching, so one declared binary name covers both platforms.
 pub fn binary_mode(source_root: &Path, skill: &str, filename: &str) -> Option<String> {
     let bare = filename.strip_suffix(".exe").unwrap_or(filename);
     parse_rows(source_root, skill)
@@ -126,9 +119,9 @@ pub fn mcp_adapter_path(source_root: &Path, skill: &str, home: &Path) -> Option<
 
 /// The mode to install `skill` in at `destination`: an explicit choice for
 /// this run outranks whatever is already on disk, which outranks the
-/// `skill` default. `skill` is the default only on a first install --
-/// install.sh's T109: an unattended update with no flag must carry an
-/// existing mcp install forward, not silently revert it.
+/// `skill` default. `skill` is the default only on a first install (T109):
+/// an unattended update with no flag must carry an existing mcp install
+/// forward, not silently revert it.
 pub fn resolve_mode(
     source_root: &Path,
     skill: &str,
@@ -146,13 +139,12 @@ pub fn resolve_mode(
     "skill".to_string()
 }
 
-/// Where `resolve_mode`'s answer came from, for the install summary --
-/// ported from `integration_mode_source_for` (T109: an install that
-/// silently carries a mode forward is only progress over a silent wrong
-/// default if it SAYS what it did and why). Takes the mode `resolve_mode`
-/// already resolved rather than re-resolving its own, same reasoning as
-/// bash's own version: `installed_mode`'s disagreement warning belongs to
-/// that one authoritative call.
+/// Where `resolve_mode`'s answer came from, for the install summary (T109:
+/// an install that silently carries a mode forward is only progress over a
+/// silent wrong default if it SAYS what it did and why). Takes the mode
+/// `resolve_mode` already resolved rather than re-resolving its own:
+/// `installed_mode`'s disagreement warning belongs to that one
+/// authoritative call.
 pub fn mode_source(
     source_root: &Path,
     skill: &str,

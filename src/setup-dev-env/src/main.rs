@@ -1,13 +1,10 @@
 // MODE: DEV
 // PACKAGE: PROD
 
-//! Port of setup-dev-env.sh: builds every crate under src/ for the host's
-//! own target triple into bin/<triple>, stages the generated shell
-//! artifacts on build-if-missing terms, and wires the pre-push git hook.
-//! See setup-dev-env.sh's own header for the full rationale; this crate
-//! reproduces its observable behavior, including the self-hosting
-//! bootstrap this same script's own plan_secondary row for `setup-dev-env`
-//! closes (see plan.rs).
+//! Builds every crate under src/ for the host's own target triple into
+//! bin/<triple>, stages the generated shell artifacts on build-if-missing
+//! terms, and wires the pre-push git hook. Includes the self-hosting
+//! bootstrap: the plan's own row for `setup-dev-env` closes that loop.
 
 mod generated;
 mod markers;
@@ -19,20 +16,14 @@ mod triple;
 
 use std::path::Path;
 
-// The bash original derives its own name from `${0##*/}`, which in every
-// real invocation is "setup-dev-env.sh" -- the literal file name, not the
-// compiled binary's own bare name. Used for the two `${0##*/}`-derived
-// bash messages (unknown-argument, no-house-target-covers); the third
-// `${0##*/}` usage in the bash original is the nix re-exec target, which
-// this crate replicates in reexec.rs instead (see that module's own doc
-// comment).
+// The literal script file name, not the compiled binary's own bare name.
+// Used in two messages (unknown-argument, no-house-target-covers); a third
+// use of this name is the nix re-exec target, handled separately.
 const PROGRAM: &str = "setup-dev-env.sh";
 
-// Byte-for-byte the same text bash's own usage() prints (sed -n '3,23p' of
-// setup-dev-env.sh's own header, em-dashes included) -- deliberately NOT
-// including the header's own lines 24-26 ("Only the host's target triple is
-// built...", CI/release-triple context), which usage()'s own sed range
-// stops short of and --help therefore never prints either.
+// The exact usage text this prints (em-dashes included) -- deliberately NOT
+// including additional CI/release-triple context, which --help never
+// prints either.
 const USAGE: &str = "\
 setup-dev-env.sh \u{2014} build the crates under src/ into a working local tree.
 
@@ -156,8 +147,7 @@ fn run() -> i32 {
     }
 
     // --list and --check return above this point, so they still cost no
-    // nix, cargo, or git at all -- matching bash's own observable ordering
-    // exactly.
+    // nix, cargo, or git at all.
     if let Err(message) = plan::check_stray_src_dirs(&repo_root) {
         eprint!("{message}");
         return 70;

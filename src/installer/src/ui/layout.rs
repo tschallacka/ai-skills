@@ -1,10 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Pane geometry -- ported in spirit from installer/src/35-ui-model.sh's
-//! iui_layout/iui_list_width/iui_head_geometry. Only the "left-bottom"
-//! mascot placement is ported (an ordinary terminal, sprite pinned under
-//! the list); "right-top" existed to make room for the hint carousel,
-//! which this slice does not have.
+//! Pane geometry. Only the "left-bottom" mascot placement exists here (an
+//! ordinary terminal, sprite pinned under the list); a "right-top"
+//! placement for a hint carousel is out of scope for this slice.
 
 pub struct Layout {
     pub cols: usize,
@@ -28,13 +26,12 @@ const DETAIL_MIN_W: usize = 30;
 /// The sprite's own 16 rows (mascot::HEIGHT) plus one separator line above it.
 const MASCOT_RESERVED_ROWS: usize = 17;
 /// The list must keep at least this many rows of its own, or the mascot is
-/// dropped rather than starving the content a reader came for -- same
-/// reasoning as install.sh's IUI_HEAD_MIN_LIST_ROWS.
+/// dropped rather than starving the content a reader came for.
 const MASCOT_MIN_LIST_ROWS: usize = 6;
 
 /// The list is sized to its content -- a row is cursor(1) + checkbox(3) +
 /// space(1) + name -- so the longest skill name decides the width and
-/// nothing truncates, same rule as iui_list_width.
+/// nothing truncates.
 fn list_width(cols: usize, skill_names: &[&str]) -> usize {
     let longest = skill_names.iter().map(|n| n.len()).max().unwrap_or(0);
     let mut width = (longest + 6).clamp(LIST_MIN_W, LIST_MAX_W);

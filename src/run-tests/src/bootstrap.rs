@@ -2,9 +2,8 @@
 // PACKAGE: PROD
 
 //! refuse_if_dev_env_dirty and bootstrap_generated: the two pre-flight
-//! checks run-tests.sh performs before any test runs, both shelling out to
-//! the same real scripts the bash original does rather than reimplementing
-//! their own logic.
+//! checks performed before any test runs, both shelling out to the real
+//! scripts rather than reimplementing their own logic.
 
 use crate::platform::{self, script_command, which};
 use std::path::Path;
@@ -71,11 +70,10 @@ pub fn bootstrap_generated(repo_root: &Path) -> Result<Option<String>, String> {
     if which("rjq") {
         return Ok(None);
     }
-    // The real bash if/elif structure: PATH is prepended unconditionally
-    // whenever the bootstrap call succeeds with non-empty output, with NO
-    // re-verification that rjq is then actually found on the newly-extended
-    // PATH. Only the elif branch (the call itself failing, or succeeding
-    // with empty output) is the failure path.
+    // PATH is prepended unconditionally whenever the bootstrap call
+    // succeeds with non-empty output, with NO re-verification that rjq is
+    // then actually found on the newly-extended PATH. Only a failing call,
+    // or one succeeding with empty output, is treated as a failure.
     let output = script_command(&repo_root.join("bootstrap.sh"))
         .args(["rjq", "--path-only"])
         .current_dir(repo_root)

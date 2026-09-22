@@ -3,9 +3,9 @@
 
 //! Gate 0: BUGS.json and TODO.json are filed on the `registers` branch and
 //! nowhere else, so ids are allocated in one place and no merge ever has to
-//! reconcile two sets of them. Fails immediately, before any other gate runs
-//! -- mirrors pre-push-check.sh's own early `exit 1` exactly, including its
-//! own distinct terminal line (not the normal final summary line).
+//! reconcile two sets of them. Fails immediately, before any other gate
+//! runs, with its own distinct terminal line (not the normal final summary
+//! line).
 //!
 //! The other half is `registers` itself: a push from that branch is checked
 //! for one thing only, that nothing but the two registers changed, and no

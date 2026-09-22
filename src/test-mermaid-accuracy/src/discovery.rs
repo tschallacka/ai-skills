@@ -1,9 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
 
-//! Builds the three corpora the bash original's own tree.txt/scripts.txt/
-//! markdown.txt equivalents represent, and the tree_has()/script_writes()
-//! existence checks over them.
+//! Builds the three corpora tree_has()/script_writes() run their existence
+//! checks over.
 //!
 //! Corpus 1 (tree): every regular file under repo_root, excluding any
 //! directory named `.git` anywhere, and the exact top-level paths
@@ -11,8 +10,8 @@
 //! script's own path -- that exclusion belongs only to corpus 2).
 //!
 //! Corpus 2 (script-text): the concatenated text of every `.sh` and `.rs`
-//! file in corpus 1, excluding only the real bash original's own source path
-//! (AR-125). `.rs` joined T145 goal 27: once a script's bash reimplementation
+//! file in corpus 1, excluding only this test's own source path (AR-125).
+//! `.rs` joined T145 goal 27: once a script's bash reimplementation
 //! body is stripped down to a die-loudly missing-binary stub, an identifier
 //! or artifact path the bash body used to mention (and a diagram or doc still
 //! names) survives only in the compiled binary's own Rust source -- the same
@@ -31,9 +30,8 @@ use std::path::{Path, PathBuf};
 
 pub struct Corpora {
     /// Every regular file under repo_root (pruned), as repo-root-relative,
-    /// forward-slash paths (matching how the bash original's own tree.txt
-    /// stores absolute paths -- relative here is an implementation choice
-    /// that preserves identical existence semantics).
+    /// forward-slash paths -- relative here is an implementation choice
+    /// that preserves existence semantics regardless of representation.
     pub tree: Vec<String>,
     pub script_text: String,
     pub markdown_text: String,

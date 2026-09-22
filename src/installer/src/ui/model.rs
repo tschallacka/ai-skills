@@ -1,13 +1,9 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Picker state -- selection, cursor, scroll, focus -- ported in spirit from
-//! installer/src/35-ui-model.sh's IUI_* state, trimmed to what this slice
-//! actually drives: [[requirements]] supplies the per-skill ok/degraded/
-//! blocked state and DEPENDENCIES section, and `offered_modes`/`mode` carry
-//! T95's integration-mode cycling (`m`, `iui_action_cycle_integration`).
-//! There is still no `d`/`r` (dependency-install-hint text, reverify) --
-//! those read installer/tools.tsv's own hint table, which nothing in this
-//! installer parses yet.
+//! Picker state -- selection, cursor, scroll, focus. `requirements`
+//! supplies the per-skill ok/degraded/blocked state and DEPENDENCIES
+//! section, and `offered_modes`/`mode` carry integration-mode cycling
+//! (`m`).
 
 use crate::requirements::{SkillState, SkillStatus};
 
@@ -18,7 +14,7 @@ pub struct SkillEntry {
     pub status: SkillStatus,
     /// Every integration mode this skill declares (`[]` for the near-total
     /// majority with no `integration.tsv`, meaning it offers no choice at
-    /// all -- same as install.sh's `IUI_INTEGRATION_OFFERED` being empty).
+    /// all).
     pub offered_modes: Vec<String>,
     /// The mode this skill installs in if selected right now: the run's
     /// already-resolved default until `m` cycles it, from then on whatever
@@ -45,10 +41,9 @@ pub struct PickerState {
 }
 
 impl PickerState {
-    /// Everything installable starts selected, same as install.sh's numbered
-    /// menu default of "all" -- but a Blocked skill is preselected through
-    /// `toggle`, same as iui_load_installer_skills does, so it cannot end up
-    /// selected: iui_toggle refuses it the same way a later keypress would.
+    /// Everything installable starts selected, but a Blocked skill is
+    /// preselected through `toggle`, so it cannot end up selected: `toggle`
+    /// refuses it the same way a later keypress would.
     pub fn new(skills: Vec<SkillEntry>) -> Self {
         let selected = vec![false; skills.len()];
         let mut state = PickerState {
@@ -71,7 +66,7 @@ impl PickerState {
 
     /// Deselecting is always allowed; selecting a Blocked skill is refused
     /// with the reason instead of allowed and then rejected by the install
-    /// itself -- same rule as installer/src/35-ui-model.sh's iui_toggle.
+    /// itself.
     pub fn toggle(&mut self, index: usize) {
         let Some(skill) = self.skills.get(index) else {
             return;
@@ -91,9 +86,9 @@ impl PickerState {
         }
     }
 
-    /// Same rule as the `a` key in install.sh's iui_handle_key: deselect
-    /// everything first, then toggle each one back on, so a Blocked skill
-    /// stays out through the same refusal `toggle` gives a direct keypress.
+    /// Deselects everything first, then toggles each one back on, so a
+    /// Blocked skill stays out through the same refusal `toggle` gives a
+    /// direct keypress.
     pub fn select_all(&mut self) {
         for i in 0..self.skills.len() {
             self.selected[i] = false;
@@ -151,9 +146,9 @@ impl PickerState {
         self.info_scroll = 0;
     }
 
-    /// Scroll follows the cursor, same clamp rule as iui_clamp_scroll: never
-    /// let the cursor run off either edge of the visible window, and never
-    /// scroll past the point where the list would show trailing blank rows.
+    /// Scroll follows the cursor: never let the cursor run off either edge
+    /// of the visible window, and never scroll past the point where the
+    /// list would show trailing blank rows.
     pub fn clamp_scroll(&mut self, visible_rows: usize) {
         let count = self.skills.len();
         if self.scroll > self.cursor {
@@ -182,10 +177,9 @@ impl PickerState {
     }
 
     /// Advances the skill under the cursor to its next offered mode,
-    /// wrapping -- ported from installer/src/37-ui-input.sh's
-    /// `iui_action_cycle_integration`. A no-op, with no message, for a
-    /// skill offering fewer than two modes -- there is nothing to refuse,
-    /// so unlike `toggle` this never has anything to say.
+    /// wrapping. A no-op, with no message, for a skill offering fewer than
+    /// two modes -- there is nothing to refuse, so unlike `toggle` this
+    /// never has anything to say.
     pub fn cycle_integration_mode(&mut self) {
         let Some(skill) = self.skills.get_mut(self.cursor) else {
             return;
@@ -206,12 +200,10 @@ impl PickerState {
     }
 
     /// Lists how to install every currently-missing requirement of the
-    /// skill under the cursor -- ported from
-    /// installer/src/37-ui-input.sh's `iui_action_dep_hint`. A group
-    /// requirement's label names every member (`requirement_label`'s "any
-    /// of a, b"); the install hint underneath is printed once per member,
-    /// since installer/tools.tsv's hint table is keyed by a single tool id,
-    /// not by a group.
+    /// skill under the cursor. A group requirement's label names every
+    /// member (`requirement_label`'s "any of a, b"); the install hint
+    /// underneath is printed once per member, since the hint table is
+    /// keyed by a single tool id, not by a group.
     pub fn dep_hint(&mut self) {
         let Some(skill) = self.skills.get(self.cursor) else {
             return;
@@ -248,11 +240,9 @@ impl PickerState {
     }
 
     /// Re-checks the skill under the cursor's requirements against this
-    /// host right now -- ported from `iui_action_reverify`. install.sh
-    /// caches a tool's verify result across skills and clears it here; this
-    /// installer never cached one in the first place (each requirement is a
-    /// handful of PATH lookups, cheap enough to just redo), so reverify is
-    /// simply a fresh `skill_status` call.
+    /// host right now. Each requirement is a handful of PATH lookups, cheap
+    /// enough to just redo, so reverify is simply a fresh `skill_status`
+    /// call with no cache to invalidate.
     pub fn reverify(&mut self, source_root: &std::path::Path) {
         let Some(skill) = self.skills.get_mut(self.cursor) else {
             return;

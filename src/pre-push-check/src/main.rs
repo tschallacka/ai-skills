@@ -21,16 +21,11 @@ use report::Report;
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
-// The bash original derives its own name from `${0##*/}`, which in every
-// real invocation (the git hook, a direct call) is "pre-push-check.sh" --
-// the literal file name, not the compiled binary's own bare name.
+// The literal script file name, not the compiled binary's own bare name.
 const PROGRAM: &str = "pre-push-check.sh";
 
-// The usage block above `set -u` in pre-push-check.sh's own header comment,
-// verbatim (the bash script derives this at runtime via an awk one-liner
-// stripping the leading `# `; this port embeds the identical text as a
-// literal constant instead of re-deriving it from a comment, matching
-// ci-failures's own precedent).
+// The usage text, embedded here as a literal constant rather than derived
+// at runtime.
 const USAGE: &str = r#"pre-push-check - the per-change gates and the PR hygiene rules in AGENTS.md,
 in one command.
 

@@ -8,17 +8,18 @@
 # plans at all". One card per plan, grouped by lifecycle, each linking into that
 # plan's own overview page.
 #
-# It reads the plan tree directly rather than through overview-state.sh, which
-# costs 8-9 seconds per plan. It passes no page content through a command line,
-# so no plan size can make it fail the way the per-plan renderer does.
+# It reads the plan tree directly rather than through overview-state.sh,
+# whose per-plan git calls scale badly on a root with many plans. It passes
+# no page content through a command line, so no plan size can make it fail
+# the way the per-plan renderer does.
 #
-# Measured in Chrome, and recorded here because it is a finding about the design
-# rather than a defect in it: this page reads BETTER at 390px than at 1440px.
-# Narrow is one column, every card aligned, no dead gutters. Wide is where the
-# compromises live — a card grid leaves an empty gutter beside a group of one,
-# and cards in a row only line up because the title reserves three lines. Anyone
-# laying out a plan surface for a wide viewport should know that the wide case
-# is the harder one here, not the default that happens to work.
+# This page reads better narrow than wide, and that is a finding about the
+# design rather than a defect in it: narrow is one column, every card
+# aligned, no dead gutters. Wide is where the compromises live — a card grid
+# leaves an empty gutter beside a group of one, and cards in a row only line
+# up because the title reserves three lines. Anyone laying out a plan surface
+# for a wide viewport should know that the wide case is the harder one here,
+# not the default that happens to work.
 #
 # Usage:
 #   render-plans-board.sh [--root <plans-root>] [--out FILE] [--refresh N]
@@ -266,10 +267,9 @@ emit_css() {
 :root{
   --bg:#07080f; --bg2:#0b0d1a; --panel:rgba(255,255,255,.045); --line:rgba(255,255,255,.09);
   --txt:#e8ecff; --dim:#8b93b8; --faint:#565e85;
-  /* The planning accent is the lighter violet, not #7c6cff: measured at 10px
-     against the chip's #0b0d1a text, #7c6cff gave 5.01:1 while the other three
-     chips sat above 10:1, and the odd one out read as muddy rather than as a
-     different state. */
+  /* The planning accent is the lighter violet, not #7c6cff: against the
+     chip's dark text, the darker shade read as muddy rather than as a
+     distinct state, unlike the other three chips. */
   --accent:#a78bfa; --good:#34d399; --warn:#fbbf24; --bad:#fb7185; --cyan:#22d3ee;
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -319,8 +319,9 @@ h1{font-size:clamp(22px,3vw,32px);letter-spacing:.4px}
    every short title. */
 @media (min-width:640px){ .card h3{min-height:4.05em} }
 .path{font-size:10.5px;color:var(--faint);overflow-wrap:anywhere}
-/* .07 alpha measured as a near-invisible hairline on this ground: an empty
-   track read as a divider rather than as an empty progress bar. */
+/* The track's border alpha is kept low, a near-invisible hairline on this
+   ground, so an empty track reads as an empty progress bar rather than as
+   a divider. */
 .track{display:flex;height:8px;border-radius:999px;overflow:hidden;
   background:rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}
 .track i{display:block;height:100%}
@@ -331,18 +332,16 @@ h1{font-size:clamp(22px,3vw,32px);letter-spacing:.4px}
 .figs .good{color:var(--good)} .figs .bad{color:var(--bad)} .figs .dim{color:var(--faint)}
 .figs .sub{color:var(--warn);font-size:11px}
 /* margin-top:auto pushes the link and its divider to the card floor, so the
-   footers of a row agree even when one card's steps figure wraps to two lines.
-   It belongs in THIS rule: declared in a second .go block of equal specificity
-   it lost to this one silently, and the divider stepped by 15px between
-   neighbours — measured in the browser, invisible to every DOM assertion.
+   footers of a row agree even when one card's steps figure wraps to two
+   lines. It belongs in THIS rule: declared in a second .go block of equal
+   specificity, it would lose to this one silently.
 
-   If you go measuring this: getComputedStyle reports the USED value of `auto`,
-   not the keyword, so a healthy row reads 15px on the cards whose steps figure
-   wrapped and 0px on the rest. That is auto absorbing the difference, which is
-   the rule working, NOT the override coming back. The numbers that prove
-   alignment are the ones that must be EQUAL across a row: each link's top
-   offset within its card, and the gap from its bottom to the card's bottom
-   (17px on every card when this is right). Do not "fix" the 15px. */
+   If you go measuring this: getComputedStyle reports the USED value of
+   `auto`, which differs between a wrapped and an unwrapped card in the same
+   row -- that is auto absorbing the line-wrap difference, which is the rule
+   working, NOT the override coming back. What must stay EQUAL across a row
+   is each link's top offset within its card and the gap from its bottom to
+   the card's bottom, not the raw `auto` value itself. */
 .go{margin-top:auto;font-size:12px;color:var(--cyan);text-decoration:none;border-top:1px solid var(--line);
   padding-top:10px;display:block}
 .go:hover{text-decoration:underline}

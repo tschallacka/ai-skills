@@ -6,8 +6,8 @@ pub struct ReportResult {
     pub is_failure: bool,
 }
 
-/// A leg the host cannot have at all (see `Leg::skip_reason`). Not a failure:
-/// nothing was attempted, and the reason says so in the report.
+/// A leg the host cannot have at all. Not a failure: nothing was attempted,
+/// and the reason says so in the report.
 pub fn skipped(label: &str, reason: &str) -> ReportResult {
     ReportResult {
         text: format!("=== {label} -- SKIPPED: {reason} ===\n"),
@@ -15,11 +15,11 @@ pub fn skipped(label: &str, reason: &str) -> ReportResult {
     }
 }
 
-/// Reproduces `report()`'s exact real semantics: a log with no `Total ran`
-/// substring anywhere means the leg did not run at all (its own last 20
-/// lines are shown for diagnosis); otherwise every `Total ran`/`^Failed:`
-/// line is shown, and if any line starts with `Failed:`, the failing-test
-/// blocks are extracted via the AWK-equivalent state machine below.
+/// A log with no `Total ran` substring anywhere means the leg did not run
+/// at all (its own last 20 lines are shown for diagnosis); otherwise every
+/// `Total ran`/`^Failed:` line is shown, and if any line starts with
+/// `Failed:`, the failing-test blocks are extracted via the state machine
+/// below.
 pub fn report(label: &str, log_text: &str) -> ReportResult {
     if !log_text.contains("Total ran") {
         let mut text = format!("=== {label} -- NO SUMMARY, the leg did not run ===\n");
@@ -65,12 +65,11 @@ fn tail_lines(text: &str, n: usize) -> String {
     out
 }
 
-/// `/^  [^ ].* (PASS|FAIL|UNCONFIGURED)/ { inblock = ($0 ~ /FAIL/) }`
-/// `inblock { print }` -- a marker line toggles `in_block` to whether the
-/// WHOLE marker line contains the substring `FAIL` (unanchored, independent
-/// of which status word actually satisfied the marker condition); every
-/// line while `in_block` is true, including the marker line itself, is
-/// included up to (not including) the next marker line.
+/// A marker line toggles `in_block` to whether the WHOLE marker line
+/// contains the substring `FAIL` (unanchored, independent of which status
+/// word actually satisfied the marker condition); every line while
+/// `in_block` is true, including the marker line itself, is included up to
+/// (not including) the next marker line.
 fn extract_failing_blocks(log_text: &str) -> String {
     let mut out = String::new();
     let mut in_block = false;
@@ -140,8 +139,9 @@ Failed: test-b
 
     #[test]
     fn a_pass_marker_line_that_also_contains_the_literal_fail_substring_still_opens_a_block() {
-        // Real bash's own $0 ~ /FAIL/ is unanchored and whole-line: it does
-        // not care which status word actually matched the marker condition.
+        // A PASS marker line whose test name happens to contain the literal
+        // substring FAIL still opens a block: matching is unanchored and
+        // whole-line, independent of which status word actually matched.
         let log = "\
 Total ran: 1   Passed: 0   Failed: 1
 Failed: test-a

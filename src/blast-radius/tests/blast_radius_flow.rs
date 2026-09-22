@@ -360,7 +360,7 @@ fn an_explicit_empty_change_set_prints_no_changes_to_analyse() {
 #[test]
 fn an_explicit_blank_positional_argument_counts_as_no_changes() {
     // AR-71: a blank entry in the change set must not count as one changed
-    // path, matching bash's own `grep -c .` non-blank counting.
+    // path.
     let repo = Repo::new("blank-positional");
     repo.seed_baseline();
     let output = repo.run(&[""]);

@@ -14,8 +14,6 @@ fn usage(code: i32) -> ! {
     process::exit(code);
 }
 
-/// Mirrors src/plan-mutate/src/main.rs's own skill_root(), and this plan's
-/// own build-plan-libs/generate-skill-docs/overview-state precedent:
 /// PLANNING_SKILL_ROOT first, then an ancestor walk of both the running
 /// binary's own path and the current working directory, looking for the
 /// first ancestor whose planning/scripts subdirectory exists.
@@ -51,8 +49,8 @@ fn skill_root() -> Option<PathBuf> {
 #[derive(Debug, PartialEq, Eq)]
 enum ParsedArgs {
     Help,
-    /// Bad usage: bash's own `usage` (implicit rc=64) prints only the Usage
-    /// text, with no extra message.
+    /// Bad usage (implicit rc=64): prints only the Usage text, with no
+    /// extra message.
     BadUsage,
     Run {
         part: String,
@@ -62,10 +60,9 @@ enum ParsedArgs {
 }
 
 /// Pure argument parsing: never exits the process, so tests can assert on
-/// the parse result directly. Mirrors verify-skill-load.sh's own case-based
-/// while loop exactly: --part and --token each consume a following value
-/// (missing one is bad usage), any other flag (starts with '-') is bad
-/// usage, and at most one positional argument (the skill directory) is
+/// the parse result directly. --part and --token each consume a following
+/// value (missing one is bad usage), any other flag (starts with '-') is
+/// bad usage, and at most one positional argument (the skill directory) is
 /// accepted -- a second positional is bad usage. Both --part and --token
 /// are required.
 fn parse_args(args: &[String]) -> ParsedArgs {
@@ -110,16 +107,13 @@ fn parse_args(args: &[String]) -> ParsedArgs {
     }
 }
 
-/// Per AR-36/AR-37: a deliberate divergence from bash's own unescaped
-/// `grep -oE "SKILL-LOAD-PROOF part=$part token=[0-9a-f]+"` interpolation,
-/// which can crash on a --part value that makes the pattern an invalid ERE
-/// (no real caller ever supplies a part name containing a regex
-/// metacharacter -- every real part name is the plain string "part-N").
-/// This is a LITERAL SUBSTRING search for `SKILL-LOAD-PROOF part=<part>
-/// token=`, never compiled as a pattern, followed by taking the run of
-/// lowercase hex digits immediately after it -- preserving bash's own
-/// `[0-9a-f]+` boundary detection for the token itself. Returns the token
-/// from the FIRST matching line, matching bash's `| head -1`.
+/// Per AR-36/AR-37: a --part value is never compiled as a pattern, so a
+/// value containing a regex metacharacter cannot break the search (no real
+/// caller ever supplies a part name containing one -- every real part name
+/// is the plain string "part-N"). This is a LITERAL SUBSTRING search for
+/// `SKILL-LOAD-PROOF part=<part> token=`, followed by taking the run of
+/// lowercase hex digits immediately after it. Returns the token from the
+/// FIRST matching line.
 fn extract_token(content: &str, part: &str) -> Option<String> {
     let needle = format!("SKILL-LOAD-PROOF part={part} token=");
     for line in content.lines() {
@@ -138,10 +132,10 @@ fn extract_token(content: &str, part: &str) -> Option<String> {
 
 /// The result of checking one --part/--token pair against a skill
 /// directory, carrying the exact message text so tests can assert on it
-/// without spawning a process. Mirrors bash's own four terminal outcomes
-/// (no such part, no load-proof line, refused, verified) plus their exit
-/// codes -- pure with respect to the filesystem read already performed by
-/// the caller.
+/// without spawning a process. Four terminal outcomes (no such part, no
+/// load-proof line, refused, verified), each with its own exit code --
+/// pure with respect to the filesystem read already performed by the
+/// caller.
 enum Outcome {
     NoSuchPart { stderr: String },
     NoLoadProof { stderr: String },
@@ -302,7 +296,7 @@ mod tests {
 
     // (c) a missing part file produces the exact "no such part" message and
     // exit 66 (exercised at the main()-adjacent level: a nonexistent path
-    // fails to read, matching bash's [ -f ] check).
+    // fails to read).
     #[test]
     fn missing_part_file_read_failure_maps_to_no_such_part_exit_66() {
         let skill_dir = PathBuf::from("/nonexistent-skill-dir-for-test");
@@ -403,10 +397,9 @@ mod tests {
 
     // (g) skill_root()'s failure path (PLANNING_SKILL_ROOT unset, cwd and
     // exe path both outside any planning/scripts-containing tree) is
-    // exercised at the real compiled-binary subprocess level in
-    // tests/verify_skill_load_flow.rs, mirroring the goals 8/9/10 AR-26
-    // precedent exactly. skill_root_from's own pure logic is unit-tested
-    // here instead of hitting the real environment.
+    // exercised at the real compiled-binary subprocess level.
+    // skill_root_from's own pure logic is unit-tested here instead of
+    // hitting the real environment.
     #[test]
     fn skill_root_from_returns_none_when_nothing_resolves() {
         let resolved = skill_root_from(

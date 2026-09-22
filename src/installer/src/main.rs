@@ -4,13 +4,12 @@
 //! tiny curl-piped bootstrap script has fetched and extracted it. Runs from
 //! inside the extracted tree; knows nothing about fetching itself.
 //!
-//! This is an early slice, not full parity with install.sh yet: no
-//! interactive TUI, no plan migration. Skill discovery (discover.rs) still
-//! finds any directory with a SKILL.md, looser than install.sh's hand-
-//! maintained SKILL_NAMES table (no hidden-skill support yet); manifest.rs
-//! supplies descriptions and the --agent shortcut for the ones it knows
-//! about; permissions.rs and mcp.rs cover the planning/worktree permission
-//! grants and mcp-mode registration for claude/codex/opencode.
+//! This is an early slice: no interactive TUI, no plan migration. Skill
+//! discovery still finds any directory with a SKILL.md (no hidden-skill
+//! support yet); the manifest supplies descriptions and the --agent
+//! shortcut for the ones it knows about; permissions and mcp registration
+//! cover the planning/worktree permission grants and mcp-mode registration
+//! for claude/codex/opencode.
 
 mod backup;
 mod cli_mode;
@@ -156,10 +155,8 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
 
 /// The extracted release tree's own root, next to wherever this binary
 /// itself was run from: skill directories sit directly under it
-/// (`todo/SKILL.md`, `bug-report/SKILL.md`, ...), matching what
-/// `installer/build-release.sh` actually packs. `--source` overrides it;
-/// nothing else needs to know the layout the bootstrap script's tar
-/// extracted.
+/// (`todo/SKILL.md`, `bug-report/SKILL.md`, ...). `--source` overrides it;
+/// nothing else needs to know the layout the extracted tree uses.
 fn default_source() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| format!("resolving own path: {e}"))?;
     exe.parent()
@@ -198,9 +195,8 @@ fn run_list(argv: &[String]) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// install.sh's own `PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"`
-/// (installer/src/05-config.sh) -- a single global default, read the same
-/// way whatever subcommand runs, overridable everywhere by `--package
+/// `$PACKAGE_SELECTION` read as a single global default, the same way
+/// whatever subcommand runs, overridable everywhere by `--package
 /// prod|dev`.
 fn package_selection_env_default() -> bool {
     std::env::var("PACKAGE_SELECTION")
@@ -220,8 +216,7 @@ struct InstallArgs {
     skills: Vec<String>,
     all: bool,
     source: Option<PathBuf>,
-    /// Repeatable: `run_install` installs into every resolved root, matching
-    /// install.sh's own multi-root `SELECTED_TARGET_PATHS`.
+    /// Repeatable: `run_install` installs into every resolved root.
     targets: Vec<PathBuf>,
     agents: Vec<String>,
     integration: Vec<String>,
@@ -296,10 +291,10 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
     })
 }
 
-/// A yes/no prompt gate, ported from install.sh's `confirm()`/`ask()`:
-/// `--yes` (or a prior "a"/"all" answer, `YES_ALL` there) answers every
-/// question without reading stdin at all -- the flag headless runs need so
-/// an unattended install cannot block on a question nobody will answer.
+/// A yes/no prompt gate: `--yes` (or a prior "a"/"all" answer) answers
+/// every question without reading stdin at all -- the flag headless runs
+/// need so an unattended install cannot block on a question nobody will
+/// answer.
 struct Confirms {
     yes: bool,
 }
@@ -309,13 +304,11 @@ impl Confirms {
         Confirms { yes }
     }
 
-    /// Prints `prompt` to stderr (matching install.sh's `ask`, which never
-    /// writes a prompt to stdout) and reads one line from stdin. `y`/`yes`
-    /// answers this question only; `a`/`all` answers it and every question
-    /// after it for the rest of the run, same as install.sh's `YES_ALL`.
-    /// A read error (no stdin at all, e.g. under `curl | bash`) reads as
-    /// "no" rather than blocking -- the same failure mode `ask`'s own `read`
-    /// has on a closed stdin.
+    /// Prints `prompt` to stderr, never stdout, and reads one line from
+    /// stdin. `y`/`yes` answers this question only; `a`/`all` answers it
+    /// and every question after it for the rest of the run. A read error
+    /// (no stdin at all, e.g. under `curl | bash`) reads as "no" rather
+    /// than blocking.
     fn ask(&mut self, prompt: &str) -> bool {
         if self.yes {
             return true;
@@ -339,14 +332,9 @@ impl Confirms {
 }
 
 /// A resolved `--integration` selection: any number of `skill=mode` choices
-/// plus at most one run-wide bare-mode default -- ported from
-/// installer/src/05-config.sh's `record_integration`/`record_skill_integration`
-/// and `INTEGRATION_SELECTION`/`INTEGRATION_DEFAULT`. A later `--integration`
-/// for the same skill overwrites an earlier one (the usual last-flag-wins CLI
-/// convention); install.sh gets the same result through a different
-/// mechanism (bash 3.2 has no associative arrays, so it prepends records to a
-/// list and reads the first match), so this does not reproduce that
-/// mechanism, only its outcome.
+/// plus at most one run-wide bare-mode default. A later `--integration` for
+/// the same skill overwrites an earlier one, the usual last-flag-wins CLI
+/// convention.
 #[derive(Default)]
 struct IntegrationSelection {
     per_skill: std::collections::HashMap<String, String>,
@@ -364,14 +352,13 @@ impl IntegrationSelection {
 
 /// Parses and validates every `--integration` argument against `source`'s
 /// own declared modes -- a `skill=mode` naming a mode that skill does not
-/// offer is refused by name, same as install.sh's `record_skill_integration`
-/// refusing at the door rather than failing silently mid-install.
+/// offer is refused by name at the door rather than failing silently
+/// mid-install.
 ///
-/// `EDITOR_INTEGRATION` (install.sh's older, ai-text-editor-only env-var
-/// spelling of the same choice) is folded in first, so an explicit
+/// `EDITOR_INTEGRATION` (an older, ai-text-editor-only env-var spelling of
+/// the same choice) is folded in first, so an explicit
 /// `--integration`/`--editor-integration` on the command line still
-/// overrides it -- same precedence install.sh's own INTEGRATION_SELECTION
-/// prepend order gives the CLI flag over the env var.
+/// overrides it.
 fn build_integration_selection(
     source: &Path,
     raw: &[String],
@@ -418,18 +405,12 @@ fn build_integration_selection(
 }
 
 /// `--agent NAME` resolves to that agent's own directory under $HOME
-/// (manifest::AGENTS), matching install.sh's TARGET_PATHS; `--target DIR`
-/// names a directory outright. Exactly one of the two selects where skills
-/// land.
-/// `--agent NAME` resolves to that agent's own directory under $HOME
-/// (manifest::AGENTS), matching install.sh's TARGET_PATHS; `--target DIR`
-/// names a directory outright. Exactly one of the two selects where skills
-/// land. Also returns the resolved agent *kind* when known -- either named
-/// directly by `--agent`, or inferred from an explicit `--target` that
-/// happens to match one of AGENTS' own paths under $HOME, the same way
-/// install.sh's `agent_kind_for_root` works by path alone regardless of how
-/// the path was chosen. `None` means a custom target this installer has no
-/// grants for, same as install.sh's "custom" row.
+/// (manifest::AGENTS); `--target DIR` names a directory outright. Exactly
+/// one of the two selects where skills land. Also returns the resolved
+/// agent *kind* when known -- either named directly by `--agent`, or
+/// inferred from an explicit `--target` that happens to match one of
+/// AGENTS' own paths under $HOME. `None` means a custom target this
+/// installer has no grants for.
 fn resolve_target_and_kind(
     target: Option<PathBuf>,
     agent: Option<String>,
@@ -471,15 +452,12 @@ fn resolve_target_and_kind(
 
 /// The multi-root form `run_install` uses: `--target`/`--agent` are each
 /// repeatable there (not in `interactive`, whose picker has no root-
-/// selection UI of its own to drive more than one), matching install.sh's
-/// own `SELECTED_TARGET_PATHS` array and its main loop's `for root in
-/// SELECTED_TARGET_PATHS; do for skill in SELECTED_SKILLS; do install_skill`
-/// nesting -- every skill installs into every named root. Still mutually
-/// exclusive as families (`--target` and `--agent` cannot both be given),
-/// same as the single-root form. A duplicate root (typed twice, or two
-/// `--agent` names that happen to share a home directory) collapses to one
-/// entry so nothing installs, registers, or prompts twice for the same
-/// destination.
+/// selection UI of its own to drive more than one) -- every skill installs
+/// into every named root. Still mutually exclusive as families (`--target`
+/// and `--agent` cannot both be given), same as the single-root form. A
+/// duplicate root (typed twice, or two `--agent` names that happen to
+/// share a home directory) collapses to one entry so nothing installs,
+/// registers, or prompts twice for the same destination.
 fn resolve_targets_and_kinds(
     targets: Vec<PathBuf>,
     agents: Vec<String>,
@@ -524,15 +502,14 @@ fn read_line_trimmed() -> String {
     line.trim().to_string()
 }
 
-/// The picker's counterpart to `select_targets` for when `interactive` is
-/// given neither `--target` nor `--agent`: auto-detects installed agent
-/// roots (`manifest::agent_available`), offers saved custom locations too
-/// (`custom_locations::load`), and prompts a numbered/comma-separated
-/// choice, a custom directory, or `a` for every listed root -- ported from
-/// install.sh's `select_targets`. Reached only once this installer already
-/// knows stdin is a real terminal (the picker itself already refused to run
-/// otherwise), so unlike bash this has no separate "no interactive channel"
-/// branch to port: that case never reaches here at all.
+/// For when `interactive` is given neither `--target` nor `--agent`:
+/// auto-detects installed agent roots (`manifest::agent_available`), offers
+/// saved custom locations too (`custom_locations::load`), and prompts a
+/// numbered/comma-separated choice, a custom directory, or `a` for every
+/// listed root. Reached only once this installer already knows stdin is a
+/// real terminal (the picker itself already refused to run otherwise), so
+/// there is no separate "no interactive channel" branch here: that case
+/// never reaches here at all.
 fn select_targets_interactively(yes: bool) -> Result<Vec<(PathBuf, Option<String>)>, String> {
     let home = home_dir_opt().ok_or("interactive: needs $HOME set to detect agent roots")?;
 
@@ -663,15 +640,9 @@ fn select_targets_interactively(yes: bool) -> Result<Vec<(PathBuf, Option<String
     Ok(chosen)
 }
 
-/// Accumulates what a run actually did, for the final `== Summary ==` block
-/// -- ported from install.sh's `SUMMARY_LINES`/`summary_add` and
-/// `summary_blocked_block`/`replay_commands`. install.sh's own per-line
-/// soft-requirement/dev-build/integration-mode suffixes
-/// (`summary_soft_note`/`summary_dev_build_note`/`summary_integration_note`)
-/// are not reproduced here; this covers the two lines install.sh's own
-/// comment calls the whole point of the block -- what was installed, and,
-/// for anything blocked on a hard requirement, the exact command that
-/// retries once it's met.
+/// Accumulates what a run actually did, for the final `== Summary ==`
+/// block: what was installed, and, for anything blocked on a hard
+/// requirement, the exact command that retries once it's met.
 #[derive(Default)]
 struct Summary {
     installed: Vec<String>,
@@ -688,9 +659,8 @@ struct HardBlocked {
 
 impl Summary {
     /// `roots` and `yes` are threaded in at print time, not recorded per
-    /// skill: install.sh's own `replay_commands` reads `SELECTED_TARGET_PATHS`
-    /// and `YES` fresh when the summary prints, not when the skill was
-    /// blocked, since the whole run shares one root list and one --yes.
+    /// skill: the whole run shares one root list and one --yes, read fresh
+    /// when the summary prints rather than when the skill was blocked.
     fn print(&self, roots: &[PathBuf], yes: bool) {
         if self.installed.is_empty()
             && self.platform_blocked.is_empty()
@@ -740,18 +710,16 @@ impl Summary {
 }
 
 /// A skill missing a hard requirement is skipped rather than installed and
-/// then left half-usable -- same rule as install.sh's
-/// summary_blocked_block/RUNTIME_BLOCKED_SKILLS: "Skipped: %s -- a hard
-/// requirement is missing, nothing was written". The interactive picker
-/// already keeps a Blocked skill out of `skills` before this is called
-/// (`PickerState::toggle` refuses to select one); this is the same rule
-/// applied to a name that arrived directly via `--skill`/`--all`, which never
-/// passed through the picker at all.
+/// then left half-usable. The interactive picker already keeps a Blocked
+/// skill out of `skills` before this is called (`PickerState::toggle`
+/// refuses to select one); this is the same rule applied to a name that
+/// arrived directly via `--skill`/`--all`, which never passed through the
+/// picker at all.
 ///
-/// `manifest::skill_unsupported_here` is checked first, same order as
-/// install.sh's own per-skill loop: a platform-unsupported skill has no
-/// requirements worth checking and nothing worth replaying, so it gets its
-/// own reason rather than being reported as a missing-tool block.
+/// `manifest::skill_unsupported_here` is checked first: a
+/// platform-unsupported skill has no requirements worth checking and
+/// nothing worth replaying, so it gets its own reason rather than being
+/// reported as a missing-tool block.
 fn install_selected_skills(
     source: &Path,
     target: &Path,
@@ -815,15 +783,11 @@ fn install_selected_skills(
         )
         .map_err(|e| e.to_string())?;
         let mut line = format!("installed {skill} -> {}", target.join(skill).display());
-        // Ported suffixes from install.sh's own Installed: line
-        // (summary_soft_note/summary_integration_note, 62-summary.sh):
-        // every unmet soft requirement gets its own warning, and a skill
+        // Every unmet soft requirement gets its own warning, and a skill
         // offering more than one integration mode names which it got and
-        // why. summary_dev_build_note has no port -- it names binaries that
-        // came from a repo-root dev build location distinct from the
-        // shipped one, a second binary source this installer has no concept
-        // of at all (its copy step only ever reads from
-        // `source_root.join(skill)`).
+        // why. There is no note for a dev-build binary source distinct
+        // from the shipped one: this installer's copy step only ever reads
+        // from `source_root.join(skill)`, a single source.
         for (req, met) in &status.requirements {
             if *met || req.strength != requirements::Strength::Soft {
                 continue;
@@ -857,16 +821,11 @@ fn install_selected_skills(
 
 /// The mcp/permission/plugin steps below all take a slice of roots instead
 /// of one, because they must each run their own confirm() prompt exactly
-/// ONCE per run and then apply the resulting decision to every root --
-/// install.sh's own worktrees_permission_step/planning_permission_step/
-/// mcp_registration_step/interactive_shell_permission_step/
-/// editor_steering_step each run once, after the whole per-root install
-/// loop, and each loops over every root internally for its own per-root
-/// grant (installer/src/75-main.sh). Calling them once per root instead
-/// (what an earlier version of this file did) asks an identical prompt
-/// once per root in a multi-root run, and re-announces "== MCP
-/// registration ==" per root -- a real, user-visible divergence for
-/// `--target A --target B` or more than one `--agent`.
+/// ONCE per run and then apply the resulting decision to every root.
+/// Calling them once per root instead (what an earlier version of this file
+/// did) asks an identical prompt once per root in a multi-root run, and
+/// re-announces "== MCP registration ==" per root -- a real, user-visible
+/// divergence for `--target A --target B` or more than one `--agent`.
 fn run_mcp_registration_step(
     roots: &[(PathBuf, Option<String>)],
     source: &Path,
@@ -934,16 +893,13 @@ fn run_mcp_registration_step(
     }
 }
 
-/// The permission grants, plan migration and vendor plugins install.sh
-/// bundles with a skill's own install step (sections 12-13 of
-/// 70-permissions.sh/65-plan-migration.sh), run here ONCE for the whole
-/// run across every resolved root -- see the doc comment on
-/// `run_mcp_registration_step` for why this takes `roots` rather than one
-/// target/kind pair. Silently does nothing when no root has a known,
-/// auto-editable agent kind -- the standalone grant-permissions/
-/// mcp-register/migrate-plans/install-*-plugin subcommands remain the
-/// manual fallback, same role install.sh's print_manual_permissions plays
-/// for a "custom" row.
+/// The permission grants, plan migration and vendor plugins bundled with a
+/// skill's own install step, run here ONCE for the whole run across every
+/// resolved root -- see the doc comment on `run_mcp_registration_step` for
+/// why this takes `roots` rather than one target/kind pair. Silently does
+/// nothing when no root has a known, auto-editable agent kind -- the
+/// standalone grant-permissions/mcp-register/migrate-plans/install-*-plugin
+/// subcommands remain the manual fallback for a "custom" root.
 fn run_post_install_steps(
     roots: &[(PathBuf, Option<String>)],
     source: &Path,
@@ -960,8 +916,8 @@ fn run_post_install_steps(
     }
     let Some(home) = home_dir_opt() else { return };
 
-    // install.sh's worktrees_permission_step runs for every install, whatever
-    // skills were selected -- unlike everything else below, not gated on any
+    // Worktrees permissions run for every install, whatever skills were
+    // selected -- unlike everything else below, not gated on any
     // particular skill being among them.
     run_worktrees_permission_step(&known_roots, confirms, &home);
 
@@ -1058,9 +1014,8 @@ fn install_profiles_leniently(
 /// the same way for the same reason (a companion plugin, not an optional
 /// grant). One OR check so selecting more than one of the three still
 /// installs it exactly once. opencode/codex have no `SubagentStart`
-/// equivalent measured yet (agent-identity-plugin/README.md), so those roots
-/// get a plain statement that the guarantee is absent there instead of a
-/// silent no-op.
+/// equivalent, so those roots get a plain statement that the guarantee is
+/// absent there instead of a silent no-op.
 fn run_agent_identity_post_install(roots: &[(&Path, &str)], source: &Path, skills: &[String]) {
     let session_dependent = skills
         .iter()
@@ -1102,8 +1057,7 @@ fn run_agent_identity_post_install(roots: &[(&Path, &str)], source: &Path, skill
 
 /// A companion plugin for `chat`, Claude Code only (`PreToolUse` is a Claude
 /// Code hook): shows what chat-mcp's interrupt spool has queued at the agent's
-/// next tool call, without needing Claude Code's channels flag. See
-/// chat/docs/interrupts.md and chat-interrupt-plugin/README.md.
+/// next tool call, without needing Claude Code's channels flag.
 fn run_chat_interrupt_plugin_post_install(roots: &[(&Path, &str)], source: &Path) {
     let claude_roots: Vec<&Path> = roots
         .iter()
@@ -1127,11 +1081,9 @@ fn run_chat_interrupt_plugin_post_install(roots: &[(&Path, &str)], source: &Path
 }
 
 /// Runs for every install with at least one known agent root, whatever
-/// skills were selected -- ported from install.sh's
-/// `worktrees_permission_step`, which is deliberately outside the
-/// `contains planning ...` branch for the same reason (any agent may be
-/// asked to take a worktree). The two prompts are asked once for the whole
-/// run; the grant itself is applied once per root.
+/// skills were selected: not gated behind any particular skill, since any
+/// agent may be asked to take a worktree. The two prompts are asked once
+/// for the whole run; the grant itself is applied once per root.
 fn run_worktrees_permission_step(roots: &[(&Path, &str)], confirms: &mut Confirms, home: &Path) {
     println!();
     println!("== Agent worktree permissions ==");
@@ -1403,8 +1355,7 @@ fn run_interactive_shell_post_install(
 }
 
 /// Offered only when at least one Claude Code root was selected (these are
-/// Claude Code's own settings) and the run placed ai-text-editor -- ported
-/// from install.sh's `editor_steering_step`/`editor_gate_plugin_step`. The
+/// Claude Code's own settings) and the run placed ai-text-editor. The
 /// steering prompt runs once for the whole run; the gate plugin is copied
 /// into every Claude Code root.
 fn run_editor_steering_and_gate_step(
@@ -1433,9 +1384,8 @@ fn run_editor_steering_and_gate_step(
     }
 }
 
-/// Two independent off-switches, in the same order bash offers them;
-/// declining both leaves the setting unchanged, same as bash's own final
-/// message.
+/// Two independent off-switches; declining both leaves the setting
+/// unchanged.
 fn run_editor_steering_step(home: &Path, confirms: &mut Confirms) {
     println!();
     println!("== ai-text-editor tool steering ==");
@@ -1516,9 +1466,9 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     // $HOME, not under any one target root -- required regardless of which
     // (possibly several) target roots this run installs into.
     let home = home_dir_opt().ok_or("install: HOME is not set")?;
-    // One shared Confirms across every root, matching install.sh's single
-    // run-wide YES/YES_ALL: an "a" (all) answer for the first root's prompt
-    // must still auto-answer every later root's prompts too.
+    // One shared Confirms across every root: an "a" (all) answer for the
+    // first root's prompt must still auto-answer every later root's
+    // prompts too.
     let mut confirms = Confirms::new(args.yes);
     let mut summary = Summary::default();
     let mut installed_skills: Vec<String> = Vec::new();
@@ -1542,10 +1492,8 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     run_post_install_steps(&roots, &source, &installed_skills, &mut confirms);
     let root_paths: Vec<PathBuf> = roots.iter().map(|(t, _)| t.clone()).collect();
     summary.print(&root_paths, args.yes);
-    // install.sh's own dispatch ends with
-    // `[ -z "$RUNTIME_BLOCKED_SKILLS" ] || exit 1`, so a partial install
-    // (a skill hard-blocked on every root that offered it) cannot read as
-    // success in CI.
+    // A partial install (a skill hard-blocked on every root that offered
+    // it) cannot read as success in CI.
     if !summary.hard_blocked.is_empty() {
         return Ok(ExitCode::FAILURE);
     }
@@ -1602,10 +1550,9 @@ fn parse_uninstall_args(argv: &[String]) -> Result<UninstallArgs, String> {
 
 /// T142 (first pass): removes a skill's own installed directory, garbage-
 /// collects its shared binary and any co-installed vendor plugin only when
-/// nothing else still installed needs them, and deregisters its MCP entry --
-/// see `uninstall.rs`'s module doc comment for what this deliberately does
-/// NOT cover yet (permission-grant reversal, the opencode tui-hint variant,
-/// a TUI action).
+/// nothing else still installed needs them, and deregisters its MCP entry.
+/// Does NOT yet cover permission-grant reversal, the opencode tui-hint
+/// variant, or a TUI action.
 fn run_uninstall(argv: &[String]) -> Result<ExitCode, String> {
     let args = parse_uninstall_args(argv)?;
     if args.skills.is_empty() {
@@ -1787,11 +1734,11 @@ fn print_opencode_outcome(already_present: &str, outcome: permissions::OpencodeP
     }
 }
 
-/// install.sh's `codex_write_fresh_roots` always prints its caller's own
-/// "done" label at the end, even on a fresh create or prepend -- `label`
-/// carries that same per-context wording through (planning says "writable_
-/// roots already present", worktrees says "worktree grant already in
-/// place", regardless of which of those two branches actually ran).
+/// Always prints its caller's own "done" label at the end, even on a fresh
+/// create or prepend -- `label` carries that same per-context wording
+/// through (planning says "writable_roots already present", worktrees says
+/// "worktree grant already in place", regardless of which of those two
+/// branches actually ran).
 fn print_codex_outcome(label: &str, outcome: permissions::CodexOutcome) {
     match outcome {
         permissions::CodexOutcome::Created => {
@@ -2415,10 +2362,8 @@ fn run_set_claude_env(argv: &[String]) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// `installer print-skill-files <skill> [--source DIR]` -- ported from
-/// install.sh's `--print-skill-files <skill> --format=tsv` (the format flag
-/// is not carried over: tsv is the only format this ever produced, so a
-/// flag that could only ever have one value is not worth requiring).
+/// `installer print-skill-files <skill> [--source DIR]`. Only ever
+/// produces tsv, so there is no format flag to choose between formats.
 fn run_print_skill_files(argv: &[String]) -> Result<ExitCode, String> {
     let mut source: Option<PathBuf> = None;
     let mut skill: Option<String> = None;
@@ -2440,8 +2385,7 @@ fn run_print_skill_files(argv: &[String]) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// `installer resolve-source <skill> <relative> [--source DIR]` -- ported
-/// from install.sh's `--resolve-source <skill> <relative>`.
+/// `installer resolve-source <skill> <relative> [--source DIR]`.
 fn run_resolve_source(argv: &[String]) -> Result<ExitCode, String> {
     let mut source: Option<PathBuf> = None;
     let mut positional: Vec<String> = Vec::new();
@@ -2466,10 +2410,8 @@ fn run_resolve_source(argv: &[String]) -> Result<ExitCode, String> {
 }
 
 /// `installer install-skill <skill> --target DIR --approval yes|no
-/// [--source DIR] [--package prod|dev]` -- ported from install.sh's
-/// `--install-skill <skill> --target DIR --approval yes|no`. Exit codes
-/// mirror install.sh's own documented contract for this entry point: 0
-/// installed, 2 approval declined, 3 an unsafe or unmanaged collision.
+/// [--source DIR] [--package prod|dev]`. Exit codes: 0 installed, 2
+/// approval declined, 3 an unsafe or unmanaged collision.
 fn run_install_skill_cli(argv: &[String]) -> Result<ExitCode, String> {
     let mut source: Option<PathBuf> = None;
     let mut target: Option<PathBuf> = None;
@@ -2590,15 +2532,9 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
         i += 1;
     }
     let source = resolve_source(source)?;
-    // install.sh picks skills before roots (select_skills, then
-    // select_targets) -- but its own picker's "already installed" status
-    // does not depend on a target either, so resolving roots first here
-    // changes only the ORDER a user answers "which skills" vs. "which
-    // roots", not the roots themselves or what `a` (all of them) does
-    // (select_targets_interactively ports that part exactly). This
-    // installer's own picker already needs a `target` up front to compute
-    // each skill's installed/mode status against, which is what forces the
-    // order.
+    // This installer's own picker needs a `target` up front to compute
+    // each skill's installed/mode status against, which is what forces
+    // roots to resolve before skills are chosen.
     let roots: Vec<(PathBuf, Option<String>)> = if target.is_some() || agent.is_some() {
         vec![resolve_target_and_kind(target, agent)?]
     } else {
@@ -2691,9 +2627,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             run_post_install_steps(&roots, &source, &installed_skills, &mut confirms);
             let root_paths: Vec<PathBuf> = roots.iter().map(|(p, _)| p.clone()).collect();
             summary.print(&root_paths, yes);
-            // install.sh's own dispatch ends with
-            // `[ -z "$RUNTIME_BLOCKED_SKILLS" ] || exit 1`, so a partial
-            // install cannot read as success in CI.
+            // A partial install cannot read as success in CI.
             if !summary.hard_blocked.is_empty() {
                 return Ok(ExitCode::FAILURE);
             }

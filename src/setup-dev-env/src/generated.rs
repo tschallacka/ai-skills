@@ -4,21 +4,19 @@
 //! The generated shell artifacts, on the same build-if-missing terms as
 //! the crates: build-plan-libs.sh and generate-reviewer.sh regenerate only
 //! when their own output is missing; generate-portability.sh regenerates
-//! unconditionally, every run. Matches run-tests's own bootstrap_generated
-//! precedent -- thin subprocess calls into the real bash scripts, never
-//! reimplemented. Also wires the pre-push git hook via `git config
-//! core.hooksPath hooks`, the one legitimate git invocation anywhere in
-//! this crate.
+//! unconditionally, every run. Thin subprocess calls into the real
+//! scripts, never reimplemented. Also wires the pre-push git hook via
+//! `git config core.hooksPath hooks`, the one legitimate git invocation
+//! anywhere in this crate.
 
 use crate::platform::script_command;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// Bash's own three calls here are each `... >/dev/null 2>&1`; `Command`
-/// inherits the parent's stdio by default, so each spawn must explicitly
-/// discard both streams to match (found during goal 17's own regression
-/// sweep: an earlier version let generate-portability.sh's own "Wrote ..."
-/// line leak through to setup-dev-env's own stdout).
+/// `Command` inherits the parent's stdio by default, so each spawn must
+/// explicitly discard both streams to keep them silent (found during goal
+/// 17's own regression sweep: an earlier version let a spawned script's own
+/// output line leak through to this crate's own stdout).
 fn silent(mut command: Command) -> Command {
     command.stdout(Stdio::null()).stderr(Stdio::null());
     command
@@ -32,9 +30,8 @@ const LIBS: [&str; 5] = [
     "plan-table-lib.sh",
 ];
 
-/// Returns how many generated artifacts were (re)built this run, matching
-/// bash's own `generated` counter (used only to decide whether to print
-/// "generated artifacts already present").
+/// Returns how many generated artifacts were (re)built this run -- used
+/// only to decide whether to print "generated artifacts already present".
 pub fn build_if_missing(repo_root: &Path) -> u32 {
     let mut generated = 0;
     let missing_lib = LIBS

@@ -1,23 +1,15 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! Moves plans out of the old per-agent `<target>/planning/plans` directories
-//! into the single portable plan root -- ported from
-//! installer/src/65-plan-migration.sh's `legacy_plan_migration`, and from
-//! `plan_default_root`/`plan_ensure_root_permissions` in
-//! planning/scripts/plan-core-lib.sh (the two calls this step makes into
-//! the planning skill's own library, reimplemented here since this
-//! installer does not source bash).
+//! into the single portable plan root.
 //!
-//! Each plan is keyed by a hash of its own source path (blake3 instead of
-//! bash's `cksum`, this installer's own manifest convention, same choice as
-//! digest.rs), so a run that dies partway is idempotent: a plan already
-//! marked `.complete` is skipped, and one still `.moving` or `.blocked` is
-//! retried. Unlike install.sh's `mv` (which coreutils falls back to a
-//! copy-then-remove for automatically), this uses `fs::rename` directly and
-//! reports a cross-filesystem failure as blocked rather than silently
-//! copying -- a gap worth knowing about if the plans root ever lives on a
-//! different filesystem than a target root, which it does not for any
-//! shipped target today (both sit under $HOME).
+//! Each plan is keyed by a hash of its own source path, so a run that dies
+//! partway is idempotent: a plan already marked `.complete` is skipped, and
+//! one still `.moving` or `.blocked` is retried. This uses `fs::rename`
+//! directly and reports a cross-filesystem failure as blocked rather than
+//! silently copying -- a gap worth knowing about if the plans root ever
+//! lives on a different filesystem than a target root, which it does not
+//! for any shipped target today (both sit under $HOME).
 
 use std::fs;
 use std::io;
@@ -34,13 +26,11 @@ pub fn default_root(home: &Path) -> PathBuf {
         .join("plans")
 }
 
-// B327: same fix as shared_bin::shared_bin_dir, and for the same reason --
-// `default_root` takes `home` explicitly so a test can pass an isolated
-// tempdir, but reading PLANS_ROOT/XDG_CONFIG_HOME first silently defeated
-// that whenever the ambient environment (or another test) had them set.
-// Reuses shared_bin's thread-local override rather than a second copy of the
-// same mechanism; see its own doc comment for why a thread-local needs no
-// lock here.
+// B327: `default_root` takes `home` explicitly so a test can pass an
+// isolated tempdir, but reading PLANS_ROOT/XDG_CONFIG_HOME first silently
+// defeated that whenever the ambient environment (or another test) had
+// them set. Reuses shared_bin's thread-local override rather than a second
+// copy of the same mechanism.
 #[cfg(test)]
 fn env_value(key: &'static str) -> Option<String> {
     crate::shared_bin::test_env::resolve(key)
@@ -52,7 +42,7 @@ fn env_value(key: &'static str) -> Option<String> {
 }
 
 /// Creates the plan root if missing and proves it is actually writable with
-/// a real probe file, same as install.sh refusing to trust `-w` alone.
+/// a real probe file rather than trusting a permission check alone.
 pub fn ensure_root(root: &Path) -> io::Result<()> {
     fs::create_dir_all(root)?;
     let probe = root.join(format!(".permission-probe.{}", std::process::id()));

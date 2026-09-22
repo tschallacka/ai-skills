@@ -186,10 +186,10 @@ run_wrapper Darwin 'nice memlimit' 2Gi 400 -- my-command
 # it the skill still installs, because the wrapper degrades to nice + cpulimit,
 # and the run warns which capability is lost instead of refusing.
 #
-# The bash install.sh version of this section stubbed `uname` on PATH to make
+# An earlier bash version of this section stubbed `uname` on PATH to make
 # a Linux CI runner answer as Darwin/arm64 or Darwin/x86_64, then ran the real
 # installer against that stub and asserted its stdout/stderr wording -- because
-# install.sh's own `runtime_requirements()`/condition matching genuinely
+# that implementation's `runtime_requirements()`/condition matching genuinely
 # called `uname` at runtime, a stub could fake the host it saw.
 #
 # The Rust installer's equivalent (src/installer/src/requirements.rs) cannot
@@ -201,13 +201,10 @@ run_wrapper Darwin 'nice memlimit' 2Gi 400 -- my-command
 # What condition_applies()/host_os()/host_arch() actually do -- matching a
 # requires.tsv row's `Darwin:arm64`-style condition against an OS/arch pair,
 # including the exact "arm64 only, not Intel" case this section used to pin
-# -- is covered directly in requirements.rs's own unit tests
-# (a_wildcard_condition_always_matches, alternation_matches_either_side, and
-# resource-limited-testing/requires.tsv's own memlimit row is read by
-# requirements_for's tests elsewhere in that file), parameterized by literal
-# os/arch strings rather than a stubbed uname. That is strictly more direct:
-# it asserts the matching logic itself, not a Linux runner's ability to
-# impersonate a Mac.
+# -- is covered directly in requirements.rs's own unit tests, parameterized
+# by literal os/arch strings rather than a stubbed uname. That is strictly
+# more direct: it asserts the matching logic itself, not a Linux runner's
+# ability to impersonate a Mac.
 
 [ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-limited-run-contract: PASS'

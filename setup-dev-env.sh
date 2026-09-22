@@ -43,26 +43,22 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ─────────────────────────────────────────────────────────────────────────────
 # Compiled-binary preference
 # ─────────────────────────────────────────────────────────────────────────────
-# See plan_exec_compiled_binary_if_present's own doc comment
-# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
-# exec-vs-fall-through mechanism. Placed immediately after repo_root is
-# computed and BEFORE setup-dev-env-lib.sh is sourced -- as early as
-# structurally possible, matching pre-push-check.sh's own precedent -- since
-# the compiled binary re-derives everything itself, including its own
-# nix-shell entry, and needs nothing bash would otherwise compute first.
-# setup-dev-env.sh already declares `set -euo pipefail` above, matching what
-# sourcing plan-core-lib.sh itself wants, so no call-site `set +e` fix is
-# needed here (unlike run-tests.sh's own `set -uo pipefail`). setup-dev-env.sh
-# lives at the repository root itself, one level shallower than
-# planning/scripts, so the relative path to plan-core-lib.sh crosses one
-# directory level down, matching pre-push-check.sh's own precedent exactly.
+# Exec into the compiled binary when one is present, falling through to this
+# script's own bash implementation otherwise. Placed immediately after
+# repo_root is computed and BEFORE setup-dev-env-lib.sh is sourced -- as early
+# as structurally possible, since the compiled binary re-derives everything
+# itself, including its own nix-shell entry, and needs nothing bash would
+# otherwise compute first. setup-dev-env.sh already declares
+# `set -euo pipefail` above, so no call-site `set +e` fix is needed here.
+# setup-dev-env.sh lives at the repository root itself, one level shallower
+# than planning/scripts, so the relative path to plan-core-lib.sh crosses one
+# directory level down.
 sde_script_dir="$repo_root"
-# plan-core-lib.sh is generated (gitignored) by build-plan-libs.sh, so it does
-# not exist on a genuinely fresh checkout -- guard the source+exec on it
-# already being present, unconditionally falling through to this script's own
-# bash implementation (which itself builds plan-core-lib.sh, among other
-# things, via build-plan-libs.sh) when it is not, matching B346's fix for
-# build-plan-libs.sh's own self-referential case.
+# plan-core-lib.sh is generated (gitignored), so it does not exist on a
+# genuinely fresh checkout -- guard the source+exec on it already being
+# present, unconditionally falling through to this script's own bash
+# implementation (which itself builds plan-core-lib.sh, among other things)
+# when it is not.
 if [ -f "$sde_script_dir/planning/scripts/plan-core-lib.sh" ]; then
     source "$sde_script_dir/planning/scripts/plan-core-lib.sh"
     plan_exec_compiled_binary_if_present setup-dev-env "$sde_script_dir" "$@"
@@ -251,17 +247,16 @@ EOF
 rm -f "$repo_root/.setup-dev-env.log"
 
 # The generated shell artifacts, on the same build-if-missing terms as the
-# crates above. They are never committed (.agents/MAINTAINER.md 1.10), and a
-# fresh clone therefore has none of them — which is the same gap this script
-# exists to close: planning/scripts/*.sh `source` the five plan-*-lib.sh files,
+# crates above. They are never committed, and a fresh clone therefore has
+# none of them — which is the same gap this script exists to close:
+# planning/scripts/*.sh `source` the five plan-*-lib.sh files,
 # so a freshly cloned tree cannot run a planning helper at all until they are
 # built. Doing it here means "I ran setup-dev-env.sh" is enough to have a
 # working tree, rather than being enough only for the compiled half.
 #
-# Staleness is deliberately not detected here, exactly as run-tests.sh's
-# bootstrap_generated has it: regenerating unconditionally would let this script
-# mask drift the tests are there to find. Missing is built, present is left
-# alone.
+# Staleness is deliberately not detected here: regenerating unconditionally
+# would let this script mask drift the tests are there to find. Missing is
+# built, present is left alone.
 generated=0
 for lib in plan-core-lib.sh plan-crypt-lib.sh plan-document-lib.sh plan-progress-lib.sh plan-table-lib.sh; do
     if [ ! -f "$repo_root/planning/scripts/$lib" ]; then

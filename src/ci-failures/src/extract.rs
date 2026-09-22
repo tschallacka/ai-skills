@@ -44,24 +44,21 @@ fn has_four_space_indent(line: &str) -> bool {
 
 /// Strips ANSI CSI color sequences and a single trailing CR from one raw
 /// line, then strips a single leading GitHub-style ISO-8601 timestamp (a
-/// no-op on a GitLab trace line, which carries none) -- mirroring ci-
-/// failures.sh's own extract() awk script exactly: first $0 itself is
-/// cleaned of escape codes/CR, then a separate `line` variable additionally
-/// drops the timestamp, and every pattern rule below matches against that
-/// fully-cleaned `line`.
+/// no-op on a GitLab trace line, which carries none): the ANSI/CR cleanup
+/// happens first, then a separate step additionally drops the timestamp,
+/// and every pattern rule below matches against that fully-cleaned `line`.
 fn clean_line(raw: &str) -> String {
     let no_ansi = ansi_re().replace_all(raw, "");
     let no_cr = no_ansi.strip_suffix('\r').unwrap_or(&no_ansi);
     timestamp_re().replace(no_cr, "").into_owned()
 }
 
-/// Mirrors the `sed -e "s/${esc}\[[0-9;]*[a-zA-Z]//g" -e 's/\r$//'` pipeline
-/// gh_print_job/glab_print_job run over a job's raw log before writing it to
-/// --raw DIR: every ANSI CSI sequence removed (all occurrences per line,
-/// matching sed's own `g` flag), then one trailing CR stripped per line.
-/// Unlike clean_line (used only for pattern-matching), this does NOT strip a
-/// leading timestamp -- the raw log file is meant to be the de-escaped
-/// original, not the pattern-matcher's own further-cleaned view of it.
+/// Cleans a job's raw log before writing it to --raw DIR: every ANSI CSI
+/// sequence removed (all occurrences per line), then one trailing CR
+/// stripped per line. Unlike clean_line (used only for pattern-matching),
+/// this does NOT strip a leading timestamp -- the raw log file is meant to
+/// be the de-escaped original, not the pattern-matcher's own further-cleaned
+/// view of it.
 pub fn strip_ansi_and_cr(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for line in text.lines() {
@@ -73,13 +70,11 @@ pub fn strip_ansi_and_cr(text: &str) -> String {
     out
 }
 
-/// Reproduces ci-failures.sh's own extract() line-by-line, matching every
-/// pattern rule in the exact priority order the bash source lists them
-/// (lines 110-137 of ci-failures.sh), including the two pieces of state it
-/// carries across lines: `detail` (continuing an indented FAIL block) and
-/// `after` (continuing N more lines verbatim after panicked-at/timed-out).
-/// Every matched line (and its continuation lines) is emitted with the same
-/// four-space prefix bash's own `print "    " line` uses.
+/// Scans line-by-line, applying pattern rules in a fixed priority order and
+/// carrying two pieces of state across lines: `detail` (continuing an
+/// indented FAIL block) and `after` (continuing N more lines verbatim after
+/// panicked-at/timed-out). Every matched line (and its continuation lines)
+/// is emitted with a four-space prefix.
 pub fn extract(input: &str) -> String {
     let mut detail = false;
     let mut after: u32 = 0;

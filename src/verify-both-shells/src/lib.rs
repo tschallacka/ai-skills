@@ -1,10 +1,9 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! verify-both-shells — run the suite on the working tree under both
-//! shells. Rust port of verify-both-shells.sh, reproducing its exact
-//! observable behavior: a linked, detached git worktree; a stale-worktree
-//! liveness sweep; a tracked-file overlay; two real shell-leg subprocess
-//! runs; a content-based pass/fail report; and signal-safe cleanup.
+//! shells: a linked, detached git worktree; a stale-worktree liveness
+//! sweep; a tracked-file overlay; two real shell-leg subprocess runs; a
+//! content-based pass/fail report; and signal-safe cleanup.
 //!
 //! Exposed as a library, not only a binary, so integration tests can drive
 //! `run()` directly with fake `Leg` values instead of needing a real
@@ -27,7 +26,6 @@ use std::sync::{Arc, Mutex};
 
 pub const PROGRAM: &str = "verify-both-shells.sh";
 
-// Captured verbatim via `bash verify-both-shells.sh --help`.
 pub const USAGE: &str =
     "verify-both-shells.sh — run the suite on the working tree under both shells.
 
@@ -69,8 +67,7 @@ pub fn parse_args(args: &[String]) -> Result<Action, i32> {
 }
 
 /// PLANNING_SKILL_ROOT first, current_exe()-anchored ancestor search as
-/// fallback -- mirrors goals 16-17's own discover_repo_root exactly, never
-/// `git rev-parse`.
+/// fallback -- never `git rev-parse`.
 pub fn discover_repo_root() -> Result<PathBuf, String> {
     if let Ok(root) = env::var("PLANNING_SKILL_ROOT") {
         if !root.is_empty() {
@@ -108,13 +105,12 @@ struct Shared {
     status: AtomicI32,
 }
 
-/// Reproduces real bash's own `cleanup()` order EXACTLY: the worktree and
-/// its own parent directory (holding `harness.pid`) are removed
-/// UNCONDITIONALLY, every time -- `--keep` never affects them. Only
-/// AFTERWARD, separately, are the two independent `log5`/`log3` temp files
-/// (created directly under `${TMPDIR:-/tmp}`, NOT nested inside the
-/// worktree's own parent) either left alone (printing "logs kept") when
-/// `keep && status != 0`, or deleted otherwise.
+/// Cleanup order: the worktree and its own parent directory (holding
+/// `harness.pid`) are removed UNCONDITIONALLY, every time -- `--keep`
+/// never affects them. Only AFTERWARD, separately, are the two independent
+/// `log5`/`log3` temp files (created directly under `${TMPDIR:-/tmp}`, NOT
+/// nested inside the worktree's own parent) either left alone (printing
+/// "logs kept") when `keep && status != 0`, or deleted otherwise.
 fn cleanup(shared: &Shared) {
     if let Some(wt) = shared.wt.lock().unwrap().take() {
         git::worktree_remove(&shared.src, &wt);

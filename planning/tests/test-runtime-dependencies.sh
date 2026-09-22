@@ -5,13 +5,13 @@
 #
 # Usage: test-runtime-dependencies.sh
 #
-# rjq is a declared requirement of the planning skill (install.sh
-# runtime_requirements), and the installer refuses to install without it. But a
-# hand-copied skill directory never went through the installer, and every rjq
-# call in the validate-plan pass libraries is `2>/dev/null`. Measured on a real
-# plan before the guard existed: 14 findings with rjq, 2 without, exit 127 with
-# no explanation. A gate that quietly stops enforcing is worse than one that
-# refuses to run, so the entry points check up front and exit 69.
+# rjq is a declared requirement of the planning skill, and the installer
+# refuses to install without it. But a hand-copied skill directory never went
+# through the installer, and every rjq call in the validate-plan pass
+# libraries is `2>/dev/null` -- so findings quietly go missing with no
+# explanation when rjq is absent. A gate that quietly stops enforcing is
+# worse than one that refuses to run, so the entry points check up front and
+# exit 69.
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"

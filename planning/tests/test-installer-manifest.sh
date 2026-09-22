@@ -6,8 +6,8 @@
 # Usage: test-installer-manifest.sh
 #
 # This file is itself shipped (it is registered in PACKAGE-MANIFEST.tsv), so it
-# holds to the shipped-runtime dependency rule in CODE-STYLE.md §1: bash, POSIX
-# coreutils, awk, sed, grep, git only. No python3.
+# holds to the shipped-runtime dependency rule: bash, POSIX coreutils, awk,
+# sed, grep, git only. No python3.
 set -euo pipefail
 export LC_ALL=C
 # shellcheck source=planning/tests/lib-test.sh
@@ -16,9 +16,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 map_file="$repo_dir/planning/PACKAGE-MAP.tsv"
 manifest_file="$repo_dir/planning/PACKAGE-MANIFEST.tsv"
-# Load the manifest helper directly (retired install.sh's own CLI dispatch
-# used to be the only way in; source_file()/platform_relative_path() are the
-# same functions either way, just called in-process now).
+# Load the manifest helper directly: source_file()/platform_relative_path()
+# are called in-process rather than through a CLI dispatch.
 # shellcheck disable=SC1090
 source "$repo_dir/installer/src/05-config.sh"
 # shellcheck disable=SC1090
@@ -61,9 +60,7 @@ test_manifest_emission() {
     map_installable=$(mktemp)
     trap 'rm -f "$emitted" "$map_installable"' RETURN
 
-    # install.sh's own --print-skill-files just cat'd PACKAGE-MANIFEST.tsv (see
-    # git history), so emitted-vs-manifest was always a tautology; the real
-    # contract is manifest == the map's installable rows.
+    # The real contract is manifest == the map's installable rows.
     cp "$manifest_file" "$emitted"
     awk -F '\t' 'NR == 1 { next } $6 == "false" { print }' "$map_file" >"$map_installable"
     cmp -s "$manifest_file" "$map_installable"

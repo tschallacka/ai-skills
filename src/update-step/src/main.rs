@@ -249,14 +249,13 @@ fn atomicity_check(
 /// "file not found" instead of failing on the first read (B349): CI-only,
 /// never reproduced locally, has shown the file passing an immediately
 /// preceding `is_file()` check and then failing this read moments later,
-/// within the same process, with no code path here or in `git_snapshot`
-/// that removes the file itself -- consistent with a transient filesystem
-/// visibility lag under the heavy parallel I/O contention real CI runs
-/// under (many sibling `cargo test` binaries and delegated subprocesses
-/// touching the same scratch tree at once), not a logic error. A short
-/// bounded retry is the correct response to a transient I/O error
-/// regardless of the exact underlying mechanism, and costs nothing on the
-/// ordinary path where the file is simply there.
+/// with nothing in this process removing the file itself -- consistent
+/// with a transient filesystem visibility lag under heavy parallel I/O
+/// contention (many sibling test binaries and subprocesses touching the
+/// same scratch tree at once), not a logic error. A short bounded retry is
+/// the correct response to a transient I/O error regardless of the exact
+/// underlying mechanism, and costs nothing on the ordinary path where the
+/// file is simply there.
 fn read_progress_file(path: &Path) -> std::io::Result<String> {
     read_with_retry(path, 5, std::time::Duration::from_millis(20))
 }
@@ -423,10 +422,10 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(30));
             std::fs::write(&write_path, "late content").unwrap();
         });
-        // Production waits about 80 ms; a loaded CI runner can start the writer
-        // thread later than that, which failed this test on x86_64 macOS
-        // (run 35660433933). The behaviour under test is "retries until the file
-        // appears", so the test gives the retry loop two seconds to see it.
+        // A loaded CI runner can start the writer thread later than
+        // production does. The behaviour under test is "retries until the
+        // file appears", so the test gives the retry loop two seconds to
+        // see it.
         assert_eq!(
             read_with_retry(&path, 200, std::time::Duration::from_millis(10)).unwrap(),
             "late content"

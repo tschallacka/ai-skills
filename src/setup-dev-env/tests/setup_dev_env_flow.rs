@@ -83,12 +83,10 @@ impl Repo {
         let dir = unique_dir(tag);
         fs::create_dir_all(&dir).unwrap();
         git(&dir, &["init", "-q"]);
-        // A root virtual workspace, matching the real ai-skills repository's
-        // own root Cargo.toml (members = ["src/*"]) -- without it, cargo
-        // treats each src/<crate>/Cargo.toml as a standalone package and
-        // places target/ INSIDE the crate's own directory rather than at
-        // repo_root/target, which is where stage.rs (matching the real
-        // bash original) expects to find a build's output.
+        // A root virtual workspace (members = ["src/*"]) -- without it,
+        // cargo treats each src/<crate>/Cargo.toml as a standalone package
+        // and places target/ INSIDE the crate's own directory rather than
+        // at repo_root/target, which is where a build's output is expected.
         write_file(
             &dir.join("Cargo.toml"),
             "[workspace]\nmembers = [\"src/*\"]\nresolver = \"2\"\n",
@@ -176,14 +174,13 @@ fn real_repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-// The build loop is driven by iterating plan::plan()'s own fixed table
-// (matching bash's own behavior exactly: a directory under src/ that is
-// NOT one of the plan's own rows is simply never visited by this loop,
-// even though it is a perfectly valid cargo workspace member otherwise).
-// So a "dummy crate" usable by the build loop must reuse one of the
-// table's own real crate names -- their PRODUCTION identity is irrelevant
-// here, since every test below builds a totally isolated fixture
-// repository under its own scratch directory.
+// The build loop is driven by iterating plan::plan()'s own fixed table: a
+// directory under src/ that is NOT one of the plan's own rows is simply
+// never visited by this loop, even though it is a perfectly valid cargo
+// workspace member otherwise. So a "dummy crate" usable by the build loop
+// must reuse one of the table's own real crate names -- their PRODUCTION
+// identity is irrelevant here, since every test below builds a totally
+// isolated fixture repository under its own scratch directory.
 const OK_CRATE: &str = "add-goal";
 const FAILING_CRATE: &str = "cleanup-plans";
 // A real plan-table crate name that also triggers the skill-dir extra-copy
@@ -256,10 +253,8 @@ fn a_full_run_builds_and_stages_the_dummy_crate_binary() {
 /// Regression test: a real bug found during goal 17's own regression sweep.
 /// stage_extras (the planning/scripts sibling and skill-dir copies) used to
 /// run and print its own "   -> ..." lines BEFORE stage_primary's "ok ->
-/// bin/..." line, the opposite of bash's own print order (bash's printf for
-/// "ok -> bin/..." always completes before the sibling/skill-dir cp calls
-/// even start). Assert the exact line order for a crate that triggers the
-/// skill-dir branch.
+/// bin/..." line, the wrong order. Assert the exact line order for a crate
+/// that triggers the skill-dir branch.
 #[test]
 fn the_ok_line_prints_before_the_skill_dir_extra_copy_line() {
     let repo = Repo::new("print-order");

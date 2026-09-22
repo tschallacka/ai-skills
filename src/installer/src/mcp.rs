@@ -1,8 +1,7 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! Registers an mcp-mode skill's adapter binary with an agent's own CLI, and
-//! takes the registration away again once nothing points at it anymore --
-//! ported from installer/src/72-mcp-registration.sh.
+//! takes the registration away again once nothing points at it anymore.
 //!
 //! Each agent's own CLI is preferred over hand-editing its configuration
 //! (`claude mcp add`, `codex mcp add`), because the CLI owns the format;
@@ -12,12 +11,11 @@
 //! command points inside the directory this install owns -- a hand-made
 //! entry of the same name pointing elsewhere is left alone.
 //!
-//! Unlike claude_register/codex_register, which shell out and are therefore
-//! NOT exercised by an automated test that could touch a real, live agent
-//! configuration, the file-reading (`mcp_entry_is_ours`) and file-writing
-//! (opencode's fallback) paths are fully unit tested. This mirrors the
-//! ci-failures skill's own documented split (gh exercised for real, glab
-//! only against a stub) rather than hiding the gap.
+//! `claude_register`/`codex_register` shell out and are therefore NOT
+//! exercised by an automated test that could touch a real, live agent
+//! configuration; the file-reading (`mcp_entry_is_ours`) and file-writing
+//! (opencode's fallback) paths are fully unit tested instead, rather than
+//! leaving that gap unacknowledged.
 
 use crate::backup;
 use crate::permissions;
@@ -68,9 +66,9 @@ fn claude_mcp_command(home: &Path, name: &str) -> Option<String> {
         .map(String::from)
 }
 
-/// `[mcp_servers.NAME]`'s own `command` key, read the same way install.sh's
-/// awk one-liner does: stop at the next `[table]` header, and only look at
-/// lines whose first whitespace-separated token is exactly `command`.
+/// `[mcp_servers.NAME]`'s own `command` key: stop at the next `[table]`
+/// header, and only look at lines whose first whitespace-separated token
+/// is exactly `command`.
 fn codex_mcp_command(content: &str, name: &str) -> Option<String> {
     let want = format!("[mcp_servers.{name}]");
     let mut inside = false;
@@ -106,13 +104,11 @@ fn opencode_mcp_command(home: &Path, name: &str) -> Option<String> {
         .map(String::from)
 }
 
-/// `mcp_entry_is_ours` in install.sh (installer/src/72-mcp-registration.sh)
-/// reads `${CODEX_HOME:-$HOME/.codex}/config.toml` -- a different override
-/// variable from the one its own permission-merge path uses
-/// (`CODEX_CONFIGFILE`, `permissions::codex_configfile`). Two variables for
-/// the same default file is install.sh's own inconsistency, not a slip in
-/// this port: matching it means using CODEX_HOME here specifically, not
-/// reusing `codex_configfile`.
+/// Reads `${CODEX_HOME:-$HOME/.codex}/config.toml` -- a different override
+/// variable from the one the permission-merge path uses
+/// (`CODEX_CONFIGFILE`, `permissions::codex_configfile`). Deliberately not
+/// reusing `codex_configfile`: the two directories are configured
+/// independently and are not guaranteed to agree.
 fn codex_mcp_configfile(home: &Path) -> std::path::PathBuf {
     std::env::var("CODEX_HOME")
         .map(std::path::PathBuf::from)
@@ -294,8 +290,8 @@ mod tests {
     use std::sync::Mutex;
 
     // codex_mcp_configfile reads the process-global CODEX_HOME; every test
-    // that overrides it takes this lock first, same reasoning as
-    // plan_migration.rs's own ENV_LOCK.
+    // that overrides it takes this lock first, so tests setting the same
+    // env var cannot race each other.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn write(path: &Path, content: &str) {

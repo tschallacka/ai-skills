@@ -2,8 +2,7 @@
 // PACKAGE: PROD
 
 //! Gate 7: the whole suite, only when --full is given. Inherits stdio so
-//! run-tests.sh's own output reaches the terminal directly, matching bash's
-//! own unredirected `./run-tests.sh`.
+//! the suite's own output reaches the terminal directly, unredirected.
 
 use crate::platform::script_command;
 use crate::report::Report;

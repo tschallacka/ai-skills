@@ -2,14 +2,12 @@
 //! T107/B283: one running `tail` binds a control socket in the session state
 //! dir and serves the other verbs on ITS connection, so a send no longer
 //! registers a second time under the same nick and the message arrives from
-//! the nick the agent chose. Migrated from chat/tests/test-chat-owner-socket.sh
-//! (T145 goal 25, W135) -- chat-client-rs's first tests/ directory.
+//! the nick the agent chose (T145 goal 25, W135).
 //!
-//! Reuses W131's shared support module from chat-server-rs's own tests/
-//! directory via `#[path]` rather than a new Cargo dependency: neither crate
-//! depends on the other in `[dependencies]`, and a real (even dev-only) path
-//! dependency between them would be a heavier answer than sharing one test
-//! module needs (05-step-migrate-owner-socket's own handoff).
+//! Reuses a shared support module via `#[path]` rather than a new Cargo
+//! dependency: neither crate depends on the other in `[dependencies]`, and a
+//! real (even dev-only) path dependency between them would be a heavier
+//! answer than sharing one test module needs.
 //!
 //! Runs on every platform. What differs is the control endpoint the owner
 //! records: a unix socket path on unix (whose file mode bits and address-length
@@ -50,10 +48,10 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
     // ONE shared AI_CHAT_HOME for the server and every client/tail below --
     // not a separate scratch dir for the client side. AI_CHAT_HOME serves
     // double duty (server-side channel storage AND client-side
-    // session/owner-record state), and the bash original relies on exactly
-    // that: a tail's own control-socket record and the channel log it
-    // forwards into must live under the SAME home the server was started
-    // with, or the two halves of this test never see each other's state.
+    // session/owner-record state): a tail's own control-socket record and
+    // the channel log it forwards into must live under the SAME home the
+    // server was started with, or the two halves of this test never see
+    // each other's state.
     let home = server.home.path();
     let chan = "#owned";
     let nick = "owner";

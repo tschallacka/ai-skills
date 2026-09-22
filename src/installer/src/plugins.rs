@@ -1,13 +1,11 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! Installs the vendor-shipped plugins that ride along with a skill rather
-//! than being selectable on their own -- the first two ported from
-//! installer/src/70-permissions.sh's `install_tui_hint_plugin_claude`/
-//! `install_tui_hint_plugin_opencode`/`install_editor_gate_plugin`, the rest
-//! added since. None is in manifest.rs's SKILLS list: tui-hint-plugin rides
-//! with interactive-shell, editor-gate-plugin with ai-text-editor,
-//! agent-identity-plugin with chat/ai-text-editor/interactive-shell, and
-//! chat-interrupt-plugin with chat.
+//! than being selectable on their own. None is in the shipped skill list:
+//! tui-hint-plugin rides with interactive-shell, editor-gate-plugin with
+//! ai-text-editor, agent-identity-plugin with
+//! chat/ai-text-editor/interactive-shell, and chat-interrupt-plugin with
+//! chat.
 //!
 //! Claude Code reads a plugin directory per root, so it is copied there
 //! verbatim; opencode declares plugins globally in its own config's
@@ -62,7 +60,7 @@ const CHAT_INTERRUPT_PLUGIN_EXECUTABLES: &[&str] = &["hooks/lib.sh", "hooks/pre-
 /// Copies `files` (relative to `source_root/plugin_name`) into
 /// `target_root/plugin_name`, then makes `executables` (a subset of `files`)
 /// executable on unix. A file the shipped tree does not have is silently
-/// skipped, same as install.sh's `[ -f "$source" ] || continue`.
+/// skipped.
 #[cfg_attr(not(unix), allow(unused_variables))]
 fn copy_plugin_files(
     source_root: &Path,
@@ -124,9 +122,8 @@ pub fn install_editor_gate_plugin(source_root: &Path, target_root: &Path) -> io:
 }
 
 /// T122/T123: rides unconditionally with chat/ai-text-editor/interactive-shell
-/// on a Claude Code root, same as the two plugins above -- no opencode variant,
-/// since `SubagentStart` is a Claude-Code-only hook (nothing measured
-/// equivalent on opencode/codex yet; see agent-identity-plugin/README.md).
+/// on a Claude Code root -- no opencode variant, since `SubagentStart` is a
+/// Claude-Code-only hook with no equivalent there yet.
 pub fn install_agent_identity_plugin_claude(
     source_root: &Path,
     target_root: &Path,
@@ -140,8 +137,8 @@ pub fn install_agent_identity_plugin_claude(
     )
 }
 
-/// Rides with `chat`, Claude Code only: `PreToolUse` is a Claude Code hook, and
-/// the reminder it shows is chat-mcp's own interrupt spool (chat/docs/interrupts.md).
+/// Rides with `chat`, Claude Code only: `PreToolUse` is a Claude Code hook,
+/// and the reminder it shows is chat-mcp's own interrupt spool.
 pub fn install_chat_interrupt_plugin_claude(
     source_root: &Path,
     target_root: &Path,
@@ -207,8 +204,9 @@ fn unregister_plugin_entry(cfg: &Path, entry: &str) -> io::Result<bool> {
 }
 
 /// The shared, `$HOME`-keyed path `install_tui_hint_plugin_opencode` copies
-/// `tui-hint-plugin.js` to -- exposed so `uninstall.rs` can find and remove
-/// the same file it installed, without recomputing the layout itself.
+/// `tui-hint-plugin.js` to -- exposed so an uninstall step can find and
+/// remove the same file it installed, without recomputing the layout
+/// itself.
 pub fn tui_hint_plugin_opencode_path(home: &Path) -> PathBuf {
     crate::shared_bin::xdg_config_home_or(home)
         .join("tsch-ai-skills")
@@ -217,9 +215,9 @@ pub fn tui_hint_plugin_opencode_path(home: &Path) -> PathBuf {
 }
 
 /// Removes the opencode tui-hint-plugin's registration and, when nothing
-/// else references it, the shared `tui-hint-plugin.js` file itself. Callers
-/// (uninstall.rs) decide whether anything else still needs the file; this
-/// only performs the removal once that decision is made.
+/// else references it, the shared `tui-hint-plugin.js` file itself. The
+/// caller decides whether anything else still needs the file; this only
+/// performs the removal once that decision is made.
 pub fn uninstall_tui_hint_plugin_opencode(home: &Path) -> io::Result<bool> {
     let path = tui_hint_plugin_opencode_path(home);
     let cfg = permissions::opencode_configfile(home);

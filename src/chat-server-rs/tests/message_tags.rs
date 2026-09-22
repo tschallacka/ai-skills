@@ -1,9 +1,7 @@
 // MODE: DEV
 //! B157/T131/T135: real IRCv3 CAP negotiation and the message-tags msgid it
 //! carries, plus a live `tail`'s cursor advancing from that real msgid tag
-//! rather than a once-a-second poll. Migrated from
-//! chat/tests/test-chat-cap-negotiation.sh and
-//! chat/tests/test-chat-tail-msgid-cursor.sh (T145 goal 25, W133).
+//! rather than a once-a-second poll (T145 goal 25, W133).
 //!
 //! Kept in ONE file per this step's own split-flag (AR-108, cycle 44):
 //! CAP negotiation verifiably exercises chat-server-rs only (a raw TLS probe;
@@ -26,9 +24,14 @@ use std::time::{Duration, Instant};
 
 use support::{spawn_server, ChildGuard};
 
-/// A raw TLS connection to the server, driven the way `openssl s_client` is
-/// driven in the bash originals -- stdin fed on demand, stdout accumulated in
-/// the background so `wait_for`/`output` can poll it without blocking.
+/// Ceiling for a raw TLS connection's openssl handshake plus the server's
+/// reply; wait_for returns as soon as the needle appears, so raising this
+/// only helps a slow runner and costs a fast one nothing.
+const WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// A raw TLS connection to the server: stdin fed on demand, stdout
+/// accumulated in the background so `wait_for`/`output` can poll it without
+/// blocking.
 struct RawConn {
     _child: ChildGuard,
     stdin: ChildStdin,
@@ -106,7 +109,7 @@ fn cap_ls_lists_exactly_message_tags() {
     let mut conn = RawConn::open(server.port);
     conn.feed("CAP LS\r\n");
     assert!(
-        conn.wait_for("CAP * LS", Duration::from_secs(5)),
+        conn.wait_for("CAP * LS", WAIT_TIMEOUT),
         "CAP LS produced no reply at all: {}",
         conn.output()
     );
@@ -124,7 +127,7 @@ fn cap_req_of_a_supported_capability_acks() {
     let mut conn = RawConn::open(server.port);
     conn.feed("CAP REQ :message-tags\r\n");
     assert!(
-        conn.wait_for("CAP *", Duration::from_secs(5)),
+        conn.wait_for("CAP *", WAIT_TIMEOUT),
         "CAP REQ message-tags produced no reply"
     );
     assert!(
@@ -141,7 +144,7 @@ fn cap_req_of_an_unsupported_capability_naks() {
     let mut conn = RawConn::open(server.port);
     conn.feed("CAP REQ :no-such-capability\r\n");
     assert!(
-        conn.wait_for("CAP *", Duration::from_secs(5)),
+        conn.wait_for("CAP *", WAIT_TIMEOUT),
         "CAP REQ no-such-capability produced no reply"
     );
     assert!(
@@ -158,7 +161,7 @@ fn cap_req_mixed_naks_the_whole_set() {
     let mut conn = RawConn::open(server.port);
     conn.feed("CAP REQ :message-tags no-such-capability\r\n");
     assert!(
-        conn.wait_for("CAP *", Duration::from_secs(5)),
+        conn.wait_for("CAP *", WAIT_TIMEOUT),
         "the mixed CAP REQ produced no reply"
     );
     assert!(
@@ -183,7 +186,7 @@ fn registration_is_held_across_cap_negotiation_until_end() {
     );
     conn.feed("CAP END\r\n");
     assert!(
-        conn.wait_for(" 001 ", Duration::from_secs(5)),
+        conn.wait_for(" 001 ", WAIT_TIMEOUT),
         "registration never completed after CAP END: {}",
         conn.output()
     );
@@ -196,7 +199,7 @@ fn a_plain_client_with_no_cap_registers_normally() {
     let mut conn = RawConn::open(server.port);
     conn.feed("NICK plainreg\r\nUSER plainreg 0 * :plainreg\r\n");
     assert!(
-        conn.wait_for(" 001 ", Duration::from_secs(5)),
+        conn.wait_for(" 001 ", WAIT_TIMEOUT),
         "a plain NICK/USER client (no CAP at all) never registered: {}",
         conn.output()
     );
@@ -211,12 +214,12 @@ fn two_connections_negotiate_independently() {
     a.feed("CAP LS\r\nCAP REQ :message-tags\r\nNICK indepa\r\nUSER indepa 0 * :a\r\nCAP END\r\n");
     b.feed("NICK indepb\r\nUSER indepb 0 * :b\r\n");
     assert!(
-        a.wait_for(" 001 ", Duration::from_secs(5)),
+        a.wait_for(" 001 ", WAIT_TIMEOUT),
         "connection A never registered: {}",
         a.output()
     );
     assert!(
-        b.wait_for(" 001 ", Duration::from_secs(5)),
+        b.wait_for(" 001 ", WAIT_TIMEOUT),
         "connection B never registered: {}",
         b.output()
     );
@@ -247,12 +250,12 @@ fn a_negotiated_peer_gets_msgid_a_plain_peer_does_not() {
         "NICK plainpeer\r\nUSER plainpeer 0 * :p\r\nJOIN {chan}\r\n"
     ));
     assert!(
-        tagged.wait_for("End of /NAMES list", Duration::from_secs(5)),
+        tagged.wait_for("End of /NAMES list", WAIT_TIMEOUT),
         "the tagged peer never completed its JOIN: {}",
         tagged.output()
     );
     assert!(
-        plain.wait_for("End of /NAMES list", Duration::from_secs(5)),
+        plain.wait_for("End of /NAMES list", WAIT_TIMEOUT),
         "the plain peer never completed its JOIN: {}",
         plain.output()
     );
@@ -262,13 +265,13 @@ fn a_negotiated_peer_gets_msgid_a_plain_peer_does_not() {
         "NICK capsender\r\nUSER capsender 0 * :s\r\nJOIN {chan}\r\nPRIVMSG {chan} :tagged-vs-plain\r\n"
     ));
     assert!(
-        sender.wait_for("End of /NAMES list", Duration::from_secs(5)),
+        sender.wait_for("End of /NAMES list", WAIT_TIMEOUT),
         "the sender never joined: {}",
         sender.output()
     );
 
     assert!(
-        tagged.wait_for("tagged-vs-plain", Duration::from_secs(5)),
+        tagged.wait_for("tagged-vs-plain", WAIT_TIMEOUT),
         "the tagged peer never received the broadcast at all: {}",
         tagged.output()
     );
@@ -280,7 +283,7 @@ fn a_negotiated_peer_gets_msgid_a_plain_peer_does_not() {
     );
 
     assert!(
-        plain.wait_for("tagged-vs-plain", Duration::from_secs(5)),
+        plain.wait_for("tagged-vs-plain", WAIT_TIMEOUT),
         "the plain peer never received the broadcast at all: {}",
         plain.output()
     );

@@ -1,16 +1,11 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Decodes a byte stream into keys -- ported in spirit from
-//! installer/src/37-ui-input.sh's iui_read_key/iui_read_escape/
-//! iui_read_tilde. No SGR mouse parsing (iui_read_mouse): this slice is
+//! Decodes a byte stream into keys. No SGR mouse parsing: this slice is
 //! keyboard-only.
 //!
-//! bash 3.2's `read -t` floor is a whole second, which is why install.sh's
-//! escape-continuation timeout and its idle tick share one number. Rust has
-//! no such floor, so this uses a short (25ms) timeout to tell an arrow key's
-//! trailing bytes from a bare Escape, and a separate, longer one (1s) for
-//! the idle tick -- snappier than the bash original without changing what
-//! either timeout means.
+//! Uses a short timeout to tell an arrow key's trailing bytes from a bare
+//! Escape, and a separate, longer timeout for the idle tick -- two
+//! independent constants, each free to change without affecting the other.
 
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -34,8 +29,8 @@ pub enum Key {
     ShiftTab,
     Char(char),
     Escape,
-    /// No byte arrived within the idle timeout -- an animation tick in
-    /// install.sh's picker; here, just "nothing happened, keep waiting".
+    /// No byte arrived within the idle timeout -- just "nothing happened,
+    /// keep waiting".
     Tick,
     /// The reader thread's stdin hit EOF.
     Eof,
@@ -101,7 +96,7 @@ fn decode_byte(byte: u8, rx: &Receiver<Option<u8>>) -> Key {
         b'\r' | b'\n' => Key::Enter,
         b' ' => Key::Space,
         b'\t' => Key::Tab,
-        0x03 => Key::Char('q'), // Ctrl-C reads as the quit key, same as install.sh's picker.
+        0x03 => Key::Char('q'), // Ctrl-C reads as the quit key.
         b if b.is_ascii() => Key::Char(b as char),
         _ => Key::Escape,
     }

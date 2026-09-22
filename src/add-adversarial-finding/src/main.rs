@@ -167,9 +167,8 @@ fn main() {
     }
     fs::write(&review, output).unwrap_or_else(|error| die(error.to_string(), 64));
     if work_unit != "N/A" {
-        // Mirrors add-adversarial-finding.sh's own `mint-fix-keys.sh "$plan_dir"
-        // >&2` call: re-mint so the newly gated row gets a fix key, with the
-        // minter's own chatter kept off this command's one-line stdout result.
+        // Re-mint so the newly gated row gets a fix key, with the minter's
+        // own chatter kept off this command's one-line stdout result.
         let minter = env::current_exe()
             .ok()
             .and_then(|path| {

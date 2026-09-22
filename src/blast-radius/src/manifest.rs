@@ -6,11 +6,10 @@ use std::path::Path;
 
 /// For each changed path under `planning/`, skip if already tracked;
 /// otherwise count LITERAL SUBSTRING occurrences of the path anywhere in
-/// `planning/PACKAGE-MANIFEST.tsv` -- reproducing `grep -Fc` exactly, a
-/// substring count, not an exact-line match. A path that happens to be a
-/// substring of an unrelated manifest row's own field silently counts as
-/// "has a row" under this real bash semantic, and this is preserved, not
-/// "fixed".
+/// `planning/PACKAGE-MANIFEST.tsv` -- a substring count, not an exact-line
+/// match. A path that happens to be a substring of an unrelated manifest
+/// row's own field silently counts as "has a row"; this looseness is
+/// deliberate, not a bug.
 pub fn missing_rows(repo_root: &Path, manifest: &Path, changed: &[String]) -> Vec<Line> {
     let manifest_text = std::fs::read_to_string(manifest).unwrap_or_default();
     let mut lines = Vec::new();
@@ -58,9 +57,9 @@ mod tests {
 
     #[test]
     fn substring_count_counts_a_path_embedded_in_an_unrelated_row() {
-        // AR-69's sibling subtlety, called out explicitly for grep -Fc: a
-        // path that is merely a SUBSTRING of another row's own field still
-        // counts as "has a row", matching bash's real (loose) semantics.
+        // AR-69's sibling subtlety: a path that is merely a SUBSTRING of
+        // another row's own field still counts as "has a row" -- a loose,
+        // deliberate match rather than an exact-field one.
         let dir =
             std::env::temp_dir().join(format!("blast-radius-manifest-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

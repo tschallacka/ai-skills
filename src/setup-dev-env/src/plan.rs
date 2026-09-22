@@ -1,19 +1,13 @@
 // MODE: DEV
 // PACKAGE: PROD
 
-//! The crate/binary table setup-dev-env-lib.sh's own plan()/plan_primary_*/
-//! plan_secondary functions produce, embedded as static Rust data grouped
-//! to mirror the bash structure 1:1 for diffability -- this is
-//! DELIBERATELY a second source of truth alongside setup-dev-env-lib.sh's
-//! real plan(), not a runtime call into that script (which would leave
-//! setup-dev-env-lib.sh a permanent runtime dependency of the "ported"
-//! binary, contradicting this crate's whole purpose). A crate added to or
-//! removed from the workspace must be registered in BOTH places (the bash
-//! row for the fallback path, this table for the wired path) or the two
-//! paths silently diverge on what gets built -- an accepted, documented
-//! risk, matching the same shape run-tests's own SUITES array already
-//! carries in this plan, guarded by an automated drift test (W93) that
-//! diffs this table against the real bash plan() output.
+//! The crate/binary table this crate builds from, embedded as static Rust
+//! data -- DELIBERATELY a second source of truth, not a runtime call into
+//! a script (which would leave that script a permanent runtime dependency
+//! of this "ported" binary, contradicting this crate's whole purpose). A
+//! crate added to or removed from the workspace must be registered in BOTH
+//! places or the two paths silently diverge on what gets built -- an
+//! accepted, documented risk, guarded by an automated drift test (W93).
 
 use std::path::Path;
 
@@ -104,31 +98,23 @@ const SECONDARY: &[Row] = &[
     // stages this crate like every other; only the NEXT invocation of
     // setup-dev-env.sh execs into it.
     ("setup-dev-env", "setup-dev-env"),
-    // Registered after this crate itself, matching setup-dev-env-lib.sh's
-    // own real plan_secondary() row order exactly (goal 17).
+    // Registered after this crate itself (goal 17).
     ("generate-portability", "generate-portability"),
-    // Goal 18: appended after generate-portability, matching
-    // setup-dev-env-lib.sh's own real plan_secondary() row order exactly.
+    // Goal 18: appended after generate-portability.
     ("blast-radius", "blast-radius"),
-    // Goal 19: appended after blast-radius, matching setup-dev-env-lib.sh's
-    // own real plan_secondary() row order exactly.
+    // Goal 19: appended after blast-radius.
     ("verify-both-shells", "verify-both-shells"),
-    // Goal 20: appended after verify-both-shells, matching
-    // setup-dev-env-lib.sh's own real plan_secondary() row order exactly.
+    // Goal 20: appended after verify-both-shells.
     ("ci-subjects", "ci-subjects"),
-    // Goal 21: appended after ci-subjects, matching setup-dev-env-lib.sh's
-    // own real plan_secondary() row order exactly.
+    // Goal 21: appended after ci-subjects.
     ("ci-scope", "ci-scope"),
-    // Goal 22: appended after ci-scope, matching setup-dev-env-lib.sh's own
-    // real plan_secondary() row order exactly.
+    // Goal 22: appended after ci-scope.
     ("ci-test-scope", "ci-test-scope"),
-    // Goal 26: appended after ci-test-scope, matching setup-dev-env-lib.sh's
-    // own real plan_secondary() row order exactly.
+    // Goal 26: appended after ci-test-scope.
     ("test-mermaid-accuracy", "test-mermaid-accuracy"),
     // Built and staged here because planning/PACKAGE-MANIFEST.tsv promises
     // planning/scripts/generate-postmortem and test-persona-drift fails on a
-    // fresh checkout without it; appended after test-mermaid-accuracy,
-    // matching setup-dev-env-lib.sh's row order.
+    // fresh checkout without it; appended after test-mermaid-accuracy.
     ("generate-postmortem", "generate-postmortem"),
 ];
 
@@ -141,9 +127,8 @@ const HARDCODED: &[Row] = &[
     ("interactive-shell-mcp", "interactive-shell-mcp"),
 ];
 
-/// The full plan, in the same order setup-dev-env-lib.sh's own plan()
-/// concatenates its groups: plan_primary (add_and_infra then
-/// update_and_verify), plan_secondary, then the hardcoded tail.
+/// The full plan, concatenating its groups in a fixed order: add_and_infra,
+/// update_and_verify, secondary, then the hardcoded tail.
 pub fn plan() -> Vec<Row> {
     let mut rows = Vec::with_capacity(
         PRIMARY_ADD_AND_INFRA.len()

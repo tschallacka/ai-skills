@@ -67,8 +67,8 @@ for skill in todo bug-report; do
     # generated installer for a literal proves nothing. Install the skill and look
     # at what arrived -- the only thing the agent reading the schema depends on.
     # install-skill (not the interactive install subcommand) is the one that
-    # writes a .version marker, same shape install.sh's own cli_install_skill
-    # once did -- the assertion two lines down needs that marker.
+    # writes a .version marker -- the assertion two lines down needs that
+    # marker.
     installed="$work/installed-$skill"
     "$installer_bin" install-skill "$skill" --target "$installed" --approval yes \
         --source "$repo_root" >/dev/null 2>&1 \

@@ -2,8 +2,7 @@
 // PACKAGE: PROD
 
 //! report_one/run_one/run_cargo_one: how each test or crate is launched and
-//! its outcome classified and counted, matching run-tests.sh's own
-//! PASS/SKIP/FAIL/TIMEOUT/UNCONFIGURED reporting exactly.
+//! its outcome classified and counted as PASS/SKIP/FAIL/TIMEOUT/UNCONFIGURED.
 
 use crate::platform;
 use std::ffi::OsString;
@@ -49,19 +48,17 @@ pub struct RunConfig<'a> {
     pub refuse_unconfigured_cargo: bool,
     /// Every child process inherits these three explicitly (rather than
     /// mutating this process's own environment, which std::env::set_var
-    /// cannot safely do on this toolchain), matching bash's own
-    /// `export TMPDIR=...`/`export PLANNING_AGENT_TMPDIR=...` for the
-    /// duration of the run.
+    /// cannot safely do on this toolchain) for the duration of the run.
     pub tmpdir: &'a Path,
     pub planning_agent_tmpdir: &'a Path,
     pub test_run_id: &'a str,
 }
 
-/// Matches bash's own `sed 's#^.*/tests/##; s#\.sh$##'` exactly -- run on
-/// the test's own ABSOLUTE path, not a repo-relative one: the leading "/"
-/// bash's pattern relies on to find "/tests/" comes from repo_root's own
-/// path, not from the suite name itself (a suite literally named "tests"
-/// has no leading slash of its own before stripping repo_root).
+/// Strips everything through the last `/tests/` and a trailing `.sh`, run
+/// on the test's own ABSOLUTE path, not a repo-relative one: the leading
+/// "/" needed to find "/tests/" comes from repo_root's own path, not from
+/// the suite name itself (a suite literally named "tests" has no leading
+/// slash of its own before stripping repo_root).
 fn label_for(test_path: &Path) -> String {
     // Forward slashes first: a Windows path joins its parts with `\`, and the
     // pattern below looks for "/tests/".
@@ -205,11 +202,10 @@ pub fn run_cargo_one(config: &RunConfig, crate_dir: &str, counts: &mut Counts) {
     report_one(&label, code, &output, config.verbose, counts);
 }
 
-/// Builds the full argv exactly as the original does: optional timeout_cmd,
-/// optional wrapper (mem cpu --), then `trailing` (the bash-test or
-/// cargo-test invocation) -- each optional layer present only when
-/// configured, matching bash's own optional-array-element construction (an
-/// absent wrapper must not appear as an empty argv element).
+/// Builds the full argv: optional timeout_cmd, optional wrapper (mem cpu
+/// --), then `trailing` (the bash-test or cargo-test invocation) -- each
+/// optional layer present only when configured; an absent wrapper must not
+/// appear as an empty argv element.
 fn build_command(config: &RunConfig, mem: &str, cpu: &str, trailing: Vec<OsString>) -> Command {
     let mut argv: Vec<OsString> = Vec::new();
     if let Some(timeout_cmd) = config.timeout_cmd {
@@ -371,8 +367,7 @@ mod tests {
     fn label_strips_correctly_for_a_suite_directly_named_tests() {
         // A suite literally named "tests" (a direct child of repo_root) has
         // no leading slash of its own before "tests/" once repo_root is
-        // stripped -- the fix for a real bug this crate shipped with,
-        // caught by direct comparison against the real bash original.
+        // stripped -- the fix for a real bug this crate shipped with.
         let root = Path::new("/repo");
         let path = root.join("tests/test-foo.sh");
         assert_eq!(label_for(&path), "test-foo");

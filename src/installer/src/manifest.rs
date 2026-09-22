@@ -1,14 +1,11 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! The shipped skill list and the agent targets install.sh's menu offers,
-//! ported from installer/src/05-config.sh's `SKILL_NAMES`/`SKILL_DESCRIPTIONS`
-//! and `TARGET_NAMES`/`TARGET_PATHS`/`TARGET_KINDS`. Hand-kept in sync with
-//! that file (index-parallel there, a struct here) rather than generated,
-//! same as install.sh itself describes those arrays: a new skill or agent is
-//! one edit, in both places, until this replaces install.sh outright.
+//! The shipped skill list and the agent targets this installer's menu
+//! offers. Hand-kept as a struct list rather than generated: a new skill or
+//! agent is one edit here.
 //!
-//! `SKILL_DETAILS` (the interactive picker's long-form body) is not ported
-//! yet -- it belongs to the TUI slice, not the manifest.
+//! The interactive picker's long-form body is not carried here -- it
+//! belongs to the TUI slice, not the manifest.
 
 pub struct Skill {
     pub name: &'static str,
@@ -111,7 +108,7 @@ pub fn skill_unsupported_here(_skill: &str) -> Option<&'static str> {
 pub struct Agent {
     pub name: &'static str,
     pub kind: &'static str,
-    /// Joined onto $HOME with `/`, matching install.sh's TARGET_PATHS.
+    /// Joined onto $HOME with `/` to form this agent's skills directory.
     pub home_suffix: &'static str,
 }
 
@@ -159,9 +156,8 @@ fn on_path(bin: &str) -> bool {
     std::env::split_paths(&path_var).any(|dir| dir.join(bin).is_file())
 }
 
-/// Any entry directly under `dir` whose filename starts with `prefix` --
-/// Rust's answer to install.sh's `compgen -G "$dir/$prefix*"` glob probe
-/// for Cline's own versioned VS Code extension directory name.
+/// Any entry directly under `dir` whose filename starts with `prefix` -- a
+/// glob probe for Cline's own versioned VS Code extension directory name.
 fn any_entry_starts_with(dir: &std::path::Path, prefix: &str) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return false;
@@ -171,16 +167,13 @@ fn any_entry_starts_with(dir: &std::path::Path, prefix: &str) -> bool {
         .any(|e| e.file_name().to_string_lossy().starts_with(prefix))
 }
 
-/// Is this agent worth offering as an install root on this host -- ported
-/// from install.sh's `agent_target_available`, keyed by `kind` instead of
-/// bash's array index (this installer has no positional TARGET_PATHS array
-/// to index into). Universal Agent Skills has no owning application, so it
-/// is always offered; every other kind needs either its own CLI on PATH or
-/// evidence it is already installed. Cline's own check is the widest: no
-/// CLI at all, just its skills directory, its VS Code extension directory
-/// (a fixed name or a versioned `saoudrizwan.claude-dev-<version>` one,
-/// local or on a remote/server VS Code install), or its global storage
-/// directory.
+/// Is this agent worth offering as an install root on this host. Universal
+/// Agent Skills has no owning application, so it is always offered; every
+/// other kind needs either its own CLI on PATH or evidence it is already
+/// installed. Cline's own check is the widest: no CLI at all, just its
+/// skills directory, its VS Code extension directory (a fixed name or a
+/// versioned `saoudrizwan.claude-dev-<version>` one, local or on a
+/// remote/server VS Code install), or its global storage directory.
 pub fn agent_available(kind: &str, home: &std::path::Path) -> bool {
     match kind {
         "universal" => true,
@@ -289,7 +282,7 @@ mod tests {
         assert!(known_agent("not-a-real-agent").is_none());
     }
 
-    /// A copy-paste typo in one of the 11 near-identical `Profile{}` literals
+    /// A copy-paste typo in one of the near-identical `Profile{}` literals
     /// must fail `cargo test`, not silently no-op at real install time.
     #[test]
     fn every_profile_entry_resolves_to_a_real_parseable_matching_file() {

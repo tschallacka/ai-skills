@@ -2,8 +2,7 @@
 // PACKAGE: PROD
 //! The global-input check: any changed path that can alter every crate's
 //! meaning forces `scope=full`. First matching path in the CHANGE SET's own
-//! order wins (not alphabetical, not pattern order), matching bash's own
-//! `while read` loop over the diff exactly.
+//! order wins (not alphabetical, not pattern order).
 
 /// `src/ci-scope/*` is the self-protection extension this goal adds: once
 /// this crate exists, a change to its own source must be exercised in full,

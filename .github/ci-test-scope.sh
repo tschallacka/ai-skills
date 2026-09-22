@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # MODE: DEV
 # ci-test-scope.sh — decide which shell tests and crate tests a CI run has to
-# execute, the same idea ci-scope.sh already proves for crate BUILDS, applied
-# to the shell suite ci-scope.sh does not touch (T116).
+# execute.
 #
 # Prints:
 #   scope=full|selective
 #   reason=<one line saying why>
 #   tests=<space-separated repo-relative test paths and crate dirs to run,
 #          meaningful only when scope=selective; empty under scope=full,
-#          where run-tests.sh's own unfiltered discovery is what runs>
+#          where nothing is filtered and everything runs>
 #
-# THE DEFAULT IS ALWAYS full, for the same reason ci-scope.sh's is: every
+# THE DEFAULT IS ALWAYS full: every
 # branch that cannot prove a smaller scope correct returns full, including
 # every error path. A selector that narrows when it is confused is worse than
 # none, because the green tick then means "we did not look" while reading as
@@ -47,9 +46,9 @@
 #                      per line. For tests, so every branch is reachable
 #                      without inventing commits.
 #   --push-to BRANCH  this run is a push to BRANCH, not a pull request: decide
-#                     full and stop, matching ci-scope.sh's own reasoning (a
-#                     push to master has an empty diff against itself, and
-#                     selection is a pull-request feature).
+#                     full and stop (a push to master has an empty diff
+#                     against itself, and selection is a pull-request
+#                     feature).
 #
 # Exit codes: 0 always, unless usage is wrong (64).
 

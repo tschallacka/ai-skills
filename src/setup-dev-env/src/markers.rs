@@ -5,9 +5,9 @@
 //! unique-per-run token at the moment building begins; .finished is
 //! written with the SAME token only once every crate in the plan has
 //! built successfully. A crate failure must leave .finished absent or
-//! naming an older run. The exact token string need not match bash's own
-//! `$$.$(date -u +%s)` shape, since nothing else parses this file's
-//! content beyond comparing it for exact equality against .finished.
+//! naming an older run. The exact token shape does not matter, since
+//! nothing else parses this file's content beyond comparing it for exact
+//! equality against .finished.
 
 use std::path::Path;
 

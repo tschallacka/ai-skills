@@ -14,10 +14,9 @@ use std::path::Path;
 const MARKER_PREFIX: &str = "# COVERS: ";
 
 /// Reads only the first 5 lines of `item` (a repo-relative path) looking for
-/// the first line beginning with `# COVERS: `, matching bash's own
-/// `sed -n '1,5{/^# COVERS: /p;}' | head -1` exactly: a marker on line 6 or
-/// later is never honoured, and only the first matching line within the
-/// window counts. A path that is not a regular file (a crate directory, or
+/// the first line beginning with `# COVERS: `: a marker on line 6 or later
+/// is never honoured, and only the first matching line within the window
+/// counts. A path that is not a regular file (a crate directory, or
 /// anything `fs::read_to_string` cannot open) has no marker at all.
 pub fn read_marker(repo_root: &Path, item: &str) -> Option<String> {
     let full_path = repo_root.join(item);

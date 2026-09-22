@@ -2,14 +2,11 @@
 // PACKAGE: PROD
 
 /// What a caller-supplied target string means, before either forge backend
-/// makes a single API call. Mirrors gh_resolve_run's and
-/// glab_resolve_pipeline's own identical structure in the bash source: pr/N
-/// and a short bare number both name a PR/MR, a long bare number names a
-/// run/pipeline id directly, empty names the current branch, and anything
-/// else is a branch name. The magnitude threshold (9+ digits is a run id,
-/// shorter is a PR/MR number) is a stated heuristic in the bash source
-/// itself, preserved exactly rather than "fixed" -- this port's scope is
-/// behavioral parity, not judgment changes.
+/// makes a single API call: pr/N and a short bare number both name a PR/MR,
+/// a long bare number names a run/pipeline id directly, empty names the
+/// current branch, and anything else is a branch name. The magnitude
+/// threshold (9+ digits is a run id, shorter is a PR/MR number) is a fixed
+/// heuristic, not a per-invocation judgment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedTarget {
     /// A run or pipeline id, usable directly with no further resolution.

@@ -3,17 +3,17 @@
 //! Repository-root discovery: `PLANNING_SKILL_ROOT` first (set by
 //! `plan_exec_compiled_binary_if_present` on every wired invocation),
 //! `current_exe()`-anchored ancestor search as the fallback for a standalone
-//! invocation (tests, or running the binary directly) -- mirrors goals
-//! 16-19's own `discover_repo_root` exactly, never `git rev-parse`.
+//! invocation (tests, or running the binary directly) -- never
+//! `git rev-parse`.
 
 use std::env;
 use std::path::{Path, PathBuf};
 
 /// Never fails: on a discovery failure, returns a sentinel path that does
 /// not exist, so the caller's own ordinary `repo_root.is_dir()` reachability
-/// check (run AFTER the `--push-to` short-circuit, matching bash's real
-/// order exactly) is what reports the failure, rather than main() reporting
-/// it out of order before `--push-to` is even considered.
+/// check (run AFTER the `--push-to` short-circuit) is what reports the
+/// failure, rather than main() reporting it out of order before `--push-to`
+/// is even considered.
 pub fn discover_repo_root_or_sentinel() -> PathBuf {
     discover_repo_root().unwrap_or_else(|_| PathBuf::from("/nonexistent-ci-scope-repo-root"))
 }

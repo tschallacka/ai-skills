@@ -18,11 +18,10 @@ fn print_first_lines(text: &str, limit: usize) {
     }
 }
 
-/// Builds the shared bundled libraries first (best-effort, matching bash's
-/// own `|| true`), then collects the changed, still-existing shell scripts
+/// Builds the shared bundled libraries first (best-effort: a failure here
+/// is not fatal), then collects the changed, still-existing shell scripts
 /// and runs shellcheck against them. Returns that list so gate_static_scans
-/// can reuse it without recomputing, mirroring the bash original's own
-/// shared `$changed_sh` global across gate_shellcheck and gate_static_scans.
+/// can reuse it without recomputing.
 pub fn gate_shellcheck(
     repo_root: &Path,
     base: Option<&str>,

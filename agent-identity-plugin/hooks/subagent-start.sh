@@ -2,13 +2,13 @@
 # MODE: PROD
 # SubagentStart hook: injects the subagent's own agent_id/agent_type into
 # its context as additionalContext, and instructs it to declare that id on
-# every ai-text-editor and interactive-shell call. Measured 2026-09-08
-# (T122's own note): a subagent's environment is byte-identical to its
-# parent's, so nothing downstream of the shell can tell them apart on its
-# own -- this hook is the only place the harness hands the id over, and it
-# is soft (context, not an environment variable a child process inherits),
-# which is why it pairs with each tool's own refusal/scoping rather than
-# replacing it. Never blocks or modifies anything; this only annotates.
+# every ai-text-editor and interactive-shell call. A subagent's environment
+# is byte-identical to its parent's, so nothing downstream of the shell can
+# tell them apart on its own -- this hook is the only place the harness
+# hands the id over, and it is soft (context, not an environment variable a
+# child process inherits), which is why it pairs with each tool's own
+# refusal/scoping rather than replacing it. Never blocks or modifies
+# anything; this only annotates.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

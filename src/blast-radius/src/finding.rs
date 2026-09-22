@@ -1,8 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! One rendered output line plus its counting/stream disposition, mirroring
-//! bash's own `report_fail`/`report_warn` (stderr, counted) versus the
-//! plain `ok:`/`note:` printfs (stdout, uncounted).
+//! One rendered output line plus its counting/stream disposition: fail/warn
+//! go to stderr and are counted, while plain ok/note lines go to stdout and
+//! are not.
 
 pub enum Level {
     Fail,

@@ -5,8 +5,8 @@
 #
 # installer/bootstrap.sh downloads ai-skills-<target-triple>.tar.gz and
 # expects an executable `installer` sitting at the tarball root, alongside
-# the same skill content install.sh's own release already carries. This
-# script does not reimplement collecting that content: it builds the one
+# the same skill content every release carries. This script does not
+# reimplement collecting that content: it builds the one
 # universal tarball build-release.sh already knows how to assemble
 # (running every prerequisite step that needs — the chat/register binaries,
 # rjq, the plan libraries, REVIEWER.md), extracts it once, and then repacks
@@ -56,16 +56,12 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-# Matches installer-platform's Target::resolve and install.sh's
-# normalize_platform. install.sh itself supports Windows via Git Bash/MSYS/
-# Cygwin (B94), so a "100% drop-in" installer needs a Windows asset too, even
-# though installer/bootstrap.sh (the curl-piped LAUNCHER around the binary
-# this packs) is POSIX-only for now: that is a statement about the launcher
-# script, not about the tarball's own contents -- the installer binary this
-# packs has no POSIX-only dependency, and CI's native job (ci.yml) already
-# builds, runs and verifies it on windows-latest. A future Windows-capable
-# bootstrap.sh, or a maintainer downloading this asset by hand, both need
-# this target packed the same as any other.
+# This target list includes Windows even though the curl-piped launcher
+# around the binary this packs is POSIX-only for now: that is a statement
+# about the launcher, not about the tarball's own contents -- the installer
+# binary this packs has no POSIX-only dependency. A future Windows-capable
+# launcher, or a maintainer downloading this asset by hand, both need this
+# target packed the same as any other.
 host_target() {
     case "$(uname -s):$(uname -m)" in
         Linux:x86_64 | Linux:amd64) printf '%s\n' x86_64-unknown-linux-musl ;;
@@ -106,10 +102,9 @@ installer_binary_path() { # <target> -> where its binary sits once built
     printf '%s/target/%s/release/%s\n' "$repo_root" "$1" "$(binary_name_for "$1")"
 }
 
-# Builds only when nothing is there yet, same "build-if-missing, staleness is
-# the tests' job" posture build-release.sh already takes with the chat and
-# register binaries. Returns 1 (not a hard exit) when cargo is absent or the
-# build fails, so the caller can decide whether that is fatal.
+# Builds only when nothing is there yet; staleness detection is left to the
+# tests. Returns 1 (not a hard exit) when cargo is absent or the build
+# fails, so the caller can decide whether that is fatal.
 #
 # ALWAYS passes --target, even when it names the running host: `uname`
 # cannot tell a glibc host from a musl one, so a "this is the host, skip
@@ -118,8 +113,7 @@ installer_binary_path() { # <target> -> where its binary sits once built
 # x86_64-unknown-linux-musl regardless -- caught by inspecting a build this
 # script itself produced with that shortcut still in place (`file` showed
 # a glibc interpreter on a binary named as a musl one). The target's std
-# library must be installed (`rustup target add`, the CI native job's own
-# "Install the target standard library" step) for this to succeed.
+# library must be installed (`rustup target add`) for this to succeed.
 ensure_installer_binary() {
     local target="$1" bin
     bin="$(installer_binary_path "$target")"

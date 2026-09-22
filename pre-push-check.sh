@@ -21,8 +21,7 @@
 #   git diff --check        whitespace, in the worktree, the index and the
 #                           branch's committed diff
 #   PORTABILITY.md          regenerated unconditionally, so it always matches
-#                           what's about to be pushed (it is untracked; see
-#                           generate-portability.sh)
+#                           what's about to be pushed (it is untracked)
 #   bash -n                 every changed shell script
 #   static shell gate       the changed scripts at warning severity, with -x so
 #                           `source=` resolves from disk. CI lints the whole
@@ -54,10 +53,9 @@
 # and anything else fails. The registers
 # workflow (.github/workflows/registers.yml) checks ids and parents when the
 # push lands.
-# The registers update, the plan validator and the role-drift tests stay with
-# .agents/MAINTAINER.md section 2 (and planning/MAINTAINER.md section 4 for a
-# change to the planning skill): they need judgement about what changed, which a
-# pre-push helper deliberately does not guess at.
+# The registers update, the plan validator and the role-drift tests are
+# deliberately left out of these gates: they need judgement about what
+# changed, which a pre-push helper does not guess at.
 #
 # Usage:
 #   pre-push-check.sh           the gates above
@@ -69,9 +67,8 @@
 # usage; 65 = not a git repository, or neither master nor an upstream resolves
 # and there is no branch diff to check; 69 = nix is needed to re-enter the
 # development shell and is not on PATH, so NO gate ran. 69 was undocumented,
-# and a caller that read only "non-zero" therefore reported a refusal for a run
-# that never started -- which is exactly what tests/test-register-branch-gate.sh
-# did on the macOS bash 3.2 leg, where there is no nix.
+# and a caller that read only "non-zero" therefore reported a refusal for a
+# run that never started, on a host with no nix.
 
 set -u
 export LC_ALL=C
@@ -81,18 +78,15 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ─────────────────────────────────────────────────────────────────────────────
 # Compiled-binary preference
 # ─────────────────────────────────────────────────────────────────────────────
-# See plan_exec_compiled_binary_if_present's own doc comment
-# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
-# exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
+# Exec into the compiled binary when one is present, falling through to the
+# bash implementation otherwise. This script takes no --plan-dir and does not
 # hoist one, so there is no hoist ordering to preserve; placed immediately
 # after both anchor lines above, before pre-push-check-lib.sh is sourced and
 # before the nix-shell re-exec below -- a wired invocation execs the compiled
 # binary before bash ever sources its own library or attempts its own
 # re-exec, and the compiled binary performs its own equivalent re-exec check
-# internally. pre-push-check.sh lives at the repository root itself, one
-# level shallower than ci-failures/scripts, so the relative path to
-# plan-core-lib.sh crosses one directory level down, not the two ci-failures.sh
-# crosses upward.
+# internally. pre-push-check.sh lives at the repository root itself, so the
+# relative path to plan-core-lib.sh crosses one directory level down.
 ppc_script_dir="$repo_root"
 source "$ppc_script_dir/planning/scripts/plan-core-lib.sh"
 plan_exec_compiled_binary_if_present pre-push-check "$ppc_script_dir" "$@"
@@ -244,10 +238,9 @@ printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; workt
 # BUGS.json and TODO.json are append-mostly arrays, so two branches that both
 # file an entry both take the same next free id. Git does not see that: the
 # additions land at different array positions, it merges them textually with NO
-# conflict, and the result carries two unrelated entries under one id. That
-# happened for real on 2026-09-04 -- eight duplicate ids in one merge, invisible
-# until reg_findings ran -- and the resolvers' advice in the textual case is to
-# take one side, which silently drops the other's entries.
+# conflict, and the result carries two unrelated entries under one id,
+# invisible until reg_findings ran -- and the resolvers' advice in the
+# textual case is to take one side, which silently drops the other's entries.
 #
 # The structural answer is a single writer: register entries are filed on the
 # `bugs` branch and nowhere else, so ids are allocated in one place and no merge
@@ -324,7 +317,7 @@ fi
 
 # ---- 3, 3b, 4: shellcheck, static scans, and rust crates -------------------
 # Each gate lives in pre-push-check-lib.sh so this file stays under the
-# CODE-STYLE.md §3 size limit; see that file's header for why.
+# repo's size limit for a script.
 gate_shellcheck
 gate_static_scans
 gate_rust_crates

@@ -23,7 +23,7 @@
 # --shard I/N        run only item I of every N, 0-indexed, chosen by
 #                    deterministic position in the SORTED, post-selection work
 #                    list (shell tests then crates) -- not per-suite, so one
-#                    shard is never planning/tests' 84% of the work while
+#                    shard is never stuck with most of the work while
 #                    another idles. The same I/N against the same inputs picks
 #                    the same items every time, so a CI failure on shard 2/4
 #                    reproduces locally with the identical flag. Absent: every
@@ -43,12 +43,12 @@
 # concurrent run deletes the first's worktree.
 #
 # A failing test's full output is always printed — it is the only diagnostic the
-# runner has, and truncating it to the last 20 lines hid the failing assertion.
+# runner has, and truncating it hid the failing assertion.
 # `--verbose` additionally prints the output of tests that passed.
 #
-# `set -uo pipefail` deliberately omits `-e` (the sanctioned exception in
-# CODE-STYLE.md §2): a failing test must not abort the loop before the summary
-# is printed. Each test's status is captured explicitly instead.
+# `set -uo pipefail` deliberately omits `-e`: a failing test must not abort
+# the loop before the summary is printed. Each test's status is captured
+# explicitly instead.
 #
 # Suite paths are resolved against the repo root, so the runner works from any
 # working directory.
@@ -59,20 +59,17 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ─────────────────────────────────────────────────────────────────────────────
 # Compiled-binary preference
 # ─────────────────────────────────────────────────────────────────────────────
-# See plan_exec_compiled_binary_if_present's own doc comment
-# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
-# exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
+# Exec into the compiled binary when one is present, falling through to the
+# bash implementation otherwise. This script takes no --plan-dir and does not
 # hoist one, so there is no hoist ordering to preserve; placed immediately
 # after repo_root is computed (the only genuine prerequisite: the relative
 # path to plan-core-lib.sh needs it) and before wrapper is resolved, before
 # the AI_SKILLS_RESOURCE_LIMIT case statement, and before anything else this
-# script does -- as early as structurally possible, matching pre-push-check.sh's
-# own goal-14 precedent exactly, since the compiled binary re-derives the
-# resource-limit/wrapper selection itself and needs nothing bash would
-# otherwise compute first. run-tests.sh lives at the repository root itself,
-# one level shallower than ci-failures/scripts, so the relative path to
-# plan-core-lib.sh crosses one directory level down, not the two
-# ci-failures.sh crosses upward.
+# script does -- as early as structurally possible, since the compiled binary
+# re-derives the resource-limit/wrapper selection itself and needs nothing
+# bash would otherwise compute first. run-tests.sh lives at the repository
+# root itself, so the relative path to plan-core-lib.sh crosses one
+# directory level down.
 #
 # RUN_TESTS_BASH exports the bash interpreter THIS invocation is actually
 # running under (bash's own $BASH), so the compiled binary can propagate the

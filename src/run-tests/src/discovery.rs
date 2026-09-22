@@ -1,13 +1,13 @@
 // MODE: DEV
 // PACKAGE: PROD
 
-//! Suite/crate discovery and work-item filtering, mirroring run-tests.sh's
-//! own find+sort shelling exactly -- including its own deliberate collation
-//! choices (no locale override for shell-test discovery, LC_ALL=C pinned
-//! only for crate discovery, per B203) -- rather than reimplementing find or
-//! sort as Rust logic. The one exception is Windows, which has no find or
-//! sort that mean what these arguments say: there the same two listings are
-//! read straight from the directories and sorted by bytes.
+//! Suite/crate discovery and work-item filtering: shells out to real find
+//! and sort rather than reimplementing them as Rust logic, including
+//! deliberate collation choices (no locale override for shell-test
+//! discovery, LC_ALL=C pinned only for crate discovery, per B203). The one
+//! exception is Windows, which has no find or sort that mean what these
+//! arguments say: there the same two listings are read straight from the
+//! directories and sorted by bytes.
 
 use std::collections::HashSet;
 use std::fs;
@@ -216,9 +216,8 @@ pub fn split_tests_and_crates(repo_root: &Path, items: &[String]) -> (Vec<PathBu
     (tests, crates)
 }
 
-/// Validates and parses a `--shard I/N` argument exactly as the bash
-/// original's own case-pattern validation does: both non-negative integers,
-/// total at least 1, index strictly less than total.
+/// Validates and parses a `--shard I/N` argument: both non-negative
+/// integers, total at least 1, index strictly less than total.
 pub fn parse_shard(program: &str, spec: &str) -> Result<(usize, usize), String> {
     let malformed =
         || format!("{program}: --shard wants I/N, both non-negative integers, got {spec}");

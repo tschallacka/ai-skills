@@ -27,10 +27,9 @@ fn die(message: impl AsRef<str>, code: i32) -> ! {
     process::exit(code);
 }
 
-/// Mirrors src/plan-mutate/src/main.rs's own skill_root(): PLANNING_SKILL_ROOT
-/// first, then an ancestor walk of both the running binary's own path and the
-/// current working directory, looking for the first ancestor whose
-/// planning/scripts subdirectory exists.
+/// PLANNING_SKILL_ROOT first, then an ancestor walk of both the running
+/// binary's own path and the current working directory, looking for the
+/// first ancestor whose planning/scripts subdirectory exists.
 fn skill_root_from(
     env_root: Option<&Path>,
     exe_path: Option<&Path>,
@@ -162,8 +161,7 @@ fn member_is_dev_only(path: &Path) -> std::io::Result<bool> {
 /// `#!`), the shared `set -euo pipefail` line wherever it appears, and the
 /// file's own MODE/PACKAGE marker lines wherever they appear. Leading blank
 /// lines in the surviving content are dropped; once the first non-blank
-/// survivor is emitted every following line (blank or not) is kept, matching
-/// bash's `awk 'NF || printed { print; printed = 1 }'` exactly.
+/// survivor is emitted every following line (blank or not) is kept.
 fn strip_member(content: &str) -> String {
     let mut out = String::new();
     let mut printed = false;
@@ -217,10 +215,8 @@ fn emit_library_header(group: &str, purpose: &str, target: &str) -> String {
     out
 }
 
-/// Every `*.sh` file directly under `lib_root/group`, sorted lexicographically
-/// (matching bash's `for member in "$lib_root/$group"/*.sh` under LC_ALL=C).
-/// A missing group directory yields an empty list rather than an error,
-/// matching bash's own glob-no-match-falls-through-to-continue behavior.
+/// Every `*.sh` file directly under `lib_root/group`, sorted lexicographically.
+/// A missing group directory yields an empty list rather than an error.
 fn group_members(lib_root: &Path, group: &str) -> Vec<PathBuf> {
     let mut members: Vec<PathBuf> = fs::read_dir(lib_root.join(group))
         .into_iter()
@@ -240,12 +236,12 @@ fn group_members(lib_root: &Path, group: &str) -> Vec<PathBuf> {
     members
 }
 
-/// Header plus every surviving member's stripped content, in the fixed order
-/// bash builds them: a blank line, then (dev target only) a provenance
-/// comment naming the source file, then the stripped body. Errs (mirroring
-/// bash's own exit-65 paths) when the group name is unrecognized or when zero
-/// members survive — an empty directory and a directory whose only members
-/// are all PACKAGE:-DEV-excluded under a prod target are the same failure.
+/// Header plus every surviving member's stripped content, in the fixed
+/// order: a blank line, then (dev target only) a provenance comment naming
+/// the source file, then the stripped body. Errs when the group name is
+/// unrecognized or when zero members survive — an empty directory and a
+/// directory whose only members are all PACKAGE:-DEV-excluded under a prod
+/// target are the same failure.
 fn render_library(lib_root: &Path, group: &str, target: &str) -> Result<String, String> {
     let (_filename, purpose) =
         group_output(group).ok_or_else(|| format!("unknown group: {group}"))?;
@@ -518,9 +514,9 @@ mod tests {
     fn tempdir() -> PathBuf {
         // A monotonic counter alongside the nanosecond timestamp: on a
         // coarser-than-nanosecond clock (some virtualized CI runners), two
-        // of this file's six tempdir() calls can otherwise land on the same
-        // path in the same process, and one test then sees another's real
-        // fixture content spliced into its own supposedly-isolated directory.
+        // tempdir() calls can otherwise land on the same path in the same
+        // process, and one test then sees another's real fixture content
+        // spliced into its own supposedly-isolated directory.
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let mut path = std::env::temp_dir();
         let unique = format!(

@@ -2,14 +2,10 @@
 // PACKAGE: PROD
 //! Reads the workspace's own dependency graph from `cargo metadata`.
 //!
-//! Deliberate simplification: bash's own port shells out to `rjq` to query
-//! the metadata JSON, because bash has no JSON parser of its own. This port
-//! parses the same JSON natively with `serde_json` instead -- a subprocess
-//! and a text-reparsing step bash needed only for a language limitation the
-//! Rust port does not share (the same class of documented simplification as
-//! this plan's own glob-matcher precedent). `git` and `cargo metadata`
-//! themselves are still real subprocesses: their own resolution behavior is
-//! exactly what must stay in parity with the bash original.
+//! Deliberate simplification: this parses the metadata JSON natively with
+//! `serde_json` rather than shelling out to a query tool. `git` and
+//! `cargo metadata` themselves are still real subprocesses: their own
+//! resolution behavior must be preserved exactly.
 
 use std::path::Path;
 use std::process::Command;
@@ -34,15 +30,14 @@ pub struct Dependency {
 }
 
 pub enum MetadataError {
-    /// `command -v cargo` fails: bash's own distinct "cannot compute the
-    /// dependency graph" reason for a missing tool, not a failing one.
+    /// `command -v cargo` fails: a distinct reason for a missing tool, not
+    /// a failing one.
     CargoNotOnPath,
     /// `cargo metadata` ran but exited non-zero.
     CommandFailed,
     /// `cargo metadata` exited 0 but produced no stdout.
     Empty,
-    /// The JSON did not parse -- the port's own equivalent of bash's `rjq`
-    /// query itself failing.
+    /// The JSON did not parse.
     Unparseable,
 }
 
@@ -71,9 +66,8 @@ pub fn read(repo_root: &Path) -> Result<Metadata, MetadataError> {
 }
 
 /// `(dependent, dependency)` pairs, one per workspace-internal dependency
-/// edge -- matching bash's own `rjq` query: for every package, for every one
-/// of its dependencies whose name is itself a workspace member, emit that
-/// pair.
+/// edge: for every package, for every one of its dependencies whose name is
+/// itself a workspace member, emit that pair.
 pub fn build_edges(metadata: &Metadata) -> Vec<(String, String)> {
     let members: std::collections::HashSet<&str> =
         metadata.packages.iter().map(|p| p.name.as_str()).collect();

@@ -1,11 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
 
-//! Host target-triple resolution, mirroring setup-dev-env-lib.sh's own
-//! host_triple() -- with one deliberate fix: the Windows OS arm also
-//! accepts `Windows_NT` (B94, already fixed in the sibling
-//! plan_crypt_target_triple.sh but never carried into this script's own
-//! resolver), not just `MINGW*`/`MSYS*`/`CYGWIN*`.
+//! Host target-triple resolution: the Windows OS arm also accepts
+//! `Windows_NT` (B94), not just `MINGW*`/`MSYS*`/`CYGWIN*`.
 
 use std::env;
 #[cfg(not(windows))]
@@ -26,11 +23,10 @@ pub fn resolve_triple(os: &str, arch: &str) -> Result<String, String> {
             "arm64" | "aarch64" => Ok("aarch64-apple-darwin".to_string()),
             _ => Err(format!("no house target covers Darwin:{arch}")),
         },
-        // MINGW*/MSYS*/CYGWIN* per the bash original; Windows_NT is the
-        // B94 fix plan_crypt_target_triple.sh already carries and this
-        // resolver did not -- a non-POSIX shell (cmd, PowerShell) reports
-        // Windows_NT, which a POSIX uname never does, but no host the msvc
-        // binary actually serves should be refused for reporting it.
+        // MINGW*/MSYS*/CYGWIN* covers a POSIX-ish shell on Windows;
+        // Windows_NT covers a non-POSIX shell (cmd, PowerShell), which a
+        // POSIX uname never reports, but no host the msvc binary actually
+        // serves should be refused for reporting it (B94).
         _ if os.starts_with("MINGW")
             || os.starts_with("MSYS")
             || os.starts_with("CYGWIN")
@@ -45,9 +41,8 @@ pub fn resolve_triple(os: &str, arch: &str) -> Result<String, String> {
     }
 }
 
-/// Shells to real `uname -s`/`uname -m` (matching bash's own
-/// `uname -s 2>/dev/null || printf 'unknown'` fallback shape) and resolves
-/// the result via `resolve_triple`.
+/// Shells to real `uname -s`/`uname -m`, falling back to "unknown" if
+/// either fails, and resolves the result via `resolve_triple`.
 pub fn host_triple() -> Result<String, String> {
     // A Windows host is told by the compiler, not asked: `uname` is only there
     // when Git for Windows' usr/bin happens to be on PATH, and a plain cmd or
@@ -81,13 +76,11 @@ fn uname_field(flag: &str) -> String {
 /// when absent or empty (a direct/standalone invocation outside the wired
 /// exec path, such as a test), fall back to a location-anchored resolution
 /// from the running binary's own path, walking up for the nearest ancestor
-/// containing planning/scripts -- mirroring pecbip_find_skill_root's own
-/// algorithm. Deliberately never uses git rev-parse: unlike pre-push-check
-/// and run-tests, setup-dev-env.sh's real bash original needs no git at all
-/// for any mode (it anchors purely to BASH_SOURCE[0]'s own location), and a
-/// git-ancestry resolution has a concrete failure mode in this repository's
-/// own nested tool copies under benchmark/results/, where git rev-parse
-/// --show-toplevel resolves to the OUTER repository root instead.
+/// containing planning/scripts. Deliberately never uses git rev-parse: this
+/// resolution needs no git for any mode, and a git-ancestry resolution has
+/// a concrete failure mode in this repository's own nested tool copies
+/// under benchmark/results/, where git rev-parse --show-toplevel resolves
+/// to the OUTER repository root instead.
 pub fn discover_repo_root(self_binary_name: &str) -> Result<std::path::PathBuf, String> {
     if let Ok(root) = env::var("PLANNING_SKILL_ROOT") {
         if !root.is_empty() {

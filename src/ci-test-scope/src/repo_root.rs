@@ -3,17 +3,16 @@
 //! Repository-root discovery: `PLANNING_SKILL_ROOT` first (set by
 //! `plan_exec_compiled_binary_if_present` on every wired invocation),
 //! `current_exe()`-anchored ancestor search as the fallback for a standalone
-//! invocation (tests, or running the binary directly) -- identical to
-//! ci-scope's own repo_root.rs (goal 21).
+//! invocation (tests, or running the binary directly).
 
 use std::env;
 use std::path::{Path, PathBuf};
 
 /// Never fails: on a discovery failure, returns a sentinel path that does
 /// not exist, so the caller's own ordinary `repo_root.is_dir()` reachability
-/// check (run AFTER the `--push-to` short-circuit, matching bash's real
-/// order exactly) is what reports the failure, rather than main() reporting
-/// it out of order before `--push-to` is even considered.
+/// check (run AFTER the `--push-to` short-circuit) is what reports the
+/// failure, rather than main() reporting it out of order before `--push-to`
+/// is even considered.
 pub fn discover_repo_root_or_sentinel() -> PathBuf {
     discover_repo_root().unwrap_or_else(|_| PathBuf::from("/nonexistent-ci-test-scope-repo-root"))
 }

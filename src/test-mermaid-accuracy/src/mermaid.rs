@@ -519,7 +519,7 @@ mod tests {
     #[test]
     fn blocks_cross_check_catches_a_silently_skipped_block() {
         // A block with no recognisable content at all (blank body) still
-        // closes and counts toward `blocks`, matching the bash original.
+        // closes and counts toward `blocks`.
         let doc = "```mermaid\n```\n";
         let result = parse_document(doc);
         assert_eq!(result.blocks, 1);

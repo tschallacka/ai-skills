@@ -20,11 +20,9 @@ fn die(message: impl AsRef<str>, code: i32) -> ! {
     process::exit(code);
 }
 
-/// Mirrors src/plan-mutate/src/main.rs's own skill_root(), and this plan's
-/// own build-plan-libs precedent (W57): PLANNING_SKILL_ROOT first, then an
-/// ancestor walk of both the running binary's own path and the current
-/// working directory, looking for the first ancestor whose planning/scripts
-/// subdirectory exists.
+/// PLANNING_SKILL_ROOT first, then an ancestor walk of both the running
+/// binary's own path and the current working directory, looking for the
+/// first ancestor whose planning/scripts subdirectory exists.
 fn skill_root_from(
     env_root: Option<&Path>,
     exe_path: Option<&Path>,
@@ -57,9 +55,8 @@ fn skill_root() -> Option<PathBuf> {
 #[derive(Debug)]
 enum ParsedArgs {
     Help,
-    /// Bad usage: bash's own `usage` (implicit rc=64) prints only the Usage
-    /// text, with no extra message -- unlike build-plan-libs.sh's louder
-    /// style, this script never names what was wrong.
+    /// Bad usage (implicit rc=64): prints only the Usage text, with no
+    /// extra message -- this script never names what was wrong.
     BadUsage,
     Run {
         check_only: bool,
@@ -67,10 +64,10 @@ enum ParsedArgs {
     },
 }
 
-/// Pure argument parsing: never exits the process, so tests can assert on the
-/// returned value directly. Mirrors bash's own grammar exactly -- only
-/// position 1 is ever checked for a flag (`-h`/`--help`/`--check`), at most
-/// one argument may remain after that, and it must not start with `-`:
+/// Pure argument parsing: never exits the process, so tests can assert on
+/// the returned value directly. Only position 1 is ever checked for a flag
+/// (`-h`/`--help`/`--check`), at most one argument may remain after that,
+/// and it must not start with `-`:
 ///   case "${1:-}" in -h|--help) usage 0;; --check) check_only=true; shift;; esac
 ///   [ "$#" -le 1 ] || usage
 ///   case "${1:-}" in -*) usage;; esac
@@ -172,14 +169,11 @@ fn hash_hex(bytes: &[u8]) -> String {
 
 /// T86. Inserts a load-sanity line in the last fifth of the body, derived
 /// from the body's own SHA-256. Per AR-28: `raw_body` is trimmed of ALL
-/// trailing newline/blank-line characters first, mirroring bash's own
-/// command-substitution capture semantics chained through
-/// skill_section_body -> emit_part -> plant_load_proof (body=$(...) strips
-/// every trailing '\n'), so the hash/count/insertion-point arithmetic runs
-/// over the SAME bytes bash's really does -- not the raw section text, which
-/// may (and for 3 of the 4 real parts, does) carry a trailing blank line
-/// before its SKILL_SECTION:END marker. The proof block is inserted strictly
-/// AFTER line `at`, never before or in place of it.
+/// trailing newline/blank-line characters first, so the hash/count/
+/// insertion-point arithmetic runs over that trimmed content -- not the raw
+/// section text, which may carry a trailing blank line before its
+/// SKILL_SECTION:END marker. The proof block is inserted strictly AFTER
+/// line `at`, never before or in place of it.
 fn plant_load_proof(part: &str, raw_body: &str) -> String {
     let body = raw_body.trim_end_matches('\n');
     let total = body.lines().count() as i64;
@@ -249,8 +243,8 @@ fn emit_part(source: &str, source_file: &Path, index: usize) -> Result<String, S
 }
 
 /// SKILL.md: front matter, a short pointer table, and the same load-sanity
-/// contract stated once. This planning-specific prose is copied verbatim
-/// from the bash source and is NOT meant to be generic.
+/// contract stated once. This planning-specific prose is NOT meant to be
+/// generic.
 fn emit_index(source: &str) -> String {
     let mut out = front_matter(source);
     out.push_str("<!-- MODE: PROD -->\n\n");
@@ -282,10 +276,7 @@ fn emit_index(source: &str) -> String {
     out
 }
 
-/// Whatever `content` bash's own $(...) capture would have produced, plus
-/// exactly one trailing newline -- write_or_check's own `printf '%s\n'`
-/// after the caller's `"$(emit_index)"`/`"$(emit_part "$i")"` capture
-/// stripped every trailing newline already there.
+/// Trims all trailing newlines from `content` and appends exactly one.
 fn normalize_trailing_newline(content: &str) -> String {
     format!("{}\n", content.trim_end_matches('\n'))
 }
@@ -428,13 +419,12 @@ mod tests {
         assert!(out1.contains(&format!("token={expected_token}")));
     }
 
-    // (e) floor/span arithmetic matches bash's clamps for a very short body.
+    // (e) floor/span arithmetic clamps correctly for a very short body.
     #[test]
     fn floor_clamp_applies_for_a_very_short_body() {
         // total=1: floor = 1*4/5 = 0, which is already < total, so no clamp
-        // fires -- confirms the arithmetic runs without panicking and inserts
-        // sanely (or not at all, matching bash's own NR==0-never-matches
-        // edge case) rather than diverging from bash's behavior.
+        // fires -- confirms the arithmetic runs without panicking and
+        // inserts sanely (or not at all) for a body this short.
         let out = plant_load_proof("part-1", "only line\n");
         assert!(out.starts_with("only line\n"));
     }
@@ -475,7 +465,7 @@ mod tests {
     }
 
     // (i) CLI parsing rejects more than one positional argument and an
-    // unrecognized flag, both with exit 64 (bash's own silent `usage`).
+    // unrecognized flag, both with exit 64.
     #[test]
     fn cli_error_paths_exit_64() {
         assert!(matches!(
@@ -487,7 +477,7 @@ mod tests {
             ParsedArgs::BadUsage
         ));
         // Position-only-first: a flag AFTER the positional is also refused,
-        // since bash only ever inspects $1 for --check/-h/--help.
+        // since only position 1 is ever inspected for --check/-h/--help.
         assert!(matches!(
             parse_args(&["somedir".to_string(), "--check".to_string()]),
             ParsedArgs::BadUsage
@@ -509,9 +499,8 @@ mod tests {
         ));
     }
 
-    // (j) per the W57/AR-26 precedent, skill_root()'s failure path is
-    // exercised at the real subprocess level in tests/generate_skill_docs_flow.rs;
-    // here we test the pure resolution function directly.
+    // (j) skill_root()'s failure path is exercised at the real subprocess
+    // level; here we test the pure resolution function directly.
     #[test]
     fn skill_root_returns_none_when_nothing_resolves() {
         let dir = tempdir();

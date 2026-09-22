@@ -106,14 +106,10 @@ fn shell_verbs() -> &'static [(&'static str, &'static str)] {
 }
 
 /// add-progress and rebuild-progress are implemented natively rather than
-/// dispatched to planning/scripts/plan-mutate.sh: that script's own
-/// compiled-binary-preference wiring execs back into THIS binary, so routing
-/// either verb through it here would be a direct, unbounded exec/spawn cycle
-/// -- the compiled binary would forever re-dispatch to the very script that
-/// prefers it. This mirrors plan-mutate.sh's own bash implementation, which
-/// documents the same two verbs as "implemented inline rather than exec'd"
-/// for its own, unrelated reasons (rebuild-progress must overwrite in place
-/// and tolerate an empty steps/ directory).
+/// dispatched to an external script: a script whose compiled-binary
+/// preference execs back into this same binary would turn either verb into
+/// a direct, unbounded exec/spawn cycle. rebuild-progress must also
+/// overwrite in place and tolerate an empty steps/ directory.
 fn die(message: impl AsRef<str>, code: i32) -> ! {
     eprintln!("plan-mutate: {}", message.as_ref());
     process::exit(code)
@@ -186,7 +182,7 @@ fn rebuild_progress(args: &[String]) -> Result<(), String> {
     }
     let mut out = String::new();
     out.push_str(&format!("# Progress: {goal_name}\n\n"));
-    // Glyphs and spacing are pinned by test-progress-bar-shape.sh; do not reflow.
+    // Glyphs and spacing are exact; do not reflow.
     out.push_str("**Progress:** `0%  #### ----------------  100%` 💤\n\n");
     out.push_str("| Goalname | Stepname | Description | Completion status |\n|---|---|---|---|\n");
     let mut step_files: Vec<PathBuf> = std::fs::read_dir(goal_dir.join("steps"))

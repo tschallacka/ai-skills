@@ -91,7 +91,14 @@ pub fn serve_on_host_port(
             break;
         }
         match listener.accept() {
-            Ok((stream, _)) => respond(stream, &state_stream),
+            Ok((stream, _)) => {
+                // Accepted sockets can inherit the listener's O_NONBLOCK on
+                // BSD-derived systems; force blocking so respond()'s read
+                // waits for the request instead of treating "not here yet"
+                // as an empty one and closing on the client mid-write.
+                let _ = stream.set_nonblocking(false);
+                respond(stream, &state_stream)
+            }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(std::time::Duration::from_millis(5))
             }

@@ -3,7 +3,7 @@
 # build-release.sh — assemble the prod tarball a release ships.
 #
 # A GitHub source archive carries the whole repository: the per-function library
-# sources, 70 test scripts, the fixtures, the maintainer documentation, the
+# sources, the test scripts, the fixtures, the maintainer documentation, the
 # benchmark tree. An end user needs none of it, and the installer downloading it
 # means every install pays for it. So a release carries an asset built here,
 # holding only what is marked MODE: PROD.
@@ -23,9 +23,8 @@
 # files array ships whole directories, so .npmignore is generated from the same
 # marker set by --npmignore.
 #
-# installer/src/05-config.sh and installer/src/50-manifest.sh are the two
-# surviving fragments of the retired bash install.sh (see git history for the
-# rest, and .agents/MAINTAINER.md for the retirement writeup): this script is
+# installer/src/05-config.sh and installer/src/50-manifest.sh are two
+# surviving fragments of the retired bash install.sh; this script is
 # now their only real consumer (a handful of tests source them too, for the
 # same skill_files()/manifest cross-checks). They are not trimmed down to
 # only what this script reads -- most of 05-config.sh is install.sh-picker

@@ -37,11 +37,10 @@ impl ForgeProbe for RealProbe {
     }
 }
 
-/// Mirrors ci-failures.sh's own detect_forge(): an explicit
-/// CI_FAILURES_FORGE override wins outright (refused if it names anything
-/// else); otherwise the origin remote's own host decides; otherwise
-/// whichever CLI is present and already speaks for this remote, gh first
-/// only because it was written first, not because it is preferred.
+/// An explicit CI_FAILURES_FORGE override wins outright (refused if it names
+/// anything else); otherwise the origin remote's own host decides;
+/// otherwise whichever CLI is present and already speaks for this remote,
+/// gh first only because it was written first, not because it is preferred.
 pub fn detect_forge(
     forge_override: Option<&str>,
     remote_url: Option<&str>,

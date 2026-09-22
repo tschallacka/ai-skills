@@ -1,34 +1,25 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! Install `source/<skill>` into `target/<skill>`. Every file is written to
-//! a sibling temp file and renamed into place -- what B292 fixed in
-//! install.sh (`cp` onto a running binary aborted the update); every write
-//! here goes through it unconditionally, so there is no separate "existing
-//! file" branch to get wrong.
+//! a sibling temp file and renamed into place unconditionally, so there is
+//! no separate "existing file" branch to get wrong, and a partial write is
+//! never observed as a completed one.
 //!
 //! T72: the one exception to "into `target/<skill>`" is a `bin/<triple>/`
 //! entry, which goes to `shared_bin::shared_bin_dir` instead -- one location
 //! for every skill's compiled binaries, not a copy per skill per agent root.
-//! See that module's doc comment.
 //!
 //! A re-install does not silently clobber a user's edits: before overwriting
 //! an existing file that differs from the source, this checks whether the
-//! file is unchanged since the LAST install (digest.rs) and backs it up
-//! first (backup.rs) if not -- the same problem install.sh's
-//! record_digests/unmodified_since_install/backup_file solve
-//! (installer/src/60-install.sh), ported with a different digest (blake3,
-//! not cksum) since this manifest is this installer's own.
+//! file is unchanged since the LAST install and backs it up first if not.
 //!
 //! `package_dev` gates whether a raw dev checkout's own maintainer-only
-//! content ships along with a skill -- install.sh's `--package prod|dev`/
-//! `PACKAGE_SELECTION` (default `prod`). This installer never reads or runs
-//! install.sh at all (no dependency on the original bash installer, present
-//! or not): `collect_relative_files` decides independently, from three
-//! sources, in order --
+//! content ships along with a skill (default: it does not).
+//! `collect_relative_files` decides independently, from three sources, in
+//! order --
 //!   1. a `bin/<target-triple>/` directory ships only the CURRENT host's own
 //!      triple subdirectory (`installer_platform::current()`), not every
-//!      platform's binaries -- a directory-layout convention, not anything
-//!      read out of install.sh;
+//!      platform's binaries -- a directory-layout convention;
 //!   2. `load_mode_manifest`'s per-skill `MODE-MANIFEST.tsv` override
 //!      (`ModeOverride::Dev`/`Prod`/`Never`, exact path or `dir/` prefix),
 //!      for files whose format has no comment syntax to carry a marker, or
@@ -38,9 +29,7 @@
 //!   3. `should_ship`'s own `# MODE: DEV` header scan for everything else,
 //!      plus a whole-`tests/`-directory exclusion for `package_dev`.
 //!
-//! install.sh's separate `--dev-build`/`DEV_BUILD` ("prefer this host's
-//! freshly-built binary over the shipped one") has no port here: this
-//! installer's own copy step (below) only ever reads from
+//! This installer's own copy step (below) only ever reads from
 //! `source_root.join(skill)` -- one location, not two -- so there is no
 //! second binary source to choose between.
 
@@ -61,13 +50,10 @@ const MODE_MANIFEST_FILENAME: &str = "MODE-MANIFEST.tsv";
 
 /// Installs `skill` in whichever mode `integration::resolve_mode` picks for
 /// it (an explicit `--integration` choice, else whatever mode is already on
-/// disk at `target_root/skill`, else `skill`) -- ported from install.sh's
-/// `install_skill` (installer/src/60-install.sh), which resolves the mode
-/// once up front and threads it through both the copy filter
-/// (`integration_file_allowed`) and the stale-binary cleanup
-/// (`remove_stale_integration_binaries`). A skill with no `integration.tsv`
-/// (almost all of them) has every file mode-free, so this is a no-op filter
-/// for them -- same behavior as before integration modes existed.
+/// disk at `target_root/skill`, else `skill`), resolved once up front and
+/// threaded through both the copy filter and the stale-binary cleanup. A
+/// skill with no `integration.tsv` (almost all of them) has every file
+/// mode-free, so this is a no-op filter for them.
 pub fn install_skill(
     source_root: &Path,
     skill: &str,
@@ -96,11 +82,9 @@ pub fn install_skill(
     let relative_paths = relative_paths_for(source_root, skill, package_dev)?;
 
     // A symlinked destination file (or the digest manifest itself) is left
-    // for manual review rather than silently replaced -- ported from
-    // install.sh's own `[ -L "$destination_file" ]`/`[ -L "$destination/.
-    // version" ]` refusal (installer/src/60-install.sh). Checked for every
-    // file BEFORE any write happens, matching bash's own two-pass shape:
-    // a collision found partway through must not leave a half-written skill.
+    // for manual review rather than silently replaced. Checked for every
+    // file BEFORE any write happens: a collision found partway through
+    // must not leave a half-written skill.
     for relative in &relative_paths {
         let dest_file = dest_dir.join(relative);
         if dest_file.is_symlink() {
@@ -176,11 +160,10 @@ pub fn install_skill(
     Ok(())
 }
 
-/// Public wrapper around `relative_paths_for` for `cli_mode.rs`'s own
-/// independent collision-checking install path (install.sh's
-/// `cli_install_skill`), which needs the same "what would this skill ship"
-/// answer without going through the backup/digest machinery this module's
-/// own `install_skill` wraps it in.
+/// Public wrapper around `relative_paths_for` for the CLI install path's
+/// own independent collision-checking, which needs the same "what would
+/// this skill ship" answer without going through the backup/digest
+/// machinery `install_skill` wraps it in.
 pub fn skill_relative_files(
     source_root: &Path,
     skill: &str,
@@ -285,9 +268,7 @@ fn load_mode_manifest(skill_dir: &Path) -> ModeManifest {
 /// triple subdirectory is descended into (ship this platform's binary, not
 /// every platform's), matching the `bin/<target-triple>/...` layout every
 /// binary-shipping skill in this repository already uses. A host
-/// `installer_platform` does not resolve ships no `bin/` content at all,
-/// same as install.sh's own `skill_files()` refusing with no build for an
-/// unknown platform (installer/src/50-manifest.sh).
+/// `installer_platform` does not resolve ships no `bin/` content at all.
 fn collect_relative_files(
     dir: &Path,
     prefix: &Path,
@@ -341,17 +322,13 @@ fn collect_relative_files(
     Ok(out)
 }
 
-/// Ships unless the file's own header (first 25 lines, same window
-/// build-release.sh's `declares_prod` reads) explicitly says `# MODE: DEV`
-/// or `<!-- MODE: DEV -->`. Everything else ships: an explicit `# MODE:
-/// PROD` marker, and -- unlike `declares_prod`, which defaults an unmarked
-/// file to NOT prod -- a file with no marker at all, since most files this
-/// installer would otherwise silently drop (JSON schemas, TSVs, prebuilt
-/// binaries) have no comment syntax to carry one and were always meant to
-/// ship. `declares_prod` can default the other way because build-release.sh
-/// pairs it with a hand-maintained inclusion list (`skill_files()`) for
-/// every real skill; a file this ships wrongly here is what
-/// `MODE-MANIFEST.tsv`'s override (above) is for.
+/// Ships unless the file's own header (first 25 lines) explicitly says
+/// `# MODE: DEV` or `<!-- MODE: DEV -->`. Everything else ships, including
+/// a file with no marker at all: most files this installer would otherwise
+/// silently drop (JSON schemas, TSVs, prebuilt binaries) have no comment
+/// syntax to carry one and were always meant to ship. A file that ships
+/// wrongly under this default is what `MODE-MANIFEST.tsv`'s override
+/// (above) is for.
 fn should_ship(path: &Path) -> bool {
     let Ok(content) = fs::read_to_string(path) else {
         return true; // not read as text (e.g. a binary) -- never DEV-marked
@@ -661,9 +638,8 @@ mod tests {
         // destination. The shared bin does not: another agent root, or
         // another skill, might still need the exact same file, and one
         // `install_skill` call over one destination has no way to know.
-        // The trade this test now pins: switching leaves both binaries in
-        // the shared bin, harmless unswept space, same trade the module
-        // doc comment and T72 itself accept for an uninstall.
+        // The trade this test pins: switching leaves both binaries in the
+        // shared bin, harmless unswept space.
         let source_root = tempfile::tempdir().unwrap();
         write_integration_tsv(source_root.path(), "ai-text-editor");
         write(

@@ -44,8 +44,7 @@ pub fn sweep_stale_worktrees(src: &Path, own_wt: &Path) {
 /// `Some(pid)` when `<parent>/harness.pid` names a pid that is still
 /// signalable (`kill -0`-equivalent). AR-80: a missing file, an empty
 /// value, or a non-numeric value are ALL treated identically as "not
-/// live" -- matching bash's own `cat ... 2>/dev/null || true` plus
-/// `[ -n "$owner" ]` guard exactly.
+/// live".
 fn live_owner(parent: &Path) -> Option<i32> {
     let contents = fs::read_to_string(parent.join("harness.pid")).ok()?;
     let pid: i32 = contents.trim().parse().ok()?;
