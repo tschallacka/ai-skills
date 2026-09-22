@@ -65,8 +65,13 @@ Monitor(command: "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-spoo
 - It touches `interrupts/<session>/.watcher` on every look and removes it on a
   clean exit, so anything can tell whether one is armed.
 - **A Monitor lives at most 30 minutes and nothing re-arms it.** The agent has to
-  arm it again when it ends, and agents forget; this is the weak point of the
-  design, not something the binary can fix.
+  arm it again when it ends, and agents forget. `chat-interrupt-plugin`'s hook
+  mitigates this: it reminds the agent to re-arm whenever something is still
+  configured to fire (`.active`) and the heartbeat has gone quiet or was never
+  started, at most once every 30 minutes. That reminder still only lands at the
+  agent's next tool call, so it cannot itself wake an idle one -- it is the
+  answer to "the agent is working but forgot", not to "the agent went idle with
+  a dead watcher".
 
 Measured on Claude Code 2.1.278 on 2026-09-21, once: with the session idle, the
 watcher's line arrived as a notification and started a turn on its own, 21 s

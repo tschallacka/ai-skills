@@ -20,6 +20,14 @@ use std::path::{Path, PathBuf};
 /// It does not end in `.log`, so the hook, which reads `*.log`, never takes it.
 pub const HEARTBEAT: &str = ".watcher";
 
+/// Marks that this identity has hook-only interrupts configured (at least one
+/// enabled, unexpired rule or a timer, with `delivery: hook`) -- the PreToolUse
+/// hook's own signal that a `chat-spool-watch` heartbeat going stale means an
+/// idle agent has nothing left watching for it, worth a reminder to re-arm.
+/// Absent when there is nothing configured, or when delivery is `push` or
+/// `both`, since a channel push already covers an idle agent then.
+pub const ACTIVE: &str = ".active";
+
 /// A name that cannot leave its directory: letters, digits, `-` and `_` only,
 /// at most 96 characters. The hook applies the same rule in shell (`tr`).
 pub fn safe_name(text: &str) -> String {
@@ -82,5 +90,11 @@ mod tests {
     #[test]
     fn the_heartbeat_is_not_a_log_file() {
         assert!(!HEARTBEAT.ends_with(".log"));
+    }
+
+    #[test]
+    fn the_active_marker_is_not_a_log_file_and_differs_from_the_heartbeat() {
+        assert!(!ACTIVE.ends_with(".log"));
+        assert_ne!(ACTIVE, HEARTBEAT);
     }
 }

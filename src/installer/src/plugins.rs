@@ -1,11 +1,13 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Installs the two vendor-shipped plugins that ride along with a skill
-//! rather than being selectable on their own -- ported from
+//! Installs the vendor-shipped plugins that ride along with a skill rather
+//! than being selectable on their own -- the first two ported from
 //! installer/src/70-permissions.sh's `install_tui_hint_plugin_claude`/
-//! `install_tui_hint_plugin_opencode`/`install_editor_gate_plugin`. Neither
-//! is in manifest.rs's SKILLS list: tui-hint-plugin rides with
-//! interactive-shell, editor-gate-plugin rides with ai-text-editor.
+//! `install_tui_hint_plugin_opencode`/`install_editor_gate_plugin`, the rest
+//! added since. None is in manifest.rs's SKILLS list: tui-hint-plugin rides
+//! with interactive-shell, editor-gate-plugin with ai-text-editor,
+//! agent-identity-plugin with chat/ai-text-editor/interactive-shell, and
+//! chat-interrupt-plugin with chat.
 //!
 //! Claude Code reads a plugin directory per root, so it is copied there
 //! verbatim; opencode declares plugins globally in its own config's
@@ -48,6 +50,14 @@ const AGENT_IDENTITY_PLUGIN_FILES: &[&str] = &[
     "hooks/subagent-start.sh",
 ];
 const AGENT_IDENTITY_PLUGIN_EXECUTABLES: &[&str] = &["hooks/lib.sh", "hooks/subagent-start.sh"];
+
+const CHAT_INTERRUPT_PLUGIN_FILES: &[&str] = &[
+    ".claude-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/lib.sh",
+    "hooks/pre-tool-use.sh",
+];
+const CHAT_INTERRUPT_PLUGIN_EXECUTABLES: &[&str] = &["hooks/lib.sh", "hooks/pre-tool-use.sh"];
 
 /// Copies `files` (relative to `source_root/plugin_name`) into
 /// `target_root/plugin_name`, then makes `executables` (a subset of `files`)
@@ -126,6 +136,21 @@ pub fn install_agent_identity_plugin_claude(
         "agent-identity-plugin",
         AGENT_IDENTITY_PLUGIN_FILES,
         AGENT_IDENTITY_PLUGIN_EXECUTABLES,
+        target_root,
+    )
+}
+
+/// Rides with `chat`, Claude Code only: `PreToolUse` is a Claude Code hook, and
+/// the reminder it shows is chat-mcp's own interrupt spool (chat/docs/interrupts.md).
+pub fn install_chat_interrupt_plugin_claude(
+    source_root: &Path,
+    target_root: &Path,
+) -> io::Result<PathBuf> {
+    copy_plugin_files(
+        source_root,
+        "chat-interrupt-plugin",
+        CHAT_INTERRUPT_PLUGIN_FILES,
+        CHAT_INTERRUPT_PLUGIN_EXECUTABLES,
         target_root,
     )
 }
@@ -347,6 +372,38 @@ mod tests {
                 .permissions()
                 .mode();
             assert_eq!(mode & 0o111, 0o111);
+        }
+    }
+
+    #[test]
+    fn chat_interrupt_plugin_copies_its_own_file_set_and_marks_the_hook_executable() {
+        let source_root = tempfile::tempdir().unwrap();
+        let dir = source_root.path().join("chat-interrupt-plugin");
+        write(&dir.join(".claude-plugin/plugin.json"), "{}");
+        write(&dir.join("hooks/hooks.json"), "{}");
+        write(&dir.join("hooks/lib.sh"), "#!/bin/sh\n");
+        write(&dir.join("hooks/pre-tool-use.sh"), "#!/bin/sh\n");
+        write(&dir.join("README.md"), "not shipped");
+        let target_root = tempfile::tempdir().unwrap();
+
+        let destination =
+            install_chat_interrupt_plugin_claude(source_root.path(), target_root.path()).unwrap();
+
+        assert!(destination.join(".claude-plugin/plugin.json").is_file());
+        assert!(destination.join("hooks/lib.sh").is_file());
+        assert!(destination.join("hooks/pre-tool-use.sh").is_file());
+        assert!(!destination.join("README.md").exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for hook in ["hooks/lib.sh", "hooks/pre-tool-use.sh"] {
+                let mode = fs::metadata(destination.join(hook))
+                    .unwrap()
+                    .permissions()
+                    .mode();
+                assert_eq!(mode & 0o111, 0o111, "{hook}");
+            }
         }
     }
 

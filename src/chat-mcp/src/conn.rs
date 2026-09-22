@@ -419,11 +419,36 @@ impl Owner {
             .lock()
             .map_err(|_| "the interrupt state is poisoned; restart the adapter".to_string())?
             .apply(tool, arguments, Instant::now())?;
+        self.sync_active_marker();
         Ok(Answer {
             note: Some(reply.note),
             data: Some(reply.data),
             ..Answer::empty()
         })
+    }
+
+    /// Keep `interrupt::ACTIVE` reflecting whether anything would still notify
+    /// through the hook alone: written when at least one rule or timer would
+    /// fire and delivery is `hook`, removed otherwise (nothing configured, or
+    /// `push`/`both` already cover an idle agent). Called after anything that
+    /// can change a rule, a timer, or the delivery setting, so a stale
+    /// `chat-spool-watch` heartbeat only draws a reminder when it still matters.
+    fn sync_active_marker(&self) {
+        let Ok(engine) = self.engine.lock() else {
+            return;
+        };
+        let active =
+            engine.delivery() == interrupt::Delivery::Hook && engine.is_active(Instant::now());
+        drop(engine);
+        let dir = interrupt::spool_dir(&self.state_dir, &self.session_key);
+        let marker = dir.join(chat_proto::spool::ACTIVE);
+        if active {
+            if std::fs::create_dir_all(&dir).is_ok() {
+                let _ = std::fs::write(&marker, "");
+            }
+        } else {
+            let _ = std::fs::remove_file(&marker);
+        }
     }
 
     /// Push a notice for every timer that has run out. Runs on every turn of
@@ -436,6 +461,10 @@ impl Owner {
         let delivery = engine.delivery();
         drop(engine);
         self.send_notices(delivery, &notices);
+        // A one-shot timer just consumed itself; that can turn "active" off.
+        if !notices.is_empty() {
+            self.sync_active_marker();
+        }
     }
 
     /// Hand notices to the agent the way it asked: pushed, spooled for the
@@ -457,6 +486,10 @@ impl Owner {
         let delivery = engine.delivery();
         drop(engine);
         self.send_notices(delivery, &notices);
+        // A `once` rule that just fired disabled itself; that can turn "active" off.
+        if !notices.is_empty() {
+            self.sync_active_marker();
+        }
     }
 
     // ---- the operations ---------------------------------------------------

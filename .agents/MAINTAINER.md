@@ -83,7 +83,7 @@ the CI map.
 | `testing-stories/` | hands a skill to a fresh agent in Docker; every real run is a billed agent session and nothing here runs automatically | `testing-stories/README.md` |
 | `hooks/` | the git hooks `setup-dev-env.sh` wires (`commit-msg`, `pre-push`) | 1.17 |
 | `docs/` | `DEBUGGING-TESTS.md` and the interactive-shell `TESTING-PROTOCOL.md` | 1.12 |
-| `agent-identity-plugin/`, `editor-gate-plugin/`, `tui-hint-plugin/` | agent-harness plugins built on hooks, each with a `README.md` and `tests/` | their `README.md` |
+| `agent-identity-plugin/`, `editor-gate-plugin/`, `tui-hint-plugin/`, `chat-interrupt-plugin/` | agent-harness plugins built on hooks, each with a `README.md` and `tests/` | their `README.md` |
 | `.brainstorm/` | a working note (`actionplan.md`, a reviewer-optimisation plan), not shipped | — |
 | `bin/`, `target/` | generated output: built binaries and cargo's build directory | 1.9, 1.10 |
 

@@ -140,7 +140,9 @@ same way (seen repeatedly in the session that wrote this). Limits: a Monitor is
 killed at its timeout, 30 minutes at most, and a one-shot background command ends
 at its first event, so **something has to arm it again**, and agents that are
 asked to re-arm consistently forget. `chat-spool-watch` is the chat skill's use of
-this.
+this; `chat-interrupt-plugin`'s hook (below) reminds an agent that is still
+working to re-arm a dead one, at most once every 30 minutes -- it cannot itself
+wake an idle agent, only reach one already making tool calls.
 
 ## What does not work
 

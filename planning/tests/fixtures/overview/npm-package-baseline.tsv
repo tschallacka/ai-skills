@@ -37,10 +37,16 @@ package/bug-report/docs/README.md	1318
 package/bug-report/requires.tsv	1628
 package/bug-report/schema.1.4.2.json	2754
 package/bug-report/schema.2.0.0-alpha.1.json	2499
+package/chat-interrupt-plugin/.claude-plugin/plugin.json	349
+package/chat-interrupt-plugin/README.md	2803
+package/chat-interrupt-plugin/hooks/hooks.json	211
+package/chat-interrupt-plugin/hooks/lib.sh	2668
+package/chat-interrupt-plugin/hooks/pre-tool-use.sh	4635
+package/chat-interrupt-plugin/tests/test-chat-interrupt-hook.sh	7992
 package/chat/SKILL.md	49924
 package/chat/binaries.tsv	2526
 package/chat/docs/README.md	1927
-package/chat/docs/interrupts.md	8909
+package/chat/docs/interrupts.md	9277
 package/chat/integration.tsv	1782
 package/chat/requires.tsv	467
 package/ci-failures/SKILL.md	4151
@@ -135,7 +141,7 @@ package/interactive-shell/requires.tsv	2252
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
-package/package.json	2113
+package/package.json	2142
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	17811
 package/planning/REVIEWER.md	25748

@@ -172,6 +172,7 @@ impl Repo {
             "editor-gate-plugin/tests",
             "tui-hint-plugin/tests",
             "agent-identity-plugin/tests",
+            "chat-interrupt-plugin/tests",
             ".github/tests",
             "benchmark/planning/tests",
         ] {

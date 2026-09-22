@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# test-chat-interrupt-hook — chat-interrupt-plugin's PreToolUse hook shows what
-# the chat bridge queued for this Claude Code session, once, as valid JSON, and
-# stays silent (and non-blocking) when nothing is queued.
+# test-chat-interrupt-hook -- chat-interrupt-plugin's PreToolUse hook shows
+# what the chat bridge queued for this Claude Code session, once, as valid
+# JSON, and stays silent (and non-blocking) when nothing is queued (same
+# convention as tui-hint-plugin/tests/test-tui-hint-matching.sh).
 #
 # The hook is what makes interrupts reach an agent without Claude Code's
 # channels flag, so the claims are about its output: a reminder naming each
 # notice, the spool emptied by reading it, only THIS session's spool read, and
 # nothing at all otherwise. Delete the hook's `mv` and the "shown once" case
-# fails; delete the session check and the "another session" case fails.
+# fails; delete the session check and the "another session" case fails. It also
+# covers the re-arm reminder (chat-mcp's own .active marker plus a stale or
+# missing chat-spool-watch heartbeat) and lib.sh's own staleness check.
 #
 # Usage:
 #   test-chat-interrupt-hook.sh
@@ -17,12 +20,15 @@ set -uo pipefail
 export LC_ALL=C
 
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$tests_dir/.." && pwd)"
+plugin_dir="$(cd "$tests_dir/.." && pwd)"
+repo_root="$(cd "$plugin_dir/.." && pwd)"
 # shellcheck source=planning/tests/lib-test.sh
 source "$repo_root/planning/tests/lib-test.sh"
 t_begin
 
-hook="$repo_root/chat-interrupt-plugin/hooks/pre-tool-use.sh"
+hook="$plugin_dir/hooks/pre-tool-use.sh"
+# shellcheck source=chat-interrupt-plugin/hooks/lib.sh
+source "$plugin_dir/hooks/lib.sh"
 work="$(mktemp -d "${TMPDIR:-/tmp}/chat-interrupt-hook.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
@@ -106,5 +112,65 @@ done
 many="$(run_hook many)"
 t_assert_contains 'the count is the whole count' 'interrupts you asked for (25)' "$many"
 t_assert_contains 'the cut is said' '+5 more' "$many"
+
+# ---- lib.sh's own is_stale/backdate, tested directly -----------------------
+stale_probe="$(mktemp "${TMPDIR:-/tmp}/chat-interrupt-stale-probe.XXXXXX")"
+if chat_interrupt_hook_is_stale "$work/no-such-file" 60; then
+    :
+else
+    t_fail 'a missing file must be reported as stale'
+fi
+: >"$stale_probe"
+if chat_interrupt_hook_is_stale "$stale_probe" 60; then
+    t_fail 'a file just written must not be reported as stale'
+fi
+chat_interrupt_hook_backdate "$stale_probe" 120
+if chat_interrupt_hook_is_stale "$stale_probe" 60; then
+    :
+else
+    t_fail 'a file backdated past the window must be reported as stale'
+fi
+rm -f "$stale_probe"
+
+# ---- the re-arm reminder: chat-mcp's .active marker plus a stale or missing
+#      chat-spool-watch heartbeat -------------------------------------------
+rearm_spool="$work/interrupts/sess-rearm"
+mkdir -p "$rearm_spool"
+
+t_assert_eq 'no .active marker means no reminder, whatever the heartbeat' \
+    "$(run_hook sess-rearm)" '{}'
+
+: >"$rearm_spool/.active"
+first_reminder="$(run_hook sess-rearm)"
+t_assert_contains 'a missing heartbeat is reminded about' 'No chat-spool-watch is watching' "$first_reminder"
+t_assert_contains 'the reminder names the command' 'chat-spool-watch' "$first_reminder"
+t_assert_contains 'the reminder says it will not restart itself' 'does not restart itself' "$first_reminder"
+
+t_assert_eq 'the reminder does not repeat inside its cooldown' \
+    "$(run_hook sess-rearm)" '{}'
+
+# A fresh heartbeat silences it even once the cooldown alone would allow one.
+chat_interrupt_hook_backdate "$rearm_spool/.rearm-reminded" 999999
+: >"$rearm_spool/.watcher"
+t_assert_eq 'a fresh heartbeat means no reminder' "$(run_hook sess-rearm)" '{}'
+
+# The heartbeat going stale again, past the cooldown, reminds again.
+chat_interrupt_hook_backdate "$rearm_spool/.watcher" 999999
+chat_interrupt_hook_backdate "$rearm_spool/.rearm-reminded" 999999
+t_assert_contains 'a stale heartbeat past the cooldown reminds again' \
+    'No chat-spool-watch is watching' "$(run_hook sess-rearm)"
+
+# A real notice and the reminder can arrive together, in one reply.
+chat_interrupt_hook_backdate "$rearm_spool/.rearm-reminded" 999999
+printf '[10:05:00Z] #ops <ci> build failed\n' >"$rearm_spool/junkbox.log"
+combined="$(run_hook sess-rearm)"
+t_assert_contains 'the notice is still shown alongside the reminder' 'build failed' "$combined"
+t_assert_contains 'and the reminder alongside the notice' 'No chat-spool-watch is watching' "$combined"
+
+# Clearing .active (the agent removed its rules and timers) silences it even
+# with a stale heartbeat and the cooldown elapsed.
+rm -f "$rearm_spool/.active"
+chat_interrupt_hook_backdate "$rearm_spool/.rearm-reminded" 999999
+t_assert_eq 'nothing configured means no reminder' "$(run_hook sess-rearm)" '{}'
 
 t_end 'test-chat-interrupt-hook'

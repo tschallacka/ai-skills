@@ -932,6 +932,52 @@ fn spooled(home: &Path) -> Vec<String> {
     lines
 }
 
+/// Whether any session's `.active` marker exists, which is what tells the
+/// PreToolUse hook a stale `chat-spool-watch` heartbeat is worth a reminder.
+fn any_active_marker(home: &Path) -> bool {
+    let Ok(sessions) = std::fs::read_dir(home.join("interrupts")) else {
+        return false;
+    };
+    sessions
+        .flatten()
+        .any(|entry| entry.path().join(".active").is_file())
+}
+
+/// The `.active` marker follows whether hook delivery still has something that
+/// would fire: absent with nothing configured, present once a rule or a timer
+/// exists, gone again once it is removed, and gone under `push`/`both` even
+/// with something configured, since a channel push already covers an idle
+/// agent then.
+#[test]
+fn the_active_marker_tracks_whether_hook_delivery_still_has_something_to_fire() {
+    let Some(mut harness) = Harness::new("interrupt-active-marker") else {
+        return;
+    };
+    assert!(!any_active_marker(&harness.home), "nothing configured yet");
+
+    let added = harness.call("interrupt_add", json!({"contains":["x"]}));
+    let id = added["state"]["id"].as_u64().unwrap();
+    assert!(any_active_marker(&harness.home), "a rule now exists");
+
+    harness.call("interrupt_settings", json!({"delivery":"push"}));
+    assert!(
+        !any_active_marker(&harness.home),
+        "push already covers an idle agent"
+    );
+
+    harness.call("interrupt_settings", json!({"delivery":"hook"}));
+    assert!(any_active_marker(&harness.home), "back to hook delivery");
+
+    harness.call("interrupt_remove", json!({"id":id}));
+    assert!(
+        !any_active_marker(&harness.home),
+        "nothing left to fire through the hook"
+    );
+
+    harness.call("timer_set", json!({"after_seconds":600}));
+    assert!(any_active_marker(&harness.home), "a timer now exists");
+}
+
 /// The default is the hook: a matching message and a timer are queued for the
 /// PreToolUse hook, one line each, and NOTHING is pushed, so a client that does
 /// not run channels sees no difference on stdout.

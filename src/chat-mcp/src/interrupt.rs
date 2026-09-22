@@ -403,6 +403,14 @@ impl Engine {
         self.settings.delivery
     }
 
+    /// Would anything still notify given the current rules and timers? A rule
+    /// that is disabled or has expired counts as gone; a timer counts whether
+    /// enabled or not, since a paused one may be turned back on. Used to decide
+    /// whether a stale `chat-spool-watch` heartbeat is worth a reminder.
+    pub fn is_active(&self, now: Instant) -> bool {
+        self.rules.iter().any(|r| r.enabled && !r.expired(now)) || !self.timers.is_empty()
+    }
+
     fn take_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -1290,6 +1298,59 @@ mod tests {
         assert_eq!(list["rules"][0]["channels"], json!(["#ops"]));
         assert_eq!(list["timers"][0]["every_seconds"], json!(600));
         assert_eq!(list["settings"]["enabled"], json!(true));
+    }
+
+    #[test]
+    fn is_active_reflects_whether_a_rule_or_timer_would_still_fire() {
+        let now = Instant::now();
+        let mut engine = Engine::default();
+        assert!(!engine.is_active(now), "nothing configured");
+
+        engine.apply("interrupt_add", &json!({}), now).unwrap();
+        assert!(engine.is_active(now), "an enabled rule exists");
+
+        engine
+            .apply("interrupt_update", &json!({"id":1,"enabled":false}), now)
+            .unwrap();
+        assert!(!engine.is_active(now), "the only rule is disabled");
+
+        engine
+            .apply("interrupt_update", &json!({"id":1,"enabled":true}), now)
+            .unwrap();
+        engine
+            .apply("interrupt_remove", &json!({"id":1}), now)
+            .unwrap();
+        assert!(!engine.is_active(now), "the rule is gone");
+
+        engine
+            .apply("timer_set", &json!({"after_seconds":600}), now)
+            .unwrap();
+        assert!(engine.is_active(now), "a timer exists, even far off");
+
+        engine
+            .apply("timer_update", &json!({"id":2,"enabled":false}), now)
+            .unwrap();
+        assert!(
+            engine.is_active(now),
+            "a disabled timer may still be re-enabled"
+        );
+
+        engine.apply("timer_cancel", &json!({"id":2}), now).unwrap();
+        assert!(!engine.is_active(now), "nothing left at all");
+    }
+
+    #[test]
+    fn is_active_ignores_an_expired_rule() {
+        let now = Instant::now();
+        let mut engine = Engine::default();
+        engine
+            .apply("interrupt_add", &json!({"expires_in_seconds":60}), now)
+            .unwrap();
+        assert!(engine.is_active(now), "not expired yet");
+        assert!(
+            !engine.is_active(now + Duration::from_secs(61)),
+            "expired, so nothing would fire"
+        );
     }
 
     #[test]

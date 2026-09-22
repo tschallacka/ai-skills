@@ -37,6 +37,7 @@
     "ai-text-editor",
     "editor-gate-plugin",
     "agent-identity-plugin",
+    "chat-interrupt-plugin",
     "www",
     "ci-failures",
     ".agents",

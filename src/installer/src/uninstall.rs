@@ -48,6 +48,7 @@ const CLAUDE_PLUGINS: &[(&str, &[&str])] = &[
         "agent-identity-plugin",
         &["chat", "ai-text-editor", "interactive-shell"],
     ),
+    ("chat-interrupt-plugin", &["chat"]),
 ];
 
 /// Every shared binary filename `skill`'s CURRENT install at `dest_dir`
@@ -448,6 +449,38 @@ mod tests {
             shared_binary.is_file(),
             "bug-report on the codex root still needs it"
         );
+    }
+
+    #[test]
+    fn chat_interrupt_plugin_is_removed_once_chat_is_the_last_skill_that_needed_it() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("chat").join("SKILL.md"), "content");
+        let dir = source_root.path().join("chat-interrupt-plugin");
+        write(&dir.join(".claude-plugin/plugin.json"), "{}");
+        write(&dir.join("hooks/hooks.json"), "{}");
+        write(&dir.join("hooks/lib.sh"), "#!/bin/sh\n");
+        write(&dir.join("hooks/pre-tool-use.sh"), "#!/bin/sh\n");
+        let target_root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        install_into(source_root.path(), "chat", target_root.path(), home.path());
+        plugins::install_chat_interrupt_plugin_claude(source_root.path(), target_root.path())
+            .unwrap();
+        assert!(target_root.path().join("chat-interrupt-plugin").is_dir());
+
+        let report = uninstall_skill(
+            source_root.path(),
+            "chat",
+            target_root.path(),
+            home.path(),
+            Some("claude"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            report.removed_plugins,
+            vec!["chat-interrupt-plugin".to_string()]
+        );
+        assert!(!target_root.path().join("chat-interrupt-plugin").exists());
     }
 
     #[test]

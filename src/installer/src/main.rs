@@ -80,6 +80,9 @@ Usage:
   installer install-agent-identity-plugin --source DIR --target DIR
                      install the vendor-shipped plugin that rides with
                      chat / ai-text-editor / interactive-shell (Claude Code only)
+  installer install-chat-interrupt-plugin --source DIR --target DIR
+                     install the vendor-shipped plugin that rides with chat
+                     (Claude Code only)
   installer install-profiles --agent claude|opencode|codex --source DIR --target DIR
                      (re)install every shipped agent profile (.agents/profiles/),
                      translated into that agent's own custom-subagent format
@@ -141,6 +144,7 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         Some("install-tui-hint-plugin") => run_install_tui_hint_plugin(&argv[1..]),
         Some("install-editor-gate-plugin") => run_install_editor_gate_plugin(&argv[1..]),
         Some("install-agent-identity-plugin") => run_install_agent_identity_plugin(&argv[1..]),
+        Some("install-chat-interrupt-plugin") => run_install_chat_interrupt_plugin(&argv[1..]),
         Some("install-profiles") => run_install_profiles(&argv[1..]),
         Some("set-claude-env") => run_set_claude_env(&argv[1..]),
         Some("print-skill-files") => run_print_skill_files(&argv[1..]),
@@ -975,6 +979,9 @@ fn run_post_install_steps(
         run_editor_steering_and_gate_step(&known_roots, source, &home, confirms);
     }
     run_agent_identity_post_install(&known_roots, source, skills);
+    if skills.iter().any(|s| s == "chat") {
+        run_chat_interrupt_plugin_post_install(&known_roots, source);
+    }
     run_profiles_post_install(&known_roots, source);
 }
 
@@ -1090,6 +1097,32 @@ fn run_agent_identity_post_install(roots: &[(&Path, &str)], source: &Path, skill
              yet, so a subagent here still shares its parent's chat nick, editor tabs, and \
              interactive-shell socket unless another mechanism separates them."
         );
+    }
+}
+
+/// A companion plugin for `chat`, Claude Code only (`PreToolUse` is a Claude
+/// Code hook): shows what chat-mcp's interrupt spool has queued at the agent's
+/// next tool call, without needing Claude Code's channels flag. See
+/// chat/docs/interrupts.md and chat-interrupt-plugin/README.md.
+fn run_chat_interrupt_plugin_post_install(roots: &[(&Path, &str)], source: &Path) {
+    let claude_roots: Vec<&Path> = roots
+        .iter()
+        .filter(|(_, k)| *k == "claude")
+        .map(|(p, _)| *p)
+        .collect();
+    if claude_roots.is_empty() {
+        return;
+    }
+    println!();
+    println!("== chat interrupts (PreToolUse hook) ==");
+    for target in &claude_roots {
+        match plugins::install_chat_interrupt_plugin_claude(source, target) {
+            Ok(destination) => println!(
+                "Installed: {} (shows queued chat interrupts at your next tool call)",
+                destination.display()
+            ),
+            Err(e) => println!("chat-interrupt-plugin: {e}"),
+        }
     }
 }
 
@@ -2270,6 +2303,20 @@ fn run_install_agent_identity_plugin(argv: &[String]) -> Result<ExitCode, String
         .map_err(|e| e.to_string())?;
     println!(
         "Installed: {} (injects AGENT_ID/AGENT_TYPE into each subagent's context at SubagentStart; see agent-identity-plugin/README.md)",
+        destination.display()
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_install_chat_interrupt_plugin(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_plugin_args("install-chat-interrupt-plugin", argv)?;
+    let target = args
+        .target
+        .ok_or("install-chat-interrupt-plugin: --target is required")?;
+    let destination = plugins::install_chat_interrupt_plugin_claude(&args.source, &target)
+        .map_err(|e| e.to_string())?;
+    println!(
+        "Installed: {} (shows queued chat interrupts at your next tool call; see chat-interrupt-plugin/README.md)",
         destination.display()
     );
     Ok(ExitCode::SUCCESS)
