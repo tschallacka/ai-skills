@@ -7481,7 +7481,7 @@
     {
       "id": "B367",
       "title": "plan-overview serve_routing failed once on macOS with a Broken pipe on the request write",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7493,17 +7493,17 @@
         "src/plan-overview/src/serve.rs",
         "src/plan-overview/tests/serve_routing.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "plan-overview/src/serve.rs's accept loop now calls stream.set_nonblocking(false) on every accepted connection, right after accept(), before respond() reads the request.",
+      "verification": "cargo test -p plan-overview green locally (fmt/clippy/test), full local suite and pre-push-check.sh green, and CI run 35... (commit c867ce98) all 33 checks passed including the macOS legs the original failure was seen on. The exact race (BSD-derived accept() inheriting the listener's O_NONBLOCK) cannot be provoked deterministically, so this is confidence from a green macOS CI run after the fix, not a reproduced-then-fixed local repro.",
       "found_by": "aiskills, CI run 35614711962, 2026-09-21",
-      "notes": "Hypothesis, not checked on macOS: serve_on_host_port sets the listener non-blocking and respond() reads the request from the accepted stream with unwrap_or(0). If the accepted socket is non-blocking there (from memory: BSD-derived systems let an accepted socket inherit the listener's O_NONBLOCK, Linux does not), an accept that lands before the request bytes arrive makes read() return WouldBlock, so the request reads as empty and any path gets the overview page, and the server then shuts the connection down, which is the client's Broken pipe. If so it is a server bug that a real browser could hit, not only a test flake. A check: after accept, stream.set_nonblocking(false), then loop the test on macOS. Correction to the observed text: the 'no earlier failure' check covered the seven failed nextupdate runs 35342032200 through 35545991115 plus 35614711962 itself (about 2026-09-18 to 2026-09-21), not everything since 2026-09-15.",
+      "notes": "Hypothesis, not checked on macOS: serve_on_host_port sets the listener non-blocking and respond() reads the request from the accepted stream with unwrap_or(0). If the accepted socket is non-blocking there (from memory: BSD-derived systems let an accepted socket inherit the listener's O_NONBLOCK, Linux does not), an accept that lands before the request bytes arrive makes read() return WouldBlock, so the request reads as empty and any path gets the overview page, and the server then shuts the connection down, which is the client's Broken pipe. If so it is a server bug that a real browser could hit, not only a test flake. A check: after accept, stream.set_nonblocking(false), then loop the test on macOS. Correction to the observed text: the 'no earlier failure' check covered the seven failed nextupdate runs 35342032200 through 35545991115 plus 35614711962 itself (about 2026-09-18 to 2026-09-21), not everything since 2026-09-15. Verified via CI run on commit c867ce98d20b257a816d183fd505a61d38b63eed (nextupdate): 33/33 checks green, including macos-latest shards.",
       "created_at": "2026-09-21T17:11:42Z",
-      "updated_at": "2026-09-21T17:11:54Z"
+      "updated_at": "2026-09-22T22:45:37Z"
     },
     {
       "id": "B368",
       "title": "Tests that copy a compiled binary and run it can fail with 'Text file busy' (ETXTBSY) when two of them run at once",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7516,12 +7516,12 @@
         "src/verify-skill-load/tests/verify_skill_load_flow.rs",
         "src/generate-skill-docs/tests/generate_skill_docs_flow.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "build-plan-libs/tests, verify-skill-load/tests and generate-skill-docs/tests each gained a run_relocated() helper that retries Command::output() up to 4 times (20ms apart) whenever the OS error is raw_os_error 26 (ETXTBSY), instead of failing the test on the first attempt.",
+      "verification": "cargo test -p build-plan-libs -p verify-skill-load -p generate-skill-docs green locally; full local suite (249/249) and pre-push-check.sh green; CI run on commit c867ce98d20b257a816d183fd505a61d38b63eed: 33/33 checks passed. The race is intermittent (seen once in ~250 whole-suite runs) so this is not a reproduced-then-fixed repro; it targets the documented mechanism directly and imposes no cost on the ordinary non-racing path.",
       "found_by": "aiskills, whole-suite run 2026-09-21",
       "notes": "Hypothesis, not measured: the classic fork/exec race. Thread A has the copy open for writing while thread B forks a child for its own Command; the child holds A's write descriptor until it execs, so A's exec of the just-written file fails with ETXTBSY. A fix that fits the cause is to serialize copy-and-run in these tests with a static Mutex, or to retry the spawn on ETXTBSY a few times. Not fixed.",
       "created_at": "2026-09-21T20:38:05Z",
-      "updated_at": "2026-09-21T20:38:05Z"
+      "updated_at": "2026-09-22T22:45:46Z"
     },
     {
       "id": "B369",
@@ -7547,7 +7547,7 @@
     {
       "id": "B370",
       "title": "chat-server-rs message_tags tests failed together on the Windows leg: openssl s_client produced no reply within 5 s",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7558,12 +7558,12 @@
       "surfaces": [
         "src/chat-server-rs/tests/message_tags.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "chat-server-rs's message_tags.rs raised its wait_for ceiling from a flat 5s to a named WAIT_TIMEOUT constant of 20s, used at all 13 call sites. wait_for already returns as soon as the expected text appears, so this only helps a slow runner and costs a fast one nothing.",
+      "verification": "cargo test -p chat-server-rs --test message_tags green locally (9/9); full local suite and pre-push-check.sh green; CI run on commit c867ce98d20b257a816d183fd505a61d38b63eed: 33/33 checks passed, including the windows-latest legs the original failure was seen on. This is a timing hypothesis (a slow Windows runner exceeding the old 5s handshake window), not a locally reproduced race, so a longer ceiling mitigates rather than proves the mechanism; re-open with evidence if it recurs.",
       "found_by": "aiskills, CI run 35664485010, 2026-09-21",
       "notes": "Hypothesis, not measured: the tests drive the server through a spawned 'openssl s_client' subprocess and wait 5 s for output (wait_for). On a slow Windows runner, running several of them in parallel, starting openssl and finishing the TLS handshake can take longer than that, so the output is still empty when the wait ends. The empty output in the failure message (nothing at all, not even the handshake banner) fits a client that had not got that far. A rerun of the failed job was started; if it passes this is a timing flake, and a fix would wait for the handshake first or use a longer, event-driven wait.",
       "created_at": "2026-09-21T23:19:48Z",
-      "updated_at": "2026-09-21T23:19:48Z"
+      "updated_at": "2026-09-22T22:45:53Z"
     },
     {
       "id": "B25",
