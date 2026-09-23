@@ -159,9 +159,9 @@ package/planning/document-sections.json	5295
 package/planning/gate-caps.json	265
 package/planning/goal-tables.json	984
 package/planning/never-executable-extensions.json	245
-package/planning/parts/part-1.md	16803
-package/planning/parts/part-2.md	20390
-package/planning/parts/part-3.md	34356
+package/planning/parts/part-1.md	17532
+package/planning/parts/part-2.md	20504
+package/planning/parts/part-3.md	34368
 package/planning/parts/part-4.md	24344
 package/planning/placeholders.json	4713
 package/planning/references/comment-discipline-contract.md	2622
@@ -235,7 +235,7 @@ package/planning/scripts/validate-plan.sh	3028
 package/planning/scripts/verify-fix-keys.sh	2691
 package/planning/scripts/verify-skill-load.sh	2722
 package/planning/scripts/verify-target.sh	3449
-package/planning/skill-source.txt	94028
+package/planning/skill-source.txt	94883
 package/planning/state-change-registry.json	1096
 package/planning/telemetry-schema.json	888
 package/post-implementation-review/SKILL.md	12077

@@ -528,6 +528,9 @@ disproven claim rather than making a new ordering promise.
 It also WARNs (never blocks) when a unit's instructions mention a project
 symbol (one whose namespace root or path prefix the plan edits) that no
 inventory row owns — this rule cannot distinguish "edit this" from "this is
+
+<!-- SKILL-LOAD-PROOF part=part-3 token=1bb864f223f09de7 -->
+
 where we attach" from text alone, so it is a skimmable signal, not a gate. It
 does not flag mere vendor/core seams (`Magento\...`, `Amasty\...`,
 `Vendor_Module::path` templates), `X::class` constants, or cross-plan
@@ -557,15 +560,12 @@ step files and run it again. The validator checks the structural guarantees;
 the decomposition review remains required for semantic completeness.
 
 For a goal marked `Test required: yes`, every implementation, markup, style,
-configuration, data, or generated work unit must have a downstream `test` or
-`verification` unit in the dependency graph. A goal marked `no` may omit that
-proof when its rationale records why testing is not meaningful or possible.
-Do not use `no` to avoid testing observable behavior.
+configuration, data, generated, or relocation work unit must have a
+downstream `test` or `verification` unit in the dependency graph. A goal
+marked `no` may omit that proof when its rationale records why testing is not
+meaningful or possible. Do not use `no` to avoid testing observable behavior.
 
 Create plan and goal progress trackers with the bundled creation helpers;
-
-<!-- SKILL-LOAD-PROOF part=part-3 token=76619d78cea4059b -->
-
 they enforce the table shape and initialize every item as `💤 incomplete`.
 
 Use these statuses consistently:

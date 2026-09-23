@@ -11,7 +11,7 @@ const COMMAND: &str = "add-work-unit.sh";
 
 fn usage(code: i32) -> ! {
     println!(
-        "Usage: {COMMAND} [--plan-dir] <plan-directory> [--repo-root DIR] --id <WNN> --type <type> --file <path|N/A>\n           --scope <scope> --subscope <subscope|N/A> --change <intended change>\n           --depends-on <WNN,...|--> --goal <NN-name> --step <NN-step-name>\n       {COMMAND} --help\n\nTypes: source markup style test config docs data generated discovery verification"
+        "Usage: {COMMAND} [--plan-dir] <plan-directory> [--repo-root DIR] --id <WNN> --type <type> --file <path|N/A>\n           --scope <scope> --subscope <subscope|N/A> --change <intended change>\n           --depends-on <WNN,...|--> --goal <NN-name> --step <NN-step-name>\n       {COMMAND} --help\n\nTypes: source markup style test config docs data generated discovery verification relocation\n\nrelocation is the one type whose --file may name a directory (ending in /):\nthe source path moved wholesale, contents unchanged; --scope names the\ndestination path."
     );
     std::process::exit(code)
 }
@@ -343,6 +343,7 @@ fn main() {
             | "generated"
             | "discovery"
             | "verification"
+            | "relocation"
     ) {
         die(format!("Unsupported work-unit type: {unit_type}"), 64)
     }
@@ -378,9 +379,15 @@ fn main() {
             64,
         )
     }
-    if unit_file.contains('*') || unit_file.ends_with('/') {
+    if unit_file.contains('*') || (unit_file.ends_with('/') && unit_type != "relocation") {
         die(
-            "File must be one concrete file, not a glob or directory",
+            "File must be one concrete file, not a glob or directory (only relocation may name a directory)",
+            64,
+        )
+    }
+    if unit_type == "relocation" && scope == "N/A" {
+        die(
+            "A relocation work unit must name its destination as --scope",
             64,
         )
     }
@@ -388,7 +395,15 @@ fn main() {
         if !Path::new(&root).is_dir() {
             die(format!("repository root not found: {root}"), 66)
         }
-        if !matches!(
+        if unit_type == "relocation" {
+            let source = Path::new(&root).join(unit_file.trim_end_matches('/'));
+            if !source.exists() {
+                die(
+                    format!("Source path does not exist under --repo-root: {unit_file}"),
+                    66,
+                )
+            }
+        } else if !matches!(
             unit_type.as_str(),
             "discovery" | "verification" | "generated"
         ) && !matches!(scope.as_str(), "N/A")

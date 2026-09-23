@@ -301,6 +301,9 @@ composing or executing the dependent goal.
 Use `no` only for a genuinely untestable or research-only goal and explain why.
 When the table says `yes`, the goal must own at least one `test` or
 `verification` work unit. When a goal owns a test or verification work unit,
+
+<!-- SKILL-LOAD-PROOF part=part-2 token=27df58680dc89f87 -->
+
 the table must say `yes`.
 
 ### 2.4 Add working context when needed
@@ -337,23 +340,21 @@ Each step file must contain:
 - The owning goal and this step's objective
 - The **single work-unit ID** it owns
 - Work-unit type (`source`, `test`, `config`, `docs`, `data`, `generated`,
-  `markup`, `style`, `discovery`, or `verification`)
+  `markup`, `style`, `discovery`, `verification`, or `relocation`)
 - Exactly one file, primary symbol or file scope, and subscope, copied from
-  the inventory; use `File: N/A` only for a verification unit and `Subscope:
-  N/A` when no nested target is changed
+  the inventory; use `File: N/A` only for a verification unit, a directory
+  `File` only for a relocation unit, and `Subscope: N/A` when no nested target
+  is changed
 - Directly executable implementation instructions
 - Acceptance criteria for this step
 - Any handoff needed by a later step
 - An atomicity check confirming that no other change target is included
 
-The only files permitted in a step are the single target and an explicitly
-listed generated output under the `generated` exception. A source step does
-not also “add tests”; create its test work unit and step separately. A test
-step does not also change production code. A verification step does not also
-
-<!-- SKILL-LOAD-PROOF part=part-2 token=f044fc4b9a109e6c -->
-
-make fixes.
+The only files permitted in a step are the single target, an explicitly
+listed generated output under the `generated` exception, or the one source
+directory a relocation unit names. A source step does not also “add tests”;
+create its test work unit and step separately. A test step does not also
+change production code. A verification step does not also make fixes.
 
 **A criterion that cannot be satisfied is worse than a missing criterion.**
 Before writing an acceptance criterion, check that the target can actually
