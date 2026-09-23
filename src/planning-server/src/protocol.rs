@@ -161,6 +161,42 @@ pub enum Request {
         work_unit: String,
         key: String,
     },
+    /// Guards work-unit-inventory.md (coverage rows live in the same file
+    /// as work-unit rows).
+    AddCoverage {
+        plan_dir: String,
+        required_outcome: String,
+        work_units: String,
+        notes: String,
+        replace: bool,
+        revision: String,
+    },
+    /// Guards work-unit-inventory.md.
+    RemoveCoverage {
+        plan_dir: String,
+        required_outcome: String,
+        revision: String,
+    },
+    /// Unguarded: create-work-unit-inventory itself refuses outright when
+    /// work-unit-inventory.md already exists, the same "nothing to lose"
+    /// shape as CreateAdversarialReview.
+    CreateWorkUnitInventory { plan_dir: String },
+    /// Unguarded: create-plan-progress itself refuses outright when
+    /// progress.md already exists, the same "nothing to lose" shape as
+    /// CreateAdversarialReview.
+    CreatePlanProgress { plan_dir: String },
+    /// Guards progress.md.
+    UpdatePlanProgress {
+        plan_dir: String,
+        goal: String,
+        status: String,
+        revision: String,
+    },
+    /// Unguarded: rebuild-plan-progress fully regenerates progress.md from
+    /// the goals' own progress files every time, the same "a guard against
+    /// its own previous bytes protects nothing a plain re-run does not
+    /// already risk" reasoning as MintFixKeys.
+    RebuildPlanProgress { plan_dir: String },
     /// Read-only: no revision at all, since it applies no write.
     ValidatePlan { plan_dir: String, complete: bool },
 }
@@ -288,6 +324,44 @@ mod tests {
                 finding_id: "AR-01".to_string(),
                 work_unit: "W01".to_string(),
                 key: "a".repeat(64),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_coverage_and_progress_requests_round_trip_through_json() {
+        let requests = [
+            Request::AddCoverage {
+                plan_dir: "/plans/demo".to_string(),
+                required_outcome: "It works".to_string(),
+                work_units: "W01,W02".to_string(),
+                notes: "verified manually".to_string(),
+                replace: false,
+                revision: "abc".to_string(),
+            },
+            Request::RemoveCoverage {
+                plan_dir: "/plans/demo".to_string(),
+                required_outcome: "It works".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::CreateWorkUnitInventory {
+                plan_dir: "/plans/demo".to_string(),
+            },
+            Request::CreatePlanProgress {
+                plan_dir: "/plans/demo".to_string(),
+            },
+            Request::UpdatePlanProgress {
+                plan_dir: "/plans/demo".to_string(),
+                goal: "01-demo".to_string(),
+                status: "in-progress".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::RebuildPlanProgress {
+                plan_dir: "/plans/demo".to_string(),
             },
         ];
         for request in requests {

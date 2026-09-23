@@ -153,6 +153,38 @@ pub fn dispatch_with_bin_dir(request: Request, bin_dir: Option<&Path>) -> Respon
             work_unit,
             key,
         } => add_fix_claim(bin_dir, &plan_dir, &finding_id, &work_unit, &key),
+        Request::AddCoverage {
+            plan_dir,
+            required_outcome,
+            work_units,
+            notes,
+            replace,
+            revision,
+        } => add_coverage(
+            bin_dir,
+            &plan_dir,
+            &required_outcome,
+            &work_units,
+            &notes,
+            replace,
+            &revision,
+        ),
+        Request::RemoveCoverage {
+            plan_dir,
+            required_outcome,
+            revision,
+        } => remove_coverage(bin_dir, &plan_dir, &required_outcome, &revision),
+        Request::CreateWorkUnitInventory { plan_dir } => {
+            create_work_unit_inventory(bin_dir, &plan_dir)
+        }
+        Request::CreatePlanProgress { plan_dir } => create_plan_progress(bin_dir, &plan_dir),
+        Request::UpdatePlanProgress {
+            plan_dir,
+            goal,
+            status,
+            revision,
+        } => update_plan_progress(bin_dir, &plan_dir, &goal, &status, &revision),
+        Request::RebuildPlanProgress { plan_dir } => rebuild_plan_progress(bin_dir, &plan_dir),
         Request::ValidatePlan { plan_dir, complete } => validate_plan(bin_dir, &plan_dir, complete),
     }
 }
@@ -596,6 +628,88 @@ fn add_fix_claim(
             key,
         ],
         &fixes_path,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_coverage(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    required_outcome: &str,
+    work_units: &str,
+    notes: &str,
+    replace: bool,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let inventory_path = Path::new(plan_dir).join("work-unit-inventory.md");
+    let mut full_args: Vec<&str> = vec![plan_dir, required_outcome, work_units, notes];
+    if replace {
+        full_args.push("--replace");
+    }
+    respond_from(guarded_call(&inventory_path, guard, || {
+        run_command(bin_dir, "add-coverage", &full_args)
+    }))
+}
+
+fn remove_coverage(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    required_outcome: &str,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let inventory_path = Path::new(plan_dir).join("work-unit-inventory.md");
+    respond_from(guarded_call(&inventory_path, guard, || {
+        run_command(bin_dir, "remove-coverage", &[plan_dir, required_outcome])
+    }))
+}
+
+fn create_work_unit_inventory(bin_dir: Option<&Path>, plan_dir: &str) -> Response {
+    let inventory_path = Path::new(plan_dir).join("work-unit-inventory.md");
+    run_then_report_revision(
+        bin_dir,
+        "create-work-unit-inventory",
+        &[plan_dir],
+        &inventory_path,
+    )
+}
+
+fn create_plan_progress(bin_dir: Option<&Path>, plan_dir: &str) -> Response {
+    let progress_path = Path::new(plan_dir).join("progress.md");
+    run_then_report_revision(bin_dir, "create-plan-progress", &[plan_dir], &progress_path)
+}
+
+fn update_plan_progress(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    goal: &str,
+    status: &str,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let progress_path = Path::new(plan_dir).join("progress.md");
+    respond_from(guarded_call(&progress_path, guard, || {
+        run_command(bin_dir, "update-plan-progress", &[plan_dir, goal, status])
+    }))
+}
+
+fn rebuild_plan_progress(bin_dir: Option<&Path>, plan_dir: &str) -> Response {
+    let progress_path = Path::new(plan_dir).join("progress.md");
+    run_then_report_revision(
+        bin_dir,
+        "rebuild-plan-progress",
+        &[plan_dir],
+        &progress_path,
     )
 }
 
@@ -1645,6 +1759,257 @@ mod tests {
             snapshot(&plan_dir),
             "a stale guard must change nothing"
         );
+    }
+
+    #[test]
+    fn add_coverage_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        add_demo_work_unit(&bin_dir, &plan_dir);
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let inventory_path = copy_a.join("work-unit-inventory.md");
+        let (_, guard) = read_with_revision(&inventory_path).unwrap();
+        ensure_built(&bin_dir, "add-coverage");
+        let response = dispatch_with_bin_dir(
+            Request::AddCoverage {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                required_outcome: "It works".to_string(),
+                work_units: "W01".to_string(),
+                notes: "verified manually".to_string(),
+                replace: false,
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "add-coverage",
+            &[
+                copy_b.to_str().unwrap(),
+                "It works",
+                "W01",
+                "verified manually",
+            ],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn add_coverage_with_a_stale_revision_is_refused_and_changes_nothing() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        add_demo_work_unit(&bin_dir, &plan_dir);
+        let before = snapshot(&plan_dir);
+
+        let bogus_guard = PlanRevision::of(b"not the real hash");
+        let response = dispatch_with_bin_dir(
+            Request::AddCoverage {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                required_outcome: "It works".to_string(),
+                work_units: "W01".to_string(),
+                notes: "verified manually".to_string(),
+                replace: false,
+                revision: bogus_guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Stale { .. }),
+            "expected Stale, got {response:?}"
+        );
+        assert_eq!(
+            before,
+            snapshot(&plan_dir),
+            "a stale guard must change nothing"
+        );
+    }
+
+    #[test]
+    fn remove_coverage_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        add_demo_work_unit(&bin_dir, &plan_dir);
+        run(
+            &bin_dir,
+            "add-coverage",
+            &[
+                plan_dir.to_str().unwrap(),
+                "It works",
+                "W01",
+                "verified manually",
+            ],
+        );
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let inventory_path = copy_a.join("work-unit-inventory.md");
+        let (_, guard) = read_with_revision(&inventory_path).unwrap();
+        ensure_built(&bin_dir, "remove-coverage");
+        let response = dispatch_with_bin_dir(
+            Request::RemoveCoverage {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                required_outcome: "It works".to_string(),
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "remove-coverage",
+            &[copy_b.to_str().unwrap(), "It works"],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn create_work_unit_inventory_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        // create-plan already scaffolds work-unit-inventory.md; remove it
+        // from both copies first so there is something to create.
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+        fs::remove_file(copy_a.join("work-unit-inventory.md")).unwrap();
+        fs::remove_file(copy_b.join("work-unit-inventory.md")).unwrap();
+
+        ensure_built(&bin_dir, "create-work-unit-inventory");
+        let response = dispatch_with_bin_dir(
+            Request::CreateWorkUnitInventory {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "create-work-unit-inventory",
+            &[copy_b.to_str().unwrap()],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn create_plan_progress_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        // create-plan already scaffolds progress.md; remove it from both
+        // copies first so there is something to create.
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+        fs::remove_file(copy_a.join("progress.md")).unwrap();
+        fs::remove_file(copy_b.join("progress.md")).unwrap();
+
+        ensure_built(&bin_dir, "create-plan-progress");
+        let response = dispatch_with_bin_dir(
+            Request::CreatePlanProgress {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "create-plan-progress",
+            &[copy_b.to_str().unwrap()],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn update_plan_progress_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let progress_path = copy_a.join("progress.md");
+        let (_, guard) = read_with_revision(&progress_path).unwrap();
+        ensure_built(&bin_dir, "update-plan-progress");
+        let response = dispatch_with_bin_dir(
+            Request::UpdatePlanProgress {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                goal: "01-demo".to_string(),
+                status: "in-progress".to_string(),
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "update-plan-progress",
+            &[copy_b.to_str().unwrap(), "01-demo", "in-progress"],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn rebuild_plan_progress_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        add_demo_work_unit(&bin_dir, &plan_dir);
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        ensure_built(&bin_dir, "rebuild-plan-progress");
+        let response = dispatch_with_bin_dir(
+            Request::RebuildPlanProgress {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "rebuild-plan-progress",
+            &[copy_b.to_str().unwrap()],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
     }
 
     #[test]

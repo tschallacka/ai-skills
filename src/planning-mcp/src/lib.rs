@@ -241,6 +241,58 @@ fn tool_definitions() -> Vec<Value> {
             ],
         ),
         tool(
+            "add_coverage",
+            "Append (or replace) a coverage row. Revision-guarded on work-unit-inventory.md (coverage rows live in the same file as work-unit rows).",
+            &["plan_dir", "required_outcome", "work_units", "notes"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("required_outcome", string("The required outcome or proof text; this is the row's own key.")),
+                ("work_units", string("Comma-separated work-unit ids that satisfy it, e.g. W01,W02.")),
+                ("notes", string("How it is satisfied.")),
+                ("replace", boolean("Replace an existing row with the same required_outcome instead of refusing. Defaults to false.")),
+                ("revision", string("work-unit-inventory.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "remove_coverage",
+            "Remove the coverage row whose required outcome matches exactly. Revision-guarded on work-unit-inventory.md.",
+            &["plan_dir", "required_outcome"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("required_outcome", string("The required outcome or proof text to remove.")),
+                ("revision", string("work-unit-inventory.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "create_work_unit_inventory",
+            "Create the plan's work-unit-inventory.md. Unguarded: refuses outright if it already exists.",
+            &["plan_dir"],
+            vec![("plan_dir", string("The plan directory."))],
+        ),
+        tool(
+            "create_plan_progress",
+            "Create the plan's progress.md. Unguarded: refuses outright if it already exists.",
+            &["plan_dir"],
+            vec![("plan_dir", string("The plan directory."))],
+        ),
+        tool(
+            "update_plan_progress",
+            "Set a goal's status row in progress.md directly (rebuild_plan_progress and update_step both do this indirectly; this is the direct, single-goal form). Revision-guarded on progress.md.",
+            &["plan_dir", "goal", "status"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("goal", string("The goal directory name.")),
+                ("status", string("incomplete, in-progress, or completed.")),
+                ("revision", string("progress.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "rebuild_plan_progress",
+            "Fully regenerate progress.md from the goals' own progress files. Unguarded: this fully regenerates the file every time, so a guard against its own previous bytes protects nothing a plain re-run does not already risk.",
+            &["plan_dir"],
+            vec![("plan_dir", string("The plan directory."))],
+        ),
+        tool(
             "validate_plan",
             "Run the plan validator (read-only, unguarded).",
             &["plan_dir"],
@@ -480,6 +532,53 @@ fn build_request(name: &str, arguments: &Value) -> Result<Request, String> {
             work_unit: str_arg(arguments, "work_unit")?,
             key: str_arg(arguments, "key")?,
         }),
+        "add_coverage" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let required_outcome = str_arg(arguments, "required_outcome")?;
+            let work_units = str_arg(arguments, "work_units")?;
+            let notes = str_arg(arguments, "notes")?;
+            let replace = opt_bool_arg(arguments, "replace");
+            let revision = revision_or_read(arguments, &plan_dir, "inventory")?;
+            Ok(Request::AddCoverage {
+                plan_dir,
+                required_outcome,
+                work_units,
+                notes,
+                replace,
+                revision,
+            })
+        }
+        "remove_coverage" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let required_outcome = str_arg(arguments, "required_outcome")?;
+            let revision = revision_or_read(arguments, &plan_dir, "inventory")?;
+            Ok(Request::RemoveCoverage {
+                plan_dir,
+                required_outcome,
+                revision,
+            })
+        }
+        "create_work_unit_inventory" => Ok(Request::CreateWorkUnitInventory {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+        }),
+        "create_plan_progress" => Ok(Request::CreatePlanProgress {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+        }),
+        "update_plan_progress" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let goal = str_arg(arguments, "goal")?;
+            let status = str_arg(arguments, "status")?;
+            let revision = revision_or_read(arguments, &plan_dir, "progress")?;
+            Ok(Request::UpdatePlanProgress {
+                plan_dir,
+                goal,
+                status,
+                revision,
+            })
+        }
+        "rebuild_plan_progress" => Ok(Request::RebuildPlanProgress {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+        }),
         "validate_plan" => Ok(Request::ValidatePlan {
             plan_dir: str_arg(arguments, "plan_dir")?,
             complete: arguments
@@ -585,6 +684,12 @@ mod tests {
                 "mint_fix_keys",
                 "verify_fix_keys",
                 "add_fix_claim",
+                "add_coverage",
+                "remove_coverage",
+                "create_work_unit_inventory",
+                "create_plan_progress",
+                "update_plan_progress",
+                "rebuild_plan_progress",
                 "validate_plan",
             ]
         );
@@ -727,6 +832,52 @@ mod tests {
                 "expected the refusal to name {missing}: {text}"
             );
         }
+    }
+
+    #[test]
+    fn add_coverage_reports_each_missing_argument_by_name() {
+        for (present, missing) in [
+            (json!({"plan_dir": "/x"}), "required_outcome"),
+            (
+                json!({"plan_dir": "/x", "required_outcome": "It works"}),
+                "work_units",
+            ),
+            (
+                json!({"plan_dir": "/x", "required_outcome": "It works", "work_units": "W01"}),
+                "notes",
+            ),
+        ] {
+            let response = call("add_coverage", present);
+            assert_eq!(response["result"]["isError"], true);
+            let text = response["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(
+                text.contains(missing),
+                "expected the refusal to name {missing}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_work_unit_inventory_reports_a_missing_argument_by_name() {
+        let response = call("create_work_unit_inventory", json!({}));
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn update_plan_progress_reports_a_missing_argument_before_ever_reading_a_plan() {
+        let response = call(
+            "update_plan_progress",
+            json!({"plan_dir": "/definitely/does/not/exist"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
     }
 
     #[test]
