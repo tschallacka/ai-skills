@@ -185,6 +185,20 @@ pub fn dispatch_with_bin_dir(request: Request, bin_dir: Option<&Path>) -> Respon
             revision,
         } => update_plan_progress(bin_dir, &plan_dir, &goal, &status, &revision),
         Request::RebuildPlanProgress { plan_dir } => rebuild_plan_progress(bin_dir, &plan_dir),
+        Request::CreatePlan { plan_dir, title } => create_plan(bin_dir, &plan_dir, &title),
+        Request::RemovePlan { plan_dir, confirm } => remove_plan(bin_dir, &plan_dir, confirm),
+        Request::CleanupPlans {
+            list_only,
+            plan_names,
+            confirm,
+        } => cleanup_plans(bin_dir, list_only, &plan_names, confirm),
+        Request::AddGoal {
+            plan_dir,
+            goal_name,
+            title,
+            outcome,
+            revision,
+        } => add_goal(bin_dir, &plan_dir, &goal_name, &title, &outcome, &revision),
         Request::ValidatePlan { plan_dir, complete } => validate_plan(bin_dir, &plan_dir, complete),
     }
 }
@@ -711,6 +725,105 @@ fn rebuild_plan_progress(bin_dir: Option<&Path>, plan_dir: &str) -> Response {
         &[plan_dir],
         &progress_path,
     )
+}
+
+fn create_plan(bin_dir: Option<&Path>, plan_dir: &str, title: &str) -> Response {
+    let description_path = Path::new(plan_dir).join("plan-description.md");
+    run_then_report_revision(
+        bin_dir,
+        "create-plan",
+        &[plan_dir, title],
+        &description_path,
+    )
+}
+
+/// remove-plan itself has no confirmation flag at all; `confirm` is this
+/// adapter's own gate, checked before the binary is ever invoked, so a
+/// caller cannot delete a whole plan through one unconfirmed tool call the
+/// way every other write in this crate is only one call away. Reports
+/// success/failure and the binary's own output the same way ValidatePlan
+/// does, since there is no file left afterward to report a revision for.
+fn remove_plan(bin_dir: Option<&Path>, plan_dir: &str, confirm: bool) -> Response {
+    if !confirm {
+        return Response::Error {
+            message: "remove_plan refuses without confirm: true -- this permanently deletes the whole plan directory".to_string(),
+        };
+    }
+    let program = program_path(bin_dir, "remove-plan");
+    match Command::new(&program).arg(plan_dir).output() {
+        Ok(output) => {
+            let mut report = String::from_utf8_lossy(&output.stdout).into_owned();
+            report.push_str(&String::from_utf8_lossy(&output.stderr));
+            Response::Validated {
+                passed: output.status.success(),
+                report,
+            }
+        }
+        Err(error) => Response::Error {
+            message: format!("could not run {}: {error}", program.display()),
+        },
+    }
+}
+
+/// Bulk-removes completed plans under the whole plans root (no single
+/// plan_dir addresses this operation, unlike everything else in this
+/// crate). `list_only` is cleanup-plans' own read-only `--list`, needing no
+/// confirmation. The real removal mode needs the same adapter-level
+/// `confirm: true` gate RemovePlan uses, checked before the binary runs at
+/// all, and -- once confirmed -- always runs with `--yes` so
+/// cleanup-plans' own interactive confirmation prompt, which would
+/// otherwise block forever with no terminal on the other end, is never
+/// reached.
+fn cleanup_plans(
+    bin_dir: Option<&Path>,
+    list_only: bool,
+    plan_names: &[String],
+    confirm: bool,
+) -> Response {
+    if !list_only && !confirm {
+        return Response::Error {
+            message: "cleanup_plans refuses without confirm: true, unless list_only -- this permanently deletes plan directories".to_string(),
+        };
+    }
+    let program = program_path(bin_dir, "cleanup-plans");
+    let mut args: Vec<&str> = Vec::new();
+    if list_only {
+        args.push("--list");
+    } else {
+        args.push("--yes");
+    }
+    args.extend(plan_names.iter().map(String::as_str));
+    match Command::new(&program).args(&args).output() {
+        Ok(output) => {
+            let mut report = String::from_utf8_lossy(&output.stdout).into_owned();
+            report.push_str(&String::from_utf8_lossy(&output.stderr));
+            Response::Validated {
+                passed: output.status.success(),
+                report,
+            }
+        }
+        Err(error) => Response::Error {
+            message: format!("could not run {}: {error}", program.display()),
+        },
+    }
+}
+
+fn add_goal(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    goal_name: &str,
+    title: &str,
+    outcome: &str,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let progress_path = Path::new(plan_dir).join("progress.md");
+    respond_from(guarded_call(&progress_path, guard, || {
+        run_command(bin_dir, "add-goal", &[plan_dir, goal_name, title, outcome])
+    }))
 }
 
 fn validate_plan(bin_dir: Option<&Path>, plan_dir: &str, complete: bool) -> Response {
@@ -1917,8 +2030,10 @@ mod tests {
     fn create_plan_progress_matches_the_standalone_command_on_an_equivalent_copy() {
         let bin_dir = sibling_bin_dir();
         let scratch = TempDir::new();
-        // create-plan already scaffolds progress.md; remove it from both
-        // copies first so there is something to create.
+        // setup_plan's own add-goal call already wrote progress.md (it
+        // rebuilds the file wholesale from every goal directory present,
+        // progress.md is not part of create-plan's own scaffold); remove
+        // it from both copies first so there is something to create.
         let plan_dir = setup_plan(&bin_dir, scratch.path());
         let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
         let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
@@ -2010,6 +2125,217 @@ mod tests {
         );
 
         assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn create_plan_scaffolds_a_real_plan_directory() {
+        // Not an assert_snapshots_match comparison against a standalone run
+        // at a different path: create-plan bakes each plan's own absolute
+        // path into .env and its initial git commit, so two independently
+        // created plans can never be byte-identical even with the same
+        // basename -- unlike every other "matches the standalone command"
+        // test in this file, which clones ONE already-created plan so both
+        // sides inherit the identical (if path-stale) baked-in content.
+        // This checks create_plan's own real properties instead.
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = scratch.path().join("new-plan");
+
+        ensure_built(&bin_dir, "create-plan");
+        let response = dispatch_with_bin_dir(
+            Request::CreatePlan {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                title: "Demo plan".to_string(),
+            },
+            Some(&bin_dir),
+        );
+        let Response::Written { revision } = response else {
+            panic!("expected Written, got {response:?}");
+        };
+        let description_path = plan_dir.join("plan-description.md");
+        let raw = fs::read(&description_path).unwrap();
+        assert_eq!(
+            revision,
+            PlanRevision::of(&raw).to_hex(),
+            "the reported revision must match the file actually written"
+        );
+        assert!(
+            String::from_utf8_lossy(&raw).contains("Demo plan"),
+            "plan-description.md must carry the title"
+        );
+        assert!(
+            plan_dir.join("work-unit-inventory.md").is_file(),
+            "create-plan must also scaffold work-unit-inventory.md"
+        );
+        // progress.md is NOT part of create-plan's own scaffold -- it is
+        // add-goal that first writes it (rebuilding it wholesale from
+        // every goal directory present, including the one it just added),
+        // confirmed directly against add-goal's own rebuild_plan_progress.
+        assert!(
+            !plan_dir.join("progress.md").exists(),
+            "progress.md should not exist before any goal has been added"
+        );
+    }
+
+    #[test]
+    fn create_plan_refuses_cleanly_when_the_target_already_exists() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        ensure_built(&bin_dir, "create-plan");
+
+        let response = dispatch_with_bin_dir(
+            Request::CreatePlan {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                title: "Demo plan".to_string(),
+            },
+            Some(&bin_dir),
+        );
+        match response {
+            Response::Error { message } => assert!(!message.is_empty()),
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remove_plan_refuses_without_confirm_and_leaves_the_plan_on_disk() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+
+        let response = dispatch_with_bin_dir(
+            Request::RemovePlan {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                confirm: false,
+            },
+            Some(&bin_dir),
+        );
+        match response {
+            Response::Error { message } => assert!(message.contains("confirm")),
+            other => panic!("expected Error, got {other:?}"),
+        }
+        assert!(plan_dir.is_dir(), "the plan must still exist on disk");
+    }
+
+    #[test]
+    fn remove_plan_with_confirm_matches_the_standalone_command() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        ensure_built(&bin_dir, "remove-plan");
+
+        let response = dispatch_with_bin_dir(
+            Request::RemovePlan {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                confirm: true,
+            },
+            Some(&bin_dir),
+        );
+        match response {
+            Response::Validated { passed, report } => {
+                assert!(passed, "expected the removal to succeed, got: {report}")
+            }
+            other => panic!("expected Validated, got {other:?}"),
+        }
+        assert!(
+            !plan_dir.exists(),
+            "the plan directory must be gone after a confirmed removal"
+        );
+    }
+
+    #[test]
+    fn cleanup_plans_list_only_never_deletes_anything() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        ensure_built(&bin_dir, "cleanup-plans");
+
+        let response = dispatch_with_bin_dir(
+            Request::CleanupPlans {
+                list_only: true,
+                plan_names: Vec::new(),
+                confirm: false,
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Validated { .. }),
+            "expected Validated, got {response:?}"
+        );
+        assert!(
+            plan_dir.is_dir(),
+            "list_only must never remove anything, regardless of what it lists"
+        );
+    }
+
+    #[test]
+    fn add_goal_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let progress_path = copy_a.join("progress.md");
+        let (_, guard) = read_with_revision(&progress_path).unwrap();
+        ensure_built(&bin_dir, "add-goal");
+        let response = dispatch_with_bin_dir(
+            Request::AddGoal {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                goal_name: "02-next".to_string(),
+                title: "Next goal".to_string(),
+                outcome: "Next outcome".to_string(),
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "add-goal",
+            &[
+                copy_b.to_str().unwrap(),
+                "02-next",
+                "Next goal",
+                "Next outcome",
+            ],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn add_goal_with_a_stale_revision_is_refused_and_changes_nothing() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        let before = snapshot(&plan_dir);
+
+        let bogus_guard = PlanRevision::of(b"not the real hash");
+        let response = dispatch_with_bin_dir(
+            Request::AddGoal {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                goal_name: "02-next".to_string(),
+                title: "Next goal".to_string(),
+                outcome: "Next outcome".to_string(),
+                revision: bogus_guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Stale { .. }),
+            "expected Stale, got {response:?}"
+        );
+        assert_eq!(
+            before,
+            snapshot(&plan_dir),
+            "a stale guard must change nothing"
+        );
     }
 
     #[test]

@@ -293,6 +293,46 @@ fn tool_definitions() -> Vec<Value> {
             vec![("plan_dir", string("The plan directory."))],
         ),
         tool(
+            "create_plan",
+            "Scaffold a new plan directory. Unguarded: refuses outright if plan_dir already exists.",
+            &["plan_dir", "title"],
+            vec![
+                ("plan_dir", string("The plan directory to create -- an explicit path, always (the CLI's own bare-name-under-the-plans-root shorthand is not offered here).")),
+                ("title", string("The plan's title.")),
+            ],
+        ),
+        tool(
+            "remove_plan",
+            "Permanently delete a whole plan directory. remove-plan itself has no confirmation flag; this tool refuses unless confirm is true, checked before anything runs.",
+            &["plan_dir", "confirm"],
+            vec![
+                ("plan_dir", string("The plan directory to delete.")),
+                ("confirm", boolean("Must be true, or the call is refused before running anything. There is no revision guard here -- confirm is the only safety check.")),
+            ],
+        ),
+        tool(
+            "cleanup_plans",
+            "Bulk-remove completed plans under the whole plans root (not one plan_dir). list_only reports which plans cleanup-plans considers complete and changes nothing. The real removal mode refuses unless confirm is true, checked before anything runs, and then always passes --yes so cleanup-plans' own interactive prompt -- which would otherwise block forever with no terminal on the other end -- is never reached.",
+            &[],
+            vec![
+                ("list_only", boolean("Report only; removes nothing. Defaults to false.")),
+                ("plan_names", string_array("Specific plan names to consider, or empty for every plan under the root.")),
+                ("confirm", boolean("Must be true to actually remove anything (ignored when list_only is true). Defaults to false.")),
+            ],
+        ),
+        tool(
+            "add_goal",
+            "Add a new goal to a plan: its own directory (goal.md + steps/) and a row in progress.md. Revision-guarded on progress.md; the new goal directory is not separately guarded, since it does not exist yet at guard time.",
+            &["plan_dir", "goal_name", "title", "outcome"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("goal_name", string("The new goal's directory name, e.g. 02-next-thing.")),
+                ("title", string("The goal's title.")),
+                ("outcome", string("The goal's outcome / definition of done.")),
+                ("revision", string("progress.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
             "validate_plan",
             "Run the plan validator (read-only, unguarded).",
             &["plan_dir"],
@@ -579,6 +619,33 @@ fn build_request(name: &str, arguments: &Value) -> Result<Request, String> {
         "rebuild_plan_progress" => Ok(Request::RebuildPlanProgress {
             plan_dir: str_arg(arguments, "plan_dir")?,
         }),
+        "create_plan" => Ok(Request::CreatePlan {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+            title: str_arg(arguments, "title")?,
+        }),
+        "remove_plan" => Ok(Request::RemovePlan {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+            confirm: opt_bool_arg(arguments, "confirm"),
+        }),
+        "cleanup_plans" => Ok(Request::CleanupPlans {
+            list_only: opt_bool_arg(arguments, "list_only"),
+            plan_names: str_array_arg(arguments, "plan_names")?,
+            confirm: opt_bool_arg(arguments, "confirm"),
+        }),
+        "add_goal" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let goal_name = str_arg(arguments, "goal_name")?;
+            let title = str_arg(arguments, "title")?;
+            let outcome = str_arg(arguments, "outcome")?;
+            let revision = revision_or_read(arguments, &plan_dir, "progress")?;
+            Ok(Request::AddGoal {
+                plan_dir,
+                goal_name,
+                title,
+                outcome,
+                revision,
+            })
+        }
         "validate_plan" => Ok(Request::ValidatePlan {
             plan_dir: str_arg(arguments, "plan_dir")?,
             complete: arguments
@@ -690,6 +757,10 @@ mod tests {
                 "create_plan_progress",
                 "update_plan_progress",
                 "rebuild_plan_progress",
+                "create_plan",
+                "remove_plan",
+                "cleanup_plans",
+                "add_goal",
                 "validate_plan",
             ]
         );
@@ -871,6 +942,52 @@ mod tests {
     fn update_plan_progress_reports_a_missing_argument_before_ever_reading_a_plan() {
         let response = call(
             "update_plan_progress",
+            json!({"plan_dir": "/definitely/does/not/exist"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn remove_plan_refuses_without_confirm_and_never_touches_disk() {
+        let response = call(
+            "remove_plan",
+            json!({"plan_dir": "/definitely/does/not/exist"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("confirm"));
+    }
+
+    #[test]
+    fn cleanup_plans_refuses_without_confirm_unless_list_only() {
+        let response = call("cleanup_plans", json!({}));
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("confirm"));
+    }
+
+    #[test]
+    fn create_plan_reports_a_missing_argument_by_name() {
+        let response = call("create_plan", json!({"plan_dir": "/x"}));
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn add_goal_reports_a_missing_argument_before_ever_reading_a_plan() {
+        let response = call(
+            "add_goal",
             json!({"plan_dir": "/definitely/does/not/exist"}),
         );
         assert_eq!(response["result"]["isError"], true);

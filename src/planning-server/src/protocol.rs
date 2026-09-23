@@ -197,6 +197,50 @@ pub enum Request {
     /// its own previous bytes protects nothing a plain re-run does not
     /// already risk" reasoning as MintFixKeys.
     RebuildPlanProgress { plan_dir: String },
+    /// Unguarded: create-plan itself refuses outright when the target
+    /// directory already exists (exit 73), the same "nothing to lose"
+    /// shape as CreateAdversarialReview. create-plan's own first argument
+    /// also accepts a bare name (no path separator), resolved under the
+    /// plans root -- the compiled binary itself never prompts (that is
+    /// plan-root.sh's own wrapper behavior, a different program this crate
+    /// never calls), but this wire operation always requires an explicit
+    /// `plan_dir` regardless, the same convention every other operation in
+    /// this crate already uses, rather than resolving that ambiguity here.
+    CreatePlan { plan_dir: String, title: String },
+    /// Deletes the whole plan directory tree; remove-plan itself has no
+    /// confirmation flag at all. `confirm` is an adapter-level gate (not a
+    /// CLI flag remove-plan reads): the handler refuses before ever
+    /// running the binary unless it is true, so a caller cannot delete a
+    /// plan by a single unconfirmed tool call the way it could with every
+    /// other tool in this crate.
+    RemovePlan { plan_dir: String, confirm: bool },
+    /// Bulk-removes completed plans under the plans root (no single
+    /// plan_dir; this addresses the whole root, unlike every other
+    /// operation here). `list_only` runs cleanup-plans' own `--list` (read-
+    /// only, reports which plans it considers complete) and needs no
+    /// confirmation. The real removal mode needs BOTH `confirm: true` (the
+    /// same adapter-level gate RemovePlan uses, refused before running
+    /// anything) and, once confirmed, is run with `--yes` so
+    /// cleanup-plans' own interactive prompt -- which would otherwise
+    /// block forever with no terminal on the other end -- is never reached.
+    CleanupPlans {
+        list_only: bool,
+        plan_names: Vec<String>,
+        confirm: bool,
+    },
+    /// Guards progress.md: add-goal both creates the new goal's own
+    /// directory (goal.md + steps/, refused outright if it already exists,
+    /// nothing to guard there) and rewrites progress.md to add the goal's
+    /// row -- progress.md is the one guardable target, the same
+    /// "guard the one file that already exists" shape as AddWorkUnit's own
+    /// inventory-only guard.
+    AddGoal {
+        plan_dir: String,
+        goal_name: String,
+        title: String,
+        outcome: String,
+        revision: String,
+    },
     /// Read-only: no revision at all, since it applies no write.
     ValidatePlan { plan_dir: String, complete: bool },
 }
@@ -362,6 +406,36 @@ mod tests {
             },
             Request::RebuildPlanProgress {
                 plan_dir: "/plans/demo".to_string(),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_plan_lifecycle_requests_round_trip_through_json() {
+        let requests = [
+            Request::CreatePlan {
+                plan_dir: "/plans/demo".to_string(),
+                title: "Demo plan".to_string(),
+            },
+            Request::RemovePlan {
+                plan_dir: "/plans/demo".to_string(),
+                confirm: true,
+            },
+            Request::CleanupPlans {
+                list_only: true,
+                plan_names: vec!["demo".to_string()],
+                confirm: false,
+            },
+            Request::AddGoal {
+                plan_dir: "/plans/demo".to_string(),
+                goal_name: "02-next".to_string(),
+                title: "Next goal".to_string(),
+                outcome: "Next outcome".to_string(),
+                revision: "abc".to_string(),
             },
         ];
         for request in requests {
