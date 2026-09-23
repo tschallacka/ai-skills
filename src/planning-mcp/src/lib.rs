@@ -364,6 +364,82 @@ fn tool_definitions() -> Vec<Value> {
             ],
         ),
         tool(
+            "create_ui_validation",
+            "Scaffold UI validation artifacts for a plan: inserts a \"## UI validation\" section into plan-description.md, and creates ui-user-stories.md and bugs.md fresh. Revision-guarded on plan-description.md. Refuses if UI validation artifacts already exist.",
+            &["plan_dir", "browser_target"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("browser_target", string("The browser or discovery method the UI stories will be run against, e.g. \"chromium headless\".")),
+                ("revision", string("plan-description.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "add_ui_story",
+            "Append a UI user story row to ui-user-stories.md and create its per-story browser run cache under ui-story-runs/. Revision-guarded on ui-user-stories.md. actions/interaction together must name a direct user interaction (click, tap, type, keyboard, press, swipe, pinch, drag, or select).",
+            &["plan_dir", "id", "persona", "actions", "interaction", "expected", "work_units"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("id", string("The new story id, e.g. US-01.")),
+                ("persona", string("The persona and/or precondition.")),
+                ("actions", string("The browser actions taken.")),
+                ("interaction", string("The interaction evidence observed.")),
+                ("expected", string("The expected observable result.")),
+                ("work_units", string("Comma-separated related work-unit ids, e.g. W01,W02.")),
+                ("revision", string("ui-user-stories.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "add_ui_story_links",
+            "Rewrite a UI story row's own Related work units column. Revision-guarded on ui-user-stories.md; each work unit must already exist in work-unit-inventory.md.",
+            &["plan_dir", "id", "work_units"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("id", string("The story id, e.g. US-01.")),
+                ("work_units", string("Comma-separated work-unit ids, e.g. W01,W02.")),
+                ("revision", string("ui-user-stories.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "update_ui_story",
+            "Update any subset of a UI story's own fields (persona/actions/interaction/expected/status/evidence; at least one required). Revision-guarded on ui-user-stories.md. Setting status to ✅ passed, 🐛 bug found, or ⏭️ excluded requires evidence; excluded additionally requires evidence recording the user's approval. When a run result (status and/or evidence) is recorded and the row's cache column still points at the standard ui-story-runs/<id>.md path, that cache file's own Status/Evidence is mirrored too, not separately guarded.",
+            &["plan_dir", "id"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("id", string("The story id, e.g. US-01.")),
+                ("persona", string("New persona/precondition text.")),
+                ("actions", string("New browser actions text.")),
+                ("interaction", string("New interaction evidence text.")),
+                ("expected", string("New expected observable result text.")),
+                ("status", string("💤 untested, ⏳ in progress, ✅ passed, 🐛 bug found, or ⏭️ excluded.")),
+                ("evidence", string("What was observed; required when status is a terminal status.")),
+                ("revision", string("ui-user-stories.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "configure_ui_story_cache",
+            "Fully regenerate a UI story's own browser run cache (its buffered interaction sequence and wait conditions). Revision-guarded on the cache file itself (ui-story-runs/<id>.md, which must already exist -- create it first with add_ui_story or create_ui_story_run_cache). revision is REQUIRED here, not optional: there is no read_plan_document id for this file, so the auto-read convenience other tools offer is not available -- pass the cache file's own last-reported revision (from add_ui_story's, create_ui_story_run_cache's, or this tool's own prior response).",
+            &["plan_dir", "id", "starting_state", "input", "target", "readiness", "max_wait", "revision"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("id", string("The story id, e.g. US-01.")),
+                ("starting_state", string("URL, persona, viewport/device, and visible initial condition.")),
+                ("input", string("The single direct user interaction, e.g. \"click Sign up\".")),
+                ("target", string("The target element and/or value.")),
+                ("readiness", string("The expected readiness signal.")),
+                ("max_wait", string("The maximum wait for that signal, e.g. \"5s\".")),
+                ("revision", string("The cache file's own current revision. Required: there is no read_plan_document id for this file.")),
+            ],
+        ),
+        tool(
+            "create_ui_story_run_cache",
+            "Create a fresh browser run cache for a story id. Unguarded: refuses outright if the cache file already exists. add_ui_story already creates this as a side effect; use this to recreate one that was deleted.",
+            &["plan_dir", "id"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("id", string("The story id, e.g. US-01.")),
+            ],
+        ),
+        tool(
             "validate_plan",
             "Run the plan validator (read-only, unguarded).",
             &["plan_dir"],
@@ -704,6 +780,84 @@ fn build_request(name: &str, arguments: &Value) -> Result<Request, String> {
                 args,
             })
         }
+        "create_ui_validation" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let browser_target = str_arg(arguments, "browser_target")?;
+            let revision = revision_or_read(arguments, &plan_dir, "plan")?;
+            Ok(Request::CreateUiValidation {
+                plan_dir,
+                browser_target,
+                revision,
+            })
+        }
+        "add_ui_story" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let id = str_arg(arguments, "id")?;
+            let persona = str_arg(arguments, "persona")?;
+            let actions = str_arg(arguments, "actions")?;
+            let interaction = str_arg(arguments, "interaction")?;
+            let expected = str_arg(arguments, "expected")?;
+            let work_units = str_arg(arguments, "work_units")?;
+            let revision = revision_or_read(arguments, &plan_dir, "stories")?;
+            Ok(Request::AddUiStory {
+                plan_dir,
+                id,
+                persona,
+                actions,
+                interaction,
+                expected,
+                work_units,
+                revision,
+            })
+        }
+        "add_ui_story_links" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let id = str_arg(arguments, "id")?;
+            let work_units = str_arg(arguments, "work_units")?;
+            let revision = revision_or_read(arguments, &plan_dir, "stories")?;
+            Ok(Request::AddUiStoryLinks {
+                plan_dir,
+                id,
+                work_units,
+                revision,
+            })
+        }
+        "update_ui_story" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let id = str_arg(arguments, "id")?;
+            let persona = opt_str_arg(arguments, "persona");
+            let actions = opt_str_arg(arguments, "actions");
+            let interaction = opt_str_arg(arguments, "interaction");
+            let expected = opt_str_arg(arguments, "expected");
+            let status = opt_str_arg(arguments, "status");
+            let evidence = opt_str_arg(arguments, "evidence");
+            let revision = revision_or_read(arguments, &plan_dir, "stories")?;
+            Ok(Request::UpdateUiStory {
+                plan_dir,
+                id,
+                persona,
+                actions,
+                interaction,
+                expected,
+                status,
+                evidence,
+                revision,
+            })
+        }
+        "configure_ui_story_cache" => Ok(Request::ConfigureUiStoryCache {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+            id: str_arg(arguments, "id")?,
+            starting_state: str_arg(arguments, "starting_state")?,
+            input: str_arg(arguments, "input")?,
+            target: str_arg(arguments, "target")?,
+            readiness: str_arg(arguments, "readiness")?,
+            max_wait: str_arg(arguments, "max_wait")?,
+            revision: str_arg(arguments, "revision")?,
+        }),
+        "create_ui_story_run_cache" => Ok(Request::CreateUiStoryRunCache {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+            id: str_arg(arguments, "id")?,
+        }),
         "validate_plan" => Ok(Request::ValidatePlan {
             plan_dir: str_arg(arguments, "plan_dir")?,
             complete: arguments
@@ -822,6 +976,12 @@ mod tests {
                 "plan_root",
                 "register_read",
                 "add_planning_bug",
+                "create_ui_validation",
+                "add_ui_story",
+                "add_ui_story_links",
+                "update_ui_story",
+                "configure_ui_story_cache",
+                "create_ui_story_run_cache",
                 "validate_plan",
             ]
         );
@@ -1078,6 +1238,115 @@ mod tests {
     #[test]
     fn add_planning_bug_reports_a_missing_argument_by_name() {
         let response = call("add_planning_bug", json!({"plan_dir": "/x"}));
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn create_ui_validation_reports_a_missing_argument_before_ever_reading_a_plan() {
+        // browser_target is missing, so this must fail there, never at
+        // reading a (nonexistent) plan for the revision.
+        let response = call(
+            "create_ui_validation",
+            json!({"plan_dir": "/definitely/does/not/exist"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn add_ui_story_reports_a_missing_argument_before_ever_reading_a_plan() {
+        let response = call(
+            "add_ui_story",
+            json!({"plan_dir": "/definitely/does/not/exist"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn add_ui_story_links_reports_a_missing_argument_before_ever_reading_a_plan() {
+        let response = call(
+            "add_ui_story_links",
+            json!({"plan_dir": "/definitely/does/not/exist"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn update_ui_story_reports_a_missing_argument_before_ever_reading_a_plan() {
+        // id is missing, so this must fail there, never at reading a
+        // (nonexistent) plan for the revision. Every field beyond plan_dir
+        // and id is optional (at least one is required, but that is
+        // update-ui-story's own refusal once it actually runs, not this
+        // adapter's).
+        let response = call(
+            "update_ui_story",
+            json!({"plan_dir": "/definitely/does/not/exist"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn configure_ui_story_cache_reports_each_missing_argument_by_name() {
+        // Unlike every other guarded tool, revision itself is required here
+        // (there is no read_plan_document id for a per-story run cache), so
+        // it is included in this cumulative check like every other field.
+        for (present, missing) in [
+            (json!({}), "plan_dir"),
+            (json!({"plan_dir": "/x"}), "id"),
+            (json!({"plan_dir": "/x", "id": "US-01"}), "starting_state"),
+            (
+                json!({"plan_dir": "/x", "id": "US-01", "starting_state": "logged out"}),
+                "input",
+            ),
+            (
+                json!({"plan_dir": "/x", "id": "US-01", "starting_state": "logged out", "input": "click Sign up"}),
+                "target",
+            ),
+            (
+                json!({"plan_dir": "/x", "id": "US-01", "starting_state": "logged out", "input": "click Sign up", "target": "#signup-button"}),
+                "readiness",
+            ),
+            (
+                json!({"plan_dir": "/x", "id": "US-01", "starting_state": "logged out", "input": "click Sign up", "target": "#signup-button", "readiness": "the form is visible"}),
+                "max_wait",
+            ),
+            (
+                json!({"plan_dir": "/x", "id": "US-01", "starting_state": "logged out", "input": "click Sign up", "target": "#signup-button", "readiness": "the form is visible", "max_wait": "5s"}),
+                "revision",
+            ),
+        ] {
+            let response = call("configure_ui_story_cache", present);
+            assert_eq!(response["result"]["isError"], true);
+            let text = response["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(
+                text.contains(missing),
+                "expected the refusal to name {missing}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_ui_story_run_cache_reports_a_missing_argument_by_name() {
+        let response = call("create_ui_story_run_cache", json!({"plan_dir": "/x"}));
         assert_eq!(response["result"]["isError"], true);
         assert!(response["result"]["content"][0]["text"]
             .as_str()

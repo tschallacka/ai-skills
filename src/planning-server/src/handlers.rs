@@ -217,6 +217,82 @@ pub fn dispatch_with_bin_dir(request: Request, bin_dir: Option<&Path>) -> Respon
         } => add_planning_bug(
             bin_dir, &plan_dir, &id, &title, &reproduce, &observed, &expected, &args,
         ),
+        Request::CreateUiValidation {
+            plan_dir,
+            browser_target,
+            revision,
+        } => create_ui_validation(bin_dir, &plan_dir, &browser_target, &revision),
+        Request::AddUiStory {
+            plan_dir,
+            id,
+            persona,
+            actions,
+            interaction,
+            expected,
+            work_units,
+            revision,
+        } => add_ui_story(
+            bin_dir,
+            &plan_dir,
+            &id,
+            &persona,
+            &actions,
+            &interaction,
+            &expected,
+            &work_units,
+            &revision,
+        ),
+        Request::AddUiStoryLinks {
+            plan_dir,
+            id,
+            work_units,
+            revision,
+        } => add_ui_story_links(bin_dir, &plan_dir, &id, &work_units, &revision),
+        Request::UpdateUiStory {
+            plan_dir,
+            id,
+            persona,
+            actions,
+            interaction,
+            expected,
+            status,
+            evidence,
+            revision,
+        } => update_ui_story(
+            bin_dir,
+            &plan_dir,
+            &id,
+            persona.as_deref(),
+            actions.as_deref(),
+            interaction.as_deref(),
+            expected.as_deref(),
+            status.as_deref(),
+            evidence.as_deref(),
+            &revision,
+        ),
+        Request::ConfigureUiStoryCache {
+            plan_dir,
+            id,
+            starting_state,
+            input,
+            target,
+            readiness,
+            max_wait,
+            revision,
+        } => configure_ui_story_cache(
+            bin_dir,
+            &plan_dir,
+            &id,
+            &starting_state,
+            &input,
+            &target,
+            &readiness,
+            &max_wait,
+            &revision,
+        ),
+        Request::CreateUiStoryRunCache { plan_dir, id } => {
+            create_ui_story_run_cache(bin_dir, &plan_dir, &id)
+        }
         Request::ValidatePlan { plan_dir, complete } => validate_plan(bin_dir, &plan_dir, complete),
     }
 }
@@ -915,6 +991,170 @@ fn add_planning_bug(
     ];
     full_args.extend(args.iter().map(String::as_str));
     run_then_report_revision(bin_dir, "add-planning-bug", &full_args, &bugs_path)
+}
+
+fn create_ui_validation(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    browser_target: &str,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let description_path = Path::new(plan_dir).join("plan-description.md");
+    respond_from(guarded_call(&description_path, guard, || {
+        run_command(bin_dir, "create-ui-validation", &[plan_dir, browser_target])
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_ui_story(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    id: &str,
+    persona: &str,
+    actions: &str,
+    interaction: &str,
+    expected: &str,
+    work_units: &str,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let stories_path = Path::new(plan_dir).join("ui-user-stories.md");
+    respond_from(guarded_call(&stories_path, guard, || {
+        run_command(
+            bin_dir,
+            "add-ui-story",
+            &[
+                plan_dir,
+                "--id",
+                id,
+                "--persona",
+                persona,
+                "--actions",
+                actions,
+                "--interaction",
+                interaction,
+                "--expected",
+                expected,
+                "--work-units",
+                work_units,
+            ],
+        )
+    }))
+}
+
+fn add_ui_story_links(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    id: &str,
+    work_units: &str,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let stories_path = Path::new(plan_dir).join("ui-user-stories.md");
+    respond_from(guarded_call(&stories_path, guard, || {
+        run_command(bin_dir, "add-ui-story-links", &[plan_dir, id, work_units])
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_ui_story(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    id: &str,
+    persona: Option<&str>,
+    actions: Option<&str>,
+    interaction: Option<&str>,
+    expected: Option<&str>,
+    status: Option<&str>,
+    evidence: Option<&str>,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let stories_path = Path::new(plan_dir).join("ui-user-stories.md");
+    let mut args: Vec<&str> = vec![plan_dir, id];
+    for (flag, value) in [
+        ("--persona", persona),
+        ("--actions", actions),
+        ("--interaction", interaction),
+        ("--expected", expected),
+        ("--status", status),
+        ("--evidence", evidence),
+    ] {
+        if let Some(value) = value {
+            args.push(flag);
+            args.push(value);
+        }
+    }
+    respond_from(guarded_call(&stories_path, guard, || {
+        run_command(bin_dir, "update-ui-story", &args)
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn configure_ui_story_cache(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    id: &str,
+    starting_state: &str,
+    input: &str,
+    target: &str,
+    readiness: &str,
+    max_wait: &str,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let cache_path = Path::new(plan_dir)
+        .join("ui-story-runs")
+        .join(format!("{id}.md"));
+    respond_from(guarded_call(&cache_path, guard, || {
+        run_command(
+            bin_dir,
+            "configure-ui-story-cache",
+            &[
+                plan_dir,
+                "--id",
+                id,
+                "--starting-state",
+                starting_state,
+                "--input",
+                input,
+                "--target",
+                target,
+                "--readiness",
+                readiness,
+                "--max-wait",
+                max_wait,
+            ],
+        )
+    }))
+}
+
+fn create_ui_story_run_cache(bin_dir: Option<&Path>, plan_dir: &str, id: &str) -> Response {
+    let cache_path = Path::new(plan_dir)
+        .join("ui-story-runs")
+        .join(format!("{id}.md"));
+    run_then_report_revision(
+        bin_dir,
+        "create-ui-story-run-cache",
+        &[plan_dir, id],
+        &cache_path,
+    )
 }
 
 fn validate_plan(bin_dir: Option<&Path>, plan_dir: &str, complete: bool) -> Response {
@@ -2584,5 +2824,434 @@ mod tests {
 
         assert_eq!(passed, output.status.success());
         assert_eq!(report, expected_report);
+    }
+
+    /// setup_plan plus create-ui-validation's own scaffold (a demo work
+    /// unit so the story tests below have a real WNN to reference, and the
+    /// "## UI validation" section create-ui-validation itself requires the
+    /// plan not to have yet).
+    fn setup_ui_validation_plan(bin_dir: &Path, dir: &Path) -> PathBuf {
+        let plan_dir = setup_plan(bin_dir, dir);
+        add_demo_work_unit(bin_dir, &plan_dir);
+        run(
+            bin_dir,
+            "create-ui-validation",
+            &[plan_dir.to_str().unwrap(), "chromium headless"],
+        );
+        plan_dir
+    }
+
+    fn add_demo_ui_story(bin_dir: &Path, plan_dir: &Path) {
+        run(
+            bin_dir,
+            "add-ui-story",
+            &[
+                plan_dir.to_str().unwrap(),
+                "--id",
+                "US-01",
+                "--persona",
+                "a first-time visitor",
+                "--actions",
+                "click Sign up",
+                "--interaction",
+                "the button depresses",
+                "--expected",
+                "the signup form appears",
+                "--work-units",
+                "W01",
+            ],
+        );
+    }
+
+    #[test]
+    fn create_ui_validation_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let description_path = copy_a.join("plan-description.md");
+        let (_, guard) = read_with_revision(&description_path).unwrap();
+        ensure_built(&bin_dir, "create-ui-validation");
+        let response = dispatch_with_bin_dir(
+            Request::CreateUiValidation {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                browser_target: "chromium headless".to_string(),
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "create-ui-validation",
+            &[copy_b.to_str().unwrap(), "chromium headless"],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn create_ui_validation_with_a_stale_revision_is_refused_and_changes_nothing() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        let before = snapshot(&plan_dir);
+
+        let bogus_guard = PlanRevision::of(b"not the real hash");
+        let response = dispatch_with_bin_dir(
+            Request::CreateUiValidation {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                browser_target: "chromium headless".to_string(),
+                revision: bogus_guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Stale { .. }),
+            "expected Stale, got {response:?}"
+        );
+        assert_eq!(
+            before,
+            snapshot(&plan_dir),
+            "a stale guard must change nothing"
+        );
+    }
+
+    #[test]
+    fn add_ui_story_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_ui_validation_plan(&bin_dir, scratch.path());
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let stories_path = copy_a.join("ui-user-stories.md");
+        let (_, guard) = read_with_revision(&stories_path).unwrap();
+        ensure_built(&bin_dir, "add-ui-story");
+        let response = dispatch_with_bin_dir(
+            Request::AddUiStory {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                id: "US-01".to_string(),
+                persona: "a first-time visitor".to_string(),
+                actions: "click Sign up".to_string(),
+                interaction: "the button depresses".to_string(),
+                expected: "the signup form appears".to_string(),
+                work_units: "W01".to_string(),
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "add-ui-story",
+            &[
+                copy_b.to_str().unwrap(),
+                "--id",
+                "US-01",
+                "--persona",
+                "a first-time visitor",
+                "--actions",
+                "click Sign up",
+                "--interaction",
+                "the button depresses",
+                "--expected",
+                "the signup form appears",
+                "--work-units",
+                "W01",
+            ],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn add_ui_story_with_a_stale_revision_is_refused_and_changes_nothing() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_ui_validation_plan(&bin_dir, scratch.path());
+        let before = snapshot(&plan_dir);
+
+        let bogus_guard = PlanRevision::of(b"not the real hash");
+        let response = dispatch_with_bin_dir(
+            Request::AddUiStory {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                id: "US-01".to_string(),
+                persona: "a first-time visitor".to_string(),
+                actions: "click Sign up".to_string(),
+                interaction: "the button depresses".to_string(),
+                expected: "the signup form appears".to_string(),
+                work_units: "W01".to_string(),
+                revision: bogus_guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Stale { .. }),
+            "expected Stale, got {response:?}"
+        );
+        assert_eq!(
+            before,
+            snapshot(&plan_dir),
+            "a stale guard must change nothing"
+        );
+    }
+
+    #[test]
+    fn add_ui_story_links_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_ui_validation_plan(&bin_dir, scratch.path());
+        add_demo_ui_story(&bin_dir, &plan_dir);
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let stories_path = copy_a.join("ui-user-stories.md");
+        let (_, guard) = read_with_revision(&stories_path).unwrap();
+        ensure_built(&bin_dir, "add-ui-story-links");
+        let response = dispatch_with_bin_dir(
+            Request::AddUiStoryLinks {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                id: "US-01".to_string(),
+                work_units: "W01".to_string(),
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "add-ui-story-links",
+            &[copy_b.to_str().unwrap(), "US-01", "W01"],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn update_ui_story_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_ui_validation_plan(&bin_dir, scratch.path());
+        add_demo_ui_story(&bin_dir, &plan_dir);
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let stories_path = copy_a.join("ui-user-stories.md");
+        let (_, guard) = read_with_revision(&stories_path).unwrap();
+        ensure_built(&bin_dir, "update-ui-story");
+        let response = dispatch_with_bin_dir(
+            Request::UpdateUiStory {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                id: "US-01".to_string(),
+                persona: None,
+                actions: None,
+                interaction: None,
+                expected: None,
+                status: Some("✅ passed".to_string()),
+                evidence: Some("clicked it and the form appeared".to_string()),
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "update-ui-story",
+            &[
+                copy_b.to_str().unwrap(),
+                "US-01",
+                "--status",
+                "✅ passed",
+                "--evidence",
+                "clicked it and the form appeared",
+            ],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+        // The table row is the source of truth, but the per-story run cache
+        // carries its own copy of Status/Evidence the validator reads
+        // directly -- confirm the cascade actually reached it rather than
+        // only asserting the two directory trees still agree with each
+        // other (which they would even if neither cache got touched).
+        let cache = fs::read_to_string(copy_a.join("ui-story-runs/US-01.md")).unwrap();
+        assert!(
+            cache.contains("✅ passed"),
+            "expected the run cache to mirror the new status: {cache}"
+        );
+    }
+
+    #[test]
+    fn update_ui_story_with_a_stale_revision_is_refused_and_changes_nothing() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_ui_validation_plan(&bin_dir, scratch.path());
+        add_demo_ui_story(&bin_dir, &plan_dir);
+        let before = snapshot(&plan_dir);
+
+        let bogus_guard = PlanRevision::of(b"not the real hash");
+        let response = dispatch_with_bin_dir(
+            Request::UpdateUiStory {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                id: "US-01".to_string(),
+                persona: None,
+                actions: None,
+                interaction: None,
+                expected: None,
+                status: Some("✅ passed".to_string()),
+                evidence: Some("clicked it".to_string()),
+                revision: bogus_guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Stale { .. }),
+            "expected Stale, got {response:?}"
+        );
+        assert_eq!(
+            before,
+            snapshot(&plan_dir),
+            "a stale guard must change nothing"
+        );
+    }
+
+    #[test]
+    fn configure_ui_story_cache_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_ui_validation_plan(&bin_dir, scratch.path());
+        add_demo_ui_story(&bin_dir, &plan_dir);
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let cache_path = copy_a.join("ui-story-runs").join("US-01.md");
+        let (_, guard) = read_with_revision(&cache_path).unwrap();
+        ensure_built(&bin_dir, "configure-ui-story-cache");
+        let response = dispatch_with_bin_dir(
+            Request::ConfigureUiStoryCache {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                id: "US-01".to_string(),
+                starting_state: "logged out on /".to_string(),
+                input: "click Sign up".to_string(),
+                target: "#signup-button".to_string(),
+                readiness: "the form is visible".to_string(),
+                max_wait: "5s".to_string(),
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "configure-ui-story-cache",
+            &[
+                copy_b.to_str().unwrap(),
+                "--id",
+                "US-01",
+                "--starting-state",
+                "logged out on /",
+                "--input",
+                "click Sign up",
+                "--target",
+                "#signup-button",
+                "--readiness",
+                "the form is visible",
+                "--max-wait",
+                "5s",
+            ],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn configure_ui_story_cache_with_a_stale_revision_is_refused_and_changes_nothing() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_ui_validation_plan(&bin_dir, scratch.path());
+        add_demo_ui_story(&bin_dir, &plan_dir);
+        let before = snapshot(&plan_dir);
+
+        let bogus_guard = PlanRevision::of(b"not the real hash");
+        let response = dispatch_with_bin_dir(
+            Request::ConfigureUiStoryCache {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                id: "US-01".to_string(),
+                starting_state: "logged out on /".to_string(),
+                input: "click Sign up".to_string(),
+                target: "#signup-button".to_string(),
+                readiness: "the form is visible".to_string(),
+                max_wait: "5s".to_string(),
+                revision: bogus_guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Stale { .. }),
+            "expected Stale, got {response:?}"
+        );
+        assert_eq!(
+            before,
+            snapshot(&plan_dir),
+            "a stale guard must change nothing"
+        );
+    }
+
+    #[test]
+    fn create_ui_story_run_cache_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        ensure_built(&bin_dir, "create-ui-story-run-cache");
+        let response = dispatch_with_bin_dir(
+            Request::CreateUiStoryRunCache {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                id: "US-09".to_string(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "create-ui-story-run-cache",
+            &[copy_b.to_str().unwrap(), "US-09"],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
     }
 }

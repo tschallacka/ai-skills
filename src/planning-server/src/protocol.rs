@@ -279,6 +279,82 @@ pub enum Request {
         expected: String,
         args: Vec<String>,
     },
+    /// Guards plan-description.md: create-ui-validation both inserts the
+    /// "## UI validation" section into the description (refused if that
+    /// section, or either target artifact, already exists) and creates
+    /// ui-user-stories.md and bugs.md fresh -- plan-description.md is the
+    /// one file that already exists, the same "guard the one file that
+    /// already exists" shape as AddGoal's own progress.md guard.
+    CreateUiValidation {
+        plan_dir: String,
+        browser_target: String,
+        revision: String,
+    },
+    /// Guards ui-user-stories.md: add-ui-story both inserts the story's row
+    /// there (refused if the id already exists) and creates a fresh
+    /// per-story browser run cache under ui-story-runs/ -- the story table
+    /// is the one guardable target, the same shape as AddGoal's own
+    /// progress.md guard. Only the flag form is wired here; the binary's
+    /// positional form is a deprecated compatibility shim for existing
+    /// callers.
+    AddUiStory {
+        plan_dir: String,
+        id: String,
+        persona: String,
+        actions: String,
+        interaction: String,
+        expected: String,
+        work_units: String,
+        revision: String,
+    },
+    /// Guards ui-user-stories.md: rewrites a story row's own "Related work
+    /// units" column to the given comma-separated ids, each of which must
+    /// already appear in work-unit-inventory.md.
+    AddUiStoryLinks {
+        plan_dir: String,
+        id: String,
+        work_units: String,
+        revision: String,
+    },
+    /// Guards ui-user-stories.md: rewrites the named fields of a story's own
+    /// row (any subset; at least one required), and, when a run result
+    /// (status and/or evidence) is recorded AND the row's own cache column
+    /// still points at the standard ui-story-runs/<id>.md path, also mirrors
+    /// Status/Evidence into that per-story cache file -- not separately
+    /// guarded, the same "cascading secondary file" simplification as
+    /// AddWorkUnit's own step file.
+    UpdateUiStory {
+        plan_dir: String,
+        id: String,
+        persona: Option<String>,
+        actions: Option<String>,
+        interaction: Option<String>,
+        expected: Option<String>,
+        status: Option<String>,
+        evidence: Option<String>,
+        revision: String,
+    },
+    /// Guards the per-story cache file itself (ui-story-runs/<id>.md, which
+    /// must already exist): configure-ui-story-cache fully regenerates it
+    /// wholesale every run, the same "guard the file that is about to be
+    /// wholly replaced" shape RemoveCoverage/UpdatePlanProgress already use
+    /// for a guarded rewrite rather than an incremental edit.
+    ConfigureUiStoryCache {
+        plan_dir: String,
+        id: String,
+        starting_state: String,
+        input: String,
+        target: String,
+        readiness: String,
+        max_wait: String,
+        revision: String,
+    },
+    /// Unguarded: create-ui-story-run-cache itself refuses outright when the
+    /// target cache file already exists, the same "nothing to lose" shape as
+    /// CreateAdversarialReview. Exists as its own operation because
+    /// AddUiStory already creates this file as a side effect; this is the
+    /// standalone recreate-if-missing path (e.g. after a manual deletion).
+    CreateUiStoryRunCache { plan_dir: String, id: String },
     /// Read-only: no revision at all, since it applies no write.
     ValidatePlan { plan_dir: String, complete: bool },
 }
@@ -503,6 +579,62 @@ mod tests {
                 observed: "it broke".to_string(),
                 expected: "it should not".to_string(),
                 args: vec!["--severity".to_string(), "major".to_string()],
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_ui_story_requests_round_trip_through_json() {
+        let requests = [
+            Request::CreateUiValidation {
+                plan_dir: "/plans/demo".to_string(),
+                browser_target: "chromium headless".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::AddUiStory {
+                plan_dir: "/plans/demo".to_string(),
+                id: "US-01".to_string(),
+                persona: "a first-time visitor".to_string(),
+                actions: "click Sign up".to_string(),
+                interaction: "the button depresses".to_string(),
+                expected: "the signup form appears".to_string(),
+                work_units: "W01,W02".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::AddUiStoryLinks {
+                plan_dir: "/plans/demo".to_string(),
+                id: "US-01".to_string(),
+                work_units: "W01".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::UpdateUiStory {
+                plan_dir: "/plans/demo".to_string(),
+                id: "US-01".to_string(),
+                persona: None,
+                actions: None,
+                interaction: None,
+                expected: None,
+                status: Some("✅ passed".to_string()),
+                evidence: Some("clicked it".to_string()),
+                revision: "abc".to_string(),
+            },
+            Request::ConfigureUiStoryCache {
+                plan_dir: "/plans/demo".to_string(),
+                id: "US-01".to_string(),
+                starting_state: "logged out on /".to_string(),
+                input: "click Sign up".to_string(),
+                target: "#signup-button".to_string(),
+                readiness: "the form is visible".to_string(),
+                max_wait: "5s".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::CreateUiStoryRunCache {
+                plan_dir: "/plans/demo".to_string(),
+                id: "US-02".to_string(),
             },
         ];
         for request in requests {
