@@ -138,8 +138,8 @@ It ships only in `mcp` integration mode:
 installer install --integration chat=mcp --skill chat --target DIR --yes     # chat-mcp instead of chat-client-rs
 ```
 
-`chat-server-rs` installs in both modes. The adapter finds a server; it does
-not start one, so step 2 of *Connecting to a channel* is still yours.
+`chat-server-rs` installs in both modes; `start_server` starts one if
+needed.
 
 Register it with your harness pointing at the shared bin every skill's
 compiled binaries live in, e.g.
@@ -150,16 +150,18 @@ claude mcp add chat -- "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/cha
 
 The installer registers and unregisters this automatically for `claude`,
 `codex` and `opencode` when you switch `chat`'s mode. A manual registration
-like the one above does not: it survives a later switch away from `mcp` as a
-stale entry, still pointing at a file that still exists (the shared bin is
-never swept on a mode switch) but is no longer the mode `chat` is actually
-in. Re-register after switching back to `mcp`, and remove the entry when you
-leave the mode by hand (`BUGS.json` B285).
+like the one above does not: switching away from `mcp` leaves it stale,
+still pointing at a file that exists but is the wrong mode. Re-register
+after switching back, and remove it by hand if you leave the mode for good
+(`BUGS.json` B285).
 
 | tool | takes | answers |
 |---|---|---|
 | `status` | — | resolved server, nick, session key and its rung, chat home, cursors |
+| `set_nick` | `nick` | the nick to register as |
+| `session_clear` | `cursors_only` | forgets the saved session, or just its cursors |
 | `discover` | `wait_seconds` | servers announcing on the beacon — check before starting one |
+| `start_server` | — | starts one if none is found |
 | `channels` | — | channels with stored messages |
 | `join` | `channel`, `since` | subscribes, seeds the cursor to the channel's end |
 | `leave` | `channel` | parts and drops the cursor |
@@ -712,6 +714,8 @@ Run `join` first to record the cursor, or `read --since 0` to take the history
 in one shot. `tail` has no `--since`; after JOIN it waits for pushed messages.
 
 ### 2. If nothing answers, start the server yourself
+
+An `mcp`-mode install has `start_server`; the CLI has none:
 
 ```bash
 "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-server-rs" &

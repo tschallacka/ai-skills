@@ -103,6 +103,8 @@ pub const TOOL_ARGUMENTS: &[&str] = &[
     "count",
     "message",
     "delivery",
+    "nick",
+    "cursors_only",
 ];
 
 /// The advertised schema for one `TOOL_ARGUMENTS` key. Exhaustive on purpose:
@@ -206,6 +208,12 @@ fn tool_argument(key: &str) -> Value {
         "agent" => {
             json!({"type":"string","description":"Same as session; either name works, session wins if both are given."})
         }
+        "nick" => {
+            json!({"type":"string","description":"The nick to register as from now on. Saved to the session; a connection already held under the old nick is dropped so the next call reconnects and registers under this one."})
+        }
+        "cursors_only" => {
+            json!({"type":"boolean","description":"Drop only the per-channel cursors, keeping the saved server and nick. Omit (or false) to clear the whole saved session instead."})
+        }
         other => unreachable!("TOOL_ARGUMENTS declares {other} with no schema"),
     }
 }
@@ -228,9 +236,27 @@ fn routing() -> &'static [ToolSpec] {
             &[],
         ),
         (
+            "set_nick",
+            "Change the nick you register as. Saves it to the session and drops any connection already held under the old nick, so the very next call (join, send, read, wait, ...) opens a fresh one and registers under the new nick.",
+            &["nick", "session", "agent"],
+            &["nick"],
+        ),
+        (
+            "session_clear",
+            "Forget the saved session: by default the server, nick and every channel cursor, or with cursors_only just the cursors (keeping the saved server and nick). Also drops any connection currently held, so the next call starts over.",
+            &["cursors_only", "session", "agent"],
+            &[],
+        ),
+        (
             "discover",
             "Which chat servers are announcing themselves on the local network, from the UDP beacon. Use it to see whether a server is already running BEFORE starting one: a second server on another port splits the channel, and every agent then talks past the others.",
             &["wait_seconds"],
+            &[],
+        ),
+        (
+            "start_server",
+            "Start a chat server, but only after checking the UDP beacon for one already announcing itself -- a second server on another port would split the channel, so this joins an existing one instead of starting another. Always the loopback default (127.0.0.1): there is no argument here to widen the bind, the same restraint the chat skill asks of a human running the CLI. Needs the chat-server-rs binary installed beside this adapter.",
+            &[],
             &[],
         ),
         (
@@ -443,19 +469,23 @@ fn call_tool(id: Value, params: Value) -> Value {
         .unwrap_or_else(|| json!({}));
     let result = match name {
         "status" => Ok(status()),
+        "set_nick" => set_nick(&arguments),
+        "session_clear" => session_clear(&arguments),
         "discover" => Ok(discover(
             u64_argument(&arguments, "wait_seconds").unwrap_or(3),
         )),
+        "start_server" => start_server(),
         "channels" => Ok(channels()),
         "join" | "leave" | "send" | "read" | "wait" | "who" | "trigger_add" | "trigger_remove"
         | "trigger_toggle" | "triggers" | "interrupt_add" | "interrupt_update"
         | "interrupt_remove" | "interrupt_list" | "interrupt_settings" | "timer_set"
         | "timer_update" | "timer_cancel" => connected_tool(name, &arguments),
         other => Err(format!(
-            "unknown tool: {}. The tools are status, discover, channels, join, leave, send, read, \
-             wait, who, trigger_add, trigger_remove, trigger_toggle, triggers, interrupt_add, \
-             interrupt_update, interrupt_remove, interrupt_list, interrupt_settings, timer_set, \
-             timer_update and timer_cancel.",
+            "unknown tool: {}. The tools are status, set_nick, session_clear, discover, \
+             start_server, channels, join, leave, send, read, wait, who, trigger_add, \
+             trigger_remove, trigger_toggle, triggers, interrupt_add, interrupt_update, \
+             interrupt_remove, interrupt_list, interrupt_settings, timer_set, timer_update and \
+             timer_cancel.",
             other
         )),
     };
@@ -734,7 +764,7 @@ fn resolve(session_key: &str) -> Result<(String, String), String> {
     if server.is_empty() {
         return Err(format!(
             "no chat server found: nothing saved, nothing cached, and no announce beacon on UDP {} within 3s. \
-             Start ONE server (the chat skill's chat-server-rs) and let its beacon be how clients find it — \
+             Call start_server, which checks the beacon itself before starting one — \
              a second server on another port splits the channel.",
             chat_client_rs::DEFAULT_BEACON_PORT
         ));
@@ -804,11 +834,17 @@ fn status() -> Value {
     })
 }
 
-fn discover(wait_seconds: u64) -> Value {
-    let port = std::env::var("AI_CHAT_BEACON_PORT")
+/// `AI_CHAT_BEACON_PORT` if set, else the client's well-known default -- the
+/// same lookup `discover` and `start_server` both need before listening.
+fn beacon_port() -> u16 {
+    std::env::var("AI_CHAT_BEACON_PORT")
         .ok()
         .and_then(|value| value.parse().ok())
-        .unwrap_or(chat_client_rs::DEFAULT_BEACON_PORT);
+        .unwrap_or(chat_client_rs::DEFAULT_BEACON_PORT)
+}
+
+fn discover(wait_seconds: u64) -> Value {
+    let port = beacon_port();
     let found = chat_client_rs::discover_candidates(port, wait_seconds.clamp(1, 30));
     json!({
         "tool": "discover",
@@ -837,6 +873,161 @@ fn channels() -> Value {
     }
     names.sort();
     json!({"tool":"channels","channels":names,"store":home.display().to_string()})
+}
+
+/// Change the saved nick and drop any connection held under the old one, so
+/// the next call reconnects and registers fresh rather than carrying on
+/// under a name the server has already accepted for this process.
+fn set_nick(arguments: &Value) -> Result<Value, String> {
+    let nick = string_argument(arguments, "nick")
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .ok_or("set_nick needs nick")?;
+    let session_key = resolved_session_key(arguments);
+    let dir = state_dir();
+    let mut session = chat_client_rs::Session::load_with_key(&dir, &session_key);
+    let previous = session.nick.clone();
+    session.nick = nick.clone();
+    session
+        .save_with_key(&dir, &session_key)
+        .map_err(|e| format!("could not save the session: {e}"))?;
+    let dropped = drop_held(&session_key);
+    Ok(json!({
+        "tool": "set_nick",
+        "session": session_key,
+        "nick": nick,
+        "previous_nick": previous,
+        "note": if dropped {
+            "the held connection was dropped; the next call reconnects and registers under the new nick"
+        } else {
+            "the next call opens a connection and registers under the new nick"
+        },
+    }))
+}
+
+/// Forget the saved session: the whole file (server, nick, every cursor), or
+/// with `cursors_only` just the cursors, keeping the saved server and nick.
+/// Either way drops a held connection too, so a stale one is not left
+/// registered under state this call just discarded.
+fn session_clear(arguments: &Value) -> Result<Value, String> {
+    let cursors_only = arguments
+        .get("cursors_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let session_key = resolved_session_key(arguments);
+    let dir = state_dir();
+    if cursors_only {
+        let mut session = chat_client_rs::Session::load_with_key(&dir, &session_key);
+        session.cursors.clear();
+        session
+            .save_with_key(&dir, &session_key)
+            .map_err(|e| format!("could not save the session: {e}"))?;
+    } else {
+        let path = chat_client_rs::Session::path_for(&dir, &session_key);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("could not remove the session file: {e}")),
+        }
+    }
+    let dropped = drop_held(&session_key);
+    Ok(json!({
+        "tool": "session_clear",
+        "session": session_key,
+        "cleared": if cursors_only { "cursors" } else { "session" },
+        "note": if dropped {
+            "a held connection was dropped too"
+        } else {
+            "no connection was held"
+        },
+    }))
+}
+
+/// Unconditionally drop the connection held for `session_key`, regardless of
+/// which one is currently there -- unlike `forget`, which only removes a
+/// specific connection id so a fresh replacement opened by another call in
+/// the meantime survives. `set_nick`/`session_clear` want the opposite: the
+/// state they just changed on disk should never be read by whatever is
+/// currently held, so the one that is there, whichever it is, goes.
+fn drop_held(session_key: &str) -> bool {
+    held()
+        .lock()
+        .map(|mut map| map.remove(session_key).is_some())
+        .unwrap_or(false)
+}
+
+/// Start a chat server, but only once the UDP beacon has had a chance to say
+/// one is already running: two servers on one machine split the channel, so
+/// this checks before it spawns, the same restraint the chat skill asks of a
+/// human running the CLI by hand. Always the loopback default -- there is no
+/// argument here that could widen the bind.
+fn start_server() -> Result<Value, String> {
+    let port = beacon_port();
+    if let Some(server) = chat_client_rs::discover_candidates(port, 3).first() {
+        return Ok(json!({
+            "tool": "start_server",
+            "started": false,
+            "server": server,
+            "note": "a server is already announcing; joining it instead of starting a second one",
+        }));
+    }
+    let binary = server_binary_path()?;
+    let child = std::process::Command::new(&binary)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("could not start {}: {e}", binary.display()))?;
+    let pid = child.id();
+    // Reaped in the background so a server that later exits does not leave a
+    // zombie behind for the life of this long-running adapter process.
+    std::thread::spawn(move || {
+        let mut child = child;
+        let _ = child.wait();
+    });
+    for _ in 0..3 {
+        if let Some(server) = chat_client_rs::discover_candidates(port, 2).first() {
+            return Ok(json!({
+                "tool": "start_server",
+                "started": true,
+                "server": server,
+                "pid": pid,
+                "note": "no other server answered the beacon, so a new one was started",
+            }));
+        }
+    }
+    Err(format!(
+        "started {} (pid {pid}) but it has not announced on UDP {port} within 6s; \
+         it may still be starting -- call discover again shortly",
+        binary.display()
+    ))
+}
+
+/// `chat-server-rs`, resolved as a sibling of this adapter's own binary: the
+/// chat skill ships both to the same directory in every install mode, and in
+/// a dev tree `./setup-dev-env.sh` puts them beside each other too.
+fn server_binary_path() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("could not resolve this adapter's own path: {e}"))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "this adapter's own resolved path has no parent directory".to_string())?;
+    let name = if cfg!(windows) {
+        "chat-server-rs.exe"
+    } else {
+        "chat-server-rs"
+    };
+    let candidate = dir.join(name);
+    if candidate.is_file() {
+        Ok(candidate)
+    } else {
+        Err(format!(
+            "chat-server-rs not found beside this adapter ({}); the chat skill ships them \
+             together, so reinstall it, or build one with: cargo build --release \
+             --manifest-path src/chat-server-rs/Cargo.toml",
+            candidate.display()
+        ))
+    }
 }
 
 #[cfg(test)]

@@ -33,7 +33,12 @@ const SESSION: &str = "t90flow";
 struct Harness {
     home: PathBuf,
     port: u16,
-    server: Child,
+    /// None for the one test whose server was started by the adapter itself
+    /// (`start_server`) rather than by this harness -- `Drop` then has
+    /// nothing of its own to kill, since the adapter's own child outlives
+    /// neither the adapter (killed just above it) nor, in that test, the
+    /// scratch home removed right after.
+    server: Option<Child>,
     adapter: Child,
     stdin: ChildStdin,
     /// Every line the adapter writes to stdout, read on a thread of its own so
@@ -137,7 +142,7 @@ impl Harness {
         Some(Harness {
             home,
             port,
-            server,
+            server: Some(server),
             adapter,
             stdin,
             lines,
@@ -249,8 +254,10 @@ impl Drop for Harness {
     fn drop(&mut self) {
         let _ = self.adapter.kill();
         let _ = self.adapter.wait();
-        let _ = self.server.kill();
-        let _ = self.server.wait();
+        if let Some(server) = self.server.as_mut() {
+            let _ = server.kill();
+            let _ = server.wait();
+        }
         let _ = std::fs::remove_dir_all(&self.home);
     }
 }
@@ -1027,5 +1034,261 @@ fn by_default_notices_are_queued_for_the_hook_and_nothing_is_pushed() {
     assert!(
         harness.notice(NOTICE_WAIT).is_some(),
         "both delivers by push as well"
+    );
+}
+
+/// `set_nick` saves the new nick and drops the held connection, so a call
+/// made right after it opens a fresh one that registers under the new name
+/// rather than carrying on as the old one.
+#[test]
+fn set_nick_changes_the_saved_nick_and_the_next_connection_registers_under_it() {
+    let Some(mut harness) = Harness::new("setnick") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t90n"}));
+    let who = harness.call("who", json!({"channel":"#t90n"}));
+    assert_eq!(
+        who["members"],
+        json!(["tester"]),
+        "the seeded session's nick before any change: {who}"
+    );
+
+    let renamed = harness.call("set_nick", json!({"nick":"renamed"}));
+    assert_eq!(renamed["nick"], json!("renamed"));
+    assert_eq!(renamed["previous_nick"], json!("tester"));
+
+    let status = harness.call("status", json!({}));
+    assert_eq!(
+        status["connection_held"],
+        json!(false),
+        "set_nick must drop the old connection: {status}"
+    );
+    assert_eq!(status["nick"], json!("renamed"));
+
+    harness.call("join", json!({"channel":"#t90n"}));
+    let who = harness.call("who", json!({"channel":"#t90n"}));
+    assert_eq!(
+        who["members"],
+        json!(["renamed"]),
+        "the reconnected agent should carry the new nick: {who}"
+    );
+}
+
+/// A `set_nick` with no argument, or an all-whitespace one, is refused by
+/// name rather than saving an empty nick a later connect would mint over.
+#[test]
+fn set_nick_refuses_an_empty_nick() {
+    let Some(mut harness) = Harness::new("setnickrefuse") else {
+        return;
+    };
+    let response = harness.request("tools/call", json!({"name":"set_nick","arguments":{}}));
+    assert_eq!(response["result"]["isError"], json!(true));
+    let response = harness.request(
+        "tools/call",
+        json!({"name":"set_nick","arguments":{"nick":"   "}}),
+    );
+    assert_eq!(response["result"]["isError"], json!(true));
+}
+
+/// `session_clear` with no argument drops the whole saved session (server,
+/// nick, cursors) and the held connection; a fresh call then mints a nick of
+/// its own rather than reusing what was saved before.
+#[test]
+fn session_clear_drops_the_whole_saved_session_and_the_held_connection() {
+    let Some(mut harness) = Harness::new("clearall") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t90c"}));
+    harness.call("read", json!({"channel":"#t90c","since":0}));
+
+    let cleared = harness.call("session_clear", json!({}));
+    assert_eq!(cleared["cleared"], json!("session"));
+
+    let status = harness.call("status", json!({}));
+    assert_eq!(
+        status["connection_held"],
+        json!(false),
+        "session_clear must drop the held connection: {status}"
+    );
+    assert_eq!(
+        status["nick_is_saved"],
+        json!(false),
+        "the saved nick should be gone too: {status}"
+    );
+    assert_eq!(
+        status["cursors"],
+        json!({}),
+        "cursors are gone with the rest of the session: {status}"
+    );
+}
+
+/// `session_clear` with `cursors_only` keeps the saved server and nick, only
+/// dropping the per-channel cursors -- and still drops the held connection,
+/// since a stale one could otherwise answer with the cursor this call just
+/// discarded.
+#[test]
+fn session_clear_with_cursors_only_keeps_the_nick_and_server() {
+    let Some(mut harness) = Harness::new("clearcursors") else {
+        return;
+    };
+    harness.call("join", json!({"channel":"#t90cc"}));
+    harness.other_sends("#t90cc", "one");
+    harness.call("read", json!({"channel":"#t90cc"}));
+
+    let cleared = harness.call("session_clear", json!({"cursors_only":true}));
+    assert_eq!(cleared["cleared"], json!("cursors"));
+
+    let status = harness.call("status", json!({}));
+    assert_eq!(
+        status["nick"],
+        json!("tester"),
+        "the nick must survive a cursors-only clear: {status}"
+    );
+    assert_eq!(
+        status["cursors"],
+        json!({}),
+        "the cursor for #t90cc should be gone: {status}"
+    );
+    assert_eq!(
+        status["connection_held"],
+        json!(false),
+        "cursors_only still drops the held connection: {status}"
+    );
+}
+
+/// `start_server` checks the beacon before doing anything else: with the
+/// harness's own server already announcing on its isolated beacon port,
+/// start_server must report it rather than spawning a second one that would
+/// split the channel.
+#[test]
+fn start_server_finds_the_running_one_and_does_not_spawn_a_second() {
+    let Some(mut harness) = Harness::new("startexisting") else {
+        return;
+    };
+    let result = harness.call("start_server", json!({}));
+    assert_eq!(result["started"], json!(false), "{result}");
+    assert_eq!(
+        result["server"],
+        json!(format!("127.0.0.1:{}", harness.port)),
+        "{result}"
+    );
+}
+
+/// Best-effort termination by pid, for a process this test never held a
+/// `Child` handle to: `start_server` spawns `chat-server-rs` as the
+/// ADAPTER's child, not this test process's, so there is nothing to call
+/// `.kill()` on directly -- only the pid the tool reported back.
+fn kill_pid(pid: u64) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .status();
+    }
+}
+
+/// Kills the pid it holds when dropped, including on a panic unwind, so a
+/// failing assertion partway through a test does not leak a real
+/// `chat-server-rs` process into the rest of the run.
+struct SpawnedServerGuard(u64);
+
+impl Drop for SpawnedServerGuard {
+    fn drop(&mut self) {
+        kill_pid(self.0);
+    }
+}
+
+/// With nothing answering the beacon at all, `start_server` spawns a real
+/// `chat-server-rs` of its own, and a plain client can then reach it at the
+/// address the tool reported -- this is the case Harness::new never
+/// exercises, since it always pre-starts a server.
+#[test]
+fn start_server_spawns_one_when_nothing_answers_and_a_client_can_then_reach_it() {
+    let server_bin = bin_dir().join(format!("chat-server-rs{}", std::env::consts::EXE_SUFFIX));
+    if !server_bin.is_file() {
+        eprintln!(
+            "mcp_flow[startfresh]: SKIPPED — no chat-server-rs beside the adapter in this build"
+        );
+        return;
+    }
+    let home = scratch("startfresh");
+    // A beacon port nothing else on this machine announces on, chosen the
+    // same way the rest of this file isolates itself.
+    let beacon_port = free_port();
+
+    let mut adapter = Command::new(bin_dir().join("chat-mcp"))
+        .env("AI_CHAT_HOME", &home)
+        .env("CHAT_SESSION_ID", "startfresh")
+        // The client-side name `start_server`'s own discover check reads...
+        .env("AI_CHAT_BEACON_PORT", beacon_port.to_string())
+        // ...and the server-side name, set here (not with std::env::set_var
+        // later) because `start_server` spawns chat-server-rs by inheriting
+        // THIS process's environment, not whatever the test process's own
+        // environment holds at call time -- the two are unrelated once the
+        // adapter itself has already started.
+        .env("CHAT_BEACON_PORT", beacon_port.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("chat-mcp starts");
+    let stdin = adapter.stdin.take().expect("adapter stdin");
+    let stdout = BufReader::new(adapter.stdout.take().expect("adapter stdout"));
+    let (sender, lines) = channel();
+    std::thread::spawn(move || {
+        for line in stdout.lines().map_while(Result::ok) {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let mut harness = Harness {
+        home: home.clone(),
+        port: 0,
+        server: None,
+        adapter,
+        stdin,
+        lines,
+        notices: VecDeque::new(),
+        next_id: 1,
+    };
+
+    let result = harness.call("start_server", json!({}));
+    assert_eq!(result["started"], json!(true), "{result}");
+    let pid = result["pid"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("start_server reported no pid: {result}"));
+    let _guard = SpawnedServerGuard(pid);
+    let server_addr = result["server"]
+        .as_str()
+        .unwrap_or_else(|| panic!("start_server reported no address: {result}"))
+        .to_string();
+
+    // Prove the spawned server is real: a plain client connects and posts.
+    let status = Command::new(bin_dir().join("chat-client-rs"))
+        .args([
+            "send",
+            "--server",
+            &server_addr,
+            "--nick",
+            "prover",
+            "--chan",
+            "#t90x",
+            "--text",
+            "the spawned server answers",
+            "--no-session",
+        ])
+        .env("AI_CHAT_HOME", &home)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("chat-client-rs runs");
+    assert!(
+        status.success(),
+        "a client could not reach the spawned server"
     );
 }

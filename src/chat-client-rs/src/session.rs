@@ -336,7 +336,7 @@ impl Session {
         Session::path_for(state_dir, &session_key().0)
     }
 
-    pub(crate) fn path_for(state_dir: &std::path::Path, key: &str) -> PathBuf {
+    pub fn path_for(state_dir: &std::path::Path, key: &str) -> PathBuf {
         state_dir.join("sessions").join(format!("{}.json", key))
     }
 

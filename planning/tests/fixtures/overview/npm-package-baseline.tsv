@@ -43,7 +43,7 @@ package/chat-interrupt-plugin/hooks/hooks.json	211
 package/chat-interrupt-plugin/hooks/lib.sh	2668
 package/chat-interrupt-plugin/hooks/pre-tool-use.sh	4635
 package/chat-interrupt-plugin/tests/test-chat-interrupt-hook.sh	7992
-package/chat/SKILL.md	49924
+package/chat/SKILL.md	49999
 package/chat/binaries.tsv	2526
 package/chat/docs/README.md	1927
 package/chat/docs/interrupts.md	9277
