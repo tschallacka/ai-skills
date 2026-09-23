@@ -4,11 +4,13 @@
 //! daemon: one Request per connection line, one Response back (NDJSON, the
 //! same one-message-per-line shape ai-text-editor's own transport.rs uses).
 //!
-//! Seven wire-level operations: two bounded reads, four guarded writes, and
-//! one read-only validator. Every guarded Request carries the PlanRevision
-//! (as its hex string) the caller last observed for the document it targets;
-//! the server checks it against the document's current on-disk hash before
-//! applying any write (see revision.rs).
+//! Two bounded reads, a growing set of guarded writes (three of them --
+//! UpdateWorkUnit/RemoveWorkUnit/UpdatePlanContent -- generic wire shapes
+//! covering several CLI modes each, rather than one Request variant per
+//! flag), and one read-only validator. Every guarded Request carries the
+//! PlanRevision (as its hex string) the caller last observed for the
+//! document it targets; the server checks it against the document's current
+//! on-disk hash before applying any write (see revision.rs).
 
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +46,51 @@ pub enum Request {
         depends_on: String,
         goal: String,
         step: String,
+        revision: String,
+    },
+    /// The flexible positional/flag mix update-work-unit itself takes
+    /// (`args`, verbatim, after `plan_dir` and `unit_id`) rather than one
+    /// field per flag: `--scope`/`--file`/`--type`/`--depends-on`/
+    /// `--description`, the two-positional shorthand, or `--goal`/`--step`
+    /// to move the unit are all the same guarded write against the same
+    /// file, so nothing is gained by giving each its own Request shape.
+    /// Guards work-unit-inventory.md only, matching AddWorkUnit's own
+    /// documented MVP simplification: a move also rewrites the unit's step
+    /// file and both goals' progress trackers, and those are not separately
+    /// guarded here.
+    UpdateWorkUnit {
+        plan_dir: String,
+        unit_id: String,
+        args: Vec<String>,
+        revision: String,
+    },
+    /// Guards work-unit-inventory.md, the same simplification as
+    /// UpdateWorkUnit/AddWorkUnit -- the cascade also rewrites coverage
+    /// rows, the owning goal's roster, the step file and its testing twin,
+    /// and rebuilds both progress trackers, none of which are separately
+    /// guarded here.
+    RemoveWorkUnit {
+        plan_dir: String,
+        unit_id: String,
+        confirm_cascade: bool,
+        revision: String,
+    },
+    /// One generic wire shape for every update-plan-content mode except
+    /// review-status/testing-requirement (which predate this and keep their
+    /// own dedicated variants): `mode` is the long flag name without its
+    /// leading `--` (e.g. "description-paragraph", "title",
+    /// "decomposition-review"), and `args` is the rest of that mode's own
+    /// positional arguments, verbatim and in CLI order, after `plan_dir`.
+    /// The guard target is resolved from `mode`/`args` the same way
+    /// update-plan-content's own `document_path` resolves its write target
+    /// (see handlers::update_plan_content_target) -- eighteen modes would
+    /// otherwise mean eighteen near-identical Request variants and handler
+    /// functions for what is, underneath, one guarded subprocess call with
+    /// a different flag and argument list each time.
+    UpdatePlanContent {
+        plan_dir: String,
+        mode: String,
+        args: Vec<String>,
         revision: String,
     },
     SetReviewStatus {
@@ -120,6 +167,34 @@ mod tests {
         let encoded = encode_request(&request);
         let decoded = decode_request(&encoded).unwrap();
         assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn the_generic_write_requests_round_trip_through_json() {
+        let requests = [
+            Request::UpdateWorkUnit {
+                plan_dir: "/plans/demo".to_string(),
+                unit_id: "W05".to_string(),
+                args: vec!["--scope".to_string(), "new scope".to_string()],
+                revision: "abc".to_string(),
+            },
+            Request::RemoveWorkUnit {
+                plan_dir: "/plans/demo".to_string(),
+                unit_id: "W05".to_string(),
+                confirm_cascade: true,
+                revision: "abc".to_string(),
+            },
+            Request::UpdatePlanContent {
+                plan_dir: "/plans/demo".to_string(),
+                mode: "title".to_string(),
+                args: vec!["goal:01-example".to_string(), "New title".to_string()],
+                revision: "abc".to_string(),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
     }
 
     #[test]

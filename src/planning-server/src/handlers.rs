@@ -1,32 +1,37 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! The seven MVP request handlers. The two reads call directly into
-//! plan-context-core's own bounded-read machinery (the same implementation
-//! plan-context.sh is already wired onto). The four writes DELEGATE to the
-//! existing standalone commands (update-step, add-work-unit,
+//! The request handlers, growing past the original seven-operation MVP.
+//! The two reads call directly into plan-context-core's own bounded-read
+//! machinery (the same implementation plan-context.sh is already wired
+//! onto). Every write DELEGATES to the existing standalone commands
+//! (update-step, add-work-unit, update-work-unit, remove-work-unit,
 //! update-plan-content) as real subprocesses rather than reimplementing
-//! their own logic -- update-step/add-work-unit/update-plan-content are all
-//! `main.rs`-only binaries with no `[lib]` target, so there is no library to
-//! call instead, and delegation guarantees byte-identical output by
-//! construction rather than by separately-verified parity. The guard gates
-//! whether the subprocess runs at all: a stale guard means the subprocess is
-//! never invoked. ValidatePlan is unguarded and read-only.
+//! their own logic -- all `main.rs`-only binaries with no `[lib]` target, so
+//! there is no library to call instead, and delegation guarantees
+//! byte-identical output by construction rather than by separately-verified
+//! parity. The guard gates whether the subprocess runs at all: a stale
+//! guard means the subprocess is never invoked. ValidatePlan is unguarded
+//! and read-only.
 //!
 //! Known MVP simplification, recorded rather than hidden: add-work-unit
 //! touches TWO files (it inserts a row into work-unit-inventory.md and
 //! creates a brand-new step .md file); only the inventory row is guarded
 //! here, since the new step file does not exist yet at guard time and a
-//! creation has nothing to check a hash against. update-step, in fact,
-//! writes only ONE file -- confirmed directly against the real standalone
-//! binary: it rewrites the goal's own progress.md status row and leaves the
-//! step document itself completely untouched, so progress.md, not the step
-//! file, is what update-step's own guard must check (an earlier version of
-//! this handler guarded the step file instead, which never changed, so the
-//! guard never actually detected anything -- every call, racing or
-//! sequential, correct revision or stale, silently passed). Closing the
-//! add-work-unit gap (covering its new step file too) is exactly the
-//! "migrate every other command onto this mechanism" follow-on this goal's
-//! own scope section defers.
+//! creation has nothing to check a hash against. update-work-unit and
+//! remove-work-unit inherit the same simplification -- a move or a cascade
+//! removal rewrites the unit's step file, coverage rows, both goals'
+//! rosters and both progress trackers, and only the inventory row's own
+//! guard is checked. update-step, in fact, writes only ONE file --
+//! confirmed directly against the real standalone binary: it rewrites the
+//! goal's own progress.md status row and leaves the step document itself
+//! completely untouched, so progress.md, not the step file, is what
+//! update-step's own guard must check (an earlier version of this handler
+//! guarded the step file instead, which never changed, so the guard never
+//! actually detected anything -- every call, racing or sequential, correct
+//! revision or stale, silently passed). Closing the add-work-unit gap
+//! (covering its new step file too) is exactly the "migrate every other
+//! command onto this mechanism" follow-on this goal's own scope section
+//! defers.
 
 use crate::protocol::{Request, Response};
 use crate::revision::{guarded_call, read_with_revision, PlanRevision, RevisionError};
@@ -87,6 +92,24 @@ pub fn dispatch_with_bin_dir(request: Request, bin_dir: Option<&Path>) -> Respon
             &step,
             &revision,
         ),
+        Request::UpdateWorkUnit {
+            plan_dir,
+            unit_id,
+            args,
+            revision,
+        } => update_work_unit(bin_dir, &plan_dir, &unit_id, &args, &revision),
+        Request::RemoveWorkUnit {
+            plan_dir,
+            unit_id,
+            confirm_cascade,
+            revision,
+        } => remove_work_unit(bin_dir, &plan_dir, &unit_id, confirm_cascade, &revision),
+        Request::UpdatePlanContent {
+            plan_dir,
+            mode,
+            args,
+            revision,
+        } => update_plan_content(bin_dir, &plan_dir, &mode, &args, &revision),
         Request::SetReviewStatus {
             plan_dir,
             status,
@@ -238,6 +261,120 @@ fn add_work_unit(
                 step,
             ],
         )
+    }))
+}
+
+fn update_work_unit(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    unit_id: &str,
+    args: &[String],
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let inventory_path = Path::new(plan_dir).join("work-unit-inventory.md");
+    let mut full_args: Vec<&str> = vec![plan_dir, unit_id];
+    full_args.extend(args.iter().map(String::as_str));
+    respond_from(guarded_call(&inventory_path, guard, || {
+        run_command(bin_dir, "update-work-unit", &full_args)
+    }))
+}
+
+fn remove_work_unit(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    unit_id: &str,
+    confirm_cascade: bool,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let inventory_path = Path::new(plan_dir).join("work-unit-inventory.md");
+    let mut full_args: Vec<&str> = vec![plan_dir, unit_id];
+    if confirm_cascade {
+        full_args.push("--confirm-cascade");
+    }
+    respond_from(guarded_call(&inventory_path, guard, || {
+        run_command(bin_dir, "remove-work-unit", &full_args)
+    }))
+}
+
+/// The document id a given update-plan-content `mode` call targets, from
+/// `mode` and its own leading arguments. Some modes take an explicit
+/// document id as their first argument (append-paragraph, table-paragraph,
+/// insert-after, insert-before, delete-paragraph, title, field); others
+/// imply one from the flag itself (description-* implies "plan", goal-*
+/// implies "goal:<args[0]>", step-* implies "step:<args[0]>", review-*
+/// implies "adversarial-review", decomposition-review implies "plan") --
+/// mirroring update-plan-content's own `document_path` dispatch exactly
+/// (src/update-plan-content/src/main.rs). Public so planning-mcp's own
+/// revision-auto-read convenience (reading the current revision when a
+/// caller omits one) can name the same document this handler will guard,
+/// without a second copy of this table.
+pub fn update_plan_content_document_id(mode: &str, args: &[String]) -> Result<String, String> {
+    match mode {
+        "description-paragraph" | "description-section" => Ok("plan".to_string()),
+        "goal-paragraph" | "goal-section" => {
+            let goal = args
+                .first()
+                .ok_or_else(|| format!("{mode} needs a goal name"))?;
+            Ok(format!("goal:{goal}"))
+        }
+        "step-paragraph" | "step-section" => {
+            let step = args
+                .first()
+                .ok_or_else(|| format!("{mode} needs a goal/step"))?;
+            Ok(format!("step:{step}"))
+        }
+        "review-paragraph" | "review-section" => Ok("adversarial-review".to_string()),
+        "decomposition-review" => Ok("plan".to_string()),
+        "append-paragraph" | "table-paragraph" | "insert-after" | "insert-before"
+        | "delete-paragraph" | "title" | "field" => args
+            .first()
+            .cloned()
+            .ok_or_else(|| format!("{mode} needs a document id")),
+        other => Err(format!("unknown update-plan-content mode: {other}")),
+    }
+}
+
+/// Resolves the file a given update-plan-content `mode` call will write to,
+/// reusing the same plan_context_core::resolve_document this crate's own
+/// read path already calls rather than a second copy of that id-to-path
+/// table.
+fn update_plan_content_target(
+    plan_dir: &str,
+    mode: &str,
+    args: &[String],
+) -> Result<PathBuf, String> {
+    let document_id = update_plan_content_document_id(mode, args)?;
+    plan_context_core::resolve_document(Path::new(plan_dir), &document_id)
+}
+
+fn update_plan_content(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    mode: &str,
+    args: &[String],
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let target = match update_plan_content_target(plan_dir, mode, args) {
+        Ok(path) => path,
+        Err(message) => return Response::Error { message },
+    };
+    let flag = format!("--{mode}");
+    let mut full_args: Vec<&str> = vec![flag.as_str(), plan_dir];
+    full_args.extend(args.iter().map(String::as_str));
+    respond_from(guarded_call(&target, guard, || {
+        run_command(bin_dir, "update-plan-content", &full_args)
     }))
 }
 
@@ -913,6 +1050,236 @@ mod tests {
         );
 
         assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    /// The same add-work-unit invocation `read_work_unit_is_sugar_for...`
+    /// and both `update_step` tests already repeat inline, factored out
+    /// only for the new tests below (existing ones are left as they are,
+    /// to keep this change's diff scoped to what it actually touches).
+    fn add_demo_work_unit(bin_dir: &Path, plan_dir: &Path) {
+        run(
+            bin_dir,
+            "add-work-unit",
+            &[
+                plan_dir.to_str().unwrap(),
+                "--id",
+                "W01",
+                "--type",
+                "source",
+                "--file",
+                "src/x.rs",
+                "--scope",
+                "x",
+                "--subscope",
+                "N/A",
+                "--change",
+                "do x",
+                "--depends-on",
+                "--",
+                "--goal",
+                "01-demo",
+                "--step",
+                "01-step-x",
+            ],
+        );
+    }
+
+    #[test]
+    fn update_work_unit_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        add_demo_work_unit(&bin_dir, &plan_dir);
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let inventory_path = copy_a.join("work-unit-inventory.md");
+        let (_, guard) = read_with_revision(&inventory_path).unwrap();
+        ensure_built(&bin_dir, "update-work-unit");
+        let response = dispatch_with_bin_dir(
+            Request::UpdateWorkUnit {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                unit_id: "W01".to_string(),
+                args: vec!["--scope".to_string(), "new scope".to_string()],
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "update-work-unit",
+            &[copy_b.to_str().unwrap(), "W01", "--scope", "new scope"],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn update_work_unit_with_a_stale_revision_is_refused_and_changes_nothing() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        add_demo_work_unit(&bin_dir, &plan_dir);
+        let before = snapshot(&plan_dir);
+
+        let bogus_guard = PlanRevision::of(b"not the real hash");
+        let response = dispatch_with_bin_dir(
+            Request::UpdateWorkUnit {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                unit_id: "W01".to_string(),
+                args: vec!["--scope".to_string(), "new scope".to_string()],
+                revision: bogus_guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Stale { .. }),
+            "expected Stale, got {response:?}"
+        );
+        assert_eq!(
+            before,
+            snapshot(&plan_dir),
+            "a stale guard must change nothing"
+        );
+    }
+
+    #[test]
+    fn remove_work_unit_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        add_demo_work_unit(&bin_dir, &plan_dir);
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let inventory_path = copy_a.join("work-unit-inventory.md");
+        let (_, guard) = read_with_revision(&inventory_path).unwrap();
+        ensure_built(&bin_dir, "remove-work-unit");
+        let response = dispatch_with_bin_dir(
+            Request::RemoveWorkUnit {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                unit_id: "W01".to_string(),
+                confirm_cascade: false,
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "remove-work-unit",
+            &[copy_b.to_str().unwrap(), "W01"],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn update_plan_content_decomposition_review_matches_the_standalone_command() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let plan_description = copy_a.join("plan-description.md");
+        let (_, guard) = read_with_revision(&plan_description).unwrap();
+        ensure_built(&bin_dir, "update-plan-content");
+        let response = dispatch_with_bin_dir(
+            Request::UpdatePlanContent {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                mode: "decomposition-review".to_string(),
+                args: vec!["completed".to_string()],
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "update-plan-content",
+            &[
+                "--decomposition-review",
+                copy_b.to_str().unwrap(),
+                "completed",
+            ],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn update_plan_content_title_matches_the_standalone_command_on_a_generic_document_id() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+
+        let plan_description = copy_a.join("plan-description.md");
+        let (_, guard) = read_with_revision(&plan_description).unwrap();
+        ensure_built(&bin_dir, "update-plan-content");
+        let response = dispatch_with_bin_dir(
+            Request::UpdatePlanContent {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+                mode: "title".to_string(),
+                args: vec!["plan".to_string(), "A new title".to_string()],
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "update-plan-content",
+            &["--title", copy_b.to_str().unwrap(), "plan", "A new title"],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn update_plan_content_with_an_unknown_mode_is_a_clean_error_not_a_panic() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+
+        let response = dispatch_with_bin_dir(
+            Request::UpdatePlanContent {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                mode: "not-a-real-mode".to_string(),
+                args: vec![],
+                revision: "0".repeat(64),
+            },
+            Some(&bin_dir),
+        );
+        match response {
+            Response::Error { message } => {
+                assert!(message.contains("unknown update-plan-content mode"))
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
     }
 
     #[test]

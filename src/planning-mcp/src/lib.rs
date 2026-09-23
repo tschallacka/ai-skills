@@ -1,14 +1,15 @@
 // MODE: DEV
 // PACKAGE: PROD
 //! MCP adapter for planning-server, mirroring ai-text-editor-mcp's own
-//! thin-adapter shape: a stdio JSON-RPC surface exposing the same seven MVP
-//! operations planning-client's own subcommands expose, each implemented as
-//! a direct, in-process call into planning_server::handlers::dispatch --
-//! no operation's own logic is reimplemented here. Calling the handler
-//! in-process rather than through the socket needs no running
-//! planning-server daemon at all; it is the plan-file-level revision guard,
-//! not any particular process, that makes a write safe, so this is not a
-//! second implementation of that guard, only a second caller of it.
+//! thin-adapter shape: a stdio JSON-RPC surface exposing the operations
+//! planning_server::handlers dispatches, growing past the original seven-
+//! operation MVP, each implemented as a direct, in-process call into
+//! planning_server::handlers::dispatch -- no operation's own logic is
+//! reimplemented here. Calling the handler in-process rather than through
+//! the socket needs no running planning-server daemon at all; it is the
+//! plan-file-level revision guard, not any particular process, that makes a
+//! write safe, so this is not a second implementation of that guard, only a
+//! second caller of it.
 
 use planning_server::handlers;
 use planning_server::protocol::{Request, Response};
@@ -44,6 +45,10 @@ fn string(description: &str) -> Value {
 
 fn boolean(description: &str) -> Value {
     json!({"type": "boolean", "description": description})
+}
+
+fn string_array(description: &str) -> Value {
+    json!({"type": "array", "items": {"type": "string"}, "description": description})
 }
 
 fn tool(name: &str, description: &str, required: &[&str], properties: Vec<(&str, Value)>) -> Value {
@@ -117,6 +122,39 @@ fn tool_definitions() -> Vec<Value> {
             ],
         ),
         tool(
+            "update_work_unit",
+            "Change an existing work unit's scope/file/type/depends-on/description, or move it to a different goal/step, revision-guarded on work-unit-inventory.md. A move also rewrites the unit's step file and both goals' progress trackers; only the inventory row is guarded.",
+            &["plan_dir", "unit_id", "args"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("unit_id", string("The work unit id, e.g. W05.")),
+                ("args", string_array("The rest of update-work-unit's own arguments verbatim, e.g. [\"--scope\", \"new scope\"] or [\"--goal\", \"02-next\", \"--step\", \"03-step\"] to move it.")),
+                ("revision", string("work-unit-inventory.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "remove_work_unit",
+            "Remove a work unit: its inventory row, its id from coverage rows, its goal's Owned work units entry, its step file and testing twin, then rebuilds both progress trackers. Revision-guarded on work-unit-inventory.md; other rewritten files are not separately guarded. Refuses when another unit depends on this one unless confirm_cascade is set.",
+            &["plan_dir", "unit_id"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("unit_id", string("The work unit id, e.g. W05.")),
+                ("confirm_cascade", boolean("Prune dependency links from other units onto this one. Defaults to false.")),
+                ("revision", string("work-unit-inventory.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "update_plan_content",
+            "Edit plan prose: one paragraph, a whole section, a title, a table cell, or a decomposition-review flag, revision-guarded on whichever document the mode targets.",
+            &["plan_dir", "mode", "args"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("mode", string("description-paragraph, description-section, goal-paragraph, goal-section, step-paragraph, step-section, review-paragraph, review-section, append-paragraph, table-paragraph, insert-after, insert-before, delete-paragraph, title, field, or decomposition-review.")),
+                ("args", string_array("The mode's own arguments verbatim, e.g. [\"1.2\", \"new text\"] for description-paragraph, or [\"goal:01-example\", \"New title\"] for title.")),
+                ("revision", string("The target document's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
             "set_review_status",
             "Set the plan's adversarial-review status, revision-guarded.",
             &["plan_dir", "status"],
@@ -170,6 +208,29 @@ fn bool_arg(arguments: &Value, key: &str) -> Result<bool, String> {
         .get(key)
         .and_then(Value::as_bool)
         .ok_or_else(|| format!("missing required argument: {key}"))
+}
+
+fn opt_bool_arg(arguments: &Value, key: &str) -> bool {
+    arguments.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// `args` on update_work_unit/update_plan_content: an array of strings, or
+/// simply absent (some modes/calls need none) -- absent is `[]`, not a
+/// missing-argument refusal, since every other tool's optional array would
+/// otherwise need its own caller-side `[]` default.
+fn str_array_arg(arguments: &Value, key: &str) -> Result<Vec<String>, String> {
+    match arguments.get(key) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| format!("{key} must be an array of strings"))
+            })
+            .collect(),
+        Some(_) => Err(format!("{key} must be an array of strings")),
+    }
 }
 
 fn revision_or_read(
@@ -240,6 +301,43 @@ fn build_request(name: &str, arguments: &Value) -> Result<Request, String> {
                 depends_on: str_arg(arguments, "depends_on")?,
                 goal: str_arg(arguments, "goal")?,
                 step: str_arg(arguments, "step")?,
+                revision,
+            })
+        }
+        "update_work_unit" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let unit_id = str_arg(arguments, "unit_id")?;
+            let args = str_array_arg(arguments, "args")?;
+            let revision = revision_or_read(arguments, &plan_dir, "inventory")?;
+            Ok(Request::UpdateWorkUnit {
+                plan_dir,
+                unit_id,
+                args,
+                revision,
+            })
+        }
+        "remove_work_unit" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let unit_id = str_arg(arguments, "unit_id")?;
+            let confirm_cascade = opt_bool_arg(arguments, "confirm_cascade");
+            let revision = revision_or_read(arguments, &plan_dir, "inventory")?;
+            Ok(Request::RemoveWorkUnit {
+                plan_dir,
+                unit_id,
+                confirm_cascade,
+                revision,
+            })
+        }
+        "update_plan_content" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let mode = str_arg(arguments, "mode")?;
+            let args = str_array_arg(arguments, "args")?;
+            let document_id = handlers::update_plan_content_document_id(&mode, &args)?;
+            let revision = revision_or_read(arguments, &plan_dir, &document_id)?;
+            Ok(Request::UpdatePlanContent {
+                plan_dir,
+                mode,
+                args,
                 revision,
             })
         }
@@ -346,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_names_all_seven_operations() {
+    fn tools_list_names_every_routed_operation() {
         let response = handle(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
         let names: Vec<&str> = response["result"]["tools"]
             .as_array()
@@ -361,11 +459,105 @@ mod tests {
                 "read_work_unit",
                 "update_step",
                 "add_work_unit",
+                "update_work_unit",
+                "remove_work_unit",
+                "update_plan_content",
                 "set_review_status",
                 "set_testing_requirement",
                 "validate_plan",
             ]
         );
+    }
+
+    #[test]
+    fn update_work_unit_reports_a_missing_argument_before_ever_reading_a_plan() {
+        // unit_id is missing, so this must fail at that check, never at
+        // reading a (nonexistent) plan for the revision -- same contract
+        // update_step's own equivalent test pins for the existing tools.
+        let response = call(
+            "update_work_unit",
+            json!({"plan_dir": "/definitely/does/not/exist"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn update_work_unit_accepts_an_args_array_and_defaults_it_to_empty() {
+        // args is optional; when it is present it must be an array of
+        // strings, and both calls fail on the (deliberately nonexistent)
+        // plan_dir at the revision read, not on parsing args itself.
+        for arguments in [
+            json!({"plan_dir": "/definitely/does/not/exist", "unit_id": "W01"}),
+            json!({"plan_dir": "/definitely/does/not/exist", "unit_id": "W01", "args": ["--scope", "x"]}),
+        ] {
+            let response = call("update_work_unit", arguments);
+            assert_eq!(response["result"]["isError"], true);
+            assert!(
+                !response["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("must be an array of strings"),
+                "a valid or absent args must not be reported as malformed"
+            );
+        }
+    }
+
+    #[test]
+    fn update_work_unit_refuses_a_non_array_args() {
+        let response = call(
+            "update_work_unit",
+            json!({"plan_dir": "/x", "unit_id": "W01", "args": "not an array"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("must be an array of strings"));
+    }
+
+    #[test]
+    fn remove_work_unit_reports_a_missing_argument_before_ever_reading_a_plan() {
+        let response = call(
+            "remove_work_unit",
+            json!({"plan_dir": "/definitely/does/not/exist"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn update_plan_content_refuses_an_unknown_mode_before_ever_reading_a_plan() {
+        let response = call(
+            "update_plan_content",
+            json!({"plan_dir": "/definitely/does/not/exist", "mode": "not-a-real-mode", "args": []}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("unknown update-plan-content mode"));
+    }
+
+    #[test]
+    fn update_plan_content_reports_a_missing_positional_argument_by_name() {
+        // "goal-paragraph" needs a goal name as args[0]; an empty args must
+        // be refused by name rather than panicking on an out-of-bounds index.
+        let response = call(
+            "update_plan_content",
+            json!({"plan_dir": "/definitely/does/not/exist", "mode": "goal-paragraph", "args": []}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("needs a goal name"));
     }
 
     #[test]
