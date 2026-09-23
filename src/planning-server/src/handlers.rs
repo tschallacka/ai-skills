@@ -122,6 +122,37 @@ pub fn dispatch_with_bin_dir(request: Request, bin_dir: Option<&Path>) -> Respon
             rationale,
             revision,
         } => set_testing_requirement(bin_dir, &plan_dir, &goal, required, &rationale, &revision),
+        Request::CreateAdversarialReview { plan_dir } => {
+            create_adversarial_review(bin_dir, &plan_dir)
+        }
+        Request::UpdateAdversarialReview {
+            plan_dir,
+            args,
+            revision,
+        } => update_adversarial_review(bin_dir, &plan_dir, &args, &revision),
+        Request::AddAdversarialFinding {
+            plan_dir,
+            finding_id,
+            args,
+            revision,
+        } => add_adversarial_finding(bin_dir, &plan_dir, &finding_id, &args, &revision),
+        Request::ResolveFinding {
+            plan_dir,
+            finding_id,
+            args,
+            revision,
+        } => resolve_finding(bin_dir, &plan_dir, &finding_id, &args, &revision),
+        Request::MintFixKeys { plan_dir } => mint_fix_keys(bin_dir, &plan_dir),
+        Request::VerifyFixKeys {
+            plan_dir,
+            claimed_by,
+        } => verify_fix_keys(bin_dir, &plan_dir, claimed_by.as_deref()),
+        Request::AddFixClaim {
+            plan_dir,
+            finding_id,
+            work_unit,
+            key,
+        } => add_fix_claim(bin_dir, &plan_dir, &finding_id, &work_unit, &key),
         Request::ValidatePlan { plan_dir, complete } => validate_plan(bin_dir, &plan_dir, complete),
     }
 }
@@ -425,6 +456,147 @@ fn set_testing_requirement(
             ],
         )
     }))
+}
+
+/// Runs `name`, then reports the new revision of `target` on success --
+/// the shared shape `create_adversarial_review`/`mint_fix_keys`/
+/// `add_fix_claim` all need for their own unguarded creates/regenerations:
+/// no guard to check beforehand, but still a revision worth handing back
+/// so a caller's very next guarded call on the same file has one.
+fn run_then_report_revision(
+    bin_dir: Option<&Path>,
+    name: &str,
+    args: &[&str],
+    target: &Path,
+) -> Response {
+    match run_command(bin_dir, name, args) {
+        Ok(()) => match read_with_revision(target) {
+            Ok((_, revision)) => Response::Written {
+                revision: revision.to_hex(),
+            },
+            Err(error) => Response::Error {
+                message: error.to_string(),
+            },
+        },
+        Err(message) => Response::Error { message },
+    }
+}
+
+fn create_adversarial_review(bin_dir: Option<&Path>, plan_dir: &str) -> Response {
+    let review_path = Path::new(plan_dir).join("adversarial-review.md");
+    run_then_report_revision(
+        bin_dir,
+        "create-adversarial-review",
+        &[plan_dir],
+        &review_path,
+    )
+}
+
+fn update_adversarial_review(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    args: &[String],
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let review_path = Path::new(plan_dir).join("adversarial-review.md");
+    let mut full_args: Vec<&str> = vec![plan_dir];
+    full_args.extend(args.iter().map(String::as_str));
+    respond_from(guarded_call(&review_path, guard, || {
+        run_command(bin_dir, "update-adversarial-review", &full_args)
+    }))
+}
+
+fn add_adversarial_finding(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    finding_id: &str,
+    args: &[String],
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let review_path = Path::new(plan_dir).join("adversarial-review.md");
+    let mut full_args: Vec<&str> = vec![plan_dir, finding_id];
+    full_args.extend(args.iter().map(String::as_str));
+    respond_from(guarded_call(&review_path, guard, || {
+        run_command(bin_dir, "add-adversarial-finding", &full_args)
+    }))
+}
+
+fn resolve_finding(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    finding_id: &str,
+    args: &[String],
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let review_path = Path::new(plan_dir).join("adversarial-review.md");
+    let mut full_args: Vec<&str> = vec![plan_dir, finding_id];
+    full_args.extend(args.iter().map(String::as_str));
+    respond_from(guarded_call(&review_path, guard, || {
+        run_command(bin_dir, "resolve-finding", &full_args)
+    }))
+}
+
+fn mint_fix_keys(bin_dir: Option<&Path>, plan_dir: &str) -> Response {
+    let fix_keys_path = Path::new(plan_dir).join("fix-keys.json");
+    run_then_report_revision(bin_dir, "mint-fix-keys", &[plan_dir], &fix_keys_path)
+}
+
+fn verify_fix_keys(bin_dir: Option<&Path>, plan_dir: &str, claimed_by: Option<&str>) -> Response {
+    let program = program_path(bin_dir, "verify-fix-keys");
+    let mut args: Vec<&str> = vec![plan_dir];
+    if let Some(id) = claimed_by {
+        args.push("--claimed-by");
+        args.push(id);
+    }
+    match Command::new(&program).args(&args).output() {
+        Ok(output) => {
+            let mut report = String::from_utf8_lossy(&output.stdout).into_owned();
+            report.push_str(&String::from_utf8_lossy(&output.stderr));
+            Response::Validated {
+                passed: output.status.success(),
+                report,
+            }
+        }
+        Err(error) => Response::Error {
+            message: format!("could not run {}: {error}", program.display()),
+        },
+    }
+}
+
+fn add_fix_claim(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    finding_id: &str,
+    work_unit: &str,
+    key: &str,
+) -> Response {
+    let fixes_path = Path::new(plan_dir).join("fixes.md");
+    run_then_report_revision(
+        bin_dir,
+        "add-fix-claim",
+        &[
+            plan_dir,
+            "--finding",
+            finding_id,
+            "--work-unit",
+            work_unit,
+            "--key",
+            key,
+        ],
+        &fixes_path,
+    )
 }
 
 fn validate_plan(bin_dir: Option<&Path>, plan_dir: &str, complete: bool) -> Response {
@@ -1280,6 +1452,199 @@ mod tests {
             }
             other => panic!("expected Error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn create_adversarial_review_matches_the_standalone_command_on_an_equivalent_copy() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        // setup_plan already runs create-adversarial-review; remove it from
+        // both copies first so there is something to create.
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        let copy_a = cloned_plan(scratch.path(), "copy-a", &plan_dir);
+        let copy_b = cloned_plan(scratch.path(), "copy-b", &plan_dir);
+        fs::remove_file(copy_a.join("adversarial-review.md")).unwrap();
+        fs::remove_file(copy_b.join("adversarial-review.md")).unwrap();
+
+        ensure_built(&bin_dir, "create-adversarial-review");
+        let response = dispatch_with_bin_dir(
+            Request::CreateAdversarialReview {
+                plan_dir: copy_a.to_string_lossy().into_owned(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written, got {response:?}"
+        );
+
+        run(
+            &bin_dir,
+            "create-adversarial-review",
+            &[copy_b.to_str().unwrap()],
+        );
+
+        assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    #[test]
+    fn create_adversarial_review_refuses_cleanly_when_it_already_exists() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        // setup_plan already runs create-adversarial-review once.
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        ensure_built(&bin_dir, "create-adversarial-review");
+
+        let response = dispatch_with_bin_dir(
+            Request::CreateAdversarialReview {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+            },
+            Some(&bin_dir),
+        );
+        match response {
+            Response::Error { message } => assert!(!message.is_empty()),
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_adversarial_review_and_fix_key_workflow_runs_end_to_end() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        add_demo_work_unit(&bin_dir, &plan_dir);
+        for name in [
+            "add-adversarial-finding",
+            "resolve-finding",
+            "mint-fix-keys",
+            "verify-fix-keys",
+            "add-fix-claim",
+        ] {
+            ensure_built(&bin_dir, name);
+        }
+        let plan_dir_str = plan_dir.to_string_lossy().into_owned();
+
+        // 1. Gate a finding on W01, guarded on adversarial-review.md.
+        // AR-01 is create-adversarial-review's own scaffolded placeholder
+        // row, so the new finding this test adds is AR-02.
+        let review_path = plan_dir.join("adversarial-review.md");
+        let (_, guard) = read_with_revision(&review_path).unwrap();
+        let response = dispatch_with_bin_dir(
+            Request::AddAdversarialFinding {
+                plan_dir: plan_dir_str.clone(),
+                finding_id: "AR-02".to_string(),
+                args: vec![
+                    "Missing X".to_string(),
+                    "Add X".to_string(),
+                    "--work-unit".to_string(),
+                    "W01".to_string(),
+                ],
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written for add_adversarial_finding, got {response:?}"
+        );
+
+        // 2. Mint fix keys (unguarded, full regeneration).
+        let response = dispatch_with_bin_dir(
+            Request::MintFixKeys {
+                plan_dir: plan_dir_str.clone(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written for mint_fix_keys, got {response:?}"
+        );
+        let fix_keys: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(plan_dir.join("fix-keys.json")).unwrap())
+                .unwrap();
+        let key = fix_keys["keys"]["AR-02"]["W01"]
+            .as_str()
+            .expect("a minted key for AR-02/W01")
+            .to_string();
+
+        // 3. Claim the fix (unguarded, append-only).
+        let response = dispatch_with_bin_dir(
+            Request::AddFixClaim {
+                plan_dir: plan_dir_str.clone(),
+                finding_id: "AR-02".to_string(),
+                work_unit: "W01".to_string(),
+                key: key.clone(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Written { .. }),
+            "expected Written for add_fix_claim, got {response:?}"
+        );
+
+        // 4. Verify the claim (read-only, unguarded) -- must pass.
+        let response = dispatch_with_bin_dir(
+            Request::VerifyFixKeys {
+                plan_dir: plan_dir_str.clone(),
+                claimed_by: None,
+            },
+            Some(&bin_dir),
+        );
+        match response {
+            Response::Validated { passed, report } => {
+                assert!(passed, "expected the claim to verify, got: {report}")
+            }
+            other => panic!("expected Validated, got {other:?}"),
+        }
+
+        // 5. Resolve the finding, guarded on adversarial-review.md.
+        let (_, guard) = read_with_revision(&review_path).unwrap();
+        let response = dispatch_with_bin_dir(
+            Request::ResolveFinding {
+                plan_dir: plan_dir_str.clone(),
+                finding_id: "AR-02".to_string(),
+                args: vec!["--status".to_string(), "resolved".to_string()],
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        match response {
+            Response::Written { .. } => {}
+            other => panic!("expected Written for resolve_finding, got {other:?}"),
+        }
+        let after_resolve = fs::read_to_string(&review_path).unwrap();
+        assert!(
+            after_resolve.contains("resolved"),
+            "expected the finding's status to read resolved: {after_resolve}"
+        );
+    }
+
+    #[test]
+    fn add_adversarial_finding_with_a_stale_revision_is_refused_and_changes_nothing() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = setup_plan(&bin_dir, scratch.path());
+        let before = snapshot(&plan_dir);
+
+        let bogus_guard = PlanRevision::of(b"not the real hash");
+        let response = dispatch_with_bin_dir(
+            Request::AddAdversarialFinding {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                finding_id: "AR-02".to_string(),
+                args: vec!["Missing X".to_string(), "Add X".to_string()],
+                revision: bogus_guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        assert!(
+            matches!(response, Response::Stale { .. }),
+            "expected Stale, got {response:?}"
+        );
+        assert_eq!(
+            before,
+            snapshot(&plan_dir),
+            "a stale guard must change nothing"
+        );
     }
 
     #[test]

@@ -177,6 +177,70 @@ fn tool_definitions() -> Vec<Value> {
             ],
         ),
         tool(
+            "create_adversarial_review",
+            "Create the plan's adversarial-review.md. Unguarded: refuses outright if it already exists, so there is nothing to lose a concurrent write against.",
+            &["plan_dir"],
+            vec![("plan_dir", string("The plan directory."))],
+        ),
+        tool(
+            "update_adversarial_review",
+            "Rewrite the adversarial-review Findings table from CSV rows (ID, Missing or over-broad item, Required plan change, Status, Work unit), read from adversarial-review-incoming.md if present, else --file, else stdin. Revision-guarded on adversarial-review.md.",
+            &["plan_dir"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("args", string_array("update-adversarial-review's own arguments verbatim, e.g. [\"--file\", \"rows.csv\"] or [\"--cycle\", \"2\"] or [\"--check\"].")),
+                ("revision", string("adversarial-review.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "add_adversarial_finding",
+            "Append a finding to the adversarial review. Revision-guarded on adversarial-review.md; re-minting fix-keys.json when a work unit is named is not separately guarded.",
+            &["plan_dir", "finding_id", "args"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("finding_id", string("The finding id, e.g. AR-01.")),
+                ("args", string_array("The finding and resolution text, then optional flags, e.g. [\"Missing X\", \"Add X\", \"--status\", \"open\", \"--work-unit\", \"W05\"].")),
+                ("revision", string("adversarial-review.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "resolve_finding",
+            "Record a finding's status (and optionally who claimed it). Revision-guarded on adversarial-review.md.",
+            &["plan_dir", "finding_id"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("finding_id", string("The finding id, e.g. AR-01.")),
+                ("args", string_array("resolve-finding's own arguments verbatim, e.g. [\"--status\", \"resolved\", \"--claimed-by\", \"session-1\"].")),
+                ("revision", string("adversarial-review.md's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "mint_fix_keys",
+            "(Re)generate fix-keys.json from the plan's current findings. Unguarded: this fully regenerates the file every time, so a guard against its own previous bytes protects nothing a plain re-run does not already risk.",
+            &["plan_dir"],
+            vec![("plan_dir", string("The plan directory."))],
+        ),
+        tool(
+            "verify_fix_keys",
+            "Verify fixes.md's claims against fix-keys.json (read-only, unguarded, like validate_plan).",
+            &["plan_dir"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("claimed_by", string("Optional: verify as this session id, refusing a claim made by the same session that minted the keys.")),
+            ],
+        ),
+        tool(
+            "add_fix_claim",
+            "Record one fix claim in fixes.md. Unguarded: fixes.md is an append-only audit trail that may not exist yet before the first claim.",
+            &["plan_dir", "finding_id", "work_unit", "key"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("finding_id", string("The adversarial-review finding the fix answers, e.g. AR-01.")),
+                ("work_unit", string("The work unit that carried the fix, e.g. W05.")),
+                ("key", string("The fix key minted for that pair (64 lowercase hex chars).")),
+            ],
+        ),
+        tool(
             "validate_plan",
             "Run the plan validator (read-only, unguarded).",
             &["plan_dir"],
@@ -366,6 +430,56 @@ fn build_request(name: &str, arguments: &Value) -> Result<Request, String> {
                 revision,
             })
         }
+        "create_adversarial_review" => Ok(Request::CreateAdversarialReview {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+        }),
+        "update_adversarial_review" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let args = str_array_arg(arguments, "args")?;
+            let revision = revision_or_read(arguments, &plan_dir, "adversarial-review")?;
+            Ok(Request::UpdateAdversarialReview {
+                plan_dir,
+                args,
+                revision,
+            })
+        }
+        "add_adversarial_finding" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let finding_id = str_arg(arguments, "finding_id")?;
+            let args = str_array_arg(arguments, "args")?;
+            let revision = revision_or_read(arguments, &plan_dir, "adversarial-review")?;
+            Ok(Request::AddAdversarialFinding {
+                plan_dir,
+                finding_id,
+                args,
+                revision,
+            })
+        }
+        "resolve_finding" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let finding_id = str_arg(arguments, "finding_id")?;
+            let args = str_array_arg(arguments, "args")?;
+            let revision = revision_or_read(arguments, &plan_dir, "adversarial-review")?;
+            Ok(Request::ResolveFinding {
+                plan_dir,
+                finding_id,
+                args,
+                revision,
+            })
+        }
+        "mint_fix_keys" => Ok(Request::MintFixKeys {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+        }),
+        "verify_fix_keys" => Ok(Request::VerifyFixKeys {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+            claimed_by: opt_str_arg(arguments, "claimed_by"),
+        }),
+        "add_fix_claim" => Ok(Request::AddFixClaim {
+            plan_dir: str_arg(arguments, "plan_dir")?,
+            finding_id: str_arg(arguments, "finding_id")?,
+            work_unit: str_arg(arguments, "work_unit")?,
+            key: str_arg(arguments, "key")?,
+        }),
         "validate_plan" => Ok(Request::ValidatePlan {
             plan_dir: str_arg(arguments, "plan_dir")?,
             complete: arguments
@@ -464,6 +578,13 @@ mod tests {
                 "update_plan_content",
                 "set_review_status",
                 "set_testing_requirement",
+                "create_adversarial_review",
+                "update_adversarial_review",
+                "add_adversarial_finding",
+                "resolve_finding",
+                "mint_fix_keys",
+                "verify_fix_keys",
+                "add_fix_claim",
                 "validate_plan",
             ]
         );
@@ -558,6 +679,54 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("needs a goal name"));
+    }
+
+    #[test]
+    fn create_adversarial_review_reports_a_missing_argument_by_name() {
+        let response = call("create_adversarial_review", json!({}));
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn add_adversarial_finding_reports_a_missing_argument_before_ever_reading_a_plan() {
+        // finding_id is missing, so this must fail there, never at reading
+        // a (nonexistent) plan for the revision.
+        let response = call(
+            "add_adversarial_finding",
+            json!({"plan_dir": "/definitely/does/not/exist"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn add_fix_claim_reports_each_missing_argument_by_name() {
+        for (present, missing) in [
+            (json!({"plan_dir": "/x"}), "finding_id"),
+            (
+                json!({"plan_dir": "/x", "finding_id": "AR-01"}),
+                "work_unit",
+            ),
+            (
+                json!({"plan_dir": "/x", "finding_id": "AR-01", "work_unit": "W01"}),
+                "key",
+            ),
+        ] {
+            let response = call("add_fix_claim", present);
+            assert_eq!(response["result"]["isError"], true);
+            let text = response["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(
+                text.contains(missing),
+                "expected the refusal to name {missing}: {text}"
+            );
+        }
     }
 
     #[test]

@@ -105,6 +105,62 @@ pub enum Request {
         rationale: String,
         revision: String,
     },
+    /// Unguarded: create-adversarial-review itself refuses outright when
+    /// adversarial-review.md already exists (exit 73), so this can never
+    /// lose a concurrent write the way an overwrite could -- the file
+    /// either does not exist yet (nothing to guard against) or the call
+    /// fails cleanly with no write at all.
+    CreateAdversarialReview { plan_dir: String },
+    /// `args`, verbatim, after `plan_dir`: `--file`/`--cycle`/`--check`.
+    /// Guards adversarial-review.md.
+    UpdateAdversarialReview {
+        plan_dir: String,
+        args: Vec<String>,
+        revision: String,
+    },
+    /// `args`, verbatim, after `plan_dir` and `finding_id`: the finding and
+    /// resolution text, plus `--status`/`--work-unit`. Guards
+    /// adversarial-review.md; re-minting fix-keys.json when `--work-unit`
+    /// is given is not separately guarded (the same MVP simplification as
+    /// AddWorkUnit's own secondary file).
+    AddAdversarialFinding {
+        plan_dir: String,
+        finding_id: String,
+        args: Vec<String>,
+        revision: String,
+    },
+    /// `args`, verbatim, after `plan_dir` and `finding_id`:
+    /// `--status`/`--claimed-by`. Guards adversarial-review.md.
+    ResolveFinding {
+        plan_dir: String,
+        finding_id: String,
+        args: Vec<String>,
+        revision: String,
+    },
+    /// Unguarded: mint-fix-keys fully regenerates fix-keys.json from the
+    /// plan's current findings every time rather than applying an
+    /// incremental edit, so a revision guard against its OWN previous
+    /// bytes would not protect anything a plain re-run does not already
+    /// risk -- two concurrent mints simply leave the later write standing,
+    /// exactly as running the CLI twice back to back would.
+    MintFixKeys { plan_dir: String },
+    /// Read-only, unguarded, like ValidatePlan: verifies fixes.md's claims
+    /// against fix-keys.json and reports pass/fail plus the full report.
+    VerifyFixKeys {
+        plan_dir: String,
+        claimed_by: Option<String>,
+    },
+    /// Unguarded: fixes.md is an append-only audit trail that may not exist
+    /// yet at all before the first claim (the same "nothing to guard
+    /// against yet" gap AddWorkUnit's own new step file already carries,
+    /// documented rather than worked around with a new bootstrap
+    /// mechanism this crate's guard does not otherwise need).
+    AddFixClaim {
+        plan_dir: String,
+        finding_id: String,
+        work_unit: String,
+        key: String,
+    },
     /// Read-only: no revision at all, since it applies no write.
     ValidatePlan { plan_dir: String, complete: bool },
 }
@@ -189,6 +245,49 @@ mod tests {
                 mode: "title".to_string(),
                 args: vec!["goal:01-example".to_string(), "New title".to_string()],
                 revision: "abc".to_string(),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_adversarial_review_workflow_requests_round_trip_through_json() {
+        let requests = [
+            Request::CreateAdversarialReview {
+                plan_dir: "/plans/demo".to_string(),
+            },
+            Request::UpdateAdversarialReview {
+                plan_dir: "/plans/demo".to_string(),
+                args: vec!["--cycle".to_string(), "2".to_string()],
+                revision: "abc".to_string(),
+            },
+            Request::AddAdversarialFinding {
+                plan_dir: "/plans/demo".to_string(),
+                finding_id: "AR-01".to_string(),
+                args: vec!["missing".to_string(), "add it".to_string()],
+                revision: "abc".to_string(),
+            },
+            Request::ResolveFinding {
+                plan_dir: "/plans/demo".to_string(),
+                finding_id: "AR-01".to_string(),
+                args: vec!["--status".to_string(), "resolved".to_string()],
+                revision: "abc".to_string(),
+            },
+            Request::MintFixKeys {
+                plan_dir: "/plans/demo".to_string(),
+            },
+            Request::VerifyFixKeys {
+                plan_dir: "/plans/demo".to_string(),
+                claimed_by: Some("session-1".to_string()),
+            },
+            Request::AddFixClaim {
+                plan_dir: "/plans/demo".to_string(),
+                finding_id: "AR-01".to_string(),
+                work_unit: "W01".to_string(),
+                key: "a".repeat(64),
             },
         ];
         for request in requests {
