@@ -204,8 +204,11 @@ fn starting_without_command_resumes_a_previously_saved_sessions_command() {
     // file still exists, so starting the next process too early would fail
     // to bind while this stale file still satisfies the readiness poll's
     // `socket.exists()` check -- wait for the real signal, not a fixed sleep.
+    // 20s, not 5: observed flaking on a loaded macOS CI runner at 5s
+    // (B370 hit the same class of thing in chat-server-rs's own tests and
+    // settled on the same 20s bound for the same reason).
     let socket = harness.scratch.join("sockets/flow-resume/term.sock");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while socket.exists() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
