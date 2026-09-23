@@ -199,6 +199,24 @@ pub fn dispatch_with_bin_dir(request: Request, bin_dir: Option<&Path>) -> Respon
             outcome,
             revision,
         } => add_goal(bin_dir, &plan_dir, &goal_name, &title, &outcome, &revision),
+        Request::PlanRoot { directory } => plan_root(bin_dir, directory.as_deref()),
+        Request::RegisterRead {
+            kind,
+            mode,
+            args,
+            file,
+        } => register_read(bin_dir, &kind, &mode, &args, &file),
+        Request::AddPlanningBug {
+            plan_dir,
+            id,
+            title,
+            reproduce,
+            observed,
+            expected,
+            args,
+        } => add_planning_bug(
+            bin_dir, &plan_dir, &id, &title, &reproduce, &observed, &expected, &args,
+        ),
         Request::ValidatePlan { plan_dir, complete } => validate_plan(bin_dir, &plan_dir, complete),
     }
 }
@@ -824,6 +842,79 @@ fn add_goal(
     respond_from(guarded_call(&progress_path, guard, || {
         run_command(bin_dir, "add-goal", &[plan_dir, goal_name, title, outcome])
     }))
+}
+
+/// Runs a read-only command and reports pass/fail plus its combined
+/// stdout+stderr as `report` -- the same shape ValidatePlan/VerifyFixKeys
+/// already use for "ran a command, here is what it printed", reused here
+/// rather than inventing a document-shaped response for output that has no
+/// revision to guard.
+fn run_readonly(bin_dir: Option<&Path>, name: &str, args: &[&str]) -> Response {
+    let program = program_path(bin_dir, name);
+    match Command::new(&program).args(args).output() {
+        Ok(output) => {
+            let mut report = String::from_utf8_lossy(&output.stdout).into_owned();
+            report.push_str(&String::from_utf8_lossy(&output.stderr));
+            Response::Validated {
+                passed: output.status.success(),
+                report,
+            }
+        }
+        Err(error) => Response::Error {
+            message: format!("could not run {}: {error}", program.display()),
+        },
+    }
+}
+
+fn plan_root(bin_dir: Option<&Path>, directory: Option<&str>) -> Response {
+    let mut args: Vec<&str> = vec!["project-root"];
+    if let Some(directory) = directory {
+        args.push(directory);
+    }
+    run_readonly(bin_dir, "plan-root", &args)
+}
+
+fn register_read(
+    bin_dir: Option<&Path>,
+    kind: &str,
+    mode: &str,
+    args: &[String],
+    file: &str,
+) -> Response {
+    let mut full_args: Vec<&str> = vec![kind, mode];
+    full_args.extend(args.iter().map(String::as_str));
+    full_args.push("--file");
+    full_args.push(file);
+    run_readonly(bin_dir, "register-read", &full_args)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_planning_bug(
+    bin_dir: Option<&Path>,
+    plan_dir: &str,
+    id: &str,
+    title: &str,
+    reproduce: &str,
+    observed: &str,
+    expected: &str,
+    args: &[String],
+) -> Response {
+    let bugs_path = Path::new(plan_dir).join("planning-bugs.json");
+    let mut full_args: Vec<&str> = vec![
+        plan_dir,
+        "--id",
+        id,
+        "--title",
+        title,
+        "--reproduce",
+        reproduce,
+        "--observed",
+        observed,
+        "--expected",
+        expected,
+    ];
+    full_args.extend(args.iter().map(String::as_str));
+    run_then_report_revision(bin_dir, "add-planning-bug", &full_args, &bugs_path)
 }
 
 fn validate_plan(bin_dir: Option<&Path>, plan_dir: &str, complete: bool) -> Response {
@@ -2336,6 +2427,133 @@ mod tests {
             snapshot(&plan_dir),
             "a stale guard must change nothing"
         );
+    }
+
+    #[test]
+    fn plan_root_reports_the_resolved_project_root() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        ensure_built(&bin_dir, "plan-root");
+
+        let response = dispatch_with_bin_dir(
+            Request::PlanRoot {
+                directory: Some(scratch.path().to_string_lossy().into_owned()),
+            },
+            Some(&bin_dir),
+        );
+        match response {
+            Response::Validated { passed, report } => {
+                assert!(passed, "expected plan-root to succeed, got: {report}");
+                assert!(
+                    !report.trim().is_empty(),
+                    "expected plan-root to print the resolved root"
+                );
+            }
+            other => panic!("expected Validated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn register_read_matches_the_standalone_command_on_a_fresh_register() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let register = scratch.path().join("BUGS.json");
+        fs::write(&register, r#"{"bugs": []}"#).unwrap();
+        ensure_built(&bin_dir, "register-read");
+
+        let response = dispatch_with_bin_dir(
+            Request::RegisterRead {
+                kind: "bug".to_string(),
+                mode: "count".to_string(),
+                args: Vec::new(),
+                file: register.to_string_lossy().into_owned(),
+            },
+            Some(&bin_dir),
+        );
+        let Response::Validated { passed, report } = response else {
+            panic!("expected Validated, got {response:?}");
+        };
+        assert!(passed, "expected register-read to succeed, got: {report}");
+
+        let program = bin_dir.join("register-read");
+        let output = Command::new(&program)
+            .args(["bug", "count", "--file", &register.to_string_lossy()])
+            .output()
+            .unwrap();
+        let mut expected = String::from_utf8_lossy(&output.stdout).into_owned();
+        expected.push_str(&String::from_utf8_lossy(&output.stderr));
+        assert_eq!(report, expected);
+    }
+
+    #[test]
+    fn register_read_reports_failure_cleanly_for_a_missing_file() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        ensure_built(&bin_dir, "register-read");
+
+        let response = dispatch_with_bin_dir(
+            Request::RegisterRead {
+                kind: "bug".to_string(),
+                mode: "count".to_string(),
+                args: Vec::new(),
+                file: scratch
+                    .path()
+                    .join("does-not-exist.json")
+                    .to_string_lossy()
+                    .into_owned(),
+            },
+            Some(&bin_dir),
+        );
+        match response {
+            Response::Validated { passed, .. } => assert!(!passed),
+            other => panic!("expected Validated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_planning_bug_creates_the_register_with_the_right_entry() {
+        // Not an assert_snapshots_match comparison against a standalone run:
+        // add-planning-bug embeds a real wall-clock created_at/updated_at
+        // timestamp (confirmed directly in its own source), so two
+        // independently run invocations can differ in that one field even
+        // with identical arguments -- the same class of thing that ruled out
+        // a byte-for-byte comparison for create_plan. This checks the
+        // write's own real properties instead.
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let plan_dir = scratch.path().join("plan");
+        fs::create_dir_all(&plan_dir).unwrap();
+
+        ensure_built(&bin_dir, "add-planning-bug");
+        let response = dispatch_with_bin_dir(
+            Request::AddPlanningBug {
+                plan_dir: plan_dir.to_string_lossy().into_owned(),
+                id: "PB-01".to_string(),
+                title: "It breaks".to_string(),
+                reproduce: "run it".to_string(),
+                observed: "it broke".to_string(),
+                expected: "it should not".to_string(),
+                args: vec!["--severity".to_string(), "major".to_string()],
+            },
+            Some(&bin_dir),
+        );
+        let Response::Written { revision } = response else {
+            panic!("expected Written, got {response:?}");
+        };
+        let bugs_path = plan_dir.join("planning-bugs.json");
+        let raw = fs::read(&bugs_path).unwrap();
+        assert_eq!(
+            revision,
+            PlanRevision::of(&raw).to_hex(),
+            "the reported revision must match the file actually written"
+        );
+        let text = String::from_utf8_lossy(&raw);
+        for expected in ["PB-01", "It breaks", "run it", "it broke", "major"] {
+            assert!(
+                text.contains(expected),
+                "expected planning-bugs.json to contain {expected:?}: {text}"
+            );
+        }
     }
 
     #[test]

@@ -241,6 +241,44 @@ pub enum Request {
         outcome: String,
         revision: String,
     },
+    /// Read-only: resolves a project's plan-storage root (plan-root's own
+    /// `project-root` subcommand). `resolve` -- plan-root's OTHER
+    /// subcommand -- is deliberately not wired: on a project's first use it
+    /// reads stdin interactively to ask where plans should live, and
+    /// run_command inherits this adapter's own stdin unchanged, which in an
+    /// MCP-stdio context is the JSON-RPC channel itself -- a real hang (or
+    /// worse, a corrupted read of a future request) rather than a
+    /// hypothetical one.
+    PlanRoot { directory: Option<String> },
+    /// Read-only: `mode` is register-read's own subcommand
+    /// (show/list/report/count/next-id), `args` its trailing arguments
+    /// (an id for show, flags for list/report/count). `file` is REQUIRED
+    /// here rather than optional: register-read falls back to the
+    /// `BUGS_JSON`/`TODO_JSON` env vars or a bare `BUGS.json`/`TODO.json`
+    /// relative to its own cwd when omitted, and this crate has no
+    /// reliable way to guarantee either from an MCP server's own working
+    /// directory -- the same "two different TODO.json files exist, cd into
+    /// the right worktree first" footgun this repo's own contributors already
+    /// hit, sidestepped here by simply always requiring an explicit path.
+    RegisterRead {
+        kind: String,
+        mode: String,
+        args: Vec<String>,
+        file: String,
+    },
+    /// Unguarded: add-planning-bug's own doc comment says it plainly --
+    /// "Appends to <plan-directory>/planning-bugs.json, creating it on
+    /// first use" -- the same "nothing to guard against yet before the
+    /// first write" gap AddFixClaim's own fixes.md already carries.
+    AddPlanningBug {
+        plan_dir: String,
+        id: String,
+        title: String,
+        reproduce: String,
+        observed: String,
+        expected: String,
+        args: Vec<String>,
+    },
     /// Read-only: no revision at all, since it applies no write.
     ValidatePlan { plan_dir: String, complete: bool },
 }
@@ -436,6 +474,35 @@ mod tests {
                 title: "Next goal".to_string(),
                 outcome: "Next outcome".to_string(),
                 revision: "abc".to_string(),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_root_register_and_planning_bug_requests_round_trip_through_json() {
+        let requests = [
+            Request::PlanRoot {
+                directory: Some("/repo".to_string()),
+            },
+            Request::PlanRoot { directory: None },
+            Request::RegisterRead {
+                kind: "bug".to_string(),
+                mode: "show".to_string(),
+                args: vec!["B123".to_string()],
+                file: "/repo/BUGS.json".to_string(),
+            },
+            Request::AddPlanningBug {
+                plan_dir: "/plans/demo".to_string(),
+                id: "PB-01".to_string(),
+                title: "It breaks".to_string(),
+                reproduce: "run it".to_string(),
+                observed: "it broke".to_string(),
+                expected: "it should not".to_string(),
+                args: vec!["--severity".to_string(), "major".to_string()],
             },
         ];
         for request in requests {

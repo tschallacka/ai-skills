@@ -333,6 +333,37 @@ fn tool_definitions() -> Vec<Value> {
             ],
         ),
         tool(
+            "plan_root",
+            "Resolve a project's plan-storage root directory (read-only). plan-root's OTHER subcommand, resolve, is not offered: on a project's first use it reads stdin interactively, which this adapter cannot safely forward.",
+            &[],
+            vec![("directory", string("The project directory to resolve from; omit for the current directory."))],
+        ),
+        tool(
+            "register_read",
+            "Query the shared bug or todo register (read-only). file is required, naming the exact BUGS.json/TODO.json to read -- there is no reliable ambient default this adapter can resolve.",
+            &["kind", "mode", "file"],
+            vec![
+                ("kind", string("bug or todo.")),
+                ("mode", string("show, list, report, count, or next-id.")),
+                ("args", string_array("The mode's own trailing arguments, e.g. [\"B123\"] for show, or [\"--status\", \"open\"] for list/report/count.")),
+                ("file", string("The exact register file to read, e.g. /path/to/BUGS.json.")),
+            ],
+        ),
+        tool(
+            "add_planning_bug",
+            "Append a plan-scoped bug to planning-bugs.json, creating it on first use. Unguarded: the same \"nothing to guard against yet\" shape as add_fix_claim.",
+            &["plan_dir", "id", "title", "reproduce", "observed", "expected"],
+            vec![
+                ("plan_dir", string("The plan directory.")),
+                ("id", string("The plan-local bug id, PB-01 upward.")),
+                ("title", string("The bug's title.")),
+                ("reproduce", string("The command or steps, runnable rather than described.")),
+                ("observed", string("What happened, quoted from the output.")),
+                ("expected", string("What should have happened.")),
+                ("args", string_array("Optional flags verbatim, e.g. [\"--severity\", \"blocking\", \"--priority\", \"urgent\", \"--status\", \"confirmed\", \"--found-by\", \"session-1\"].")),
+            ],
+        ),
+        tool(
             "validate_plan",
             "Run the plan validator (read-only, unguarded).",
             &["plan_dir"],
@@ -646,6 +677,33 @@ fn build_request(name: &str, arguments: &Value) -> Result<Request, String> {
                 revision,
             })
         }
+        "plan_root" => Ok(Request::PlanRoot {
+            directory: opt_str_arg(arguments, "directory"),
+        }),
+        "register_read" => Ok(Request::RegisterRead {
+            kind: str_arg(arguments, "kind")?,
+            mode: str_arg(arguments, "mode")?,
+            args: str_array_arg(arguments, "args")?,
+            file: str_arg(arguments, "file")?,
+        }),
+        "add_planning_bug" => {
+            let plan_dir = str_arg(arguments, "plan_dir")?;
+            let id = str_arg(arguments, "id")?;
+            let title = str_arg(arguments, "title")?;
+            let reproduce = str_arg(arguments, "reproduce")?;
+            let observed = str_arg(arguments, "observed")?;
+            let expected = str_arg(arguments, "expected")?;
+            let args = str_array_arg(arguments, "args")?;
+            Ok(Request::AddPlanningBug {
+                plan_dir,
+                id,
+                title,
+                reproduce,
+                observed,
+                expected,
+                args,
+            })
+        }
         "validate_plan" => Ok(Request::ValidatePlan {
             plan_dir: str_arg(arguments, "plan_dir")?,
             complete: arguments
@@ -761,6 +819,9 @@ mod tests {
                 "remove_plan",
                 "cleanup_plans",
                 "add_goal",
+                "plan_root",
+                "register_read",
+                "add_planning_bug",
                 "validate_plan",
             ]
         );
@@ -990,6 +1051,33 @@ mod tests {
             "add_goal",
             json!({"plan_dir": "/definitely/does/not/exist"}),
         );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn register_read_reports_each_missing_argument_by_name() {
+        for (present, missing) in [
+            (json!({}), "kind"),
+            (json!({"kind": "bug"}), "mode"),
+            (json!({"kind": "bug", "mode": "show"}), "file"),
+        ] {
+            let response = call("register_read", present);
+            assert_eq!(response["result"]["isError"], true);
+            let text = response["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(
+                text.contains(missing),
+                "expected the refusal to name {missing}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn add_planning_bug_reports_a_missing_argument_by_name() {
+        let response = call("add_planning_bug", json!({"plan_dir": "/x"}));
         assert_eq!(response["result"]["isError"], true);
         assert!(response["result"]["content"][0]["text"]
             .as_str()
