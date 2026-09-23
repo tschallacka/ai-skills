@@ -105,9 +105,9 @@ fn tool_definitions() -> Vec<Value> {
             vec![
                 ("plan_dir", string("The plan directory.")),
                 ("id", string("The new work unit id, e.g. W05.")),
-                ("type", string("source, test, verification, docs, config, data, generated, discovery, markup, or style.")),
-                ("file", string("The target file, or N/A.")),
-                ("scope", string("The primary symbol or file scope.")),
+                ("type", string("source, test, verification, docs, config, data, generated, discovery, markup, style, or relocation.")),
+                ("file", string("The target file, or N/A. relocation alone may name a directory (ending in /): the source path moved wholesale, contents unchanged.")),
+                ("scope", string("The primary symbol or file scope. For relocation, the destination path instead.")),
                 ("subscope", string("The subscope, or N/A.")),
                 ("change", string("The intended change.")),
                 ("depends_on", string("Comma-separated dependency work-unit ids, or --.")),

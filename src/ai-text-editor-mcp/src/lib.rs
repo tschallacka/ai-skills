@@ -691,7 +691,7 @@ fn tool_definitions() -> Vec<Value> {
         ("range_start_byte", int("Inclusive first byte for exact_bytes on large tabs.")),
         ("range_end_byte", int("Exclusive last byte for exact_bytes on large tabs.")),
         ("preview_lines", int("When a match spans more than double this many lines, shrink its shown contents to its first and last preview_lines lines (contents_preview) instead of the whole span. byte_start/byte_end, and so match_id, stay exact regardless. 0 (default) shows the full contents unshrunk.")),
-    ])); p }, vec!["mode", "query"]));
+    ])); p }, vec!["mode"]));
     tools.push((
         "job_start",
         "Create a lifecycle record for agent-owned long work; this tool does not execute the work.",
@@ -1175,6 +1175,34 @@ mod tests {
             }
         }
         assert!(found >= 7, "expected the mutating tools, found {found}");
+    }
+
+    /// search accepts `query` OR `query_base64` -- the server itself refuses
+    /// only when both are absent. Declaring `query` required forced a
+    /// schema-following client to always send it, even when it meant to
+    /// search with `query_base64` alone.
+    #[test]
+    fn search_does_not_require_query_since_query_base64_is_an_alternative() {
+        let tools = tools();
+        let search = tools
+            .iter()
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some("search"))
+            .expect("search is advertised");
+        let required = search
+            .pointer("/inputSchema/required")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            required,
+            vec![Value::from("mode")],
+            "search must require only mode, not query: {required:?}"
+        );
+        let properties = properties(search);
+        assert!(
+            properties.contains_key("query") && properties.contains_key("query_base64"),
+            "both remain available, just neither is forced"
+        );
     }
 
     /// B251 and B252, the schema half. The server refusing these by name is

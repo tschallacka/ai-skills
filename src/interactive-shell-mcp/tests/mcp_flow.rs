@@ -174,6 +174,98 @@ fn start_text_view_and_shutdown_drive_a_real_session() {
 }
 
 #[test]
+fn starting_without_command_resumes_a_previously_saved_sessions_command() {
+    let Some(mut harness) = Harness::new("resume") else {
+        return;
+    };
+    let start = harness.call(
+        1,
+        "start",
+        json!({
+            "command": ["sh", "-c", "printf hello; sleep 600"],
+            "session": "flow-resume",
+            "cols": 20,
+            "rows": 4,
+            "idle_timeout_seconds": 600
+        }),
+    );
+    assert_eq!(Harness::content(&start)["started"], json!(true));
+
+    let shutdown = harness.call(2, "shutdown", json!({"session":"flow-resume"}));
+    assert!(
+        Harness::content(&shutdown)["responses"]
+            .as_array()
+            .is_some_and(|responses| responses.iter().any(|event| event["event"] == "ack")),
+        "shutdown was not acknowledged"
+    );
+    // The ack only means the request was accepted; the listening process
+    // notices `stopped` and removes its socket on its own next loop turn,
+    // asynchronously. `PosixListener::bind` refuses outright when a socket
+    // file still exists, so starting the next process too early would fail
+    // to bind while this stale file still satisfies the readiness poll's
+    // `socket.exists()` check -- wait for the real signal, not a fixed sleep.
+    let socket = harness.scratch.join("sockets/flow-resume/term.sock");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while socket.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        !socket.exists(),
+        "the old session's socket was never cleaned up"
+    );
+
+    // No `command` this time: the saved session under the same id must
+    // supply it, the way the CLI's own `-- COMMAND` omission does.
+    let restart = harness.call(3, "start", json!({"session": "flow-resume"}));
+    let restarted = Harness::content(&restart);
+    assert_eq!(
+        restarted["started"],
+        json!(true),
+        "restart without command failed: {restarted}"
+    );
+    assert_eq!(
+        restarted["ready"],
+        json!(true),
+        "resumed session never became ready: {restarted}"
+    );
+
+    let view = harness.call(4, "view", json!({"session":"flow-resume"}));
+    let view = Harness::content(&view);
+    let responses = view["responses"]
+        .as_array()
+        .unwrap_or_else(|| panic!("view returned no responses: {view}"));
+    let view_event = responses
+        .iter()
+        .find(|event| event["event"] == "view")
+        .unwrap_or_else(|| panic!("no view event in {responses:?}"));
+    assert!(
+        view_event["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("hello"),
+        "expected the resumed session to still run the saved command, got {view_event}"
+    );
+
+    harness.call(5, "shutdown", json!({"session":"flow-resume"}));
+}
+
+#[test]
+fn starting_without_command_or_a_saved_session_is_refused_by_name() {
+    let Some(mut harness) = Harness::new("no-command-no-session") else {
+        return;
+    };
+    let start = harness.call(1, "start", json!({"session": "flow-never-started-before"}));
+    assert_eq!(start["result"]["isError"], json!(true), "{start}");
+    let message = start["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        message.contains("command"),
+        "refusal should name what was missing: {message}"
+    );
+}
+
+#[test]
 fn an_unknown_tool_reports_iserror_over_the_wire() {
     let Some(mut harness) = Harness::new("unknown-tool") else {
         return;

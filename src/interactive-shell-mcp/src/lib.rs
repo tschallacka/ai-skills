@@ -165,9 +165,9 @@ fn routing() -> &'static [ToolSpec] {
     &[
         (
             "start",
-            "Start a new interactive-shell session: allocates a real PTY and runs command in it. Use session or agent (or --socket) so every other tool can reach it without repeating configuration.",
+            "Start a new interactive-shell session: allocates a real PTY and runs command in it. Use session or agent (or --socket) so every other tool can reach it without repeating configuration. command may be omitted when session or agent names a previously saved session -- the saved command (and cols/rows/idle_timeout/tcp) is reused, the way the CLI's own `-- COMMAND` omission works.",
             &["command", "session", "agent", "socket", "cols", "rows", "idle_timeout_seconds", "tcp"],
-            &["command"],
+            &[],
         ),
         (
             "text",
@@ -554,19 +554,24 @@ fn interactive_shell_binary_path() -> PathBuf {
 }
 
 fn start_session(arguments: &Value) -> Result<Value, String> {
-    let command: Vec<String> = arguments
-        .get("command")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "start needs command (an array of strings)".to_string())?
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| "command must be an array of strings".to_string())
-        })
-        .collect::<Result<_, _>>()?;
-    if command.is_empty() {
+    // command is optional: omitting it (like omitting `-- COMMAND` on the
+    // CLI) resumes a previously saved session's command, which needs
+    // session or agent to name that saved session.
+    let command: Vec<String> = match arguments.get("command") {
+        Some(value) => value
+            .as_array()
+            .ok_or_else(|| "command must be an array of strings".to_string())?
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "command must be an array of strings".to_string())
+            })
+            .collect::<Result<_, _>>()?,
+        None => Vec::new(),
+    };
+    if arguments.get("command").is_some() && command.is_empty() {
         return Err("command must not be empty".into());
     }
 
@@ -574,18 +579,44 @@ fn start_session(arguments: &Value) -> Result<Value, String> {
     let session_arg = string_argument(arguments, "session");
     let agent_arg = string_argument(arguments, "agent");
 
+    // Additive, not either/or: the CLI itself accepts --socket together
+    // with --session/--agent (the explicit socket overrides what a saved
+    // session would resolve to, while session/agent still names the saved
+    // command/cols/rows/etc, and still persists this call's settings for
+    // next time). An if/else-if here would silently drop session/agent
+    // whenever socket was also given.
     let mut cli_args: Vec<String> = Vec::new();
     if let Some(socket) = &socket_arg {
         cli_args.push("--socket".into());
         cli_args.push(socket.clone());
-    } else if let Some(session) = &session_arg {
+    }
+    if let Some(session) = &session_arg {
         cli_args.push("--session".into());
         cli_args.push(session.clone());
-    } else if let Some(agent) = &agent_arg {
+    }
+    if let Some(agent) = &agent_arg {
         cli_args.push("--agent".into());
         cli_args.push(agent.clone());
-    } else {
+    }
+    if socket_arg.is_none() && session_arg.is_none() && agent_arg.is_none() {
         return Err("start needs socket, session, or agent".into());
+    }
+    if command.is_empty() {
+        // Nothing to resume from: rather than spawn a process that the real
+        // CLI will immediately refuse ("command is required") with no
+        // stderr this adapter captures, check up front that a session
+        // actually has a saved command to fall back on.
+        let id = session_identity(session_arg.as_deref(), agent_arg.as_deref());
+        let saved = match &id {
+            Some(id) => load_session(id)?,
+            None => None,
+        };
+        if saved.is_none() {
+            return Err(
+                "start needs command, unless session or agent names a previously saved session"
+                    .into(),
+            );
+        }
     }
     if let Some(cols) = u64_argument(arguments, "cols") {
         cli_args.push("--cols".into());
