@@ -163,6 +163,11 @@ pub fn validate_plan_documents(
             }) {
                 findings.fail("Adversarial review has unresolved findings");
             }
+            if rationale_staleness(&review_text, &plan.join("adversarial-review-history.md"))
+                == Some(true)
+            {
+                findings.fail("Verdict rationale is stale: at least one more review cycle has been archived since it was written (T56 -- run update-adversarial-review.sh --set-rationale again after reviewing the latest cycle)");
+            }
         } else if std::fs::read_to_string(&description)
             .map(|text| text.lines().any(|line| line == "- Status: ✅ approved"))
             .unwrap_or(false)
@@ -245,6 +250,47 @@ pub fn validate_plan_documents(
     }
 }
 
+/// Whether the Verdict's own "- Rationale cycle: N" stamp (written by
+/// update-adversarial-review's own `--set-rationale`, T56) has fallen
+/// behind the archive. `cycle_number` below mirrors that same binary's own
+/// function exactly: `max(archived "## Cycle N") + 1`, the number the
+/// CURRENT (not yet archived) findings table would get if archived right
+/// now -- the same value a rationale is stamped with at write time. A
+/// rationale is stale when a FRESH `cycle_number` computed now no longer
+/// equals the stamp: at least one more review cycle has landed and been
+/// archived since the rationale was written, so it may no longer describe
+/// the findings actually in front of the reader.
+///
+/// `None` when no stamp is present at all -- a plan written before this
+/// check existed, or a rationale someone hand-edited outside
+/// `--set-rationale` -- so this never retroactively fails older plans; it
+/// can only compare a stamp that is actually there.
+fn rationale_staleness(review_text: &str, history: &Path) -> Option<bool> {
+    let stamped: i64 = review_text.lines().find_map(|line| {
+        line.strip_prefix("- Rationale cycle: ")?
+            .trim()
+            .parse()
+            .ok()
+    })?;
+    Some(cycle_number(history) > stamped)
+}
+
+/// Mirrors update-adversarial-review's own `cycle_number(history, None)`
+/// exactly (see that function's own doc comment for why the two must stay
+/// byte-for-byte in agreement rather than merely "similar"). Duplicated
+/// here rather than shared through a new crate: it is 8 lines, pure, and
+/// keyed to the `## Cycle N` archive heading format, a stable convention
+/// already load-bearing elsewhere in this same document family.
+fn cycle_number(history: &Path) -> i64 {
+    std::fs::read_to_string(history)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.strip_prefix("## Cycle ")?.parse::<i64>().ok())
+        .max()
+        .unwrap_or(0)
+        + 1
+}
+
 /// Hardens every plan document against hand-edit damage:
 /// helper-flag-shaped text, duplicate paragraph labels, and shell-variable
 /// path fragments.
@@ -301,9 +347,54 @@ fn paragraph_label_regex() -> &'static Regex {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_hardening, validate_obsolete, validate_step_numbers};
+    use super::{
+        rationale_staleness, validate_hardening, validate_obsolete, validate_step_numbers,
+    };
     use planning_validator_common::Findings;
     use std::fs;
+
+    fn scratch_history(name: &str, content: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "validator-docs-rationale-{name}-{}.md",
+            std::process::id()
+        ));
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn rationale_staleness_is_none_with_no_stamp_at_all() {
+        // Pre-existing content from before T56 shipped, or a rationale
+        // someone hand-edited outside --set-rationale: nothing to compare,
+        // so this must never retroactively flag an older plan.
+        let history = scratch_history("no-stamp", "\n## Cycle 1\n\nrow\n");
+        let review = "## Verdict\n\n- Status: `✅ approved`\n- Rationale: no findings remain.\n";
+        assert_eq!(rationale_staleness(review, &history), None);
+        let _ = fs::remove_file(history);
+    }
+
+    #[test]
+    fn rationale_staleness_is_false_when_the_stamp_matches_the_current_cycle() {
+        let history = scratch_history("fresh", "\n## Cycle 1\n\nrow\n");
+        // cycle_number(history) here is 2 (max archived + 1) -- the same
+        // value --set-rationale would have stamped if it ran right now.
+        let review =
+            "## Verdict\n\n- Status: `✅ approved`\n- Rationale: current.\n- Rationale cycle: 2\n";
+        assert_eq!(rationale_staleness(review, &history), Some(false));
+        let _ = fs::remove_file(history);
+    }
+
+    #[test]
+    fn rationale_staleness_is_true_once_a_later_cycle_has_been_archived() {
+        let history = scratch_history("stale", "\n## Cycle 1\n\nrow\n\n## Cycle 2\n\nrow\n");
+        // Stamped for cycle 2, but a THIRD cycle's worth of archiving has
+        // happened since (cycle_number(history) is now 3): the rationale
+        // describes findings that have since been superseded.
+        let review =
+            "## Verdict\n\n- Status: `✅ approved`\n- Rationale: old.\n- Rationale cycle: 2\n";
+        assert_eq!(rationale_staleness(review, &history), Some(true));
+        let _ = fs::remove_file(history);
+    }
 
     #[test]
     fn obsolete_marker_returns_the_shell_refusal_code() {

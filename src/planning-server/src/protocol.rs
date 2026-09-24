@@ -111,8 +111,12 @@ pub enum Request {
     /// either does not exist yet (nothing to guard against) or the call
     /// fails cleanly with no write at all.
     CreateAdversarialReview { plan_dir: String },
-    /// `args`, verbatim, after `plan_dir`: `--file`/`--cycle`/`--check`.
-    /// Guards adversarial-review.md.
+    /// `args`, verbatim, after `plan_dir`: `--file`/`--cycle`/`--check`, or
+    /// `--set-rationale <text>` as its own standalone mode (no CSV/findings
+    /// involved) that stamps the Verdict's own Rationale line with the
+    /// review cycle it describes, so a later archived cycle moving past
+    /// that stamp can be flagged by validate-plan (T56). Guards
+    /// adversarial-review.md.
     UpdateAdversarialReview {
         plan_dir: String,
         args: Vec<String>,

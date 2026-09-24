@@ -215,5 +215,56 @@ case "$cycle2" in
     *) note_fail "cycle 2 does not carry the corrected Tokens value" ;;
 esac
 
+# --- T56: a Verdict rationale stamped with the cycle it describes reads as
+# fresh while it does, and stale once a later cycle is archived past it ---
+plan_rationale="$temporary_root/plan-rationale"
+"$scripts/create-plan.sh" "$plan_rationale" "T56 demo" >/dev/null
+"$scripts/add-goal.sh" "$plan_rationale" 01-demo "Demo goal" "Demo outcome" >/dev/null
+"$scripts/create-adversarial-review.sh" "$plan_rationale" >/dev/null
+
+# MINTED_BY simulates a reviewer identity distinct from the claimant's own
+# session, the same override verify-fix-keys' own self-certification
+# refusal (B23) names as the sanctioned way around it in a single-session
+# test -- never a weakening of that gate, only a stand-in for the
+# would-be-separate reviewer session it exists to require.
+printf 'ID,Missing or over-broad item,Required plan change,Status,Work unit\nAR-01,Missing X,Add X,resolved,W01\n' \
+    | MINTED_BY=reviewer-1 "$scripts/update-adversarial-review.sh" "$plan_rationale" >/dev/null
+"$scripts/update-adversarial-review.sh" "$plan_rationale" --set-rationale "AR-01 resolved; nothing outstanding." >/dev/null
+review_rationale="$plan_rationale/adversarial-review.md"
+case "$(cat "$review_rationale")" in
+    *'- Rationale cycle: 2'*) : ;;
+    *) note_fail "first --set-rationale did not stamp cycle 2 (Cycle 1 already archived, so the CURRENT table is cycle 2)" ;;
+esac
+
+key1="$(rjq -r '.keys["AR-01"]["W01"]' "$plan_rationale/fix-keys.json")"
+"$scripts/add-fix-claim.sh" "$plan_rationale" --finding AR-01 --work-unit W01 --key "$key1" >/dev/null
+"$scripts/update-plan-content.sh" --review-status "$plan_rationale" approved >/dev/null \
+    || note_fail "approving with a fresh rationale was refused"
+
+fresh_report="$("$scripts/validate-plan.sh" "$plan_rationale" 2>&1 || true)"
+case "$fresh_report" in
+    *'rationale is stale'*) note_fail "a FRESH rationale (stamped 2, history still at cycle 2) was flagged stale" ;;
+    *) : ;;
+esac
+
+# Land a second cycle without touching the rationale again -- the stamp
+# stays at 2, but the archive (and cycle_number computed fresh) moves to 3.
+printf 'ID,Missing or over-broad item,Required plan change,Status,Work unit\nAR-02,Missing Y,Add Y,resolved,W02\n' \
+    | MINTED_BY=reviewer-1 "$scripts/update-adversarial-review.sh" "$plan_rationale" >/dev/null
+key2="$(rjq -r '.keys["AR-02"]["W02"]' "$plan_rationale/fix-keys.json")"
+"$scripts/add-fix-claim.sh" "$plan_rationale" --finding AR-02 --work-unit W02 --key "$key2" >/dev/null
+"$scripts/update-plan-content.sh" --review-status "$plan_rationale" approved >/dev/null \
+    || note_fail "re-approving after a second cycle was refused"
+
+case "$(cat "$review_rationale")" in
+    *'- Rationale cycle: 2'*) : ;;
+    *) note_fail "the rationale's own stamp should be untouched by a findings-only update (still cycle 2)" ;;
+esac
+stale_report="$("$scripts/validate-plan.sh" "$plan_rationale" 2>&1 || true)"
+case "$stale_report" in
+    *'rationale is stale'*) : ;;
+    *) note_fail "a rationale stamped 2 with history now at cycle 3 was NOT flagged stale: $stale_report" ;;
+esac
+
 [ "$(t_failures)" -eq 0 ] || exit 1
 printf 'test-adversarial-review-cycles.sh passed.\n'

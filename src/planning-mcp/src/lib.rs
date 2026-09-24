@@ -184,11 +184,11 @@ fn tool_definitions() -> Vec<Value> {
         ),
         tool(
             "update_adversarial_review",
-            "Rewrite the adversarial-review Findings table from CSV rows (ID, Missing or over-broad item, Required plan change, Status, Work unit), read from adversarial-review-incoming.md if present, else --file, else stdin. Revision-guarded on adversarial-review.md.",
+            "Rewrite the adversarial-review Findings table from CSV rows (ID, Missing or over-broad item, Required plan change, Status, Work unit), read from adversarial-review-incoming.md if present, else --file, else stdin. Revision-guarded on adversarial-review.md. args also accepts --set-rationale <text> as a standalone mode (no CSV/findings involved): sets the Verdict's own Rationale line, stamped with the review cycle it describes, so validate-plan can flag it once a later cycle is archived past that stamp (T56).",
             &["plan_dir"],
             vec![
                 ("plan_dir", string("The plan directory.")),
-                ("args", string_array("update-adversarial-review's own arguments verbatim, e.g. [\"--file\", \"rows.csv\"] or [\"--cycle\", \"2\"] or [\"--check\"].")),
+                ("args", string_array("update-adversarial-review's own arguments verbatim, e.g. [\"--file\", \"rows.csv\"] or [\"--cycle\", \"2\"] or [\"--check\"] or [\"--set-rationale\", \"No unresolved findings remain.\"].")),
                 ("revision", string("adversarial-review.md's current revision; omit to read it fresh first.")),
             ],
         ),

@@ -105,12 +105,34 @@ pub fn install_skill(
     for relative in &relative_paths {
         // T72: a `bin/<triple>/<file>` entry never lands under this skill's
         // own directory at all -- it goes to the one shared location every
-        // skill's binaries now live in. Never deleted from here on a mode
-        // switch (unlike an ordinary per-skill file just below): another
-        // agent root, or another skill, may still be depending on the exact
-        // same shared file, and this install has no way to know.
+        // skill's binaries now live in.
         if let Some(filename) = shared_bin::shared_binary_filename(relative) {
             if !integration::file_allowed(source_root, skill, relative, &mode) {
+                // B374: this skill's newly-resolved mode does not need this
+                // shared binary (typically a mode switch away from it) --
+                // remove the stale copy, but ONLY when no OTHER currently-
+                // installed skill, on any root this installer can discover
+                // under `home`, still needs the exact same filename. Reuses
+                // uninstall.rs's own already-tested cross-root/cross-skill
+                // reference count (`other_skill_needs_binary`, the same
+                // check a real uninstall already makes) rather than a
+                // second, install-time-only guess at "is this still
+                // needed" -- the T72 comment this replaces existed
+                // precisely because getting that guess wrong once already
+                // left a skill's binary broken for everyone else sharing
+                // it; this is that same safety, not a relaxation of it.
+                let shared_dir = shared_bin::shared_bin_dir(home);
+                let dest_file = shared_dir.join(filename);
+                if dest_file.is_file()
+                    && !crate::uninstall::other_skill_needs_binary(
+                        source_root,
+                        home,
+                        filename,
+                        &dest_dir,
+                    )
+                {
+                    fs::remove_file(&dest_file)?;
+                }
                 continue;
             }
             let source_file = source_dir.join(relative);
@@ -632,14 +654,17 @@ mod tests {
     }
 
     #[test]
-    fn switching_mode_never_deletes_the_previous_modes_shared_binary() {
-        // T72: the old per-skill bin/ made "switch mode, stale binary
-        // disappears" free -- the binary lived only under this one
-        // destination. The shared bin does not: another agent root, or
-        // another skill, might still need the exact same file, and one
-        // `install_skill` call over one destination has no way to know.
-        // The trade this test pins: switching leaves both binaries in the
-        // shared bin, harmless unswept space.
+    fn switching_mode_removes_the_previous_modes_shared_binary_when_nothing_else_needs_it() {
+        // B374: T72's own shared bin (one location for every skill's
+        // binary, not a copy per skill per agent root) meant a mode switch
+        // had no per-destination file to delete the way the old per-skill
+        // bin/ did -- and for a long time this simply never swept the
+        // binary the OLD mode needed, leaving it stale indefinitely. Now it
+        // does, but only once it has confirmed (other_skill_needs_binary,
+        // reused from uninstall.rs's own already-tested cross-root/
+        // cross-skill reference count) that nothing else installed still
+        // depends on the exact same filename -- see the companion test
+        // below for that safety still holding.
         let source_root = tempfile::tempdir().unwrap();
         write_integration_tsv(source_root.path(), "ai-text-editor");
         write(
@@ -685,9 +710,82 @@ mod tests {
         )
         .unwrap();
 
+        assert!(
+            !shared.join(platform_binary_name("ai-text-editor")).exists(),
+            "nothing else needs the skill-mode binary; the stale copy should be swept"
+        );
         assert!(shared
-            .join(platform_binary_name("ai-text-editor"))
+            .join(platform_binary_name("ai-text-editor-mcp"))
             .is_file());
+    }
+
+    #[test]
+    fn switching_mode_keeps_the_shared_binary_a_sibling_root_still_needs() {
+        // The safety half of B374's fix: a mode switch must NOT remove a
+        // shared binary another root's own install of the SAME skill still
+        // needs in the OLD mode -- other_skill_needs_binary scans every
+        // root this installer can discover under `home`, not just the one
+        // being switched.
+        let source_root = tempfile::tempdir().unwrap();
+        write_integration_tsv(source_root.path(), "ai-text-editor");
+        write(
+            &source_root.path().join(format!(
+                "ai-text-editor/bin/{}/{}",
+                current_target(),
+                platform_binary_name("ai-text-editor")
+            )),
+            "skill binary",
+        );
+        write(
+            &source_root.path().join(format!(
+                "ai-text-editor/bin/{}/{}",
+                current_target(),
+                platform_binary_name("ai-text-editor-mcp")
+            )),
+            "mcp binary",
+        );
+        let home = tempfile::tempdir().unwrap();
+        let root_a = home.path().join("root-a");
+        let root_b = home.path().join("root-b");
+
+        // Both roots install in skill mode first, so each has a real,
+        // on-disk skill directory other_skill_needs_binary can discover --
+        // it walks known_roots(home), which root_a/root_b are not among
+        // unless something is actually recorded there; installing into
+        // custom locations makes that discovery possible for this test.
+        for root in [&root_a, &root_b] {
+            install_skill(
+                source_root.path(),
+                "ai-text-editor",
+                root,
+                home.path(),
+                Some("skill"),
+                false,
+            )
+            .unwrap();
+        }
+        crate::custom_locations::save(home.path(), &root_a).unwrap();
+        crate::custom_locations::save(home.path(), &root_b).unwrap();
+
+        // root_a switches to mcp mode; root_b is still in skill mode and
+        // still needs the skill-mode binary.
+        install_skill(
+            source_root.path(),
+            "ai-text-editor",
+            &root_a,
+            home.path(),
+            Some("mcp"),
+            false,
+        )
+        .unwrap();
+
+        let shared = shared_bin::shared_bin_dir(home.path());
+        assert!(
+            shared
+                .join(platform_binary_name("ai-text-editor"))
+                .is_file(),
+            "root_b's own still-skill-mode install still needs this binary"
+        );
         assert!(shared
             .join(platform_binary_name("ai-text-editor-mcp"))
             .is_file());
