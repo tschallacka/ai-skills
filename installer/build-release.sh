@@ -324,9 +324,18 @@ case "$mode" in
         # host_target() -- the resolver this whole file already uses for
         # prepare_planning_rust_commands() -- names the target once so the
         # build and the destination directory can never disagree.
+        # T70/AR-9: every skill built in this section needs the same Windows
+        # exe suffix the register-binary block below already computes once
+        # and reuses -- resolved here, first, so the chat block (which
+        # previously had no suffix handling at all and would have hard-failed
+        # the first time this ever ran on windows-latest) and the
+        # interactive-shell/ai-text-editor blocks T70 adds all share it.
+        skill_dir="$(host_target)" \
+            || { printf '%s: unsupported host for skill binaries\n' "${0##*/}" >&2; exit 66; }
+        skill_exe=''
+        case "$skill_dir" in *windows*) skill_exe='.exe' ;; esac
         if command -v cargo >/dev/null 2>&1; then
-            chat_dir="$(host_target)" \
-                || { printf '%s: unsupported host for chat binaries\n' "${0##*/}" >&2; exit 66; }
+            chat_dir="$skill_dir"
             ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-server-rs ) \
                 || { printf '%s: cargo build chat-server-rs failed\n' "${0##*/}" >&2; exit 66; }
             ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-client-rs ) \
@@ -337,17 +346,62 @@ case "$mode" in
                 || { printf '%s: cargo build chat-spool-watch failed\n' "${0##*/}" >&2; exit 66; }
             mkdir -p "$repo_root/chat/bin/$chat_dir"
             chat_release="$repo_root/target/$chat_dir/release"
-            cp "$chat_release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
-            cp "$chat_release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
-            cp "$chat_release/chat-mcp" "$repo_root/chat/bin/$chat_dir/chat-mcp"
-            cp "$chat_release/chat-spool-watch" "$repo_root/chat/bin/$chat_dir/chat-spool-watch"
+            cp "$chat_release/chat-server-rs$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-server-rs$skill_exe"
+            cp "$chat_release/chat-client-rs$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-client-rs$skill_exe"
+            cp "$chat_release/chat-mcp$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-mcp$skill_exe"
+            cp "$chat_release/chat-spool-watch$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-spool-watch$skill_exe"
         else
             # Prebuilt binaries must already be in place (CI build step).
-            ls "$repo_root/chat/bin/"*/chat-server-rs >/dev/null 2>&1 \
-                && ls "$repo_root/chat/bin/"*/chat-client-rs >/dev/null 2>&1 \
-                && ls "$repo_root/chat/bin/"*/chat-mcp >/dev/null 2>&1 \
-                && ls "$repo_root/chat/bin/"*/chat-spool-watch >/dev/null 2>&1 || {
+            ls "$repo_root/chat/bin/"*/"chat-server-rs$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/chat/bin/"*/"chat-client-rs$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/chat/bin/"*/"chat-mcp$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/chat/bin/"*/"chat-spool-watch$skill_exe" >/dev/null 2>&1 || {
                 printf '%s: cargo not found and chat/bin binaries absent\n' "${0##*/}" >&2
+                exit 66
+            }
+        fi
+        # T70/W13: interactive-shell and ai-text-editor were never built here
+        # at all before this -- build-release.sh silently shipped a package
+        # missing both skills for every target, since skill_files() only
+        # requires what actually exists on disk (AR-1/AR-2). Same
+        # cargo-then-require-prebuilt structure as the chat block above.
+        # interactive-shell-fixture (a third bin the interactive-shell
+        # package also produces) and ai-text-editor-schema-gen (ai-text-editor's
+        # own third bin) are both MODE: DEV tooling, absent from either
+        # skill's binaries.tsv, and deliberately not built here.
+        if command -v cargo >/dev/null 2>&1; then
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package interactive-shell --bin interactive-shell --bin interactive-shell-input ) \
+                || { printf '%s: cargo build interactive-shell failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package interactive-shell-mcp ) \
+                || { printf '%s: cargo build interactive-shell-mcp failed\n' "${0##*/}" >&2; exit 66; }
+            mkdir -p "$repo_root/interactive-shell/bin/$skill_dir"
+            ish_release="$repo_root/target/$skill_dir/release"
+            cp "$ish_release/interactive-shell$skill_exe" "$repo_root/interactive-shell/bin/$skill_dir/interactive-shell$skill_exe"
+            cp "$ish_release/interactive-shell-input$skill_exe" "$repo_root/interactive-shell/bin/$skill_dir/interactive-shell-input$skill_exe"
+            cp "$ish_release/interactive-shell-mcp$skill_exe" "$repo_root/interactive-shell/bin/$skill_dir/interactive-shell-mcp$skill_exe"
+        else
+            ls "$repo_root/interactive-shell/bin/"*/"interactive-shell$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/interactive-shell/bin/"*/"interactive-shell-input$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/interactive-shell/bin/"*/"interactive-shell-mcp$skill_exe" >/dev/null 2>&1 || {
+                printf '%s: cargo not found and interactive-shell/bin binaries absent\n' "${0##*/}" >&2
+                exit 66
+            }
+        fi
+        if command -v cargo >/dev/null 2>&1; then
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package ai-text-editor --bin ai-text-editor --bin ai-text-editor-server ) \
+                || { printf '%s: cargo build ai-text-editor failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package ai-text-editor-mcp ) \
+                || { printf '%s: cargo build ai-text-editor-mcp failed\n' "${0##*/}" >&2; exit 66; }
+            mkdir -p "$repo_root/ai-text-editor/bin/$skill_dir"
+            ate_release="$repo_root/target/$skill_dir/release"
+            cp "$ate_release/ai-text-editor$skill_exe" "$repo_root/ai-text-editor/bin/$skill_dir/ai-text-editor$skill_exe"
+            cp "$ate_release/ai-text-editor-server$skill_exe" "$repo_root/ai-text-editor/bin/$skill_dir/ai-text-editor-server$skill_exe"
+            cp "$ate_release/ai-text-editor-mcp$skill_exe" "$repo_root/ai-text-editor/bin/$skill_dir/ai-text-editor-mcp$skill_exe"
+        else
+            ls "$repo_root/ai-text-editor/bin/"*/"ai-text-editor$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/ai-text-editor/bin/"*/"ai-text-editor-server$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/ai-text-editor/bin/"*/"ai-text-editor-mcp$skill_exe" >/dev/null 2>&1 || {
+                printf '%s: cargo not found and ai-text-editor/bin binaries absent\n' "${0##*/}" >&2
                 exit 66
             }
         fi

@@ -1,0 +1,203 @@
+# MODE: DEV
+# T70: build every shipping skill's binaries for all five targets and
+# publish the resulting multi-target npm package -- CI-driven, not a
+# maintainer running npm publish from their own single-platform machine.
+#
+# Three jobs, not one, because GitHub Actions environment protection gates
+# at the JOB level, not the step level (AR-10): a job any unattended
+# workflow_dispatch dry run must reach cannot also carry a real
+# required-reviewer gate.
+#
+#   build   -- five-leg matrix (same os/target pairs as release-installer.yml's
+#              own native job), each leg builds every binary-shipping skill
+#              for its own target via installer/build-release.sh and uploads
+#              that target's per-skill bin/<target>/ subtree.
+#   assemble -- ungated; downloads all five payloads into one tree so a
+#              single job holds every target's binaries at once (something
+#              no native runner can produce alone), then always runs an
+#              npm pack --dry-run. This is the job an unattended
+#              workflow_dispatch run needs to reach and complete.
+#   publish -- gated on a genuine `release: published` trigger and the
+#              npm-publish environment's required-reviewer protection
+#              (provisioned separately, via the GitHub API -- naming an
+#              environment here does not by itself create that protection).
+#              Never reachable from workflow_dispatch.
+#
+# planning/scripts/<cmd> (~30 Rust-migrated planning commands) is staged at
+# a single canonical path with no per-target subdirectory, unlike every
+# other skill's bin/<target>/<binary> layout -- a pre-existing convention
+# this workflow does not redesign. assemble and publish each stage it
+# explicitly for their own runner's platform (x86_64-unknown-linux-musl),
+# a known, deliberate single-platform limitation the manual npm publish
+# process already had (see plan-description.md's own risks section).
+
+name: release-npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: ${{ matrix.target }} builds every shipping skill
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - name: Pin the toolchain and target
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install the musl C toolchain
+        if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get install -y -qq musl-tools
+
+      # build-release.sh's own build mode builds every binary-shipping
+      # skill's crates for the host platform (chat, the register binaries,
+      # rjq, plan-crypt, the planning commands, and -- since T70's W13 --
+      # interactive-shell and ai-text-editor), matching host_target()'s
+      # own resolution of this leg's target.
+      - name: Build every shipping skill for this target
+        shell: bash
+        run: ./installer/build-release.sh --out "$RUNNER_TEMP/release-payload"
+
+      # Stage only each skill's bin/<target>/ subtree into a clean,
+      # predictable layout for upload -- not the whole assembled tree
+      # (which also carries the single-platform planning/scripts/<cmd>
+      # files jobs.assemble/jobs.publish stage for themselves instead, and
+      # the maintainer-only files a release tarball would otherwise ship).
+      - name: Stage this target's per-skill binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -1)"
+          src="$RUNNER_TEMP/release-payload/ai-skills-$version"
+          dest="$RUNNER_TEMP/release-npm-payload"
+          mkdir -p "$dest"
+          for skill in chat planning todo interactive-shell bug-report ai-text-editor; do
+            if [ -d "$src/$skill/bin/${{ matrix.target }}" ]; then
+              mkdir -p "$dest/$skill/bin"
+              cp -R "$src/$skill/bin/${{ matrix.target }}" "$dest/$skill/bin/${{ matrix.target }}"
+            fi
+          done
+
+      - name: Upload this target's payload
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-npm-payload-${{ matrix.target }}
+          path: ${{ runner.temp }}/release-npm-payload
+          if-no-files-found: error
+
+  assemble:
+    name: assemble every target and dry-run verify the npm package
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - name: Pin the toolchain and target
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install the musl C toolchain
+        run: sudo apt-get install -y -qq musl-tools
+
+      # Every leg's own release-npm-payload-<target> artifact holds a
+      # different target subdirectory under the same skill/bin/ paths, so
+      # merging all five into one checkout with no path collisions is what
+      # actually assembles a tree holding all five targets at once.
+      - name: Download every target's payload
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: release-npm-payload-*
+          path: .
+          merge-multiple: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+
+      - name: Regenerate .npmignore
+        run: ./installer/build-release.sh --npmignore > .npmignore
+
+      - name: Stage planning commands for this job's own platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Staging planning/scripts/<cmd> for x86_64-unknown-linux-musl (this job'"'"'s own runner) -- a known, deliberate single-platform limitation of the pre-existing planning/scripts/<cmd> convention, not something this workflow redesigns.'
+          ./installer/build-release.sh --prepare
+
+      - name: Dry-run pack the npm package
+        run: npm pack --dry-run
+
+  publish:
+    name: publish to npm (gated)
+    needs: assemble
+    if: github.event_name == 'release'
+    environment: npm-publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Pin the toolchain and target
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install the musl C toolchain
+        run: sudo apt-get install -y -qq musl-tools
+
+      - name: Download every target's payload
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: release-npm-payload-*
+          path: .
+          merge-multiple: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Regenerate .npmignore
+        run: ./installer/build-release.sh --npmignore > .npmignore
+
+      - name: Stage planning commands for this job's own platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Staging planning/scripts/<cmd> for x86_64-unknown-linux-musl (this job'"'"'s own runner) -- a known, deliberate single-platform limitation of the pre-existing planning/scripts/<cmd> convention, not something this workflow redesigns.'
+          ./installer/build-release.sh --prepare
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
