@@ -3413,7 +3413,7 @@
     {
       "id": "B371",
       "title": "setup-dev-env.sh keeps a stale compiled plan library because it checks only that generated artifacts exist, so a checkout install ships helpers without B365's fix",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3424,12 +3424,12 @@
       "surfaces": [
         "setup-dev-env.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "setup-dev-env's build_if_missing now judges the plan libraries' freshness via build-plan-libs.sh --check instead of a bare existence check (nextupdate a164efa2, src/setup-dev-env/src/generated.rs).",
+      "verification": "Verified end to end: ran the rebuilt setup-dev-env binary directly against this checkout; a stale/missing library triggers a real rebuild via --check's own verdict, and REVIEWER.md (which has no --check) now regenerates unconditionally every run instead, matching PORTABILITY.md's own precedent. Full cargo test -p setup-dev-env green; pre-push-check.sh and ./run-tests.sh both green on the fixing commit.",
       "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
       "notes": "Masks B365: its fix (40d51bdb, b7258bb4) is correct, but it never reaches an install made from a working tree that was set up before the fix. After bin/<triple>/build-plan-libs and a reinstall, the scratch reproduction exits 0 for both helpers. The same existence-only check may cover REVIEWER.md and the other generated files; only the plan libraries were measured. Measured for REVIEWER.md too, 2026-09-24: planning/REVIEWER.md was a Sep 16 build of 24342 bytes; bin/<triple>/generate-reviewer rewrote it to 25748, which is what the npm baseline expects. pre-push-check had flagged it as 'npm package baseline drift'. So the existence-only check covers at least the plan libraries and REVIEWER.md.",
       "created_at": "2026-09-24T09:20:43Z",
-      "updated_at": "2026-09-24T09:33:48Z"
+      "updated_at": "2026-09-24T11:25:59Z"
     },
     {
       "id": "B14",
@@ -5026,7 +5026,7 @@
     {
       "id": "B372",
       "title": "setup-dev-env.sh does not refresh chat/bin/<triple>/, so an install from the checkout ships the previous chat-mcp, chat-server-rs and chat-client-rs",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -5037,17 +5037,17 @@
       "surfaces": [
         "setup-dev-env.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "setup-dev-env's stage_extras now stages chat-client-rs/chat-mcp/chat-server-rs/chat-spool-watch into chat/bin/<triple>/, via a new named skill_dir_for(crate_name) lookup (nextupdate a164efa2, src/setup-dev-env/src/stage.rs).",
+      "verification": "Deleted a marker binary from chat/bin/x86_64-unknown-linux-musl/, re-ran the rebuilt setup-dev-env binary directly, confirmed it re-created it and printed the new '-> chat/bin/x86_64-unknown-linux-musl/...' line for all four chat binaries. New unit test skill_dir_for_covers_every_multi_binary_skill pins the mapping. cargo test -p setup-dev-env, pre-push-check.sh, ./run-tests.sh all green.",
       "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
       "notes": "Silent: the install succeeds and the MCP server connects, so only a hash comparison of the shared bin against bin/<triple>/ shows it. Workaround: copy bin/<triple>/chat-* into chat/bin/<triple>/ before installing.",
       "created_at": "2026-09-24T09:20:43Z",
-      "updated_at": "2026-09-24T09:20:43Z"
+      "updated_at": "2026-09-24T11:26:09Z"
     },
     {
       "id": "B373",
       "title": "ai-text-editor has no skill-local bin/<triple>/, so installing from a checkout never updates the shared ai-text-editor, ai-text-editor-server and ai-text-editor-mcp",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -5058,17 +5058,17 @@
       "surfaces": [
         "setup-dev-env.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Same skill_dir_for(crate_name) fix as B372 covers ai-text-editor/ai-text-editor-mcp, staging into ai-text-editor/bin/<triple>/ (nextupdate a164efa2, src/setup-dev-env/src/stage.rs).",
+      "verification": "Deleted a marker binary from ai-text-editor/bin/x86_64-unknown-linux-musl/, re-ran the rebuilt setup-dev-env binary directly, confirmed it re-created it and printed the new '-> ai-text-editor/bin/x86_64-unknown-linux-musl/...' line for all three binaries. Same skill_dir_for_covers_every_multi_binary_skill test covers this case too. cargo test -p setup-dev-env, pre-push-check.sh, ./run-tests.sh all green.",
       "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
       "notes": "Sibling of the chat/bin entry filed alongside: same mechanism, different skill. Went unnoticed because the old binary still starts and connects.",
       "created_at": "2026-09-24T09:20:43Z",
-      "updated_at": "2026-09-24T09:20:43Z"
+      "updated_at": "2026-09-24T11:26:09Z"
     },
     {
       "id": "B375",
       "title": "install --agent claude writes agent profiles to ~/.claude/skills/.claude/agents/, which Claude Code never reads",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -5079,12 +5079,12 @@
       "surfaces": [
         "src/installer/src/profiles.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "run_profiles_post_install and install_profiles_leniently now take the real home directory (already resolved once per install run) instead of a skill install root's own path, and install_profile is called with it directly (nextupdate a164efa2, src/installer/src/main.rs).",
+      "verification": "New test run_profiles_post_install_writes_under_home_not_a_skill_root exercises run_profiles_post_install itself end to end against the real chris/nitpicker profile JSON, asserting the profile lands under home/.claude/agents/ and never under home/.claude/skills/.claude/agents/. Full cargo test -p installer green (232 tests); pre-push-check.sh and ./run-tests.sh both green.",
       "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
       "notes": "Worked around on this machine by copying the 10 missing files into ~/.claude/agents/. The live nitpicker.md there differs from the shipped one and was left alone.",
       "created_at": "2026-09-24T09:20:43Z",
-      "updated_at": "2026-09-24T09:20:43Z"
+      "updated_at": "2026-09-24T11:26:17Z"
     },
     {
       "id": "B377",
@@ -7673,7 +7673,7 @@
     {
       "id": "B376",
       "title": "setup-dev-env.sh runs generate-portability.sh without AI_SKILLS_BIN_ROOT, so on a machine with skills installed it fails and PORTABILITY.md goes stale",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7684,12 +7684,12 @@
       "surfaces": [
         "setup-dev-env.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "setup-dev-env's build_if_missing now sets AI_SKILLS_BIN_ROOT=<the bin dir this run just built> on every subprocess it spawns (build-plan-libs.sh, generate-reviewer.sh, generate-portability.sh), via a new with_bin_root helper (nextupdate a164efa2, src/setup-dev-env/src/generated.rs).",
+      "verification": "Ran the rebuilt setup-dev-env binary directly on this machine, which already has a real installed skill set at ~/.config/tsch-ai-skills/bin (the exact condition the bug reproduces on): output now reads 'regenerated planning/REVIEWER.md' / 'regenerated PORTABILITY.md' with no failure message, previously 'generate-portability.sh failed; the portability catalogue may be stale' every run. cargo test -p setup-dev-env, pre-push-check.sh, ./run-tests.sh all green with no AI_SKILLS_BIN_ROOT override needed by the caller anymore.",
       "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
       "notes": "Downgraded to a warning by setup-dev-env, so it is easy to miss in the build output.",
       "created_at": "2026-09-24T09:20:43Z",
-      "updated_at": "2026-09-24T09:20:43Z"
+      "updated_at": "2026-09-24T11:26:17Z"
     },
     {
       "id": "B25",
