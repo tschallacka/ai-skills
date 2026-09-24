@@ -130,4 +130,135 @@ done
 tracked_bins="$(git -C "$root" ls-files planning/bin chat/bin todo/bin bug-report/bin 2>/dev/null || true)"
 t_assert_eq 'no bundled binary is tracked in git (.agents/MAINTAINER.md 1.10)' "$tracked_bins" ''
 
+# ---- T70/W08: binaries.tsv vs skill_files() drift -------------------------
+#
+# Each row above says what a skill SHIPS. installer/src/50-manifest.sh's
+# skill_files() is a second, independently maintained declaration of the
+# same fact -- one case arm per skill, hand-written, and not machine-parsed
+# from binaries.tsv anywhere -- so the two can silently disagree. This finds
+# every (target, binary) pair one names that the other does not.
+
+# The (target, binary) pairs one skill's binaries.tsv declares.
+drift_binaries_tsv_pairs() { # <binaries.tsv path>
+    awk -F'\t' '!/^#/ && NF == 4 && $1 != "target" { print $1 "/" $3 }' "$1" | LC_ALL=C sort -u
+}
+
+# The (target, binary) pairs one skill's own arm of skill_files() actually
+# stages, extracted from a manifest file (the real one, or a fixture).
+# skill_files() writes this three different ways depending on the skill
+# (skill_artifact_files() calls inside a uname case block, raw printf lines
+# inside a uname case block, or a flat heredoc list with no case-gating at
+# all -- planning's own plan-overview/rjq rows are the last two), so this
+# does not look for any one call syntax: it isolates the skill's own arm
+# (from its `<skill>)` opener to the next bare `<word>)` arm-opener or
+# `esac`, whichever comes first -- indentation-agnostic, since arms in this
+# hand-maintained function are not indented consistently with each other --
+# and then pulls every literal `bin/<target>/<binary>` substring out of its
+# non-comment lines. That substring is what all three forms share.
+drift_skill_files_pairs() { # <skill> <manifest path>
+    local skill="$1" manifest="$2"
+    awk -v skill="$skill" '
+        $0 ~ "^[[:space:]]+" skill "\\)[[:space:]]*$" { in_arm = 1; next }
+        in_arm && /^[[:space:]]+[A-Za-z0-9_-]+\)[[:space:]]*$/ { in_arm = 0 }
+        in_arm && /^[[:space:]]+esac[[:space:]]*$/ { in_arm = 0 }
+        in_arm { print }
+    ' "$manifest" \
+        | { grep -v '^[[:space:]]*#' || true; } \
+        | { grep -oE 'bin/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' || true; } \
+        | sed 's#^bin/##' \
+        | LC_ALL=C sort -u
+}
+
+# One line per disagreement: "<skill>: <pair> declared in binaries.tsv but
+# not in skill_files()" or the reverse. Prints nothing when the two agree.
+drift_report() { # <skill> <binaries.tsv path> <manifest path>
+    local skill="$1" reg="$2" manifest="$3" declared actual p
+    declared="$(drift_binaries_tsv_pairs "$reg")"
+    actual="$(drift_skill_files_pairs "$skill" "$manifest")"
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        printf '%s: %s declared in binaries.tsv but not in skill_files()\n' "$skill" "$p"
+    done <<COMM
+$(comm -23 <(printf '%s\n' "$declared") <(printf '%s\n' "$actual"))
+COMM
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        printf '%s: %s present in skill_files() but not declared in binaries.tsv\n' "$skill" "$p"
+    done <<COMM
+$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$actual"))
+COMM
+}
+
+# Self-test first: prove the check can actually fail before trusting it not
+# to. Two fixtures, because skill_files() uses two different shapes for the
+# forms drift_skill_files_pairs must recognize identically -- a
+# skill_artifact_files()-wrapped case-block form (every skill but planning)
+# and planning's own flat, unwrapped heredoc form.
+self_test_dir="$(mktemp -d "${TMPDIR:-/tmp}/t-drift.XXXXXX")"
+
+# Fixture 1: skill_artifact_files()-wrapped form, one row deliberately
+# missing from binaries.tsv relative to what "skill_files()" (the fixture
+# manifest) declares.
+cat > "$self_test_dir/wrapped-manifest.sh" <<'EOF'
+        widget)
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64)
+                    skill_artifact_files widget bin/x86_64-unknown-linux-musl/widget
+                    ;;
+            esac
+            ;;
+EOF
+cat > "$self_test_dir/wrapped.tsv" <<'EOF'
+# MODE: PROD
+target	condition	binary	why
+EOF
+report="$(drift_report widget "$self_test_dir/wrapped.tsv" "$self_test_dir/wrapped-manifest.sh")"
+t_assert_contains 'self-test (wrapped form) detects an injected mismatch' \
+    'widget: x86_64-unknown-linux-musl/widget present in skill_files() but not declared in binaries.tsv' "$report"
+
+# Fixture 2: planning's own flat, unwrapped heredoc form -- no case-gating,
+# no skill_artifact_files() wrapper. A check that only recognized the
+# wrapped form would false-positive-report this as fully absent (AR-7).
+cat > "$self_test_dir/flat-manifest.sh" <<'EOF'
+        gadget)
+            cat <<'INNER'
+bin/x86_64-unknown-linux-musl/gadget
+INNER
+            ;;
+EOF
+cat > "$self_test_dir/flat.tsv" <<'EOF'
+# MODE: PROD
+target	condition	binary	why
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	gadget	test fixture
+x86_64-apple-darwin	Darwin:x86_64	gadget	test fixture, deliberately not in skill_files()
+EOF
+report="$(drift_report gadget "$self_test_dir/flat.tsv" "$self_test_dir/flat-manifest.sh")"
+t_assert_contains 'self-test (flat heredoc form) detects an injected mismatch' \
+    'gadget: x86_64-apple-darwin/gadget declared in binaries.tsv but not in skill_files()' "$report"
+t_assert_eq 'self-test (flat heredoc form) does not false-positive the matching row' \
+    "$(printf '%s\n' "$report" | grep -c 'x86_64-unknown-linux-musl/gadget' || true)" '0'
+
+rm -rf "$self_test_dir"
+
+# The real check, against the real tree: every skill with a binaries.tsv.
+# Excludes benchmark/ and testing-stories/, whose own archived runs carry
+# copies of other skills' registries as fixture data (a fixture's own
+# top-level directory is not a real skill_files() arm, and cross-checking
+# it against one would false-positive every row it declares).
+manifest="$root/installer/src/50-manifest.sh"
+for reg in $registries; do
+    rel="${reg#"$root"/}"
+    skill="${rel%%/*}"
+    case "$skill" in
+        benchmark|testing-stories) continue ;;
+    esac
+    drift="$(drift_report "$skill" "$reg" "$manifest")"
+    [ -z "$drift" ] || while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        t_fail "binaries.tsv/skill_files() drift: $line"
+    done <<DRIFT
+$drift
+DRIFT
+done
+
 t_end

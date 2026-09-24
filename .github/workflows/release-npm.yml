@@ -86,8 +86,8 @@ jobs:
         shell: bash
         run: |
           {
-            echo 'C:\Program Files\Git\bin'
-            echo 'C:\Program Files\Git\usr\bin'
+            printf '%s\n' 'C:\Program Files\Git\bin'
+            printf '%s\n' 'C:\Program Files\Git\usr\bin'
           } >> "$GITHUB_PATH"
 
       - name: Pin the toolchain and target
@@ -125,18 +125,23 @@ jobs:
       # (which also carries the single-platform planning/scripts/<cmd>
       # files jobs.assemble/jobs.publish stage for themselves instead, and
       # the maintainer-only files a release tarball would otherwise ship).
+      #
+      # --out only receives the FINAL PACKED ai-skills-<version>.tar.gz
+      # (measured: a real run wrote it there and nothing else) -- the
+      # actual per-skill binaries build-release.sh's build mode produces
+      # land directly in the checked-out repo tree itself
+      # (<skill>/bin/<target>/..., e.g. chat/bin/x86_64.../chat-server-rs),
+      # which is where this step reads them from instead.
       - name: Stage this target's per-skill binaries
         shell: bash
         run: |
           set -euo pipefail
-          version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -1)"
-          src="$RUNNER_TEMP/release-payload/ai-skills-$version"
           dest="$RUNNER_TEMP/release-npm-payload"
           mkdir -p "$dest"
           for skill in chat planning todo interactive-shell bug-report ai-text-editor; do
-            if [ -d "$src/$skill/bin/${{ matrix.target }}" ]; then
+            if [ -d "$skill/bin/${{ matrix.target }}" ]; then
               mkdir -p "$dest/$skill/bin"
-              cp -R "$src/$skill/bin/${{ matrix.target }}" "$dest/$skill/bin/${{ matrix.target }}"
+              cp -R "$skill/bin/${{ matrix.target }}" "$dest/$skill/bin/${{ matrix.target }}"
             fi
           done
 

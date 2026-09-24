@@ -21,7 +21,7 @@ package/agent-identity-plugin/tests/test-agent-identity-injection.sh	1934
 package/ai-text-editor/SKILL.md	24814
 package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	19410
-package/ai-text-editor/binaries.tsv	500
+package/ai-text-editor/binaries.tsv	2146
 package/ai-text-editor/docs/README.md	1307
 package/ai-text-editor/integration.tsv	1638
 package/ai-text-editor/references/protocol.md	36297

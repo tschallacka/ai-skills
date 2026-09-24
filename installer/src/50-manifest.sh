@@ -233,15 +233,20 @@ scripts/verify-target
 EOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/rjq' ;;
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/rjq'
+                    skill_artifact_files planning bin/x86_64-unknown-linux-musl/plan-crypt ;;
                 Linux:aarch64|Linux:arm64)
-                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/rjq' ;;
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/rjq'
+                    skill_artifact_files planning bin/aarch64-unknown-linux-musl/plan-crypt ;;
                 Darwin:x86_64)
-                    printf '%s\n' 'bin/x86_64-apple-darwin/rjq' ;;
+                    printf '%s\n' 'bin/x86_64-apple-darwin/rjq'
+                    skill_artifact_files planning bin/x86_64-apple-darwin/plan-crypt ;;
                 Darwin:arm64)
-                    printf '%s\n' 'bin/aarch64-apple-darwin/rjq' ;;
+                    printf '%s\n' 'bin/aarch64-apple-darwin/rjq'
+                    skill_artifact_files planning bin/aarch64-apple-darwin/plan-crypt ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/rjq.exe' ;;
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/rjq.exe'
+                    skill_artifact_files planning bin/x86_64-pc-windows-msvc/plan-crypt.exe ;;
                 *)
                     printf 'skill_files: no rjq artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
@@ -703,8 +708,17 @@ ISHEOF
                     skill_artifact_files interactive-shell bin/x86_64-apple-darwin/interactive-shell bin/x86_64-apple-darwin/interactive-shell-input bin/x86_64-apple-darwin/interactive-shell-mcp ;;
                 Darwin:arm64)
                     skill_artifact_files interactive-shell bin/aarch64-apple-darwin/interactive-shell bin/aarch64-apple-darwin/interactive-shell-input bin/aarch64-apple-darwin/interactive-shell-mcp ;;
-                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                MINGW*:x86_64|Windows*:x86_64|MINGW*:amd64|Windows*:amd64)
                     skill_artifact_files interactive-shell bin/x86_64-pc-windows-msvc/interactive-shell.exe bin/x86_64-pc-windows-msvc/interactive-shell-input.exe bin/x86_64-pc-windows-msvc/interactive-shell-mcp.exe ;;
+                # T70/AR-33: T84 shipped real Cygwin-native and MSYS2-native
+                # builds (interactive-shell/binaries.tsv's own x86_64-pc-cygwin
+                # rows, CI-proven by ci.yml's cygwin/msys2 legs) distinct from
+                # the MSVC build above -- linked against cygwin1.dll or
+                # msys-2.0.dll respectively, not an MSVC binary -- so CYGWIN*/
+                # MSYS* route to them instead of falling into the MINGW*/
+                # Windows* arm the way they used to.
+                CYGWIN*:x86_64|CYGWIN*:amd64|MSYS*:x86_64|MSYS*:amd64)
+                    skill_artifact_files interactive-shell bin/x86_64-pc-cygwin/interactive-shell.exe bin/x86_64-pc-cygwin/interactive-shell-input.exe bin/x86_64-pc-cygwin/interactive-shell-mcp.exe ;;
                 *)
                     printf 'skill_files: no interactive-shell artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
