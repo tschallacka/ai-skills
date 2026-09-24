@@ -91,6 +91,10 @@ fn print_response(response: &Response) -> ExitCode {
             println!("written; new revision: {revision}");
             ExitCode::SUCCESS
         }
+        Response::WrittenWithId { revision, id } => {
+            println!("written; new id: {id}; new revision: {revision}");
+            ExitCode::SUCCESS
+        }
         Response::Validated { passed, report } => {
             print!("{report}");
             if *passed {

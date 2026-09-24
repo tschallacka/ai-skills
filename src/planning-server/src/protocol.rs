@@ -355,6 +355,77 @@ pub enum Request {
     /// AddUiStory already creates this file as a side effect; this is the
     /// standalone recreate-if-missing path (e.g. after a manual deletion).
     CreateUiStoryRunCache { plan_dir: String, id: String },
+    /// Read-only: a register file's (TODO.json/BUGS.json) raw content and
+    /// its PlanRevision hash. Unlike a plan document there is no
+    /// plan-context document id for these files -- register-read serves
+    /// bounded QUERIES (show/list/report/count/next-id), never a whole
+    /// guardable snapshot -- so AddTodo/UpdateTodo/AddBug/UpdateBug's own
+    /// auto-read convenience needs its own read path, and this is it.
+    ReadRegisterFile { file: String },
+    /// Guards `file` directly: `file` names the exact TODO.json to operate
+    /// on and is also what gets set as the `TODO_JSON` env var for the
+    /// subprocess, never read from this adapter's own cwd or ambient
+    /// environment -- the same "two different TODO.json files exist, never
+    /// guess which one" rule RegisterRead already established. todo-add
+    /// requires the caller's own `--id` (unlike bug-add, it mints nothing),
+    /// so a plain revision-bearing Written is enough to report back.
+    AddTodo {
+        file: String,
+        id: String,
+        title: String,
+        parent: Option<String>,
+        priority: Option<String>,
+        status: Option<String>,
+        blocked_on: Option<String>,
+        detail: Option<String>,
+        refs: Vec<String>,
+        revision: String,
+    },
+    /// Guards `file` directly, the same TODO_JSON-injection shape as AddTodo.
+    UpdateTodo {
+        file: String,
+        id: String,
+        status: Option<String>,
+        priority: Option<String>,
+        note: Option<String>,
+        detail: Option<String>,
+        blocked_on: Option<String>,
+        revision: String,
+    },
+    /// Guards `file` directly (BUGS_JSON is injected the same way AddTodo
+    /// injects TODO_JSON). bug-add mints its own B<N> id and takes no id
+    /// argument at all -- WrittenWithId reports the minted id back, read
+    /// from the newly-written file's own last `bugs[]` entry (bug-add
+    /// always pushes, never sorts, so a fresh entry is always last) rather
+    /// than parsed out of the subprocess's own stdout text.
+    AddBug {
+        file: String,
+        title: String,
+        reproduce: String,
+        observed: String,
+        expected: String,
+        severity: Option<String>,
+        priority: Option<String>,
+        status: Option<String>,
+        mechanism: Option<String>,
+        parent: Option<String>,
+        found_by: Option<String>,
+        surfaces: Option<String>,
+        revision: String,
+    },
+    /// Guards `file` directly, the same BUGS_JSON-injection shape as AddBug.
+    UpdateBug {
+        file: String,
+        id: String,
+        status: Option<String>,
+        fix: Option<String>,
+        verification: Option<String>,
+        reason: Option<String>,
+        priority: Option<String>,
+        mechanism: Option<String>,
+        append_note: Option<String>,
+        revision: String,
+    },
     /// Read-only: no revision at all, since it applies no write.
     ValidatePlan { plan_dir: String, complete: bool },
 }
@@ -368,6 +439,11 @@ pub enum Response {
     Document { content: String, revision: String },
     /// A successful guarded write: the new revision the write produced.
     Written { revision: String },
+    /// A successful guarded write that also mints its own identity the
+    /// caller could not have supplied (bug-add's self-assigned B<N> id):
+    /// `revision` guards the next write, `id` is what to reference this
+    /// entry by afterward.
+    WrittenWithId { revision: String, id: String },
     /// ValidatePlan's own result: pass/fail plus the full report text.
     Validated { passed: bool, report: String },
     /// A guarded write refused because `revision` no longer matches what is
@@ -644,6 +720,68 @@ mod tests {
     }
 
     #[test]
+    fn the_todo_and_bug_register_requests_round_trip_through_json() {
+        let requests = [
+            Request::ReadRegisterFile {
+                file: "/repo/TODO.json".to_string(),
+            },
+            Request::AddTodo {
+                file: "/repo/TODO.json".to_string(),
+                id: "T45".to_string(),
+                title: "Do the thing".to_string(),
+                parent: Some("T44".to_string()),
+                priority: Some("high".to_string()),
+                status: None,
+                blocked_on: None,
+                detail: Some("some detail".to_string()),
+                refs: vec!["src/x.rs".to_string()],
+                revision: "abc".to_string(),
+            },
+            Request::UpdateTodo {
+                file: "/repo/TODO.json".to_string(),
+                id: "T45".to_string(),
+                status: Some("done".to_string()),
+                priority: None,
+                note: None,
+                detail: None,
+                blocked_on: None,
+                revision: "abc".to_string(),
+            },
+            Request::AddBug {
+                file: "/repo/BUGS.json".to_string(),
+                title: "It breaks".to_string(),
+                reproduce: "run it".to_string(),
+                observed: "it broke".to_string(),
+                expected: "it should not".to_string(),
+                severity: Some("major".to_string()),
+                priority: None,
+                status: None,
+                mechanism: None,
+                parent: None,
+                found_by: Some("session-1".to_string()),
+                surfaces: None,
+                revision: "abc".to_string(),
+            },
+            Request::UpdateBug {
+                file: "/repo/BUGS.json".to_string(),
+                id: "B12".to_string(),
+                status: Some("fixed".to_string()),
+                fix: Some("changed x".to_string()),
+                verification: Some("re-ran the repro".to_string()),
+                reason: None,
+                priority: None,
+                mechanism: None,
+                append_note: None,
+                revision: "abc".to_string(),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
     fn a_malformed_line_is_refused_by_name_not_a_panic() {
         let result = decode_request("not json at all");
         assert!(result.is_err());
@@ -667,6 +805,10 @@ mod tests {
             },
             Response::Written {
                 revision: "def".into(),
+            },
+            Response::WrittenWithId {
+                revision: "def".into(),
+                id: "B12".into(),
             },
             Response::Validated {
                 passed: true,

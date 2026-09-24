@@ -35,6 +35,7 @@
 
 use crate::protocol::{Request, Response};
 use crate::revision::{guarded_call, read_with_revision, PlanRevision, RevisionError};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -293,6 +294,105 @@ pub fn dispatch_with_bin_dir(request: Request, bin_dir: Option<&Path>) -> Respon
         Request::CreateUiStoryRunCache { plan_dir, id } => {
             create_ui_story_run_cache(bin_dir, &plan_dir, &id)
         }
+        Request::ReadRegisterFile { file } => read_register_file(&file),
+        Request::AddTodo {
+            file,
+            id,
+            title,
+            parent,
+            priority,
+            status,
+            blocked_on,
+            detail,
+            refs,
+            revision,
+        } => add_todo(
+            bin_dir,
+            &file,
+            &id,
+            &title,
+            parent.as_deref(),
+            priority.as_deref(),
+            status.as_deref(),
+            blocked_on.as_deref(),
+            detail.as_deref(),
+            &refs,
+            &revision,
+        ),
+        Request::UpdateTodo {
+            file,
+            id,
+            status,
+            priority,
+            note,
+            detail,
+            blocked_on,
+            revision,
+        } => update_todo(
+            bin_dir,
+            &file,
+            &id,
+            status.as_deref(),
+            priority.as_deref(),
+            note.as_deref(),
+            detail.as_deref(),
+            blocked_on.as_deref(),
+            &revision,
+        ),
+        Request::AddBug {
+            file,
+            title,
+            reproduce,
+            observed,
+            expected,
+            severity,
+            priority,
+            status,
+            mechanism,
+            parent,
+            found_by,
+            surfaces,
+            revision,
+        } => add_bug(
+            bin_dir,
+            &file,
+            &title,
+            &reproduce,
+            &observed,
+            &expected,
+            severity.as_deref(),
+            priority.as_deref(),
+            status.as_deref(),
+            mechanism.as_deref(),
+            parent.as_deref(),
+            found_by.as_deref(),
+            surfaces.as_deref(),
+            &revision,
+        ),
+        Request::UpdateBug {
+            file,
+            id,
+            status,
+            fix,
+            verification,
+            reason,
+            priority,
+            mechanism,
+            append_note,
+            revision,
+        } => update_bug(
+            bin_dir,
+            &file,
+            &id,
+            status.as_deref(),
+            fix.as_deref(),
+            verification.as_deref(),
+            reason.as_deref(),
+            priority.as_deref(),
+            mechanism.as_deref(),
+            append_note.as_deref(),
+            &revision,
+        ),
         Request::ValidatePlan { plan_dir, complete } => validate_plan(bin_dir, &plan_dir, complete),
     }
 }
@@ -305,9 +405,28 @@ fn program_path(bin_dir: Option<&Path>, name: &str) -> PathBuf {
 }
 
 fn run_command(bin_dir: Option<&Path>, name: &str, args: &[&str]) -> Result<(), String> {
+    run_command_with_env(bin_dir, name, args, &[])
+}
+
+/// The same delegated-subprocess call `run_command` makes, plus explicit
+/// environment variables set on the CHILD only -- this process's own
+/// environment (and every other concurrent call's) is untouched. Exists for
+/// todo-add/todo-update/bug-add/bug-update, which resolve their register
+/// file from `TODO_JSON`/`BUGS_JSON` (or a bare cwd-relative name) with no
+/// `--file`-style flag at all: the caller's exact register path is passed
+/// here as the env value instead, never read from this adapter's own cwd or
+/// ambient environment, the same "never guess which register" rule
+/// RegisterRead already established for its own read path.
+fn run_command_with_env(
+    bin_dir: Option<&Path>,
+    name: &str,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> Result<(), String> {
     let program = program_path(bin_dir, name);
     let output = Command::new(&program)
         .args(args)
+        .envs(env.iter().copied())
         .output()
         .map_err(|error| format!("could not run {}: {error}", program.display()))?;
     if output.status.success() {
@@ -1155,6 +1274,258 @@ fn create_ui_story_run_cache(bin_dir: Option<&Path>, plan_dir: &str, id: &str) -
         &[plan_dir, id],
         &cache_path,
     )
+}
+
+/// Read-only: TODO.json/BUGS.json's raw content and its PlanRevision hash,
+/// so AddTodo/UpdateTodo/AddBug/UpdateBug's own guard has something to
+/// auto-read the way every plan-scoped guarded write already can.
+fn read_register_file(file: &str) -> Response {
+    match read_with_revision(Path::new(file)) {
+        Ok((bytes, revision)) => match String::from_utf8(bytes) {
+            Ok(content) => Response::Document {
+                content,
+                revision: revision.to_hex(),
+            },
+            Err(error) => Response::Error {
+                message: format!("{file} is not UTF-8: {error}"),
+            },
+        },
+        Err(error) => Response::Error {
+            message: error.to_string(),
+        },
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_todo(
+    bin_dir: Option<&Path>,
+    file: &str,
+    id: &str,
+    title: &str,
+    parent: Option<&str>,
+    priority: Option<&str>,
+    status: Option<&str>,
+    blocked_on: Option<&str>,
+    detail: Option<&str>,
+    refs: &[String],
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let path = Path::new(file);
+    let mut args: Vec<&str> = vec!["--id", id, "--title", title];
+    if let Some(v) = parent {
+        args.push("--parent");
+        args.push(v);
+    }
+    if let Some(v) = priority {
+        args.push("--priority");
+        args.push(v);
+    }
+    if let Some(v) = status {
+        args.push("--status");
+        args.push(v);
+    }
+    if let Some(v) = blocked_on {
+        args.push("--blocked-on");
+        args.push(v);
+    }
+    if let Some(v) = detail {
+        args.push("--detail");
+        args.push(v);
+    }
+    for r in refs {
+        args.push("--ref");
+        args.push(r);
+    }
+    respond_from(guarded_call(path, guard, || {
+        run_command_with_env(bin_dir, "todo-add", &args, &[("TODO_JSON", file)])
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_todo(
+    bin_dir: Option<&Path>,
+    file: &str,
+    id: &str,
+    status: Option<&str>,
+    priority: Option<&str>,
+    note: Option<&str>,
+    detail: Option<&str>,
+    blocked_on: Option<&str>,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let path = Path::new(file);
+    let mut args: Vec<&str> = vec![id];
+    if let Some(v) = status {
+        args.push("--status");
+        args.push(v);
+    }
+    if let Some(v) = priority {
+        args.push("--priority");
+        args.push(v);
+    }
+    if let Some(v) = note {
+        args.push("--note");
+        args.push(v);
+    }
+    if let Some(v) = detail {
+        args.push("--detail");
+        args.push(v);
+    }
+    if let Some(v) = blocked_on {
+        args.push("--blocked-on");
+        args.push(v);
+    }
+    respond_from(guarded_call(path, guard, || {
+        run_command_with_env(bin_dir, "todo-update", &args, &[("TODO_JSON", file)])
+    }))
+}
+
+/// After a successful bug-add write, the freshly minted entry is always the
+/// LAST element of `array_key` (bug-add pushes, never sorts) -- reading it
+/// back this way is simpler and more robust than parsing the subprocess's
+/// own stdout text ("Filed B47: <title>").
+fn minted_id(path: &Path, array_key: &str) -> Result<String, String> {
+    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let root: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    root.get(array_key)
+        .and_then(serde_json::Value::as_array)
+        .and_then(|entries| entries.last())
+        .and_then(|entry| entry.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| format!("could not read the minted id back from {}", path.display()))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_bug(
+    bin_dir: Option<&Path>,
+    file: &str,
+    title: &str,
+    reproduce: &str,
+    observed: &str,
+    expected: &str,
+    severity: Option<&str>,
+    priority: Option<&str>,
+    status: Option<&str>,
+    mechanism: Option<&str>,
+    parent: Option<&str>,
+    found_by: Option<&str>,
+    surfaces: Option<&str>,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let path = Path::new(file);
+    let mut args: Vec<&str> = vec![
+        "--title",
+        title,
+        "--reproduce",
+        reproduce,
+        "--observed",
+        observed,
+        "--expected",
+        expected,
+    ];
+    if let Some(v) = severity {
+        args.push("--severity");
+        args.push(v);
+    }
+    if let Some(v) = priority {
+        args.push("--priority");
+        args.push(v);
+    }
+    if let Some(v) = status {
+        args.push("--status");
+        args.push(v);
+    }
+    if let Some(v) = mechanism {
+        args.push("--mechanism");
+        args.push(v);
+    }
+    if let Some(v) = parent {
+        args.push("--parent");
+        args.push(v);
+    }
+    if let Some(v) = found_by {
+        args.push("--found-by");
+        args.push(v);
+    }
+    if let Some(v) = surfaces {
+        args.push("--surfaces");
+        args.push(v);
+    }
+    match respond_from(guarded_call(path, guard, || {
+        run_command_with_env(bin_dir, "bug-add", &args, &[("BUGS_JSON", file)])
+    })) {
+        Response::Written { revision } => match minted_id(path, "bugs") {
+            Ok(id) => Response::WrittenWithId { revision, id },
+            Err(message) => Response::Error { message },
+        },
+        other => other,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_bug(
+    bin_dir: Option<&Path>,
+    file: &str,
+    id: &str,
+    status: Option<&str>,
+    fix: Option<&str>,
+    verification: Option<&str>,
+    reason: Option<&str>,
+    priority: Option<&str>,
+    mechanism: Option<&str>,
+    append_note: Option<&str>,
+    revision_hex: &str,
+) -> Response {
+    let guard = match parse_guard(revision_hex) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
+    let path = Path::new(file);
+    let mut args: Vec<&str> = vec![id];
+    if let Some(v) = status {
+        args.push("--status");
+        args.push(v);
+    }
+    if let Some(v) = fix {
+        args.push("--fix");
+        args.push(v);
+    }
+    if let Some(v) = verification {
+        args.push("--verification");
+        args.push(v);
+    }
+    if let Some(v) = reason {
+        args.push("--reason");
+        args.push(v);
+    }
+    if let Some(v) = priority {
+        args.push("--priority");
+        args.push(v);
+    }
+    if let Some(v) = mechanism {
+        args.push("--mechanism");
+        args.push(v);
+    }
+    if let Some(v) = append_note {
+        args.push("--append-note");
+        args.push(v);
+    }
+    respond_from(guarded_call(path, guard, || {
+        run_command_with_env(bin_dir, "bug-update", &args, &[("BUGS_JSON", file)])
+    }))
 }
 
 fn validate_plan(bin_dir: Option<&Path>, plan_dir: &str, complete: bool) -> Response {
@@ -3253,5 +3624,291 @@ mod tests {
         );
 
         assert_snapshots_match(&copy_a, &copy_b);
+    }
+
+    /// A minimal, schema-sound TODO.json: an empty `tasks` array passes
+    /// planning_register's own findings() trivially (nothing to validate),
+    /// so this is a real fixture, not a stand-in.
+    fn write_empty_todo_register(path: &Path) {
+        fs::write(
+            path,
+            r#"{"skill":"todo","skill_version":"1.0","comment":"test fixture","tasks":[]}"#,
+        )
+        .unwrap();
+    }
+
+    /// A minimal, schema-sound BUGS.json: findings() additionally requires
+    /// a non-empty top-level "skill" for bug registers specifically.
+    fn write_empty_bugs_register(path: &Path) {
+        fs::write(
+            path,
+            r#"{"skill":"bug-report","skill_version":"1.0","comment":"test fixture","bugs":[]}"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn read_register_file_reports_real_content_and_a_matching_revision() {
+        let scratch = TempDir::new();
+        let path = scratch.path().join("TODO.json");
+        write_empty_todo_register(&path);
+
+        let response = dispatch(Request::ReadRegisterFile {
+            file: path.to_string_lossy().into_owned(),
+        });
+        let Response::Document { content, revision } = response else {
+            panic!("expected Document, got {response:?}");
+        };
+        let raw = fs::read(&path).unwrap();
+        assert_eq!(content.as_bytes(), raw.as_slice());
+        assert_eq!(revision, PlanRevision::of(&raw).to_hex());
+    }
+
+    #[test]
+    fn add_todo_creates_the_entry_with_the_right_fields() {
+        // Not assert_snapshots_match against a standalone run: todo-add
+        // embeds a real wall-clock created_at/updated_at timestamp, the
+        // same class of thing that already ruled out that comparison for
+        // create_plan and add_planning_bug. Checks the write's own real
+        // properties instead.
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let path = scratch.path().join("TODO.json");
+        write_empty_todo_register(&path);
+        let (_, guard) = read_with_revision(&path).unwrap();
+
+        ensure_built(&bin_dir, "todo-add");
+        let response = dispatch_with_bin_dir(
+            Request::AddTodo {
+                file: path.to_string_lossy().into_owned(),
+                id: "T45".to_string(),
+                title: "Do the thing".to_string(),
+                parent: None,
+                priority: Some("high".to_string()),
+                status: None,
+                blocked_on: None,
+                detail: Some("some detail".to_string()),
+                refs: vec!["src/x.rs".to_string()],
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        let Response::Written { revision } = response else {
+            panic!("expected Written, got {response:?}");
+        };
+        let raw = fs::read(&path).unwrap();
+        assert_eq!(revision, PlanRevision::of(&raw).to_hex());
+        let text = String::from_utf8_lossy(&raw);
+        for expected in ["T45", "Do the thing", "high", "some detail", "src/x.rs"] {
+            assert!(
+                text.contains(expected),
+                "expected TODO.json to contain {expected:?}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn add_todo_with_a_stale_revision_is_refused_and_changes_nothing() {
+        let scratch = TempDir::new();
+        let path = scratch.path().join("TODO.json");
+        write_empty_todo_register(&path);
+        let before = fs::read(&path).unwrap();
+
+        let bogus_guard = PlanRevision::of(b"not the real hash");
+        let response = dispatch(Request::AddTodo {
+            file: path.to_string_lossy().into_owned(),
+            id: "T45".to_string(),
+            title: "Do the thing".to_string(),
+            parent: None,
+            priority: None,
+            status: None,
+            blocked_on: None,
+            detail: None,
+            refs: Vec::new(),
+            revision: bogus_guard.to_hex(),
+        });
+        assert!(
+            matches!(response, Response::Stale { .. }),
+            "expected Stale, got {response:?}"
+        );
+        assert_eq!(
+            before,
+            fs::read(&path).unwrap(),
+            "a stale guard must change nothing"
+        );
+    }
+
+    #[test]
+    fn update_todo_updates_the_matching_entry() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let path = scratch.path().join("TODO.json");
+        fs::write(
+            &path,
+            r#"{"skill":"todo","skill_version":"1.0","comment":"test fixture","tasks":[
+                {"id":"T01","title":"Do the thing","status":"open","priority":"normal",
+                 "parent":null,"detail":null,"blocked_on":null,"refs":[],"note":null,
+                 "created_at":"2020-01-01T00:00:00Z","updated_at":"2020-01-01T00:00:00Z"}
+            ]}"#,
+        )
+        .unwrap();
+        let (_, guard) = read_with_revision(&path).unwrap();
+
+        ensure_built(&bin_dir, "todo-update");
+        let response = dispatch_with_bin_dir(
+            Request::UpdateTodo {
+                file: path.to_string_lossy().into_owned(),
+                id: "T01".to_string(),
+                status: Some("done".to_string()),
+                priority: None,
+                note: Some("finished it".to_string()),
+                detail: None,
+                blocked_on: None,
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        let Response::Written { revision } = response else {
+            panic!("expected Written, got {response:?}");
+        };
+        let raw = fs::read(&path).unwrap();
+        assert_eq!(revision, PlanRevision::of(&raw).to_hex());
+        let text = String::from_utf8_lossy(&raw);
+        assert!(text.contains("\"status\": \"done\""), "{text}");
+        assert!(text.contains("finished it"), "{text}");
+        assert!(
+            text.contains("Do the thing"),
+            "the untouched title must survive: {text}"
+        );
+    }
+
+    #[test]
+    fn add_bug_mints_and_reports_a_new_id() {
+        // bug-add mints its own B<N> id and takes none as an argument;
+        // WrittenWithId is how the caller learns it.
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let path = scratch.path().join("BUGS.json");
+        write_empty_bugs_register(&path);
+        let (_, guard) = read_with_revision(&path).unwrap();
+
+        ensure_built(&bin_dir, "bug-add");
+        let response = dispatch_with_bin_dir(
+            Request::AddBug {
+                file: path.to_string_lossy().into_owned(),
+                title: "It breaks".to_string(),
+                reproduce: "run it".to_string(),
+                observed: "it broke".to_string(),
+                expected: "it should not".to_string(),
+                severity: Some("major".to_string()),
+                priority: None,
+                status: None,
+                mechanism: None,
+                parent: None,
+                found_by: Some("test-suite".to_string()),
+                surfaces: None,
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        let Response::WrittenWithId { revision, id } = response else {
+            panic!("expected WrittenWithId, got {response:?}");
+        };
+        assert_eq!(id, "B1", "the first bug in an empty register is B1");
+        let raw = fs::read(&path).unwrap();
+        assert_eq!(revision, PlanRevision::of(&raw).to_hex());
+        let text = String::from_utf8_lossy(&raw);
+        for expected in [
+            "B1",
+            "It breaks",
+            "run it",
+            "it broke",
+            "major",
+            "test-suite",
+        ] {
+            assert!(
+                text.contains(expected),
+                "expected BUGS.json to contain {expected:?}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn add_bug_with_a_stale_revision_is_refused_and_changes_nothing() {
+        let scratch = TempDir::new();
+        let path = scratch.path().join("BUGS.json");
+        write_empty_bugs_register(&path);
+        let before = fs::read(&path).unwrap();
+
+        let bogus_guard = PlanRevision::of(b"not the real hash");
+        let response = dispatch(Request::AddBug {
+            file: path.to_string_lossy().into_owned(),
+            title: "It breaks".to_string(),
+            reproduce: "run it".to_string(),
+            observed: "it broke".to_string(),
+            expected: "it should not".to_string(),
+            severity: None,
+            priority: None,
+            status: None,
+            mechanism: None,
+            parent: None,
+            found_by: None,
+            surfaces: None,
+            revision: bogus_guard.to_hex(),
+        });
+        assert!(
+            matches!(response, Response::Stale { .. }),
+            "expected Stale, got {response:?}"
+        );
+        assert_eq!(
+            before,
+            fs::read(&path).unwrap(),
+            "a stale guard must change nothing"
+        );
+    }
+
+    #[test]
+    fn update_bug_updates_the_matching_entry() {
+        let bin_dir = sibling_bin_dir();
+        let scratch = TempDir::new();
+        let path = scratch.path().join("BUGS.json");
+        fs::write(
+            &path,
+            r#"{"skill":"bug-report","skill_version":"1.0","comment":"test fixture","bugs":[
+                {"id":"B1","title":"It breaks","status":"reported","severity":"major",
+                 "priority":"normal","parent":null,"reproduce":"run it","observed":"it broke",
+                 "expected":"it should not","mechanism":null,"surfaces":[],"fix":null,
+                 "verification":null,"found_by":"tester","notes":null,
+                 "created_at":"2020-01-01T00:00:00Z","updated_at":"2020-01-01T00:00:00Z"}
+            ]}"#,
+        )
+        .unwrap();
+        let (_, guard) = read_with_revision(&path).unwrap();
+
+        ensure_built(&bin_dir, "bug-update");
+        let response = dispatch_with_bin_dir(
+            Request::UpdateBug {
+                file: path.to_string_lossy().into_owned(),
+                id: "B1".to_string(),
+                status: Some("fixed".to_string()),
+                fix: Some("changed x".to_string()),
+                verification: Some("re-ran the repro".to_string()),
+                reason: None,
+                priority: None,
+                mechanism: None,
+                append_note: None,
+                revision: guard.to_hex(),
+            },
+            Some(&bin_dir),
+        );
+        let Response::Written { revision } = response else {
+            panic!("expected Written, got {response:?}");
+        };
+        let raw = fs::read(&path).unwrap();
+        assert_eq!(revision, PlanRevision::of(&raw).to_hex());
+        let text = String::from_utf8_lossy(&raw);
+        assert!(text.contains("\"status\": \"fixed\""), "{text}");
+        assert!(text.contains("changed x"), "{text}");
+        assert!(text.contains("re-ran the repro"), "{text}");
     }
 }

@@ -440,6 +440,81 @@ fn tool_definitions() -> Vec<Value> {
             ],
         ),
         tool(
+            "read_register_file",
+            "Read a register file's (TODO.json/BUGS.json) raw content and its current revision (read-only).",
+            &["file"],
+            vec![("file", string("The exact register file to read, e.g. /path/to/TODO.json."))],
+        ),
+        tool(
+            "add_todo",
+            "Append a new task to a TODO.json register. Revision-guarded on file directly -- file is also set as the TODO_JSON env var for the subprocess, never read from this adapter's own cwd or ambient environment.",
+            &["file", "id", "title"],
+            vec![
+                ("file", string("The exact TODO.json to operate on.")),
+                ("id", string("The new task id, e.g. T45.")),
+                ("title", string("The task's title.")),
+                ("parent", string("Optional parent task id.")),
+                ("priority", string("urgent, high, normal, low, or someday. Defaults to normal.")),
+                ("status", string("open, done, blocked, partly, decided, dropped, or obsolete. Defaults to open.")),
+                ("blocked_on", string("Optional: what this task is blocked on.")),
+                ("detail", string("Optional longer detail text.")),
+                ("refs", string_array("Optional reference paths.")),
+                ("revision", string("file's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "update_todo",
+            "Update an existing task's status/priority/note/detail/blocked_on (any subset; at least one required). Revision-guarded on file directly, the same TODO_JSON-injection shape as add_todo.",
+            &["file", "id"],
+            vec![
+                ("file", string("The exact TODO.json to operate on.")),
+                ("id", string("The task id to update, e.g. T45.")),
+                ("status", string("New status.")),
+                ("priority", string("New priority.")),
+                ("note", string("A note to set.")),
+                ("detail", string("New detail text.")),
+                ("blocked_on", string("New blocked_on text.")),
+                ("revision", string("file's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "add_bug",
+            "File a new defect in a BUGS.json register. Revision-guarded on file directly (BUGS_JSON is injected the same way add_todo injects TODO_JSON). bug-add mints its own B<N> id and takes no id argument at all -- the response reports the minted id back, since there is no other way to learn it.",
+            &["file", "title", "reproduce", "observed", "expected"],
+            vec![
+                ("file", string("The exact BUGS.json to operate on.")),
+                ("title", string("The bug's title.")),
+                ("reproduce", string("The command or steps, runnable rather than described.")),
+                ("observed", string("What happened, quoted from the output.")),
+                ("expected", string("What should have happened.")),
+                ("severity", string("blocking, major, minor, or cosmetic. Defaults to major.")),
+                ("priority", string("urgent, high, normal, low, or someday. Defaults to normal.")),
+                ("status", string("reported or confirmed. Defaults to reported.")),
+                ("mechanism", string("Optional: why it happens, once known.")),
+                ("parent", string("Optional parent bug id.")),
+                ("found_by", string("Who found it.")),
+                ("surfaces", string("Optional comma-separated list of files it surfaces in.")),
+                ("revision", string("file's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
+            "update_bug",
+            "Update an existing bug's status/fix/verification/reason/priority/mechanism, or append a note (any subset; at least one required). Revision-guarded on file directly, the same BUGS_JSON-injection shape as add_bug. status fixed requires fix and verification; status wont-fix/not-a-defect/obsolete requires reason.",
+            &["file", "id"],
+            vec![
+                ("file", string("The exact BUGS.json to operate on.")),
+                ("id", string("The bug id to update, e.g. B12.")),
+                ("status", string("reported, confirmed, fixed, not-a-defect, wont-fix, or obsolete.")),
+                ("fix", string("What fixed it (required with status fixed).")),
+                ("verification", string("How the fix was verified (required with status fixed).")),
+                ("reason", string("Why it is wont-fix/not-a-defect/obsolete (required with those statuses).")),
+                ("priority", string("New priority.")),
+                ("mechanism", string("New mechanism text.")),
+                ("append_note", string("A note to append.")),
+                ("revision", string("file's current revision; omit to read it fresh first.")),
+            ],
+        ),
+        tool(
             "validate_plan",
             "Run the plan validator (read-only, unguarded).",
             &["plan_dir"],
@@ -518,6 +593,26 @@ fn current_revision(plan_dir: &str, document_id: &str) -> Result<String, String>
         other => Err(format!(
             "expected a Document response while reading the current revision, got {other:?}"
         )),
+    }
+}
+
+/// The same "omit revision, read it fresh first" convenience as
+/// `revision_or_read`, but for a register file (TODO.json/BUGS.json)
+/// instead of a plan document -- there is no plan-context document id for
+/// these, so the read goes through ReadRegisterFile instead of
+/// ReadPlanDocument.
+fn register_revision_or_read(arguments: &Value, file: &str) -> Result<String, String> {
+    match opt_str_arg(arguments, "revision") {
+        Some(revision) => Ok(revision),
+        None => match handlers::dispatch(Request::ReadRegisterFile {
+            file: file.to_string(),
+        }) {
+            Response::Document { revision, .. } => Ok(revision),
+            Response::Error { message } => Err(message),
+            other => Err(format!(
+                "expected a Document response while reading the current revision, got {other:?}"
+            )),
+        },
     }
 }
 
@@ -858,6 +953,107 @@ fn build_request(name: &str, arguments: &Value) -> Result<Request, String> {
             plan_dir: str_arg(arguments, "plan_dir")?,
             id: str_arg(arguments, "id")?,
         }),
+        "read_register_file" => Ok(Request::ReadRegisterFile {
+            file: str_arg(arguments, "file")?,
+        }),
+        "add_todo" => {
+            let file = str_arg(arguments, "file")?;
+            let id = str_arg(arguments, "id")?;
+            let title = str_arg(arguments, "title")?;
+            let parent = opt_str_arg(arguments, "parent");
+            let priority = opt_str_arg(arguments, "priority");
+            let status = opt_str_arg(arguments, "status");
+            let blocked_on = opt_str_arg(arguments, "blocked_on");
+            let detail = opt_str_arg(arguments, "detail");
+            let refs = str_array_arg(arguments, "refs")?;
+            let revision = register_revision_or_read(arguments, &file)?;
+            Ok(Request::AddTodo {
+                file,
+                id,
+                title,
+                parent,
+                priority,
+                status,
+                blocked_on,
+                detail,
+                refs,
+                revision,
+            })
+        }
+        "update_todo" => {
+            let file = str_arg(arguments, "file")?;
+            let id = str_arg(arguments, "id")?;
+            let status = opt_str_arg(arguments, "status");
+            let priority = opt_str_arg(arguments, "priority");
+            let note = opt_str_arg(arguments, "note");
+            let detail = opt_str_arg(arguments, "detail");
+            let blocked_on = opt_str_arg(arguments, "blocked_on");
+            let revision = register_revision_or_read(arguments, &file)?;
+            Ok(Request::UpdateTodo {
+                file,
+                id,
+                status,
+                priority,
+                note,
+                detail,
+                blocked_on,
+                revision,
+            })
+        }
+        "add_bug" => {
+            let file = str_arg(arguments, "file")?;
+            let title = str_arg(arguments, "title")?;
+            let reproduce = str_arg(arguments, "reproduce")?;
+            let observed = str_arg(arguments, "observed")?;
+            let expected = str_arg(arguments, "expected")?;
+            let severity = opt_str_arg(arguments, "severity");
+            let priority = opt_str_arg(arguments, "priority");
+            let status = opt_str_arg(arguments, "status");
+            let mechanism = opt_str_arg(arguments, "mechanism");
+            let parent = opt_str_arg(arguments, "parent");
+            let found_by = opt_str_arg(arguments, "found_by");
+            let surfaces = opt_str_arg(arguments, "surfaces");
+            let revision = register_revision_or_read(arguments, &file)?;
+            Ok(Request::AddBug {
+                file,
+                title,
+                reproduce,
+                observed,
+                expected,
+                severity,
+                priority,
+                status,
+                mechanism,
+                parent,
+                found_by,
+                surfaces,
+                revision,
+            })
+        }
+        "update_bug" => {
+            let file = str_arg(arguments, "file")?;
+            let id = str_arg(arguments, "id")?;
+            let status = opt_str_arg(arguments, "status");
+            let fix = opt_str_arg(arguments, "fix");
+            let verification = opt_str_arg(arguments, "verification");
+            let reason = opt_str_arg(arguments, "reason");
+            let priority = opt_str_arg(arguments, "priority");
+            let mechanism = opt_str_arg(arguments, "mechanism");
+            let append_note = opt_str_arg(arguments, "append_note");
+            let revision = register_revision_or_read(arguments, &file)?;
+            Ok(Request::UpdateBug {
+                file,
+                id,
+                status,
+                fix,
+                verification,
+                reason,
+                priority,
+                mechanism,
+                append_note,
+                revision,
+            })
+        }
         "validate_plan" => Ok(Request::ValidatePlan {
             plan_dir: str_arg(arguments, "plan_dir")?,
             complete: arguments
@@ -886,6 +1082,17 @@ fn respond(id: Value, response: Response) -> Value {
     match response {
         Response::Document { content, revision } => ok_result(id, format!("{content}\n\nrevision: {revision}")),
         Response::Written { revision } => ok_result(id, format!("written; new revision: {revision}")),
+        // `id` here is the destructured minted register id (e.g. bug-add's
+        // own B12), not the JSON-RPC message id -- given the same name as
+        // that outer `id: Value` parameter, so it is bound under its own
+        // name to avoid shadowing the one `ok_result` still needs.
+        Response::WrittenWithId {
+            revision,
+            id: minted_id,
+        } => ok_result(
+            id,
+            format!("written; new id: {minted_id}; new revision: {revision}"),
+        ),
         Response::Validated { passed, report } => {
             let mut result = json!({"content": [{"type": "text", "text": report}]});
             if !passed {
@@ -982,6 +1189,11 @@ mod tests {
                 "update_ui_story",
                 "configure_ui_story_cache",
                 "create_ui_story_run_cache",
+                "read_register_file",
+                "add_todo",
+                "update_todo",
+                "add_bug",
+                "update_bug",
                 "validate_plan",
             ]
         );
@@ -1347,6 +1559,81 @@ mod tests {
     #[test]
     fn create_ui_story_run_cache_reports_a_missing_argument_by_name() {
         let response = call("create_ui_story_run_cache", json!({"plan_dir": "/x"}));
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn read_register_file_reports_a_missing_argument_by_name() {
+        let response = call("read_register_file", json!({}));
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn add_todo_reports_a_missing_argument_before_ever_reading_a_register() {
+        // title is missing, so this must fail there, never at reading a
+        // (nonexistent) register file for the revision.
+        let response = call(
+            "add_todo",
+            json!({"file": "/definitely/does/not/exist/TODO.json", "id": "T45"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn update_todo_reports_a_missing_argument_before_ever_reading_a_register() {
+        let response = call(
+            "update_todo",
+            json!({"file": "/definitely/does/not/exist/TODO.json"}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument"));
+    }
+
+    #[test]
+    fn add_bug_reports_each_missing_argument_by_name() {
+        for (present, missing) in [
+            (json!({"file": "/x"}), "title"),
+            (json!({"file": "/x", "title": "t"}), "reproduce"),
+            (
+                json!({"file": "/x", "title": "t", "reproduce": "r"}),
+                "observed",
+            ),
+            (
+                json!({"file": "/x", "title": "t", "reproduce": "r", "observed": "o"}),
+                "expected",
+            ),
+        ] {
+            let response = call("add_bug", present);
+            assert_eq!(response["result"]["isError"], true);
+            let text = response["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(
+                text.contains(missing),
+                "expected the refusal to name {missing}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn update_bug_reports_a_missing_argument_before_ever_reading_a_register() {
+        let response = call(
+            "update_bug",
+            json!({"file": "/definitely/does/not/exist/BUGS.json"}),
+        );
         assert_eq!(response["result"]["isError"], true);
         assert!(response["result"]["content"][0]["text"]
             .as_str()
