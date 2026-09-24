@@ -3427,9 +3427,9 @@
       "fix": null,
       "verification": null,
       "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
-      "notes": "Masks B365: its fix (40d51bdb, b7258bb4) is correct, but it never reaches an install made from a working tree that was set up before the fix. After bin/<triple>/build-plan-libs and a reinstall, the scratch reproduction exits 0 for both helpers. The same existence-only check may cover REVIEWER.md and the other generated files; only the plan libraries were measured.",
+      "notes": "Masks B365: its fix (40d51bdb, b7258bb4) is correct, but it never reaches an install made from a working tree that was set up before the fix. After bin/<triple>/build-plan-libs and a reinstall, the scratch reproduction exits 0 for both helpers. The same existence-only check may cover REVIEWER.md and the other generated files; only the plan libraries were measured. Measured for REVIEWER.md too, 2026-09-24: planning/REVIEWER.md was a Sep 16 build of 24342 bytes; bin/<triple>/generate-reviewer rewrote it to 25748, which is what the npm baseline expects. pre-push-check had flagged it as 'npm package baseline drift'. So the existence-only check covers at least the plan libraries and REVIEWER.md.",
       "created_at": "2026-09-24T09:20:43Z",
-      "updated_at": "2026-09-24T09:20:43Z"
+      "updated_at": "2026-09-24T09:33:48Z"
     },
     {
       "id": "B14",
