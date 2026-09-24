@@ -166,7 +166,8 @@ fn run() -> i32 {
     println!("setup-dev-env: building for {host_triple}\n");
     let outcome = stage::run(&repo_root, &host_triple, exe_suffix);
 
-    generated::build_if_missing(&repo_root);
+    let bin_dir = repo_root.join("bin").join(&host_triple);
+    generated::build_if_missing(&repo_root, &bin_dir);
     generated::wire_pre_push_hook(&repo_root);
 
     println!("\n{} binary/binaries built.", outcome.built);

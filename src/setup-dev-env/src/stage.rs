@@ -4,8 +4,9 @@
 //! The per-crate build loop: `cargo build --release --target <triple>` for
 //! every (crate, binary) in the plan, then stage the resulting binary into
 //! bin/<triple>/, the planning/scripts/ sibling copy when warranted, and
-//! the three per-skill bin/<triple>/ copies for bug-report/todo/
-//! interactive-shell.
+//! the per-skill bin/<triple>/ copy for every crate that ships as part of a
+//! skill directory rather than its own (bug-report, todo, interactive-shell,
+//! interactive-shell-mcp, chat's four binaries, ai-text-editor's two).
 //!
 //! Every staging copy uses write-to-a-temp-file-in-the-same-directory-then-
 //! atomic-rename, not a truncate-in-place copy: once this crate is wired,
@@ -203,9 +204,34 @@ fn stage_primary(
     stage_from(&built_path, &dest)
 }
 
-/// The planning/scripts sibling copy and the bug-report/todo/interactive-shell
-/// skill-dir copy, each printing its own "   -> ..." line -- called AFTER
-/// stage_primary and its own "ok -> bin/..." line have already printed.
+/// The skill directory a crate's binary also belongs under (in addition to
+/// bin/<triple>/), or `None` for a crate that ships only there. bug-report
+/// and todo resolve their tool at <skill>/bin/<triple>/, which is what
+/// skill_files() promises and what CI's own staging steps do;
+/// interactive-shell's binaries.tsv resolves the same way (B291).
+/// interactive-shell-mcp is its own crate but not its own skill: its binary
+/// ships in the interactive-shell skill's mcp-mode install
+/// (integration.tsv), so it lands in THAT skill's bin/<triple>/.
+/// chat-client-rs/chat-mcp/chat-server-rs/chat-spool-watch (per
+/// chat/binaries.tsv) and ai-text-editor/ai-text-editor-mcp (per
+/// ai-text-editor/binaries.tsv) are the same shape: each is its own crate,
+/// not its own skill directory, and the installer reads a skill's binaries
+/// only from <skill>/bin/<triple>/ -- omitted here before (B372/B373), the
+/// installer had nothing to copy from a checkout and silently left whatever
+/// shared-bin copy was already there.
+fn skill_dir_for(crate_name: &str) -> Option<&str> {
+    match crate_name {
+        "bug-report" | "todo" | "interactive-shell" => Some(crate_name),
+        "interactive-shell-mcp" => Some("interactive-shell"),
+        "chat-client-rs" | "chat-mcp" | "chat-server-rs" | "chat-spool-watch" => Some("chat"),
+        "ai-text-editor" | "ai-text-editor-mcp" => Some("ai-text-editor"),
+        _ => None,
+    }
+}
+
+/// The planning/scripts sibling copy and the per-skill bin/<triple>/ copy
+/// (see `skill_dir_for`), each printing its own "   -> ..." line -- called
+/// AFTER stage_primary and its own "ok -> bin/..." line have already printed.
 fn stage_extras(
     repo_root: &Path,
     triple: &str,
@@ -223,18 +249,7 @@ fn stage_extras(
         println!("   -> planning/scripts/{binary}{exe_suffix}");
     }
 
-    // bug-report and todo resolve their tool at <skill>/bin/<triple>/, which
-    // is what skill_files() promises and what CI's own staging steps do;
-    // interactive-shell's binaries.tsv resolves the same way (B291).
-    // interactive-shell-mcp is its own crate but not its own skill: its
-    // binary ships in the interactive-shell skill's mcp-mode install
-    // (integration.tsv), so it lands in THAT skill's bin/<triple>/.
-    let skill_dir = match crate_name {
-        "bug-report" | "todo" | "interactive-shell" => Some(crate_name),
-        "interactive-shell-mcp" => Some("interactive-shell"),
-        _ => None,
-    };
-    if let Some(skill_dir) = skill_dir {
+    if let Some(skill_dir) = skill_dir_for(crate_name) {
         let skill_dest = repo_root
             .join(skill_dir)
             .join("bin")
@@ -257,6 +272,36 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn skill_dir_for_covers_every_multi_binary_skill() {
+        // B372: chat's own four binaries.
+        for crate_name in [
+            "chat-client-rs",
+            "chat-mcp",
+            "chat-server-rs",
+            "chat-spool-watch",
+        ] {
+            assert_eq!(skill_dir_for(crate_name), Some("chat"), "{crate_name}");
+        }
+        // B373: ai-text-editor's own two crates.
+        for crate_name in ["ai-text-editor", "ai-text-editor-mcp"] {
+            assert_eq!(
+                skill_dir_for(crate_name),
+                Some("ai-text-editor"),
+                "{crate_name}"
+            );
+        }
+        // Pre-existing cases, unchanged by this fix.
+        for crate_name in ["bug-report", "todo", "interactive-shell"] {
+            assert_eq!(skill_dir_for(crate_name), Some(crate_name), "{crate_name}");
+        }
+        assert_eq!(
+            skill_dir_for("interactive-shell-mcp"),
+            Some("interactive-shell")
+        );
+        assert_eq!(skill_dir_for("add-goal"), None);
     }
 
     #[test]

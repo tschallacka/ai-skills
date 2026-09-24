@@ -938,41 +938,57 @@ fn run_post_install_steps(
     if skills.iter().any(|s| s == "chat") {
         run_chat_interrupt_plugin_post_install(&known_roots, source);
     }
-    run_profiles_post_install(&known_roots, source);
+    run_profiles_post_install(&known_roots, source, &home);
 }
 
-/// T102: installs every `manifest::PROFILES` entry into each root whose kind
-/// has a registered `profiles::ProfileTranslator` -- unconditional, like the
-/// worktrees step, since a profile is not gated behind any particular
-/// installed skill. A kind with no translator (universal, openclaw, cline)
-/// is skipped silently rather than refused, the same shape T90's
-/// session-dependent skill gating already established.
-fn run_profiles_post_install(roots: &[(&Path, &str)], source: &Path) {
+/// T102: installs every `manifest::PROFILES` entry into `home` for each
+/// distinct agent kind present among `roots` that has a registered
+/// `profiles::ProfileTranslator` -- unconditional, like the worktrees step,
+/// since a profile is not gated behind any particular installed skill. A
+/// kind with no translator (universal, openclaw, cline) is skipped silently
+/// rather than refused, the same shape T90's session-dependent skill gating
+/// already established.
+///
+/// `home` (B375), not a root's own target path: each `translator.dest_suffix()`
+/// (`.claude/agents`, `.config/opencode/agents`, `.codex/agents`) is already a
+/// full path from the real home directory, the same one `run_worktrees_permission_step`
+/// and friends take as their own `home` parameter -- a root's target is a
+/// SKILL install directory (`~/.claude/skills`), a different thing. Passing
+/// a root's own path here joined the two, writing profiles under
+/// `~/.claude/skills/.claude/agents/` instead of `~/.claude/agents/`, where
+/// nothing -- Claude Code included -- ever reads them.
+fn run_profiles_post_install(roots: &[(&Path, &str)], source: &Path, home: &Path) {
     if manifest::PROFILES.is_empty() {
         return;
     }
-    let supported: Vec<(&Path, &dyn profiles::ProfileTranslator)> = roots
+    // Deduplicated by kind: every root sharing one kind writes the identical
+    // home-relative destination, so a second root of the same kind would
+    // otherwise just repeat the same install.
+    let mut seen_kinds = std::collections::HashSet::new();
+    let translators: Vec<&dyn profiles::ProfileTranslator> = roots
         .iter()
-        .filter_map(|(target, kind)| profiles::translator_for(kind).map(|t| (*target, t)))
+        .filter_map(|(_, kind)| profiles::translator_for(kind))
+        .filter(|translator| seen_kinds.insert(translator.kind()))
         .collect();
-    if supported.is_empty() {
+    if translators.is_empty() {
         return;
     }
     println!();
     println!("== agent profiles ==");
-    install_profiles_leniently(manifest::PROFILES, source, &supported);
+    install_profiles_leniently(manifest::PROFILES, source, home, &translators);
 }
 
-/// Installs each of `profiles` into every one of `supported`'s targets,
-/// skipping (never aborting on) a profile whose source cannot be read or
-/// parsed -- the automatic post-install hook's own documented lenient
-/// behavior. Takes an injectable slice, rather than reading
+/// Installs each of `profiles` into `home`, once per translator in
+/// `translators`, skipping (never aborting on) a profile whose source cannot
+/// be read or parsed -- the automatic post-install hook's own documented
+/// lenient behavior. Takes an injectable slice, rather than reading
 /// `manifest::PROFILES` directly, so this behavior is testable against a
 /// deliberately-mixed real/bad list without mutating the real const (AR-127).
 fn install_profiles_leniently(
     profiles: &[manifest::Profile],
     source: &Path,
-    supported: &[(&Path, &dyn profiles::ProfileTranslator)],
+    home: &Path,
+    translators: &[&dyn profiles::ProfileTranslator],
 ) {
     for profile in profiles {
         let text = match std::fs::read_to_string(source.join(profile.source)) {
@@ -989,8 +1005,8 @@ fn install_profiles_leniently(
                 continue;
             }
         };
-        for (target, translator) in supported {
-            match profiles::install_profile(&spec, *translator, target) {
+        for translator in translators {
+            match profiles::install_profile(&spec, *translator, home) {
                 Ok(destination) => println!(
                     "Installed: {} (agent profile \"{}\" -- restart {} before it is available, \
                      since the profile registry is read once at session start)",
@@ -2690,13 +2706,55 @@ mod tests {
                 source: ".agents/profiles/chris.json",
             },
         ];
-        let target = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
         let translator: &dyn profiles::ProfileTranslator = &profiles::ClaudeTranslator;
-        let supported = [(target.path(), translator)];
+        let translators = [translator];
 
-        install_profiles_leniently(&mixed, source.path(), &supported);
+        install_profiles_leniently(&mixed, source.path(), home.path(), &translators);
 
-        assert!(target.path().join(".claude/agents/chris.md").is_file());
+        assert!(home.path().join(".claude/agents/chris.md").is_file());
+    }
+
+    // B375: a skill's own install root (~/.claude/skills, say) must never be
+    // where a profile lands -- only the real home directory, regardless of
+    // which root's path run_profiles_post_install is handed. Exercises
+    // run_profiles_post_install itself (not install_profiles_leniently
+    // directly), since that is the function the bug was actually in: it
+    // installs the real manifest::PROFILES set, so only nitpicker and
+    // chris (the two whose real .agents/profiles/*.json this fixture
+    // copies in) are expected to land; every other real profile name is
+    // lenient-skipped for a missing source file, exactly as production
+    // behaves against an incomplete `source` checkout.
+    #[test]
+    fn run_profiles_post_install_writes_under_home_not_a_skill_root() {
+        let source = tempfile::tempdir().unwrap();
+        write_real_chris_json(source.path());
+        std::fs::create_dir_all(source.path().join(".agents/profiles")).unwrap();
+        let nitpicker = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.agents/profiles/nitpicker.json"),
+        )
+        .unwrap();
+        std::fs::write(
+            source.path().join(".agents/profiles/nitpicker.json"),
+            nitpicker,
+        )
+        .unwrap();
+
+        let home = tempfile::tempdir().unwrap();
+        let skill_root = home.path().join(".claude/skills");
+        std::fs::create_dir_all(&skill_root).unwrap();
+        let roots = [(skill_root.as_path(), "claude")];
+
+        run_profiles_post_install(&roots, source.path(), home.path());
+
+        assert!(
+            home.path().join(".claude/agents/chris.md").is_file(),
+            "profile must land under home, not under the skill root"
+        );
+        assert!(
+            !skill_root.join(".claude/agents/chris.md").exists(),
+            "profile must never land under a skill's own install root"
+        );
     }
 
     #[test]

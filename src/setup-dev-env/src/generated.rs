@@ -1,13 +1,27 @@
 // MODE: DEV
 // PACKAGE: PROD
 
-//! The generated shell artifacts, on the same build-if-missing terms as
-//! the crates: build-plan-libs.sh and generate-reviewer.sh regenerate only
-//! when their own output is missing; generate-portability.sh regenerates
-//! unconditionally, every run. Thin subprocess calls into the real
-//! scripts, never reimplemented. Also wires the pre-push git hook via
-//! `git config core.hooksPath hooks`, the one legitimate git invocation
-//! anywhere in this crate.
+//! The generated shell artifacts. The plan libraries rebuild whenever
+//! `build-plan-libs.sh --check` itself judges them stale against their own
+//! sources (B371: a bare existence check let a checkout install ship a
+//! compiled library that predated a source change, since the generated
+//! files are gitignored and a pull that changes a lib/ source leaves the
+//! old compiled output sitting there, present but stale); REVIEWER.md and
+//! PORTABILITY.md regenerate unconditionally every run, since neither
+//! target exposes its own freshness check and both are cheap to rebuild.
+//! Thin subprocess calls into the real scripts, never reimplemented. Also
+//! wires the pre-push git hook via `git config core.hooksPath hooks`, the
+//! one legitimate git invocation anywhere in this crate.
+//!
+//! Every subprocess spawned here carries `AI_SKILLS_BIN_ROOT=bin_dir` (B376):
+//! `plan_bin_dir` (planning/scripts/plan-crypt-lib.sh) prefers a real
+//! installed skill set at `~/.config/tsch-ai-skills/bin` over this repo's
+//! own `bin/<triple>/` the moment that shared directory exists, and none of
+//! these three tools (build-plan-libs, generate-reviewer,
+//! generate-portability) is a binary any skill ships -- so on a machine
+//! that already has skills installed, an unset override left every one of
+//! them unable to find the binary this very run just built, even though it
+//! sits right there in `bin_dir`.
 
 use crate::platform::script_command;
 use std::path::Path;
@@ -22,6 +36,13 @@ fn silent(mut command: Command) -> Command {
     command
 }
 
+/// Every subprocess this module spawns needs the same override, so it is
+/// applied here in one place rather than repeated at each call site.
+fn with_bin_root(mut command: Command, bin_dir: &Path) -> Command {
+    command.env("AI_SKILLS_BIN_ROOT", bin_dir);
+    command
+}
+
 const LIBS: [&str; 5] = [
     "plan-core-lib.sh",
     "plan-crypt-lib.sh",
@@ -31,16 +52,35 @@ const LIBS: [&str; 5] = [
 ];
 
 /// Returns how many generated artifacts were (re)built this run -- used
-/// only to decide whether to print "generated artifacts already present".
-pub fn build_if_missing(repo_root: &Path) -> u32 {
+/// only to decide whether to print "generated artifacts already present"
+/// for the plan libraries specifically; REVIEWER.md and PORTABILITY.md each
+/// report their own status unconditionally below, since both now always run.
+pub fn build_if_missing(repo_root: &Path, bin_dir: &Path) -> u32 {
     let mut generated = 0;
-    let missing_lib = LIBS
+    let libs_missing = LIBS
         .iter()
         .any(|lib| !repo_root.join("planning/scripts").join(lib).is_file());
-    if missing_lib {
-        if silent(script_command(
-            &repo_root.join("planning/scripts/build-plan-libs.sh"),
-        ))
+    let libs_stale = libs_missing || {
+        let mut check = with_bin_root(
+            silent(script_command(
+                &repo_root.join("planning/scripts/build-plan-libs.sh"),
+            )),
+            bin_dir,
+        );
+        !check
+            .arg("--check")
+            .current_dir(repo_root)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    };
+    if libs_stale {
+        if with_bin_root(
+            silent(script_command(
+                &repo_root.join("planning/scripts/build-plan-libs.sh"),
+            )),
+            bin_dir,
+        )
         .current_dir(repo_root)
         .status()
         .map(|s| s.success())
@@ -52,28 +92,29 @@ pub fn build_if_missing(repo_root: &Path) -> u32 {
             eprintln!("setup-dev-env: build-plan-libs.sh failed; planning helpers will not load");
         }
     }
-    if !repo_root.join("planning/REVIEWER.md").is_file() {
-        if silent(script_command(
+    if with_bin_root(
+        silent(script_command(
             &repo_root.join("planning/scripts/generate-reviewer.sh"),
-        ))
-        .current_dir(repo_root)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-        {
-            println!("setup-dev-env: generated planning/REVIEWER.md");
-            generated += 1;
-        } else {
-            eprintln!(
-                "setup-dev-env: generate-reviewer.sh failed; the reviewer contract is missing"
-            );
-        }
+        )),
+        bin_dir,
+    )
+    .current_dir(repo_root)
+    .status()
+    .map(|s| s.success())
+    .unwrap_or(false)
+    {
+        println!("setup-dev-env: regenerated planning/REVIEWER.md");
+    } else {
+        eprintln!("setup-dev-env: generate-reviewer.sh failed; the reviewer contract may be stale");
     }
-    if silent(script_command(&repo_root.join("generate-portability.sh")))
-        .current_dir(repo_root)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    if with_bin_root(
+        silent(script_command(&repo_root.join("generate-portability.sh"))),
+        bin_dir,
+    )
+    .current_dir(repo_root)
+    .status()
+    .map(|s| s.success())
+    .unwrap_or(false)
     {
         println!("setup-dev-env: regenerated PORTABILITY.md");
     } else {
