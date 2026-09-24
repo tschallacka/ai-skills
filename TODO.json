@@ -41,20 +41,20 @@
     {
       "id": "T1e",
       "title": "Decide what a converted test prints on success",
-      "status": "decided",
+      "status": "done",
       "priority": "normal",
       "parent": "T1",
       "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
       "blocked_on": null,
       "refs": [],
-      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
+      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. This decided the acceptance criterion for T1a-T1d, all of which are done and archived. Closed 2026-09-24: orphaned decision gate -- parent T1 ('One test reporter, not eighteen') is done, and all four children T1a-T1d are done and archived in TODO.2026-09-01.archive.json. The decision was made and fully acted on; T1e itself was simply never re-flagged after serving its purpose. No outstanding work.",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-09-24T12:56:47Z"
     },
     {
       "id": "T38",
       "title": "Review record: what was checked on the -ox merge, and what was not",
-      "status": "decided",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
@@ -62,9 +62,9 @@
       "refs": [
         "https://github.com/tschallacka/ai-skills/pull/3"
       ],
-      "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
+      "note": "Closed 2026-09-24, re-verified against the current tree rather than left as a stale review snapshot: (1) B18-B29, the defects this review could not verify without their original environments, are now ALL status=fixed in the live register. (2) The chat skill runtime chain, unexercised at review time, now has real crate tests (chat-mcp, chat-server-rs, chat-client-rs, chat-spool-watch) passing consistently across every CI run this session. (3) The plan-to-HTML overview renderer, checked only for existence/registration at review time, now has real behavioral tests (plan-overview's pages_primary.rs, mode.rs, autoplay.rs, serve_routing.rs) passing consistently. (4) 'CI had never run on this branch' -- PR #3 (opened to get exactly that run) was closed 2026-08-31 without merging, but nextupdate has since run CI green dozens of times including every batch of this session's own work, superseding the concern. No remaining verification gap.\n\nOriginal note: NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
       "created_at": "2026-08-24T12:17:47Z",
-      "updated_at": "2026-08-24T12:17:47Z"
+      "updated_at": "2026-09-24T12:56:47Z"
     },
     {
       "id": "T72",
