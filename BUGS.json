@@ -407,9 +407,9 @@
       "fix": "plan_exec_compiled_binary_if_present (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh, via new pecbip_pick) now tries an executable of the command's name beside the wrapper, after the shared bin and the development tree. It is skipped whenever AI_SKILLS_BIN_ROOT is set: an explicit override is authoritative. Commits 40d51bdb and b7258bb4 on nextupdate (the second corrected the first, which broke test-plan-crypt and test-runtime-dependencies).",
       "verification": "Linux, 2026-09-21: installing planning into a scratch HOME with an existing shared bin and running the installed verify-skill-load.sh --help gave exit 69 with the old helper and its usage text with the fixed one. planning/tests/test-exec-compiled-binary-preference.sh case (h) fails against the old helper and passes on bash 5 and bash 3.2. Not re-measured on macOS, where it was reported.",
       "found_by": "testing-stories planning, brainstorm and post-implementation-review runs on macOS (another worker), 2026-09-21; mechanism verified in source by aiskills",
-      "notes": "All 108 scripts/ references in the installed planning docs use the .sh form, none the extensionless one, so agents only ever hit the failing path (as reported). brainstorm Phase 2 and post-implementation-review Phases 2 and 3 die on role-context.sh with it. The exit-69 hint sends an installed user to ./setup-dev-env.sh, which does not exist outside a checkout. Went unnoticed because every developer machine has a checkout and the tests export AI_SKILLS_BIN_ROOT. The lookup rule that causes it is documented in .agents/MAINTAINER.md 1.9. Reports by the other worker: ~/.config/tsch-ai-skills/tmp/stories/{planning,brainstorm,post-implementation-review}/report.md on its machine. 40d51bdb alone failed CI (three ubuntu shards) because tests that point AI_SKILLS_BIN_ROOT at an empty directory to simulate a missing binary found the copy a checkout stages beside each wrapper; b7258bb4 makes a set override authoritative. Whole suite locally after the fix: 247 passed, 0 failed.",
+      "notes": "All 108 scripts/ references in the installed planning docs use the .sh form, none the extensionless one, so agents only ever hit the failing path (as reported). brainstorm Phase 2 and post-implementation-review Phases 2 and 3 die on role-context.sh with it. The exit-69 hint sends an installed user to ./setup-dev-env.sh, which does not exist outside a checkout. Went unnoticed because every developer machine has a checkout and the tests export AI_SKILLS_BIN_ROOT. The lookup rule that causes it is documented in .agents/MAINTAINER.md 1.9. Reports by the other worker: ~/.config/tsch-ai-skills/tmp/stories/{planning,brainstorm,post-implementation-review}/report.md on its machine. 40d51bdb alone failed CI (three ubuntu shards) because tests that point AI_SKILLS_BIN_ROOT at an empty directory to simulate a missing binary found the copy a checkout stages beside each wrapper; b7258bb4 makes a set override authoritative. Whole suite locally after the fix: 247 passed, 0 failed. 2026-09-24, macOS aarch64, nextupdate b7ff21cc: reproduced exit 69 from a scratch-HOME install, but only because the checkout's compiled plan-core-lib.sh predated the fix (B371: setup-dev-env keeps stale generated libs). After build-plan-libs and a reinstall, role-context.sh --list and verify-skill-load.sh --help exit 0. The fix holds on macOS.",
       "created_at": "2026-09-21T13:02:25Z",
-      "updated_at": "2026-09-21T14:49:24Z"
+      "updated_at": "2026-09-24T09:20:49Z"
     },
     {
       "id": "B33",
@@ -3411,6 +3411,27 @@
       "updated_at": "2026-09-21T11:44:56Z"
     },
     {
+      "id": "B371",
+      "title": "setup-dev-env.sh keeps a stale compiled plan library because it checks only that generated artifacts exist, so a checkout install ships helpers without B365's fix",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "On a checkout whose planning/scripts/plan-core-lib.sh predates c867ce98: ./setup-dev-env.sh (prints \"generated artifacts already present\"); bin/<triple>/build-plan-libs --check; then installer install --target <scratch>/skills --skill planning --source . --yes with HOME=<scratch>/home and a non-empty <scratch>/home/.config/tsch-ai-skills/bin; run <scratch>/skills/planning/scripts/role-context.sh --list",
+      "observed": "setup-dev-env: \"generated artifacts already present\", exit 0. build-plan-libs --check: \"plan-core-lib.sh is stale; run build-plan-libs.sh\". Installed role-context.sh and verify-skill-load.sh exit 69 \"no compiled binary found\" although the binaries sit beside them. Sourcing the installed plan-core-lib.sh defines no pecbip_pick. plan-core-lib.sh was dated Sep 21 14:24, its source function Sep 22.",
+      "expected": "setup-dev-env regenerates any generated artifact older than (or differing from) its sources, as build-plan-libs --check would judge it, so a checkout install ships the current helpers.",
+      "mechanism": "The bootstrap step in setup-dev-env treats presence as freshness. Generated files are gitignored and never committed, so after a pull that changes a lib/ source the old compiled library stays, and the installer copies it verbatim.",
+      "surfaces": [
+        "setup-dev-env.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
+      "notes": "Masks B365: its fix (40d51bdb, b7258bb4) is correct, but it never reaches an install made from a working tree that was set up before the fix. After bin/<triple>/build-plan-libs and a reinstall, the scratch reproduction exits 0 for both helpers. The same existence-only check may cover REVIEWER.md and the other generated files; only the plan libraries were measured.",
+      "created_at": "2026-09-24T09:20:43Z",
+      "updated_at": "2026-09-24T09:20:43Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -5001,6 +5022,69 @@
       "notes": null,
       "created_at": "2026-09-18T06:07:56Z",
       "updated_at": "2026-09-18T06:07:56Z"
+    },
+    {
+      "id": "B372",
+      "title": "setup-dev-env.sh does not refresh chat/bin/<triple>/, so an install from the checkout ships the previous chat-mcp, chat-server-rs and chat-client-rs",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "After a change to the chat crates: ./setup-dev-env.sh; T=<triple>; for b in chat-mcp chat-server-rs chat-client-rs; do cmp bin/$T/$b chat/bin/$T/$b; done",
+      "observed": "All three differ (STALE). setup-dev-env output shows \"-> interactive-shell/bin/<triple>/...\" and \"-> planning/scripts/...\" copy lines for other skills, none for chat. First seen 2026-09-21, when the installed chat-mcp missed B363; again on 2026-09-24.",
+      "expected": "setup-dev-env copies every freshly built binary into the skill-local bin/<triple>/ the installer reads, chat included, as it does for bug-report, todo and interactive-shell.",
+      "mechanism": "The installer sources a skill binaries from the gitignored <skill>/bin/<triple>/. setup-dev-env stages into that directory for some skills only, and chat is not among them.",
+      "surfaces": [
+        "setup-dev-env.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
+      "notes": "Silent: the install succeeds and the MCP server connects, so only a hash comparison of the shared bin against bin/<triple>/ shows it. Workaround: copy bin/<triple>/chat-* into chat/bin/<triple>/ before installing.",
+      "created_at": "2026-09-24T09:20:43Z",
+      "updated_at": "2026-09-24T09:20:43Z"
+    },
+    {
+      "id": "B373",
+      "title": "ai-text-editor has no skill-local bin/<triple>/, so installing from a checkout never updates the shared ai-text-editor, ai-text-editor-server and ai-text-editor-mcp",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "./setup-dev-env.sh; ls ai-text-editor/bin/<triple>; installer install --agent claude --all --source . --integration mcp --yes; cmp bin/<triple>/ai-text-editor-mcp ~/.config/tsch-ai-skills/bin/ai-text-editor-mcp",
+      "observed": "ls: No such file or directory. The install exits 0 and reports ai-text-editor installed in mcp mode, but the shared ai-text-editor-mcp stays the Sep 15 build (cmp differs) while bin/<triple>/ holds the Sep 24 one. The registered MCP server command points at that stale shared file.",
+      "expected": "A checkout install puts the freshly built ai-text-editor binaries into the shared bin, like the other skills with binaries.",
+      "mechanism": "The installer routes only <skill>/bin/<triple>/* into the shared bin. setup-dev-env builds ai-text-editor* into bin/<triple>/ only and never stages them under ai-text-editor/, so the installer has nothing to copy and leaves whatever was there.",
+      "surfaces": [
+        "setup-dev-env.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
+      "notes": "Sibling of the chat/bin entry filed alongside: same mechanism, different skill. Went unnoticed because the old binary still starts and connects.",
+      "created_at": "2026-09-24T09:20:43Z",
+      "updated_at": "2026-09-24T09:20:43Z"
+    },
+    {
+      "id": "B375",
+      "title": "install --agent claude writes agent profiles to ~/.claude/skills/.claude/agents/, which Claude Code never reads",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "installer install --agent claude --all --source . --integration mcp --yes; ls ~/.claude/skills/.claude/agents/ ~/.claude/agents/",
+      "observed": "The install prints \"Installed: /Users/<u>/.claude/skills/.claude/agents/nitpicker.md (agent profile ...)\" for all 11 profiles. 10 of them (benny, chris, christian, christoph, dana, eve, frank, installer, maintainer, oracle) existed nowhere under ~/.claude/agents/, so none were available as subagent types.",
+      "expected": "Profiles land in ~/.claude/agents/ (the agent config dir), not under the skills root.",
+      "mechanism": "Not traced in code. The path shape suggests the profile destination is built relative to the skills target (~/.claude/skills) instead of the agent config root (~/.claude).",
+      "surfaces": [
+        "src/installer/src/profiles.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
+      "notes": "Worked around on this machine by copying the 10 missing files into ~/.claude/agents/. The live nitpicker.md there differs from the shipped one and was left alone.",
+      "created_at": "2026-09-24T09:20:43Z",
+      "updated_at": "2026-09-24T09:20:43Z"
     },
     {
       "id": "B6",
@@ -7566,6 +7650,27 @@
       "updated_at": "2026-09-22T22:45:53Z"
     },
     {
+      "id": "B376",
+      "title": "setup-dev-env.sh runs generate-portability.sh without AI_SKILLS_BIN_ROOT, so on a machine with skills installed it fails and PORTABILITY.md goes stale",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "On a machine with ~/.config/tsch-ai-skills/bin present: ./setup-dev-env.sh; then ./generate-portability.sh; then AI_SKILLS_BIN_ROOT=$PWD/bin/<triple> ./generate-portability.sh",
+      "observed": "setup-dev-env: \"generate-portability.sh failed; the portability catalogue may be stale\" (still exit 0). Direct run: exit 69 \"generate-portability: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir)\". With the override: exit 0.",
+      "expected": "setup-dev-env passes AI_SKILLS_BIN_ROOT (the bin dir it just built) to the generators it runs, so they succeed regardless of an installed shared bin.",
+      "mechanism": "plan_bin_dir returns the shared bin as soon as it exists and does not fall through to bin/<triple>/ (documented in .agents/MAINTAINER.md 1.9); generate-portability is not installed to the shared bin, and setup-dev-env does not export the override for its own child.",
+      "surfaces": [
+        "setup-dev-env.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
+      "notes": "Downgraded to a warning by setup-dev-env, so it is easy to miss in the build output.",
+      "created_at": "2026-09-24T09:20:43Z",
+      "updated_at": "2026-09-24T09:20:43Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -7776,6 +7881,27 @@
       "notes": "Localized precisely this session (the original filing had mechanism: null): the actual central classifier is document_kind() in src/planning-document/src/lib.rs, lines 12-29 -- specifically 'value.ends_with(\"-testing\")' at line 21, applied to a step: id string. This is a pure, filesystem-free function called from many contexts across several crates (src/add-work-unit, src/create-plan, src/plan-content, src/plan-mutate, src/plan-context, src/update-work-unit, src/remove-work-unit, plus the validator crates), some of which classify a not-yet-created id (e.g. during an add-work-unit call, before its sibling files exist). The bug's own suggested fix (check whether stripping exactly one trailing -testing segment yields ANOTHER id/file that actually exists) requires filesystem access this function does not have and several of its callers may not have either at the point they call it -- turning a pure string classifier into a filesystem-dependent one is a real architecture change touching every call site, not a local fix. Left open: this needs a design decision (e.g. a second, filesystem-aware wrapper used only where a real check is possible, vs. changing the ID convention so a step's own file target can never itself end in '-testing' as a work-unit File-column value, vs. accepting the collision as a documented, rare edge case) rather than a forced change to the shared classifier's own signature. Fixed for real rather than left as a design-decision punt: the earlier note overstated the blast radius (document_kind() itself has exactly one real caller, update-plan-content) -- the other four call sites named in the original filing duplicate the same suffix-match bug independently and each already has filesystem/document-tree access, so no architecture change was needed, just a shared existence-checking helper.",
       "created_at": "2026-09-15T08:45:24Z",
       "updated_at": "2026-09-18T08:44:24Z"
+    },
+    {
+      "id": "B374",
+      "title": "An mcp-mode install leaves the skill-mode-only binaries chat-client-rs and interactive-shell-input stale in the shared bin",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "With an older install present: ./setup-dev-env.sh; installer install --agent claude --all --source . --integration mcp --yes; for b in chat-client-rs interactive-shell-input; do cmp bin/<triple>/$b ~/.config/tsch-ai-skills/bin/$b; done",
+      "observed": "Both differ after a successful install: the shared copies are from an earlier build, while chat-mcp and interactive-shell-mcp were replaced.",
+      "expected": "Either the install refreshes (or removes) a skill binaries it does not install in the chosen mode, or those stale copies are otherwise not left where the skill docs and hooks can still run them.",
+      "mechanism": "In mcp mode the installer copies only the mode binaries and does not touch the skill-mode ones, so a copy from an earlier skill-mode install lingers at an old version.",
+      "surfaces": [
+        "src/installer/src/install.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
+      "notes": "chat-client-rs is still named in AGENTS.md for joining #ai-skills (from ./target/release, but agents also reach it from the shared bin).",
+      "created_at": "2026-09-24T09:20:43Z",
+      "updated_at": "2026-09-24T09:20:43Z"
     },
     {
       "id": "B59",
