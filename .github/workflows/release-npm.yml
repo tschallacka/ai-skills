@@ -57,15 +57,55 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
+      # Windows only, and before checkout so it applies to it: Git for
+      # Windows otherwise writes CRLF into every shell script it checks out.
+      - name: Check out with LF endings
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.release.tag_name || github.ref }}
+          # Everything except benchmark/results/: its archived runs hold
+          # paths longer than Windows allows, and checking them out fails
+          # the windows-latest leg (ci.yml's own native job carries the
+          # identical exclusion for the identical reason). build-release.sh
+          # never reads that directory.
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/benchmark/results/
+
+      # `bash` on a windows-latest PATH can resolve to C:\Windows\System32\
+      # bash.exe, the WSL launcher, which fails when no distro is installed.
+      # Git for Windows' own bash goes first, with the GNU tools beside it.
+      - name: Put Git for Windows' bash and coreutils first on PATH
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          {
+            echo 'C:\Program Files\Git\bin'
+            echo 'C:\Program Files\Git\usr\bin'
+          } >> "$GITHUB_PATH"
 
       - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.98
         with:
           targets: ${{ matrix.target }}
+
+      # dtolnay/rust-toolchain's own targets: input does not reliably
+      # survive to a later step's cargo invocation once build-release.sh's
+      # own nested cargo calls are involved (measured: a fresh
+      # "1.98-<host-gnu>" toolchain gets auto-installed instead, missing
+      # the requested target's std). This repo's own working cross-target
+      # cargo steps (native job's rjq leg) all re-add the target explicitly
+      # immediately before building, rather than trusting the pin alone --
+      # matched here for the same reason.
+      - name: Ensure the target's std library is actually installed
+        shell: bash
+        run: rustup target add ${{ matrix.target }}
 
       - name: Install the musl C toolchain
         if: contains(matrix.target, 'linux-musl')
@@ -122,6 +162,11 @@ jobs:
         with:
           targets: x86_64-unknown-linux-musl
 
+      # See jobs.build's identical step for why the pin above is not
+      # trusted alone.
+      - name: Ensure the target's std library is actually installed
+        run: rustup target add x86_64-unknown-linux-musl
+
       - name: Install the musl C toolchain
         run: sudo apt-get install -y -qq musl-tools
 
@@ -170,6 +215,11 @@ jobs:
         uses: dtolnay/rust-toolchain@1.98
         with:
           targets: x86_64-unknown-linux-musl
+
+      # See jobs.build's identical step for why the pin above is not
+      # trusted alone.
+      - name: Ensure the target's std library is actually installed
+        run: rustup target add x86_64-unknown-linux-musl
 
       - name: Install the musl C toolchain
         run: sudo apt-get install -y -qq musl-tools
