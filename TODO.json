@@ -25,18 +25,18 @@
     {
       "id": "T56",
       "title": "Mark a review rationale superseded when a later cycle replaces it",
-      "status": "blocked",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "codex postmortem recommendation 6. The Verdict rationale is a single field rewritten by hand each cycle; across four cycles here I replaced it four times, and nothing would have flagged it had I forgotten. A stale rationale is worse than an absent one because it reads as current: it names findings by id and asserts a verdict that the findings table may already contradict. Either stamp the rationale with the cycle it was written for and warn when the archived cycle count moves past it, or fold the rationale into the same helper that rewrites the findings table.",
-      "blocked_on": "the review-document format owner: needs a rationale-cycle stamp written when the rationale is written (see note)",
+      "blocked_on": "",
       "refs": [
         "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
         "planning/scripts/update-adversarial-review.sh"
       ],
-      "note": "Attempted and reverted, deliberately. I built the staleness signal on the archived cycle number and it does not carry the meaning the entry assumed: archive 'Cycle N' names the state BEFORE run N, while a rationale saying 'Cycle N' names the review cycle whose findings just landed. Measured on a fixture — after two update runs the archive holds Cycle 1 and Cycle 2 while the rationale legitimately still reads Cycle 1 — so a warning keyed on the difference fires on the normal path, which is the T67 failure I had just fixed elsewhere. Correcting for the off-by-one then made it silent on the real case. B44 records that the numbering breaks after gaps and is closed as not-a-defect, so the counter is not a sound basis for this and no arithmetic on it will be. What would work is a stamp recording which cycle a rationale describes, written when the rationale is written rather than inferred from prose — that is a review-document format change and belongs with whoever owns the format. Reverted rather than shipping a warning that misfires in both directions.",
+      "note": "Fixed in nextupdate 83f60704, CI green (all 33 checks). Resolved the exact off-by-one trap this entry's own note warned about, by making the write side and the read side share ONE function rather than each re-deriving \"which cycle\" separately: update-adversarial-review.sh gains --set-rationale, which stamps the Verdict with `- Rationale cycle: N` using cycle_number(history, None) -- the SAME function the archiver itself already uses to decide what to call the cycle it is about to archive. planning-validator-docs then flags staleness only when cycle_number() (its own copy of the identical 8-line logic, cross-referenced in a doc comment rather than sharing a crate) now returns something greater than the stamp -- i.e. only once a cycle has actually been archived since the rationale was written, never on the normal same-cycle path the reverted attempt misfired on. Verified end-to-end with real compiled binaries through the full mint-keys/claim-fix/approve/validate workflow, twice: once where the stamp is current (no finding) and once after a second cycle lands unstamped (staleness correctly flagged, naming the fix). Unit tests on both sides plus a new shell integration test (planning/tests/test-adversarial-review-cycles.sh) cover this permanently.",
       "created_at": "2026-08-27T22:38:42Z",
-      "updated_at": "2026-08-31T14:59:45Z"
+      "updated_at": "2026-09-24T14:15:43Z"
     },
     {
       "id": "T1e",

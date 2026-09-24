@@ -7906,7 +7906,7 @@
     {
       "id": "B374",
       "title": "An mcp-mode install leaves the skill-mode-only binaries chat-client-rs and interactive-shell-input stale in the shared bin",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -7917,12 +7917,12 @@
       "surfaces": [
         "src/installer/src/install.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "install_skill's shared-binary branch (src/installer/src/install.rs) now removes a stale shared-bin copy when the skill's newly-resolved mode no longer needs it, instead of silently leaving the old-mode binary behind forever. It removes the file only after confirming, via uninstall.rs's already-tested other_skill_needs_binary (the same cross-root/cross-skill reference count a real uninstall already relies on), that no OTHER currently-installed skill on any root this installer can discover under $HOME still needs the exact same filename -- so the T72 guarantee this code's own comment used to cite (never breaking a binary another skill/root still needs) is preserved, not relaxed, while the actual staleness this bug reports is now swept.",
+      "verification": "switching_mode_never_deletes_the_previous_modes_shared_binary, which pinned the OLD (stale-leaving) behavior, is rewritten as switching_mode_removes_the_previous_modes_shared_binary_when_nothing_else_needs_it and now asserts the binary IS removed once nothing else needs it. A new companion test, switching_mode_keeps_the_shared_binary_a_sibling_root_still_needs, proves the safety case: a mode switch on one root does NOT remove a shared binary a sibling root's own still-skill-mode install still needs, mirroring uninstall.rs's own a_shared_binary_still_needed_by_a_sibling_root_is_kept precedent. cargo test -p installer: 233/233 passing. Landed together with T56 in nextupdate 83f60704, cargo fmt/clippy clean, full pre-push-check.sh --full (249/249) and CI (33/33 checks across Linux/macOS/Windows/Cygwin/MSYS2, all shards) green.",
       "found_by": "Michael's session installing nextupdate b7ff21cc into Claude on macOS (aarch64), 2026-09-24",
       "notes": "chat-client-rs is still named in AGENTS.md for joining #ai-skills (from ./target/release, but agents also reach it from the shared bin).",
       "created_at": "2026-09-24T09:20:43Z",
-      "updated_at": "2026-09-24T09:20:43Z"
+      "updated_at": "2026-09-24T14:15:53Z"
     },
     {
       "id": "B59",
