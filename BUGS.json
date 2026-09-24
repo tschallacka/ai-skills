@@ -5087,6 +5087,27 @@
       "updated_at": "2026-09-24T09:20:43Z"
     },
     {
+      "id": "B377",
+      "title": "interactive-shell-mcp mcp_flow: two tests fail every run on macOS aarch64 at nextupdate b7ff21cc",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "On nextupdate b7ff21cc, macOS aarch64: nix develop --command bash -c \"resource-limited-testing/scripts/limited-run.sh 6G 400 -- cargo test -p interactive-shell-mcp --test mcp_flow\"",
+      "observed": "test result: FAILED. 3 passed; 2 failed. start_text_view_and_shutdown_drive_a_real_session panics at tests/mcp_flow.rs:158: expected \"hello\" on screen, got a blank 20x4 view (text \"001 [000-000] \\n002 [000-000] ...\"). starting_without_command_resumes_a_previously_saved_sessions_command panics at mcp_flow.rs:215: \"the old session's socket was never cleaned up\" after its 20 s deadline. Identical on three runs: inside pre-push-check, alone, and alone outside the Claude Code sandbox.",
+      "expected": "All five mcp_flow tests pass, as they must for pre-push-check to let a push through.",
+      "mechanism": null,
+      "surfaces": [
+        "src/interactive-shell-mcp/tests/mcp_flow.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "pre-push-check while pushing registers from the nextupdate checkout, 2026-09-24",
+      "notes": "Not a sandbox effect: it reproduces with the sandbox disabled. Mechanism unknown. May overlap nextupdate dd66e813 (\"interactive-shell-mcp test flake -- 5s socket-cleanup poll too tight for a loaded CI runner\"), which was not read; this test already carries a 20 s deadline and fails on an idle machine, so it does not look like the same load-timing cause. It blocks pre-push-check on nextupdate for this machine.",
+      "created_at": "2026-09-24T09:34:43Z",
+      "updated_at": "2026-09-24T09:34:43Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
