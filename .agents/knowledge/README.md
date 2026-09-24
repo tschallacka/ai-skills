@@ -42,6 +42,7 @@ contains, it does not belong here.
 | [compiled-binary-preference-fresh-checkout.md](compiled-binary-preference-fresh-checkout.md) | Why does a freshly-wired script fail outright on a clean checkout instead of falling through to bash? |
 | [shared-machine-resources-in-tests.md](shared-machine-resources-in-tests.md) | Why does a test pass alone and fail while another run is active — literal ports, git's detached maintenance — and how was each measured? |
 | [claude-code-channels.md](claude-code-channels.md) | Can an MCP server push into a running Claude Code session — idle or busy — what does that need, and where does it silently do nothing? |
+| [pty-sessions-on-macos.md](pty-sessions-on-macos.md) | Why does a PTY session pass by hand and hang or draw nothing under `cargo test` on macOS? |
 | [windows-under-git-bash.md](windows-under-git-bash.md) | Why does correct code fail on Windows under Git for Windows' bash — line endings, paths, `.exe`, sockets, error kinds — and what does the repo do about each? |
 ## Format
 

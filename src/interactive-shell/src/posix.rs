@@ -303,20 +303,37 @@ fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, libc::pid_t
     Ok((master, pid))
 }
 
-fn stop(pid: libc::pid_t) {
+/// Stop the child and reap it, reading the master throughout (B377).
+///
+/// On macOS a dying session leader whose terminal still holds unread output
+/// does not finish exiting until the master reads it -- SIGKILL included. A
+/// blocking waitpid on an unread master therefore never returns, and the
+/// socket it would have removed stays behind. Whatever is drained is
+/// discarded: the session is ending, and nothing reads the screen after this.
+fn stop(pid: libc::pid_t, master: RawFd) {
     unsafe {
         libc::kill(-pid, libc::SIGTERM);
         let until = Instant::now() + Duration::from_millis(300);
-        while Instant::now() < until {
-            let mut s = 0;
-            if libc::waitpid(pid, &mut s, libc::WNOHANG) == pid {
+        let mut killed = false;
+        loop {
+            drain_master(master);
+            let waited = libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG);
+            if waited == pid || waited < 0 {
                 return;
+            }
+            if !killed && Instant::now() >= until {
+                libc::kill(-pid, libc::SIGKILL);
+                killed = true;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        libc::kill(-pid, libc::SIGKILL);
-        libc::waitpid(pid, std::ptr::null_mut(), 0);
     }
+}
+
+/// Read and discard everything queued on the non-blocking master.
+fn drain_master(fd: RawFd) {
+    let mut buf = [0u8; 8192];
+    while unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) } > 0 {}
 }
 
 fn status(s: i32) -> i32 {
@@ -402,7 +419,7 @@ impl Backend for PosixBackend {
 
     fn stop(&mut self) {
         if !self.reaped {
-            stop(self.pid);
+            stop(self.pid, self.master);
             self.reaped = true;
         }
     }
@@ -431,7 +448,7 @@ impl Backend for PosixBackend {
 impl Drop for PosixBackend {
     fn drop(&mut self) {
         if !self.reaped {
-            stop(self.pid);
+            stop(self.pid, self.master);
         }
         unsafe {
             libc::close(self.master);
@@ -690,6 +707,35 @@ mod tests {
         assert_eq!(
             waited, -1,
             "the child should already be reaped by PosixBackend's Drop (errno: {errno})"
+        );
+    }
+
+    /// stop() returns even when the child's output was never read (B377).
+    /// On macOS a dying session leader with output still queued for its
+    /// terminal does not finish exiting until the master reads it, so a
+    /// blocking waitpid on an unread master never returns.
+    #[test]
+    fn stop_returns_when_the_childs_output_was_never_read() {
+        let mut backend = PosixBackend::spawn(
+            &[
+                "sh".into(),
+                "-c".into(),
+                "printf hello; exec sleep 600".into(),
+            ],
+            80,
+            24,
+        )
+        .unwrap();
+        // Long enough for the output to be queued; nothing reads it.
+        std::thread::sleep(Duration::from_millis(500));
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            backend.stop();
+            let _ = done.send(());
+        });
+        assert!(
+            finished.recv_timeout(Duration::from_secs(10)).is_ok(),
+            "stop() hung waiting for a child whose terminal output nobody read"
         );
     }
 }
