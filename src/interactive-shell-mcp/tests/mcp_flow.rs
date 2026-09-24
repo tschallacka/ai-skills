@@ -111,6 +111,26 @@ impl Harness {
             .unwrap_or_else(|| panic!("response carried no content text: {response}"));
         serde_json::from_str(text).unwrap_or_else(|_| json!(text))
     }
+
+    /// Block until `text` is on screen. `start`'s `ready` only means the
+    /// socket exists, not that the program has drawn anything: with the
+    /// DYLD_LIBRARY_PATH cargo inherits from a nix shell, `sh` starts slowly
+    /// enough on macOS that an immediate `view` saw a blank screen (B377).
+    /// The timeout is a ceiling, not a sleep.
+    fn wait_for(&mut self, id: i64, session: &str, text: &str) {
+        let wait = self.call(
+            id,
+            "wait",
+            json!({"session": session, "contains": text, "timeout_ms": 30000}),
+        );
+        let wait = Self::content(&wait);
+        assert!(
+            wait["responses"]
+                .as_array()
+                .is_some_and(|responses| responses.iter().any(|event| event["matched"] == true)),
+            "{text:?} never appeared on screen: {wait}"
+        );
+    }
 }
 
 impl Drop for Harness {
@@ -145,6 +165,7 @@ fn start_text_view_and_shutdown_drive_a_real_session() {
         json!(true),
         "session never became ready: {started}"
     );
+    harness.wait_for(10, "flow-basic", "hello");
 
     let view = harness.call(2, "view", json!({"session":"flow-basic"}));
     let view = Harness::content(&view);
@@ -231,6 +252,7 @@ fn starting_without_command_resumes_a_previously_saved_sessions_command() {
         json!(true),
         "resumed session never became ready: {restarted}"
     );
+    harness.wait_for(10, "flow-resume", "hello");
 
     let view = harness.call(4, "view", json!({"session":"flow-resume"}));
     let view = Harness::content(&view);
