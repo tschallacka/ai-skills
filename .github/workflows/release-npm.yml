@@ -186,6 +186,15 @@ jobs:
           path: .
           merge-multiple: true
 
+      # Measured: a downloaded bin/<target>/<binary> artifact loses its Unix
+      # executable bit across the upload/download round trip -- present on
+      # disk (test-skill-files-manifest.sh's own -e check passed) but failing
+      # its -x check, which fails the prepack test suite below since it
+      # exec's planning's rjq. Restored unconditionally rather than trusted
+      # to survive; harmless on the windows-msvc .exe files this also touches.
+      - name: Restore the executable bit on every downloaded binary
+        run: find . -path './*/bin/*' -type f -exec chmod +x {} +
+
       - name: Set up Node
         uses: actions/setup-node@v7.0.0
         with:
@@ -235,6 +244,11 @@ jobs:
           pattern: release-npm-payload-*
           path: .
           merge-multiple: true
+
+      # See jobs.assemble's identical step for why this is not trusted to
+      # have survived the upload/download round trip on its own.
+      - name: Restore the executable bit on every downloaded binary
+        run: find . -path './*/bin/*' -type f -exec chmod +x {} +
 
       - name: Set up Node
         uses: actions/setup-node@v7.0.0
