@@ -6,7 +6,7 @@
     {
       "id": "T70",
       "title": "Ship the 2.0.0-alpha binaries as release assets, not committed blobs",
-      "status": "open",
+      "status": "done",
       "priority": "urgent",
       "parent": null,
       "detail": "Binaries for the five targets (x86_64/aarch64-unknown-linux-musl, x86_64/aarch64-apple-darwin, x86_64-pc-windows-msvc) ship with the 2.0.0-alpha release as CI artifacts, not as files in git. The rust matrix jobs already build and upload per-target artifacts; what remains is release attachment plus the installer/packaging reconciliation. rust-development-guidelines.md section 6 still governs: binaries.tsv is MODE: PROD, declared-but-unbuilt rows are legal, built-but-undeclared is not, so declare before building. tests/test-shipped-binaries.sh validates the registry against disk and is the gate that proves this landed.",
@@ -18,210 +18,43 @@
         "tests/test-shipped-binaries.sh",
         ".github/workflows/ci.yml"
       ],
-      "note": "Decision 2026-08-31 (Tschallacka): no binary blobs in the repo; the original commit-them wording is dropped. The planning/bin blob itself left the index in the T73 execution (goal 01, commit ad21749 then rebased). Re-applied onto master register twice: after 4cfab47 and after c7bb034.",
+      "note": "T72 and release-installer.yml already closed most of T70's originally-stated scope before this plan started (no committed binary blobs, existing per-target release-tarball attachment); this plan (release-asset-shipping) added a CI-driven npm-publish workflow (release-npm.yml, verified via a real workflow_dispatch dry run per W05), a real end-to-end rehearsal of the release-asset attachment and bootstrap install path (W06/W07, using a throwaway prerelease, deleted afterward), and a binaries.tsv-vs-skill_files() drift check (W08/W09).",
       "created_at": "2026-08-28T17:15:01Z",
-      "updated_at": "2026-08-31T14:59:45Z"
-    },
-    {
-      "id": "T145",
-      "title": "Make shell scripts portable across sh/bash/zsh (or fully shell-agnostic)",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Scripts currently assume bash (arrays, [[ ]], local, and other bash-specific builtins -- CODE-STYLE.md's own portability floor is bash 3.2, not POSIX sh). Requested ahead of the 2.0.0-alpha release: either make shipped .sh entrypoints genuinely POSIX /bin/sh compatible, or fall back to explicit bash+zsh dual compatibility since those are the two shells actually in wide use -- full shell-agnosticism is the preferred outcome over picking one alternate shell. Scope: audit planning/scripts/** and any other shipped .sh entrypoints for bash-only constructs; extend CI portability legs (today: bash32 floor + macOS system bash) to cover zsh and/or dash. Overlaps with T147: a script ported to Rust needs no shell-portability work at all, so scope this against whatever T147 leaves as shell scripts.",
-      "blocked_on": "T147",
-      "refs": [
-        "T147"
-      ],
-      "note": "Reordered per user: do the Rust-conversion step (T147) first, then scope T145's shell-portability work only against whatever T147 leaves as actual shell scripts -- avoids doing portability work on scripts about to be rewritten in Rust anyway. Sequence is now T147 -> T146 -> T145.",
-      "created_at": "2026-09-14T18:23:18Z",
-      "updated_at": "2026-09-14T18:39:32Z"
-    },
-    {
-      "id": "T146",
-      "title": "Port the planning skill to a Rust-backed MCP tool with atomic concurrent writes",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Port the planning skill (currently planning/scripts/*.sh operating on JSON plan-state files) to a Rust binary exposed both as a CLI and as an MCP server, mirroring ai-text-editor's dual CLI/MCP delivery model. Must be atomic under concurrent access: many subworkers/subagents routinely operate on the same plan's task list at once today, and the current file-based approach has no real concurrency guarantee, risking lost updates or corrupted plan state. Needs a real atomicity mechanism (e.g. file locking, revision-guarded compare-and-swap matching ai-text-editor's own revision-guard pattern, or a single-writer server model) rather than best-effort file writes. Requested ahead of the 2.0.0-alpha release. Plan the design with the planning skill itself before implementation, per this repo's own convention for non-trivial work.",
-      "blocked_on": null,
-      "refs": [
-        "T147"
-      ],
-      "note": "Folded into T147's plan as one of its goals (planning skill is one of the conversion candidates T147 surveys), per user decision -- not planned as a fully separate initiative. Still tracked as its own backlog entry for its distinct atomicity requirement.",
-      "created_at": "2026-09-14T18:23:18Z",
-      "updated_at": "2026-09-14T18:40:27Z"
-    },
-    {
-      "id": "T147",
-      "title": "Convert remaining bash-backed skills to Rust-backed implementations",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Survey every bash-backed skill in the repo and convert as many as practical to Rust-backed binaries, following the precedent already set by ai-text-editor, todo/bugs, register-rebuild, planning-register, and the installer. Goals: portability (removes bash-version-specific behavior entirely rather than chasing it, see T145), maintainability, and testability (cargo test vs. shell test harnesses). Requested ahead of the 2.0.0-alpha release. The planning skill is one candidate for this conversion but is tracked separately as T146 given its size and its concurrent-write atomicity requirement.",
-      "blocked_on": null,
-      "refs": [
-        "T145",
-        "T146"
-      ],
-      "note": "Umbrella plan: folds T146 (planning skill Rust/MCP port) in as one of its goals per user decision, rather than planning it separately, to avoid re-deriving the same bash-skill survey twice.",
-      "created_at": "2026-09-14T18:23:18Z",
-      "updated_at": "2026-09-14T18:40:27Z"
-    },
-    {
-      "id": "T148",
-      "title": "Turn the planning skill's review personas into proper .agents/profiles/*.json, alongside nitpicker",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "The repo already has a real, shipping cross-harness agent-profile system (T102): a canonical JSON persona at .agents/profiles/<name>.json (fields: name, description, instructions), translated per-harness by src/installer/src/profiles.rs's ProfileTranslator trait into Claude Code's .claude/agents/*.md frontmatter, opencode's markdown+YAML, and codex's TOML. Today .agents/profiles/ holds exactly one profile, nitpicker.json. Meanwhile the planning skill's adversarial-review/execution/cleanup personas (Alex, Benny, Chris/Christian/Christoph, Dana, Frank, Willie -- named in planning/roles/ROLES.md's index) live only as prose inside three bundled phase docs (planning/roles/planning.md, execution.md, cleanup.md) plus planning/roles/VOICES.md, loaded ad hoc at review time via planning/scripts/role-context.sh <persona> rather than as installable, harness-native subagents. Requested: extract each individual persona (one canonical JSON per person, matching nitpicker.json's density and single-voice style) into its own .agents/profiles/<name>.json, register each in installer/src/05-config.sh's PROFILE_NAMES array and wherever installer/src/50-manifest.sh's per-profile case arm needs a matching entry, and decide whether role-context.sh's phase-scoped loading (planning vs execution vs cleanup casts) is retired in favor of the profile system or kept as a separate, complementary mechanism for the planning skill's own bounded-read-locked reviewer dispatch (see part-3.md of the planning skill for that dispatch's exact contract). Note a persona like Chris changes name across phases (Chris in planning, Christian/Christoph elsewhere per ROLES.md) -- clarify whether these are the same profile reused or genuinely distinct personas before splitting files.",
-      "blocked_on": null,
-      "refs": [
-        "T146"
-      ],
-      "note": "filed while running the planning-skill-rustify plan's adversarial review (persona chris), 2026-09-14",
-      "created_at": "2026-09-14T19:04:10Z",
-      "updated_at": "2026-09-14T19:04:10Z"
-    },
-    {
-      "id": "T69",
-      "title": "A postmortem template carrying token accounting and a reviewer-session table",
-      "status": "open",
-      "priority": "low",
-      "parent": null,
-      "detail": "The unbuilt half of T58, separated rather than folded into its close. codex's postmortem recommendation 10, and the artifact that made their run legible in the first place: seventeen cycles, 109 findings and 41.7 million tokens, with a per-cycle table of session id, elapsed time and findings count. That data existed only because they went and collected it by hand afterwards. T57 now seeds the per-cycle fields in the review-scope block, so a template would have something to read rather than asking someone to reconstruct it. It has no natural home in the plan documents — a postmortem is written after the plan is finished and describes the process rather than the work — so it needs a decision about where it lives before it is written.",
-      "blocked_on": null,
-      "refs": [
-        "planning/scripts/create-adversarial-review.sh"
-      ],
-      "note": null,
-      "created_at": "2026-08-28T15:33:14Z",
-      "updated_at": "2026-08-28T15:33:14Z"
+      "updated_at": "2026-09-25T06:15:55Z"
     },
     {
       "id": "T56",
       "title": "Mark a review rationale superseded when a later cycle replaces it",
-      "status": "blocked",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "codex postmortem recommendation 6. The Verdict rationale is a single field rewritten by hand each cycle; across four cycles here I replaced it four times, and nothing would have flagged it had I forgotten. A stale rationale is worse than an absent one because it reads as current: it names findings by id and asserts a verdict that the findings table may already contradict. Either stamp the rationale with the cycle it was written for and warn when the archived cycle count moves past it, or fold the rationale into the same helper that rewrites the findings table.",
-      "blocked_on": "the review-document format owner: needs a rationale-cycle stamp written when the rationale is written (see note)",
+      "blocked_on": "",
       "refs": [
         "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
         "planning/scripts/update-adversarial-review.sh"
       ],
-      "note": "Attempted and reverted, deliberately. I built the staleness signal on the archived cycle number and it does not carry the meaning the entry assumed: archive 'Cycle N' names the state BEFORE run N, while a rationale saying 'Cycle N' names the review cycle whose findings just landed. Measured on a fixture — after two update runs the archive holds Cycle 1 and Cycle 2 while the rationale legitimately still reads Cycle 1 — so a warning keyed on the difference fires on the normal path, which is the T67 failure I had just fixed elsewhere. Correcting for the off-by-one then made it silent on the real case. B44 records that the numbering breaks after gaps and is closed as not-a-defect, so the counter is not a sound basis for this and no arithmetic on it will be. What would work is a stamp recording which cycle a rationale describes, written when the rationale is written rather than inferred from prose — that is a review-document format change and belongs with whoever owns the format. Reverted rather than shipping a warning that misfires in both directions.",
+      "note": "Fixed in nextupdate 83f60704, CI green (all 33 checks). Resolved the exact off-by-one trap this entry's own note warned about, by making the write side and the read side share ONE function rather than each re-deriving \"which cycle\" separately: update-adversarial-review.sh gains --set-rationale, which stamps the Verdict with `- Rationale cycle: N` using cycle_number(history, None) -- the SAME function the archiver itself already uses to decide what to call the cycle it is about to archive. planning-validator-docs then flags staleness only when cycle_number() (its own copy of the identical 8-line logic, cross-referenced in a doc comment rather than sharing a crate) now returns something greater than the stamp -- i.e. only once a cycle has actually been archived since the rationale was written, never on the normal same-cycle path the reverted attempt misfired on. Verified end-to-end with real compiled binaries through the full mint-keys/claim-fix/approve/validate workflow, twice: once where the stamp is current (no finding) and once after a second cycle lands unstamped (staleness correctly flagged, naming the fix). Unit tests on both sides plus a new shell integration test (planning/tests/test-adversarial-review-cycles.sh) cover this permanently.",
       "created_at": "2026-08-27T22:38:42Z",
-      "updated_at": "2026-08-31T14:59:45Z"
-    },
-    {
-      "id": "T74",
-      "title": "Re-verify the stale-documentation findings after the documentation reorganisation lands",
-      "status": "blocked",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Six documents made claims that did not match the tree when measured at 11f4cef on 2026-09-01. The reorganisation may fix, move or re-word any of them, so each gets re-checked against the code rather than assumed fixed or assumed still broken. Sub-tasks carry the individual claims. Found while fact-checking for the GitHub wiki; none is blocking.",
-      "blocked_on": "the documentation reorganisation currently in progress",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:13:37Z",
-      "updated_at": "2026-09-01T15:13:37Z"
-    },
-    {
-      "id": "T75",
-      "title": "AGENTS.md states the shellcheck gate is error severity; both gates are warning",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "AGENTS.md says the pre-push gate and CI use shellcheck at error severity. pre-push-check.sh and the ci.yml shellcheck job both run --severity=warning. CONTRIBUTING.md was corrected already and flags its own looser local line; AGENTS.md and the flake shell banner were not.",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
-    },
-    {
-      "id": "T76",
-      "title": "DEVELOPMENT.md and CODE-STYLE.md state a test count of 30; the real count is 123",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "DEVELOPMENT.md says 'all 30 tests' and CODE-STYLE.md section 13 says '30+ PASS'. Measured at 11f4cef: 123 test-*.sh files across the four directories run-tests.sh discovers (planning/tests 106, benchmark/planning/tests 9, tests 6, chat/tests 2), reported as 122 gate cases plus one cargo case. DEVELOPMENT.md and AGENTS.md also describe run-tests.sh as covering two directories; it covers four.",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
-    },
-    {
-      "id": "T77",
-      "title": "RELEASE.md miscounts the compiled libraries and the test scripts",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "RELEASE.md step 4 says 'the four plan-*-lib.sh'; there are five since crypt was split out of core when core hit 506 lines against the 500-line cap. RELEASE.md also says 'the 70 test scripts'.",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
-    },
-    {
-      "id": "T78",
-      "title": "CODE-CONTRACTS.md contract 7 still describes committed generated artifacts",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "Contract 7's table lists PORTABILITY.md and REVIEWER.md as freshness-checked by diffing against a committed copy, and instructs regenerating PORTABILITY.md last because 'its staleness signal is commit ordering'. Neither file is committed since the generated-files migration, the commit-ordering report_age function was deleted, and the five compiled libraries are absent from the table entirely.",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
-    },
-    {
-      "id": "T79",
-      "title": "planning/MAINTAINER.md cites a Rust pin and two chat symbols that no longer exist",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "Section 2.15 says the flake pins Rust 1.86.0; the flake takes the newest stable the locked nixpkgs offers and all seven rust-toolchain.toml files under src/ pin 1.98. Sections 2.8a and 2.15 refer to chat-server.sh's rust_bin() and to the chat server dropping to an interpreter tier; the chat skill ships no scripts at all and rust_bin appears nowhere tracked.",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
-    },
-    {
-      "id": "T80",
-      "title": "flake.nix's dev-shell banner probes the removed cargo186 and advertises the old lint line",
-      "status": "blocked",
-      "priority": "low",
-      "parent": "T74",
-      "detail": "The shellHook echoes a cargo186 version, but the floor toolchain was deliberately removed, so every nix develop prints 'cargo186: command not found'. The same banner's last line advertises the shellcheck invocation at --severity=error over git ls-files alone, which is neither the severity CI gates at nor the file set it uses (the generated libraries must be named on the command line for source= to resolve).",
-      "blocked_on": "T74",
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T15:14:23Z",
-      "updated_at": "2026-09-01T15:14:23Z"
+      "updated_at": "2026-09-24T14:15:43Z"
     },
     {
       "id": "T1e",
       "title": "Decide what a converted test prints on success",
-      "status": "decided",
+      "status": "done",
       "priority": "normal",
       "parent": "T1",
       "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
       "blocked_on": null,
       "refs": [],
-      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
+      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. This decided the acceptance criterion for T1a-T1d, all of which are done and archived. Closed 2026-09-24: orphaned decision gate -- parent T1 ('One test reporter, not eighteen') is done, and all four children T1a-T1d are done and archived in TODO.2026-09-01.archive.json. The decision was made and fully acted on; T1e itself was simply never re-flagged after serving its purpose. No outstanding work.",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-09-24T12:56:47Z"
     },
     {
       "id": "T38",
       "title": "Review record: what was checked on the -ox merge, and what was not",
-      "status": "decided",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
@@ -229,9 +62,9 @@
       "refs": [
         "https://github.com/tschallacka/ai-skills/pull/3"
       ],
-      "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
+      "note": "Closed 2026-09-24, re-verified against the current tree rather than left as a stale review snapshot: (1) B18-B29, the defects this review could not verify without their original environments, are now ALL status=fixed in the live register. (2) The chat skill runtime chain, unexercised at review time, now has real crate tests (chat-mcp, chat-server-rs, chat-client-rs, chat-spool-watch) passing consistently across every CI run this session. (3) The plan-to-HTML overview renderer, checked only for existence/registration at review time, now has real behavioral tests (plan-overview's pages_primary.rs, mode.rs, autoplay.rs, serve_routing.rs) passing consistently. (4) 'CI had never run on this branch' -- PR #3 (opened to get exactly that run) was closed 2026-08-31 without merging, but nextupdate has since run CI green dozens of times including every batch of this session's own work, superseding the concern. No remaining verification gap.\n\nOriginal note: NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
       "created_at": "2026-08-24T12:17:47Z",
-      "updated_at": "2026-08-24T12:17:47Z"
+      "updated_at": "2026-09-24T12:56:47Z"
     },
     {
       "id": "T72",
@@ -741,6 +574,52 @@
       "updated_at": "2026-09-12T17:31:33Z"
     },
     {
+      "id": "T145",
+      "title": "Convert remaining bash scripts of sufficient complexity to Rust binaries; installer stays the sole shell surface",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Corrected scope per direct user clarification (2026-09-16), superseding the original POSIX-sh/zsh-portability framing: the goal is NOT interpreter-level portability (POSIX sh, zsh) -- it is to keep extending T147's own Rust-conversion effort so that any bash script of sufficient complexity becomes a Rust binary instead, leaving the installer as the one deliberately-shell piece of this repository. Scope: survey every remaining .sh file this repo ships or runs in CI/dev (pre-push-check.sh, run-tests.sh, setup-dev-env.sh, .github/*.sh, top-level scripts like blast-radius.sh/generate-portability.sh/verify-both-shells.sh, per-skill tests/*.sh harnesses, and any planning/scripts/lib/*.sh sourced helpers T147 left as bash since their own entry point was already converted) and convert whichever are complex enough to be worth a Rust port, following T147's own established methodology (parity-verified against the real bash original, wired via the same compiled-binary-preference pattern where an entry point is being replaced in place, or a clean rewrite where a script has no natural 'wire onto a binary' shape, e.g. a test harness). A script judged NOT complex enough to be worth converting (thin wrappers, one-line dispatchers) stays bash, recorded as an explicit non-goal with a reason, matching T147's own precedent for resource-limited-testing.sh and the lifecycle-hook plugins.",
+      "blocked_on": "",
+      "refs": [
+        "T147"
+      ],
+      "note": "Closed: .plans/bash-to-rust-conversion's own 30-goal plan is fully complete and committed (goals 1-13 shared wiring/MVP planning-server; 14-23 real Rust-crate conversions of every orchestration/CI-selector script named in this ticket's own scope -- pre-push-check.sh, run-tests.sh, setup-dev-env.sh, generate-portability.sh, blast-radius.sh, verify-both-shells.sh, ci-subjects/ci-scope/ci-test-scope.sh, plus the ci.yml wiring for the three CI selectors; 24-26 CI-selector fallback stripping, the 10-file test-orchestration migration, and test-mermaid-accuracy.sh's own conversion, closing goal 8's test-harness triage per section 4.7/4.10; 27-30, this session, T145's own former 'goal 7' -- stripped the bash reimplementation body from every remaining planning/scripts/*.sh entry point and the 6 non-planning/scripts/ orchestration scripts (leaving 3 permanent bash-implementation exceptions: setup-dev-env.sh, pre-push-check.sh, render-plans-board.sh, each for a documented load-bearing reason), deleted the 17 hand-written *-lib.sh files that fell genuinely dead as a result along with their now-pointless dedicated tests, and updated CODE-STYLE.md/planning/MAINTAINER.md to stop describing the old lib.sh-sourcing convention as a live requirement for new bash scripts (planning/skill-source.txt needed no change). Every goal independently adversarially reviewed and approved; each closing commit's own full pre-push-check.sh + run-tests.sh sweep confirmed no regression against the established pre-existing baseline. T146 and T147 (this ticket's own refs) are both already done. The installer remains the one deliberately-shell surface this repository ships, per the user's own scope correction recorded in this ticket's note.",
+      "created_at": "2026-09-14T18:23:18Z",
+      "updated_at": "2026-09-18T04:55:52Z"
+    },
+    {
+      "id": "T146",
+      "title": "Port the planning skill to a Rust-backed MCP tool with atomic concurrent writes",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Port the planning skill (currently planning/scripts/*.sh operating on JSON plan-state files) to a Rust binary exposed both as a CLI and as an MCP server, mirroring ai-text-editor's dual CLI/MCP delivery model. Must be atomic under concurrent access: many subworkers/subagents routinely operate on the same plan's task list at once today, and the current file-based approach has no real concurrency guarantee, risking lost updates or corrupted plan state. Needs a real atomicity mechanism (e.g. file locking, revision-guarded compare-and-swap matching ai-text-editor's own revision-guard pattern, or a single-writer server model) rather than best-effort file writes. Requested ahead of the 2.0.0-alpha release. Plan the design with the planning skill itself before implementation, per this repo's own convention for non-trivial work.",
+      "blocked_on": null,
+      "refs": [
+        "T147"
+      ],
+      "note": "Implemented as .plans/bash-to-rust-conversion goal 13 (planning-server-mvp): a new planning-server crate (content-hash-based revision-guarded CAS, mirroring ai-text-editor's own optimistic-CAS precedent adapted for planning's many-writer topology), a planning-client CLI, and a planning-mcp thin MCP adapter -- covering the seven heaviest-value operations (bounded reads, update-step, add-work-unit, review-status, testing-requirement, a read-only validate-plan passthrough) as a deliberately-scoped MVP, not full parity with all ~50 planning commands. All 7 work units (W77-W83) implemented, tested (25 tests: unit + real subprocess-level integration), and verified against the real repository; goal adversarially approved (cycle 28) and validate-plan.sh --complete confirms implementation-complete. Migrating the 45+ already-wired planning commands onto this new server, and extending update-plan-content's coverage beyond review-status/testing-requirement, are explicit, separately-recorded future goals -- not part of this MVP's own closure.",
+      "created_at": "2026-09-14T18:23:18Z",
+      "updated_at": "2026-09-15T23:11:39Z"
+    },
+    {
+      "id": "T147",
+      "title": "Convert remaining bash-backed skills to Rust-backed implementations",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Survey every bash-backed skill in the repo and convert as many as practical to Rust-backed binaries, following the precedent already set by ai-text-editor, todo/bugs, register-rebuild, planning-register, and the installer. Goals: portability (removes bash-version-specific behavior entirely rather than chasing it, see T145), maintainability, and testability (cargo test vs. shell test harnesses). Requested ahead of the 2.0.0-alpha release. The planning skill is one candidate for this conversion but is tracked separately as T146 given its size and its concurrent-write atomicity requirement.",
+      "blocked_on": null,
+      "refs": [
+        "T145",
+        "T146"
+      ],
+      "note": "Umbrella closed: .plans/bash-to-rust-conversion, all 13 goals implementation-complete and adversarially approved (validate-plan.sh --complete: 81 work units across 13 goals). Phase-by-phase: goals 1-7 wired the shared compiled-binary-preference mechanism across every already-crated planning entry point; goals 8-11 built and wired Rust crates for the remaining crateless planning scripts (build-plan-libs, generate-skill-docs, overview-state, verify-skill-load); goal 12 converted ci-failures.sh (the last real conversion candidate outside planning/) to a Rust crate; goal 13 delivered T146's own MVP (planning-server/planning-client/planning-mcp). Explicit non-goals recorded, not silently skipped: resource-limited-testing.sh, the three Claude Code lifecycle hook plugins (agent-identity/editor-gate/tui-hint), and render-plans-board.sh (owned by a different Rust migration per ci.yml's own annotations). T145 (shell portability) is now unblocked: its own audit should scope against whatever this plan left as actual shell surface (the sourced *-lib.sh/lib/*.sh helper files, plus the deliberately-out-of-scope scripts above).",
+      "created_at": "2026-09-14T18:23:18Z",
+      "updated_at": "2026-09-15T23:11:48Z"
+    },
+    {
       "id": "T1",
       "title": "One test reporter, not eighteen",
       "status": "done",
@@ -771,6 +650,19 @@
       "note": "Already done: T86/T87 (commit 22fd60de, PR #137) split planning/SKILL.md into a short dispatcher (now 34 lines) plus planning/parts/part-1.md through part-4.md, generated from a single skill-source.txt by planning/scripts/generate-skill-docs.sh, with a load-sanity check (verify-skill-load.sh) on every part. This ticket's own requested reconciliation is already in place: role-context.sh's role_docs() lists parts/part-1..4.md for every role, installer/src/50-manifest.sh's skill_files() declares them, planning/PACKAGE-MANIFEST.tsv/PACKAGE-MAP.tsv and planning/tests/fixtures/overview/npm-package-baseline.tsv all account for them, and the full test suite (236/238 all session, no planning-related failures) confirms nothing regressed. T71 was simply never cross-referenced and closed when T86/T87 shipped -- closing it now to match reality rather than re-doing already-completed work.",
       "created_at": "2026-08-30T21:50:27Z",
       "updated_at": "2026-09-12T17:35:26Z"
+    },
+    {
+      "id": "T74",
+      "title": "Re-verify the stale-documentation findings after the documentation reorganisation lands",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Six documents made claims that did not match the tree when measured at 11f4cef on 2026-09-01. The reorganisation may fix, move or re-word any of them, so each gets re-checked against the code rather than assumed fixed or assumed still broken. Sub-tasks carry the individual claims. Found while fact-checking for the GitHub wiki; none is blocking.",
+      "blocked_on": "the documentation reorganisation currently in progress",
+      "refs": [],
+      "note": "The documentation reorganisation landed (.agents/MAINTAINER.md is the entry point). T75-T80 each re-checked against the tree on 2026-09-21 and closed.",
+      "created_at": "2026-09-01T15:13:37Z",
+      "updated_at": "2026-09-21T14:21:31Z"
     },
     {
       "id": "T81e",
@@ -1187,6 +1079,129 @@
       "updated_at": "2026-09-12T18:29:06Z"
     },
     {
+      "id": "T148",
+      "title": "Turn the planning skill's review personas into proper .agents/profiles/*.json, alongside nitpicker",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "The repo already has a real, shipping cross-harness agent-profile system (T102): a canonical JSON persona at .agents/profiles/<name>.json (fields: name, description, instructions), translated per-harness by src/installer/src/profiles.rs's ProfileTranslator trait into Claude Code's .claude/agents/*.md frontmatter, opencode's markdown+YAML, and codex's TOML. Today .agents/profiles/ holds exactly one profile, nitpicker.json. Meanwhile the planning skill's adversarial-review/execution/cleanup personas (Alex, Benny, Chris/Christian/Christoph, Dana, Frank, Willie -- named in planning/roles/ROLES.md's index) live only as prose inside three bundled phase docs (planning/roles/planning.md, execution.md, cleanup.md) plus planning/roles/VOICES.md, loaded ad hoc at review time via planning/scripts/role-context.sh <persona> rather than as installable, harness-native subagents. Requested: extract each individual persona (one canonical JSON per person, matching nitpicker.json's density and single-voice style) into its own .agents/profiles/<name>.json, register each in installer/src/05-config.sh's PROFILE_NAMES array and wherever installer/src/50-manifest.sh's per-profile case arm needs a matching entry, and decide whether role-context.sh's phase-scoped loading (planning vs execution vs cleanup casts) is retired in favor of the profile system or kept as a separate, complementary mechanism for the planning skill's own bounded-read-locked reviewer dispatch (see part-3.md of the planning skill for that dispatch's exact contract). Note a persona like Chris changes name across phases (Chris in planning, Christian/Christoph elsewhere per ROLES.md) -- clarify whether these are the same profile reused or genuinely distinct personas before splitting files.",
+      "blocked_on": null,
+      "refs": [
+        "T146"
+      ],
+      "note": "Closed: the persona-profile-migration plan's own 4 goals are all committed (goal 1: e20183d6/30bd3446 -- benny/chris/christian/christoph; goal 2: 34313a7b -- dana/frank/maintainer/installer/oracle/eve, alex deferred; goal 3: 7a4269e5 -- installer wiring for all 10; goal 4: f9059625, this session -- the actual cutover). Goal 4's own decomposition found the plan's original risk analysis (role-context.sh needing new capability built) was stale: role-context.sh was already a compiled Rust binary since 2026-09-02, before the plan existed. Repurposed it from a live dispatch-time dependency into a build-time content generator (new src/generate-profile-content/ crate, mirroring build-plan-libs.sh's own --check/--write contract) instead of building anything from scratch. part-3.md's reviewer-dispatch protocol now spawns the installed chris subagent by name instead of a manual ROLE_ID=chris + role-context.sh prompt instruction. The two persona drift tests were updated to match (test-persona-drift.sh now checks build-vs-shipped profile freshness; test-voice-artifact-drift.sh needed no change). alex is permanently excluded from profile extraction (documented in ROLES.md, not re-deferred) -- its own live payload is the entire planning skill, not a role-specific persona. Two real bugs found and fixed along the way: B361 (role-context's REVIEWER.md staleness check hashed the wrong file) and B362 (major -- role-context's own skill_dir() used a fixed-depth path guess instead of reading PLANNING_SKILL_ROOT like every other wired binary, so the documented ROLE_ID=X + role-context.sh dispatch pattern silently returned near-empty scoped context for every persona; this was the actual mechanism behind an 'environment quirk' independent reviewers hit and worked around ad hoc earlier this same session without knowing the root cause).",
+      "created_at": "2026-09-14T19:04:10Z",
+      "updated_at": "2026-09-18T06:32:40Z"
+    },
+    {
+      "id": "T150",
+      "title": "chat-mcp: deliver arriving messages to a busy agent through Claude Code channels",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "B363's adapter defects (a wait blocking every other request) are fixed, but nothing yet pushes a message into an agent that is busy or between turns; it is found only by its next read or wait. Claude Code's documentation (Channels, research preview) describes an MCP server declaring capabilities.experimental['claude/channel'] and sending notifications/claude/channel with params {content, meta}; the model receives them wrapped in a <channel source=...> tag. Per that documentation: a session must be started with --channels server:<name> (or plugin:<name>), organization policy channelsEnabled applies to Team and Enterprise, and events queue and arrive on the NEXT turn: they do not wake an idle session. It also says MCP protocol negotiation v2 breaks channel delivery, and that subagent delivery is not documented. To do: confirm all of this on the installed Claude Code (this was researched by an agent from the docs and not run), prototype a claude/channel notification from chat-mcp for mentions, and decide whether the opt-in flag is acceptable for the agents this bus serves. Also worth measuring after B363's fix: whether Claude Code sends a second call to an MCP server while one is pending (the earlier measurement, before the fix, could not tell the adapter from the client).",
+      "blocked_on": null,
+      "refs": [
+        "B363"
+      ],
+      "note": "Built 2026-09-21 (nextupdate, deba619a and after; docs in chat/docs/interrupts.md, measurements in .agents/knowledge/claude-code-channels.md). chat-mcp declares experimental claude/channel plus instructions, and has interrupt_add/update/remove/list/settings and timer_set/update/cancel: optional channel, people and string filters (with not_ versions, any/all, mentions_me), cooldown, once, expiry, a master switch, snooze and a rate limit, one-shot and repeating timers, all modifiable while running. State is per identity and survives a reconnect, not a process restart. Checked against a real interactive Claude Code 2.1.278 (haiku): idle wake, mid-tool delivery, filters, update, timers, snooze all as documented; 52 unit and 19 end-to-end tests. Not covered: subagents, claude -p (does not work), org policy, Team/Enterprise.",
+      "created_at": "2026-09-21T10:45:14Z",
+      "updated_at": "2026-09-21T20:49:16Z"
+    },
+    {
+      "id": "T69",
+      "title": "A postmortem template carrying token accounting and a reviewer-session table",
+      "status": "done",
+      "priority": "low",
+      "parent": null,
+      "detail": "The unbuilt half of T58, separated rather than folded into its close. codex's postmortem recommendation 10, and the artifact that made their run legible in the first place: seventeen cycles, 109 findings and 41.7 million tokens, with a per-cycle table of session id, elapsed time and findings count. That data existed only because they went and collected it by hand afterwards. T57 now seeds the per-cycle fields in the review-scope block, so a template would have something to read rather than asking someone to reconstruct it. It has no natural home in the plan documents — a postmortem is written after the plan is finished and describes the process rather than the work — so it needs a decision about where it lives before it is written.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/create-adversarial-review.sh"
+      ],
+      "note": "Both goals of .plans/postmortem-template shipped this session (goal 1: generate-postmortem crate implemented and wired; goal 2: installer manifest/package sync fixed as B359). Plan progress.md shows 100% complete.",
+      "created_at": "2026-08-28T15:33:14Z",
+      "updated_at": "2026-09-18T01:56:22Z"
+    },
+    {
+      "id": "T75",
+      "title": "AGENTS.md states the shellcheck gate is error severity; both gates are warning",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "AGENTS.md says the pre-push gate and CI use shellcheck at error severity. pre-push-check.sh and the ci.yml shellcheck job both run --severity=warning. CONTRIBUTING.md was corrected already and flags its own looser local line; AGENTS.md and the flake shell banner were not.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "Checked against nextupdate 2026-09-21: AGENTS.md points at pre-push-check.sh --help and CONTRIBUTING.md states the warning severity and flags its own looser local line; the flake banner line went in b9722382.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
+      "id": "T76",
+      "title": "DEVELOPMENT.md and CODE-STYLE.md state a test count of 30; the real count is 123",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "DEVELOPMENT.md says 'all 30 tests' and CODE-STYLE.md section 13 says '30+ PASS'. Measured at 11f4cef: 123 test-*.sh files across the four directories run-tests.sh discovers (planning/tests 106, benchmark/planning/tests 9, tests 6, chat/tests 2), reported as 122 gate cases plus one cargo case. DEVELOPMENT.md and AGENTS.md also describe run-tests.sh as covering two directories; it covers four.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "Checked against nextupdate 2026-09-21: DEVELOPMENT.md and AGENTS.md no longer state a test count or two directories; CODE-STYLE.md 13 dropped the '30+ PASS' pin in b9722382.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
+      "id": "T77",
+      "title": "RELEASE.md miscounts the compiled libraries and the test scripts",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "RELEASE.md step 4 says 'the four plan-*-lib.sh'; there are five since crypt was split out of core when core hit 506 lines against the 500-line cap. RELEASE.md also says 'the 70 test scripts'.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "Checked against nextupdate 2026-09-21: RELEASE.md no longer says 'the four plan-*-lib.sh' or '70 test scripts'.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
+      "id": "T78",
+      "title": "CODE-CONTRACTS.md contract 7 still describes committed generated artifacts",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "Contract 7's table lists PORTABILITY.md and REVIEWER.md as freshness-checked by diffing against a committed copy, and instructs regenerating PORTABILITY.md last because 'its staleness signal is commit ordering'. Neither file is committed since the generated-files migration, the commit-ordering report_age function was deleted, and the five compiled libraries are absent from the table entirely.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "CODE-CONTRACTS.md contract 7 rewritten in b9722382: it no longer lists PORTABILITY.md/REVIEWER.md as committed or cites commit ordering, adds the five plan-*-lib.sh, and points at .agents/MAINTAINER.md 1.10.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
+      "id": "T79",
+      "title": "planning/MAINTAINER.md cites a Rust pin and two chat symbols that no longer exist",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "Section 2.15 says the flake pins Rust 1.86.0; the flake takes the newest stable the locked nixpkgs offers and all seven rust-toolchain.toml files under src/ pin 1.98. Sections 2.8a and 2.15 refer to chat-server.sh's rust_bin() and to the chat server dropping to an interpreter tier; the chat skill ships no scripts at all and rust_bin appears nowhere tracked.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "Checked against nextupdate 2026-09-21: neither planning/MAINTAINER.md nor .agents/MAINTAINER.md carries the 1.86 pin, rust_bin or the interpreter-tier claim any more.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
+      "id": "T80",
+      "title": "flake.nix's dev-shell banner probes the removed cargo186 and advertises the old lint line",
+      "status": "done",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "The shellHook echoes a cargo186 version, but the floor toolchain was deliberately removed, so every nix develop prints 'cargo186: command not found'. The same banner's last line advertises the shellcheck invocation at --severity=error over git ls-files alone, which is neither the severity CI gates at nor the file set it uses (the generated libraries must be named on the command line for source= to resolve).",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": "flake.nix: cargo186 was already gone; the shellcheck --severity=error banner line was replaced by ./pre-push-check.sh in b9722382.",
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-21T14:21:31Z"
+    },
+    {
       "id": "T84",
       "title": "Support Windows in interactive-shell",
       "status": "done",
@@ -1296,6 +1311,32 @@
       "note": "Implemented on feat/t119-verbosity-framing, PR #157, merged into nextupdate.\n\nRe-measured before acting, per this ticket's own instruction to check the tab-id entry's ordering first: T118's short tab ids had already shipped. A two-line read at verbosity 0 was still only ~8% content by wire bytes (18 content bytes in 223 total across the data+complete frame pair) -- confirming framing still dominated and this ticket was still worth doing.\n\nThree of the ticket's proposed levers were implemented, in handle() (src/ai-text-editor/src/bin/ai-text-editor-server.rs):\n\n1. The completion frame is now omitted whenever the whole answer is a single non-streamed, non-paged data frame. That frame's only content (request_id/sequence/result_generation/version) exists to answer \"is the sequence I was reading now over\" -- not a real question when there was never more than one frame. A streamed read (payload.stream == true) or a paged result (payload has pager_key) still gets one, since those genuinely leave that question open. This applies at EVERY verbosity level, not only 0 -- it's about frame count, not payload richness, and the ticket's own proposal for this lever carried no verbosity qualifier (unlike the other two).\n\n2. byte_count is dropped at level 0. write_frames() (where byte_count is actually computed and inserted) never receives the verbosity level, so handle() marks each data frame with a private \"_omit_byte_count\" key when level==0, and write_frames strips that key unconditionally before serializing (so it never reaches the wire) and skips adding byte_count when it was present. The mid-stream restart path in write_frames builds its own frames directly, bypassing handle() entirely, so those always keep byte_count regardless of the original request's level -- restart frames were never single/unpaged/non-streamed candidates for lever 1 either, since they're stream frames by construction.\n\n3. tab_id is omitted at level 0, but ONLY when the request already addressed this exact tab by --tab-id (not tab_path, not file, not the unmarked/focused-tab form) -- echoing back an id the caller just sent is pure repetition, per the ticket's own \"sharper rule\" (level 0 must not repeat what the caller already sent). The other three addressing forms still get tab_id back at every level, preserving T98's guarantee exactly as the ticket required, since none of those forms already carries the id.\n\nNOT done: shortening/omitting request_id (the ticket's third, explicitly lowest-value/highest-risk lever). Both adapters already hardcode a minimal literal (\"cli-1\"/\"mcp-1\", 5 bytes each), and nothing in production client code reads request_id at all except TCP's auth handshake, which requires the SAME request_id to persist across the challenge/authenticate pair (protocol.md). Touching it buys a handful of bytes for real protocol risk on the one path that does depend on it. Deliberately left as a possible future ticket rather than attempted half-verified.\n\nVerified: cargo test -p ai-text-editor -- all 141 existing tests (including the two that specifically pin the pre-existing contract: an_unmarked_request_runs_on_the_focused_tab_and_the_answer_names_it, the_verbosity_ladder_shortens_the_answer_without_dropping_the_guard) plus 4 new tests added for this ticket: a_single_unpaged_answer_gets_no_completion_frame_at_any_level (levels 0-3), a_paged_search_result_still_gets_a_completion_frame (the pager_key guard), verbosity_0_drops_byte_count_but_higher_levels_keep_it, verbosity_0_omits_tab_id_only_when_the_caller_already_supplied_it (covering all three addressing forms that must still get it back). cargo test -p ai-text-editor-mcp all green and unaffected (the MCP adapter only reads session_token off the first data frame; confirmed by reading its response-handling code directly, not just running its tests). cargo fmt --check and cargo clippy --all-targets -D warnings clean for both crates. Manual end-to-end smoke test against a real running server (not just unit tests) confirmed the exact wire bytes for both the --tab-id-addressed (tab_id omitted, 103 bytes total for 18 bytes of content) and file-addressed (tab_id kept, 116 bytes total) cases, both roughly half the original 223-byte baseline for the same content. protocol.md and its own tracked npm-package-baseline.tsv byte count updated to match the new contract. Full pre-push-check.sh and full ./run-tests.sh both clean (240/240, 0 failures). PR #157 CI green across all 27 checks before merge.\n",
       "created_at": "2026-09-08T20:20:57Z",
       "updated_at": "2026-09-13T18:29:06Z"
+    },
+    {
+      "id": "T149",
+      "title": "Remove the retired required check 'install.sh matches installer/build.sh output' from master's branch protection",
+      "status": "done",
+      "priority": "low",
+      "parent": null,
+      "detail": "Owner action, outside the repository: GitHub branch protection for master. Read with: gh api repos/tschallacka/ai-skills/branches/master/protection/required_status_checks --jq '{strict, contexts}' (read on 2026-09-21). It requires 'Decide how much of the workspace this run must build', 'install.sh matches installer/build.sh output', 'Every mermaid diagram renders (syntax only, proves nothing about accuracy)', the five 'plan-overview <target>' jobs from render-artifacts.yml, and 'Shell test suite (all shards) passes'. No workflow has a job named 'install.sh matches installer/build.sh output' (grep -rn 'install.sh matches' .github is empty; install.sh and installer/build.sh are retired), so that check can never report and a pull request to master cannot go green without an admin bypass (enforce_admins is false, strict is false, no required reviews). Remove that context in the protection settings. A job rename in ci.yml or render-artifacts.yml orphans a required check the same way, so any rename of those jobs must change the protection setting in the same step. nextupdate has no protection. Found by the documentation audit (McCorrect); .agents/MAINTAINER.md section 3 cites this id.",
+      "blocked_on": "the first merge of nextupdate into master; nothing merges to master yet",
+      "refs": [],
+      "note": "2026-09-21: the owner said master is not being merged into yet, so this blocks nothing today. Do it before the first pull request or merge to master. Attempted this session via gh api PATCH on repos/.../branches/master/protection/required_status_checks (dropping 'install.sh matches installer/build.sh output' from contexts, keeping the rest). The call was blocked by Claude Code's own auto-mode permission classifier as a 'CI Bypass' pattern -- modifying a branch's required-status-checks list is treated as weakening CI gating regardless of intent, even though this specific context can never report (its job no longer exists). Left un-done; needs either the owner's own gh/browser action, or an explicit Bash permission rule allowing this specific gh api call, to get past the classifier. Done 2026-09-23 with the owner's explicit permission for this specific gh api call (the earlier attempt was blocked by Claude Code's own auto-mode 'CI Bypass' classifier). Removed 'install.sh matches installer/build.sh output' from master's required_status_checks via gh api PATCH repos/tschallacka/ai-skills/branches/master/protection/required_status_checks. Verified by re-reading the same endpoint immediately after: 8 remaining contexts, none of them the retired one. strict stayed false, enforce_admins and required reviews untouched (not part of this endpoint).",
+      "created_at": "2026-09-21T09:54:06Z",
+      "updated_at": "2026-09-23T04:47:51Z"
+    },
+    {
+      "id": "T151",
+      "title": "Sweep measurements and cross-file pointers out of code comments (CODE-STYLE section 11)",
+      "status": "done",
+      "priority": "low",
+      "parent": null,
+      "detail": "CODE-STYLE.md section 11 bans measurements and benchmark numbers, cross-file relationships and development history in comments of this repository's own source in every language. The documentation audit removed them only from files it touched; many others still carry them, for example in pre-push-check-lib.sh and .github/workflows/ci.yml (the timeout-minutes comment, the macOS memory-cap measurements). Find them (grep for 'measured', durations and 'see <file>' pointers), move any measurement that is worth keeping into .agents/knowledge with its date and run ids, and delete the rest. Raised by the audit; not started.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Swept the whole tree (top-level and planning/ shell scripts, and every Rust crate under src/) for CODE-STYLE.md section 11 violations: measurement/benchmark numbers used as justification (byte/line/test counts, dated 'Measured on...' paragraphs, CI-run-id citations) and cross-file relationship pointers ('mirrors X.rs's own Y', 'matching bash's own Z', 'see also'), the latter concentrated in ~230 sites left over from the bash-to-Rust ports. Each fix kept the local structural/behavioral point and dropped only the number or the other file's name; real OS/protocol constants (sun_path's 104/108 bytes, RFC 1459's 512-byte line cap) and single-line TODO-style markers were left alone per the rule's own exceptions. 140 files touched, comment-text only (confirmed via diff: every changed line is // /// //! or shell #). Verified: cargo build/fmt/clippy/test --workspace clean, full local suite (249/249), pre-push-check.sh PASS, npm-package-baseline.tsv refreshed for the resulting byte-size drift in shipped shell scripts, and CI green (commit c867ce98d20b257a816d183fd505a61d38b63eed, 33/33 checks) on nextupdate.",
+      "created_at": "2026-09-21T10:45:14Z",
+      "updated_at": "2026-09-22T22:46:01Z"
     },
     {
       "id": "T140",
