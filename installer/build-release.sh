@@ -486,6 +486,30 @@ case "$mode" in
                 exit 66
             fi
         fi
+        # T70/W05: binaries.tsv declares plan-crypt for all five targets (a
+        # hash/random-bytes fallback, same role as rjq) and 50-manifest.sh's
+        # skill_files lists it the same existence-gated way -- but nothing
+        # ever actually built or staged it here, so it silently never shipped
+        # for any target (found via a real npm pack --dry-run: rjq appeared,
+        # plan-crypt never did). Same three-way fallback as rjq's block just
+        # above, same $rjq_dir target resolution (identical case mapping),
+        # different binary name.
+        plan_crypt_bin='plan-crypt'
+        case "$rjq_dir" in *windows*) plan_crypt_bin='plan-crypt.exe' ;; esac
+        if [ -n "$rjq_dir" ] && [ ! -x "$repo_root/planning/bin/$rjq_dir/$plan_crypt_bin" ]; then
+            mkdir -p "$repo_root/planning/bin/$rjq_dir"
+            if [ -x "$repo_root/bin/$rjq_dir/$plan_crypt_bin" ]; then
+                cp "$repo_root/bin/$rjq_dir/$plan_crypt_bin" "$repo_root/planning/bin/$rjq_dir/$plan_crypt_bin"
+            elif command -v cargo >/dev/null 2>&1; then
+                ( cd "$repo_root/src/plan-crypt" && cargo build --release --target "$rjq_dir" ) \
+                    || { printf '%s: cargo build plan-crypt failed\n' "${0##*/}" >&2; exit 66; }
+                cp "$repo_root/target/$rjq_dir/release/$plan_crypt_bin" "$repo_root/planning/bin/$rjq_dir/$plan_crypt_bin"
+            else
+                printf '%s: no plan-crypt at planning/bin/%s/%s, no copy in bin/%s, and no cargo to build one\n' \
+                    "${0##*/}" "$rjq_dir" "$plan_crypt_bin" "$rjq_dir" >&2
+                exit 66
+            fi
+        fi
         count=0
         while IFS= read -r path; do
             [ -n "$path" ] || continue
