@@ -20,7 +20,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
 
 note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
-# REVIEWER.md is generated and never tracked (MAINTAINER.md section 2.16), so
+# REVIEWER.md is generated and never tracked (.agents/MAINTAINER.md 1.10), so
 # the contract is verified against fresh projections, not a committed copy:
 # the pin, the markers, and two builds agreeing byte for byte.
 tmp1="$(mktemp "${TMPDIR:-/tmp}/reviewer-projection.XXXXXX")"

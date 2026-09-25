@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# pre-push-check-lib.sh — gates 3, 3b and 4 (CODE-STYLE §3, 400-line script
-# cap).
+# pre-push-check-lib.sh — gates 3, 3b and 4, split out of pre-push-check.sh
+# to keep that script under this repo's size cap for a script.
 #
 # Sourced by pre-push-check.sh only, after its ok/bad/note/changed helpers
 # and base/base_label/repo_root are set. Each function reads those from the
@@ -52,16 +52,11 @@ gate_shellcheck() {
     # the linter's own command line — omit them and every variable a sourcing
     # script reads from them reports unassigned (SC2154).
     #
-    # That invocation costs ~33s of a ~47s run and is paid in full whether the
-    # change touches one script or none. Here the change set is what matters, so
-    # only the scripts that differ from master are linted, with -x: shellcheck
-    # then follows `source=` from disk instead of requiring the target on the
-    # command line, which is what makes a per-file lint equivalent to the whole-set
-    # one. Measured over all 317 live scripts, linted one at a time: 2 disagree
-    # with the whole-set result without -x (plan-context-lib.sh,
-    # test-portable-helpers.sh — both unresolved-source false positives), 0 with
-    # it, and -x introduces no findings of its own. On this branch the gate drops
-    # from 32,676ms to 454ms.
+    # That invocation is paid in full whether the change touches one script or
+    # none. Here the change set is what matters, so only the scripts that
+    # differ from master are linted, with -x: shellcheck then follows `source=`
+    # from disk instead of requiring the target on the command line, which is
+    # what makes a per-file lint equivalent to the whole-set one.
     #
     # The libraries are still built first: -x resolves them from disk, so they have
     # to exist. CI remains the authority on the full set — a change in one script
@@ -147,14 +142,10 @@ $crates
 EOF
 }
 
-# Workspace-wide, not per-crate: CI's own reasoning (native.yml's comment on
-# the workspace gate) is that a per-crate pass misses a library change
-# breaking a consumer selection did not name, and that was proven true here,
-# not hypothetically -- three CI legs failed on exactly this (client.rs's
-# `session_token_path.is_some()` then `.unwrap()`, `-D warnings` turning
-# `unnecessary_unwrap` fatal) while this gate, running fmt and test only,
-# stayed green. `-D warnings` matches CI's own flags so a local pass means the
-# same thing CI's does, not a weaker guarantee with the same wording.
+# Workspace-wide, not per-crate: a per-crate pass misses a library change
+# breaking a consumer that selecting by crate did not name. `-D warnings`
+# matches CI's flags so a local pass means the same thing CI's does, not a
+# weaker guarantee with the same wording.
 gate_rust_crates_clippy() {
     clippy_log="$(mktemp "${TMPDIR:-/tmp}/pre-push-clippy.XXXXXX")"
     if cargo clippy --workspace --all-targets -- -D warnings >"$clippy_log" 2>&1; then

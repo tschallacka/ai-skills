@@ -16,7 +16,7 @@ It complements the other three internal documents and duplicates none of them:
 
 `SKILL.md` remains the only agent-facing instruction. This file is **not** in
 `PACKAGE-MANIFEST.tsv`, not in `PACKAGE-MAP.tsv`, and not in
-`install.sh skill_files()` — it is never installed, never copied into a
+`installer/src/50-manifest.sh`'s `skill_files()` — it is never installed, never copied into a
 benchmark capsule, and never loaded by the skill, exactly like `MAINTAINER.md`.
 
 Every diagram below is drawn at the level `CODE-STYLE.md` §11 requires: node
@@ -94,7 +94,9 @@ Ordering constraints that are enforced in code, not just documented:
 `add-goal.sh` must precede it; `create-step-testing.sh:149` refuses a companion
 without its implementation step; `create-progress.sh:20-23` and
 `create-plan-progress.sh:71-74` refuse to overwrite an existing tracker
-(exit 73), which is why `plan_rebuild_goal_progress` deletes before recreating.
+(exit 73), which is why `make_goal_progress`
+(`src/add-work-unit/src/main.rs:129-160`) rewrites the whole tracker from
+step files instead, carrying old statuses across by step name.
 
 The `generate-reviewer.sh` pair at the bottom is maintainer-side, not part of a
 plan's life: it projects the two allow-listed `REVIEWER_SECTION` blocks out of
@@ -159,18 +161,20 @@ sequenceDiagram
     Frank->>DIR: removes scratch, regenerates .env, cleanup-plans.sh
 ```
 
-The registry behind every lane is `role-context.sh:63-75` (`ROLES=()`) with
-per-role scope at `:91-104`; `ROLES.md`'s persona matrix is a maintained mirror
-of that function, and `roles/VOICES.md` supplies the stance preamble through
-`voice_for()` (`role-context.sh:131-140`).
+The registry behind every lane is `role-context.sh`'s own compiled binary,
+`src/role-context/src/main.rs:9-21` (`ROLES`) with per-role scope at `:46-68`
+(`role_docs`); `ROLES.md`'s persona matrix is a maintained mirror of that
+function, and `roles/VOICES.md` supplies the stance preamble through
+`voice` (`src/role-context/src/main.rs:128-136`).
 
-Two gates are identity gates rather than content gates. `role-context.sh:207-234`
-refuses any content read without a resolvable `ROLE_ID` and prints
-`FAIL-CLOSED identity`, so a worker spawned without a persona cannot read its
-own instructions and must be respawned. `plan-context-lib.sh:261-269` decides
-per role whether the plan-content gate applies at all: `installer`, `oracle`
-and `eve` are refused plan content outright; every other role is capped at
-32768 bytes.
+Two gates are identity gates rather than content gates.
+`src/role-context/src/main.rs:219` refuses any content read without a
+resolvable `ROLE_ID` and prints `FAIL-CLOSED identity`, so a worker spawned
+without a persona cannot read its
+own instructions and must be respawned. `plan-context`'s own
+`role_cap` (`src/plan-context/src/main.rs:423-445`) decides per role whether
+the plan-content gate applies at all: `installer`, `oracle` and `eve` are
+refused plan content outright; every other role is capped at 32768 bytes.
 
 The monitor lane is deliberately thin. A subagent ends by writing one bounded
 frame (`supervision-frame.sh:70-90`, nine fixed fields, footer-overwriting) and
@@ -191,8 +195,6 @@ flowchart LR
             PTABLE["plan-table-lib.sh: CSV and Markdown tables"]
             PPROG["plan-progress-lib.sh: progress arithmetic and glyphs"]
         end
-        PRL["plan-reconcile-lib.sh"]
-        PCL["plan-context-lib.sh"]
         PMAP["plan-map-lib.sh"]
         PINV["plan-inventory-lib.sh"]
         RCLIB["role-context.sh, sourcing guard exposes the registry"]
@@ -220,7 +222,7 @@ flowchart LR
         AFIND["add-adversarial-finding.sh"]
         MINT["mint-fix-keys.sh"]
         VFK["verify-fix-keys.sh"]
-        VP["validate-plan.sh plus its validate-plan-*-lib.sh siblings"]
+        VP["validate-plan.sh"]
         VT["verify-target.sh"]
         CPROG["create-progress.sh"]
         CPPROG["create-plan-progress.sh"]
@@ -247,16 +249,12 @@ flowchart LR
     CREATE --> PDL
     GOAL --> PDL
     UNIT --> PDL
-    UNIT --> PRL
     RMUNIT --> PDL
-    RMUNIT --> PRL
     UPUNIT --> PDL
     COV --> PDL
     UPC --> PDL
-    UPC --> PCL
     PCONT --> PDL
     UAR --> PDL
-    UAR --> PRL
     AFIND --> PDL
     MINT --> PDL
     VFK --> PDL
@@ -271,9 +269,6 @@ flowchart LR
     REG --> PDL
     CLEAN --> PDL
     RMPLAN --> PDL
-    PC --> PCL
-    PRL --> PDL
-    PCL --> RCLIB
     MON --> RCLIB
 
     CREATE -.-> ROOT
@@ -327,20 +322,17 @@ of which is absent from its own usage block (`:8-29` lists only
 `rebuild-plan-progress`). Inline logic in a dispatcher is duplicated logic:
 `rebuild-progress` re-implements what `create-progress.sh` already does.
 
-Two dependency cycles are drawn as dashed back-edges:
-
-1. **Registry cycle** — `plan-context-lib.sh:276-283` sources `role-context.sh`
-   in a subshell to reuse its `resolve_id()`, while `role-context.sh` is itself
-   the peer CLI gate an agent runs alongside `plan-context.sh`. The sourcing
-   guard at `role-context.sh:163-165` is what stops this from executing the CLI
-   main flow; remove the guard and every plan read runs the reader's arg parser.
-2. **Progress-rebuild cycle** — `add-work-unit.sh:117` calls
-   `plan_rebuild_goal_progress`, which deletes `progress.md` and re-runs
-   `create-progress.sh` (`plan-reconcile-lib.sh:131-142`), which re-reads the
-   step file `add-work-unit.sh` has just written to derive each row description
-   through `plan_step_objective`. The rebuild is destructive by design;
-   `remove-work-unit.sh:66` prints the warning that completion statuses must be
-   re-applied afterwards.
+Two dependency cycles this section used to describe (a registry cycle through
+`plan-context-lib.sh` sourcing `role-context.sh`, and a progress-rebuild cycle
+through `add-work-unit.sh` calling a rebuild function in
+`plan-reconcile-lib.sh`) no longer exist: both bash libraries were deleted
+once `plan-context.sh` and `add-work-unit.sh` were fully ported to their own
+compiled binaries (T145 goal 29), and neither the Rust reimplementation nor
+`role-context.sh`'s own bash body reintroduces the same source-time coupling.
+`remove-work-unit.sh:66` still prints the warning that completion statuses
+must be re-applied after a rebuild, since `make_goal_progress`
+(`src/add-work-unit/src/main.rs:129-160`) carries the same destructive-by-
+design rewrite forward.
 
 Sibling resolution is now uniform: every script derives `script_dir` from
 `${BASH_SOURCE[0]}` (`update-step.sh` was the last holdout, resolving through
@@ -564,17 +556,19 @@ flowchart LR
 The three files marked dead are write-only or never-written, and each is a
 maintenance trap rather than a feature:
 
-- `context/mutation-handoff` is written by `context_invalidate_after_mutation`
-  from `update-plan-content.sh:486-488` on every content mutation. Nothing in
-  `planning/scripts/` reads it, so the invalidation it records has no effect.
+- `context/mutation-handoff` is written by `invalidate_context`
+  (`src/update-plan-content/src/main.rs:264-271`) on every content mutation.
+  Nothing in `planning/scripts/` reads it, so the invalidation it records has
+  no effect.
 - `context/checkpoints/<phase>.json` is written only by
   `plan-context.sh checkpoint` (`plan-context.sh:165-184`), which validates its
   phase, state and two SHA-256 hashes carefully. No shipped script consumes the
   result.
-- `validation-report.md` is never written by anything, yet `plan-env.sh` writes
-  its path into every plan manifest as `PLAN_VALIDATION_FILE`
-  (`plan-env.sh:125`) and `check_manifests` requires the key to be present
-  (`:137`, `:167`). `validate-plan.sh` reports to stdout only.
+- `validation-report.md` is never written by anything, yet `plan-env.sh`'s
+  compiled binary writes its path into every plan manifest as
+  `PLAN_VALIDATION_FILE` (`src/plan-env/src/main.rs:214`) and `manifest_check`
+  requires the key to be present (`:371`, `:404`). `validate-plan.sh` reports
+  to stdout only.
 
 Two files are agent-authored with no helper and no validator coverage:
 `working-context.md` (`SKILL.md` §2.4) and `fixes.md`. Both are durable state
@@ -628,4 +622,3 @@ the same change; that file records the new behaviour.
 | 15 | `plan-mutate.sh:54-78` and `:8-29` | `rebuild-progress` is implemented inline, duplicates `create-progress.sh`, and is absent from the dispatcher's own usage text. | An undocumented subcommand with its own copy of tracker logic to keep in sync. |
 | 16 | `update-plan-content.sh` context invalidation | It writes `<plan>/context/mutation-handoff`; no production code reads that file. The only reader is the assertion in `planning/tests/test-plan-context-deferred-boundary.sh`. | A write-only marker until a reader lands. |
 | 17 | `plan-mutate.sh` `rebuild-progress` vs `create-progress.sh` | The create path takes `<goal-directory> <goal-name>`, refuses an existing `progress.md` with 73, refuses an empty `steps/` with 66, and prints a "Created" line. `rebuild-progress` must overwrite in place, derive the goal name from the directory, tolerate an empty `steps/` and stay silent. | All four behaviours differ, so dispatching to the create path is not a drop-in; the duplication in row 15 stays until it grows a `--rebuild` mode. |
-| 18 | `validate-plan-inventory-lib.sh` `plan_validate_proof_coverage` | The pass acts only on a unit whose goal has `goal_testing_required[<goal>]` set to `yes`, but that map is written by `validate_goal_testing_requirement` in `validate-plan-goals-lib.sh`, which the entry script runs LATER. The map is always empty here and every iteration takes the `continue`. | KNOWN DEAD, deliberately: the "no downstream test or verification work unit" FAIL has never fired. Moving this pass after the goals pass would activate a gate no plan or fixture has been measured against — do that as its own change, with tests. |

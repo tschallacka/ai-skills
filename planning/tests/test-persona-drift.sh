@@ -67,20 +67,33 @@ for id in $voices_ids; do
     esac
 done
 
-# 3. Every scope doc a persona reads must exist on disk and be shipped.
-#    Pull the authoritative per-role scope list from role-context.sh.
-scope_errors=0
-for id in $registry_ids; do
-    docs="$(ROLE_ID=maintainer "$BASH" "$registry" --paths "$id" 2>/dev/null || true)"
-    [ -n "$docs" ] || continue
-    while IFS= read -r rel; do
-        [ -n "$rel" ] || continue
-        # on-disk existence
-        [ -f "$root/$rel" ] || { note_fail "scope doc missing on disk: planning/$rel (persona $id)"; continue; }
-        # shipped? (manifest lists planning/<rel> in the source column)
-        grep -q "$(printf '%s' "planning/$rel	")" "$manifest" || note_fail "scope doc not shipped: planning/$rel (persona $id)"
-    done <<< "$docs"
+# 3. Every shipped .agents/profiles/<id>.json's own instructions field must
+#    match a fresh role-context read (T148 goal 4). This replaces the old
+#    live-scope-doc-resolution check: dispatch no longer resolves scope docs
+#    at read time, it ships a build-time snapshot (generate-profile-content),
+#    so what can now drift is that snapshot vs. its live sources, not the
+#    resolution machinery itself.
+generator=""
+for candidate in "$root/../target/release/generate-profile-content" "$root/../target/debug/generate-profile-content"; do
+    if [ -x "$candidate" ]; then
+        generator="$candidate"
+        break
+    fi
 done
+if [ -z "$generator" ]; then
+    echo "persona drift: SKIP the profile-freshness check -- no generate-profile-content binary found under target/{release,debug}/. Build one with:" >&2
+    echo "    cargo build --release -p generate-profile-content" >&2
+else
+    profile_personas="benny chris christian christoph dana frank maintainer installer oracle eve"
+    for id in $profile_personas; do
+        case " $registry_ids " in
+            *" $id "*) ;;
+            *) note_fail "profile persona $id is not in the role-context registry"; continue ;;
+        esac
+        drift="$("$generator" "$id" --check 2>&1)" && continue
+        note_fail "profile drifted from a fresh role-context read: $id ($drift)"
+    done
+fi
 
 # 4. Every manifest entry must resolve on disk (no stale shipped path).
 if [ -f "$manifest" ]; then

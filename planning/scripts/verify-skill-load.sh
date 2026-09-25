@@ -29,52 +29,17 @@
 set -euo pipefail
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
+# hoist one, so there is no hoist ordering to preserve; placed immediately
+# after both anchor lines above.
+vsl_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$vsl_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present verify-skill-load "$vsl_script_dir" "$@"
+unset vsl_script_dir
 
-usage() {
-    local rc="${1:-64}"
-    cat <<USAGE
-Usage: ${0##*/} --part <name> --token <hex> [<skill-directory>]
-       ${0##*/} --help
-USAGE
-    exit "$rc"
-}
-
-part='' token='' skill_dir=''
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        -h|--help) usage 0 ;;
-        --part) [ "$#" -ge 2 ] || usage; part="$2"; shift 2 ;;
-        --token) [ "$#" -ge 2 ] || usage; token="$2"; shift 2 ;;
-        -*) usage ;;
-        *)
-            [ -z "$skill_dir" ] || usage
-            skill_dir="$1"
-            shift
-            ;;
-    esac
-done
-[ -n "$part" ] && [ -n "$token" ] || usage
-skill_dir="${skill_dir:-$(cd "$script_dir/.." && pwd)}"
-
-part_file="$skill_dir/parts/$part.md"
-[ -f "$part_file" ] || {
-    printf 'no such part: %s (looked for %s)\n' "$part" "$part_file" >&2
-    exit 66
-}
-
-actual="$(grep -oE "SKILL-LOAD-PROOF part=$part token=[0-9a-f]+" "$part_file" \
-    | sed 's/.*token=//' | head -1)"
-[ -n "$actual" ] || {
-    printf '%s carries no load-proof line; run generate-skill-docs.sh\n' "$part_file" >&2
-    exit 65
-}
-
-if [ "$token" = "$actual" ]; then
-    printf 'verified: %s was read at least as far as its load-sanity line\n' "$part"
-    exit 0
-fi
-printf 'refused: the token for %s does not match — you have not finished\n' "$part" >&2
-printf 'reading it, or you are recalling a token from a version that has since\n' >&2
-printf 'regenerated. Re-read %s and find the current line.\n' "${part_file#"$skill_dir"/}" >&2
-exit 1
+plan_die "verify-skill-load: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it" 69

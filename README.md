@@ -21,7 +21,7 @@ what they cost, how to verify any of it yourself, and what does not work yet.
 | Todo | A work queue that outlives the conversation, in one JSON file: nested tasks, every closed item carries its evidence. `todo add`/`todo update` keep the register sound; read recipes print user-ready output. | [docs](todo/docs/README.md) |
 | Brainstorm | Shapes an under-specified idea into a recorded, agreed picture (`brainstorm.md`) before planning, with an adversarial completion pass and a plan-vs-implement gate. | [docs](brainstorm/docs/README.md) |
 | Post-implementation review | After-the-fact review of built code with concrete proposed fixes, in three passes: implementer self-analysis, an independent solutions agent, and a critical-feedback agent that ranks every fix. | [docs](post-implementation-review/docs/README.md) |
-| Project-specific deviations | Records confirmed project behavior and environment quirks in per-project notes that future agents load instead of re-debugging. | [docs](project-specificies/docs/README.md) |
+| Project-specific deviations | Records confirmed project behavior and environment quirks in per-project notes that future agents load instead of re-debugging. | [docs](project-specifics/docs/README.md) |
 | Resource-limited testing | Runs heavyweight commands (suites, builds, analyzers, browsers) under platform-appropriate CPU/memory caps, with honest degradation when a platform has no cap mechanism. | [docs](resource-limited-testing/docs/README.md) |
 | Chat | RFC-1459 IRC-over-TLS message bus for agents: a rust server a standard TLS IRC client can join, a rust client with UDP discovery and TOFU cert pinning, channels, and additive history/delta reads. | [docs](chat/docs/README.md) |
 | Interactive shell | Operates a full-screen terminal program an agent has never seen - nano, mc, lynx, a pager, a menu: a rust PTY wrapper publishing each screen change as one JSONL event, compact row views and deltas to keep context small, element discovery, and a unix-socket client for keys, combos, pastes, mouse and resize. POSIX only. | [docs](interactive-shell/docs/README.md) |
@@ -29,6 +29,7 @@ what they cost, how to verify any of it yourself, and what does not work yet.
 | Git merge resolving | Conflicts resolved by what each side changed rather than by ours/theirs: reading intent from history, unions that look like choices, regenerated output, and attributing post-merge failures to the side that caused them. | [docs](git-merge-resolving/docs/README.md) |
 | Merge request etiquette | Descriptions a reviewer can act on, in the author's voice: a one-paragraph TLDR, the defect/cause/change body, derived from the branch's commits, and the one case where a collapsible section earns its place. | [docs](merge-request-etiquette/docs/README.md) |
 | Text etiquette | Shorthand and a clipped register for an agent's prose - chat, dev talk, and its own thinking: facts first, a shared shorthand with an ask-don't-guess rule, praise capped at `gj`, and the people-please prose banned. Plain english on request. | [docs](text-etiquette/docs/README.md) |
+| Question etiquette | Numbered questions, lettered options, never a bullet: a reply like `Q7b` is unambiguous, a partial answer names exactly which numbers are still open, and a lettered list always ends with "none of these, I'll say it myself." | [docs](question-etiquette/docs/README.md) |
 | AI text editor | Server-owned agent editor tabs with explicit search, revision-aware edits, undo/redo, raw-byte and hex modes, SQLite metadata, and Unix/TCP transport. | [docs](ai-text-editor/docs/README.md) |
 | www | A brake the human can pull, and one the agent pulls on itself when it is thrashing: stop, answer what do we have / what are the values / what are we trying to achieve, in order, then continue with one reasoned step or a numbered question. | [docs](www/docs/README.md) |
 | CI failures | What actually failed in a CI run or pipeline, from a run/pipeline id, a PR/MR number, or a branch: GitHub and GitLab detected from the git remote, named rather than chosen silently, with just the failing lines extracted per job. | [docs](ci-failures/docs/README.md) |
@@ -50,7 +51,7 @@ contributing a harness that is not yet listed.
 |---|---|
 | Linux | any distribution, bash 4 or 5, GNU userland |
 | macOS | 11+ with the stock `/bin/bash` 3.2, BSD userland; Homebrew bash not required |
-| Windows | via WSL2, which is a Linux install. Git Bash / MSYS / Cygwin get dependency hints from the installer but are untested and have no CI leg |
+| Windows | Git for Windows' bash with its bundled coreutils, checked by CI legs, or WSL2, which is a Linux install. The evidence and the conventions are in `.agents/MAINTAINER.md` 1.16, which is in a full git checkout and not part of the installed package |
 
 The installer and the helper scripts need `bash`, POSIX `coreutils`, `awk`,
 `sed`, `grep`, `git`, and `curl` for the one-command install. The `planning`
@@ -59,9 +60,9 @@ skill additionally needs `rjq`, and on macOS `resource-limited-testing` needs
 install hint rather than failing partway through. Those two are the only extra
 runtime dependencies any skill has — in particular `python3` is **not** required
 by anything that gets installed, only by this repository's own benchmark
-harness. `CODE-STYLE.md` is the contract these scripts are held to,
-and CI runs the test suite on Linux and macOS — including under macOS's
-bash 3.2.
+harness. `CODE-STYLE.md` is the contract these scripts are held to;
+what CI proves on each platform is mapped in `.agents/MAINTAINER.md` section 3
+(a full git checkout has both; the installed package has neither).
 
 One skill is genuinely OS-scoped: `resource-limited-testing` enforces a *hard*
 RAM cap only on Linux, via a transient systemd `--user` cgroup v2 scope. On
@@ -81,7 +82,7 @@ them. Every other skill behaves identically on both.
 Run this command and choose the skills and agent destination interactively:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh | bash
 ```
 
 The installer can install all the skills or one skill, and supports these
@@ -109,7 +110,8 @@ still exist.
 
 Install the package globally to expose the installer command. The npm package
 keeps the skills in this repository and links `ai-skills-install` directly to
-the existing `install.sh` script:
+`installer/bootstrap.sh`, which fetches the matching compiled installer
+release for your platform on first run:
 
 ```bash
 npm install -g @tschallacka/ai-skills
@@ -147,8 +149,8 @@ review rather than following the link and modifying an unexpected location.
 Interactively, choose that one skill at the menu. Headless, name it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/install.sh \
-  | bash -s -- --skill planning --target "$HOME/.codex/skills"
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh \
+  | bash -s -- install --skill planning --target "$HOME/.codex/skills"
 ```
 
 `--skill` may be given more than once, and each value may itself be a
@@ -163,25 +165,25 @@ known. `--target` takes a single root, so installing into two roots is two runs.
 
 ```bash
 # Install all skills into the shared Agent Skills root
-curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/install.sh \
-  | bash -s -- --all --target "$HOME/.agents/skills"
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh \
+  | bash -s -- install --all --target "$HOME/.agents/skills"
 
 # Unattended replacement: managed version transitions replace without backups,
 # unmanaged changed files are still backed up as <file>.bak
-curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/install.sh \
-  | bash -s -- --all --target "$HOME/.agents/skills" --yes
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh \
+  | bash -s -- install --all --target "$HOME/.agents/skills" --yes
 ```
 
 Every run ends with a **summary block on stdout** saying what was installed,
 what was not, and why; the progress and diagnostics go to stderr, so
-`install.sh … > summary.txt` keeps the outcome and `2>/dev/null` keeps it
+`installer install … > summary.txt` keeps the outcome and `2>/dev/null` keeps it
 readable. A blocked skill is reported once — not once per root — with the
 commands that finish the job. This is what an `--all` run on a machine without
 `rjq` prints:
 
 ```
 == Summary ==
-Installed: /home/u/.agents/skills/project-specificies
+Installed: /home/u/.agents/skills/project-specifics
 Installed: /home/u/.agents/skills/resource-limited-testing
 Installed: /home/u/.agents/skills/brainstorm
 Installed: /home/u/.agents/skills/post-implementation-review
@@ -190,15 +192,14 @@ To install planning once its requirements are met:
   1. install rjq:
     sudo apt-get install -y rjq
   2. replay this run:
-  ./install.sh --skill planning --target /home/u/.agents/skills --yes
+  installer install --skill planning --target /home/u/.agents/skills --yes
 ```
 
 The install step is chosen for the detected platform and package manager, and
-the replay line carries the same target and flags as the run that printed it. In
-a piped run there is no script on disk, so the replay is emitted as the
-`curl … | bash -s -- …` form instead of a path. The exit status is non-zero,
-because four of five skills is a partial install and CI must not read it as
-success.
+the replay line carries the same target and flags as the run that printed it,
+naming the installer binary bootstrap.sh downloaded to run it. The exit status
+is non-zero, because four of five skills is a partial install and CI must not
+read it as success.
 
 ### Runtime dependencies
 
@@ -227,24 +228,39 @@ No other skill has a runtime dependency.
 |---|---|
 | 0 | Everything requested was installed. Soft warnings do not change this. |
 | 1 | A requested skill was blocked by a hard requirement, or any other error. |
-| 2 | `--install-skill` only: approval declined, nothing was written. |
-| 3 | `--install-skill` only: an unsafe collision (an existing file that is not a managed version upgrade, or a symlink). |
+| 2 | `install-skill` only: approval declined, nothing was written. |
+| 3 | `install-skill` only: an unsafe collision (an existing file that is not a managed version upgrade, or a symlink). |
 
-Codes 2 and 3 belong to the machine-facing `--install-skill` mode that the
-planning skill's own tooling uses; the interactive and `--all`/`--skill` paths
-only ever return 0 or 1.
+Codes 2 and 3 belong to the machine-facing `install-skill` subcommand that the
+planning skill's own tooling uses; the `interactive`, `install --all`, and
+`install --skill` paths only ever return 0 or 1.
 
 ### Full-screen installer UI
 
-*Placeholder — `install-ui.sh`, a full-screen terminal UI for the same
-installer, is in development and is not yet wired into `install.sh`. Its
-keybindings will be documented here once it is integrated.*
+Running the bare one-liner with no arguments, or `installer interactive`
+directly, opens a full-screen skill picker instead of the numbered menu:
+
+| Key | Action |
+|---|---|
+| `↑`/`k`, `↓`/`j`, `PageUp`, `PageDown`, `Home`, `End` | move the cursor |
+| `Enter` / `Space` | toggle the skill under the cursor |
+| `Tab` / `Shift-Tab` | switch focus between the skill list and the info pane |
+| `a` / `n` | select all / select none |
+| `d`, `r`, `m` (info pane focused) | show dependency hints, re-verify requirements, cycle a skill's integration mode |
+| `i` | confirm and install the current selection |
+| `q` / `Escape` | quit without installing |
+
+With neither `--target` nor `--agent` given, it also prompts to choose an
+auto-detected agent root, a saved custom directory, a new custom directory, or
+`a` for every listed root.
 
 Review the installer before running it if you do not trust the source. Skills
 are instructions that may guide agents to run commands or access files.
 
-`install.sh` is a generated artifact assembled from `installer/src/` — see
-[CONTRIBUTING.md](CONTRIBUTING.md) before editing it.
+`install.sh` retired in favor of a compiled Rust installer
+(`src/installer/`); `installer/bootstrap.sh` is the small, still-bash entry
+point that detects the platform, downloads the matching release, and hands
+off to it — see [CONTRIBUTING.md](CONTRIBUTING.md) before editing either.
 
 ## Supported agent documentation
 
@@ -258,15 +274,23 @@ are instructions that may guide agents to run commands or access files.
 
 ## Development checkout
 
-Run the installer directly from a checkout to use its local files without
-downloading an archive:
+`installer/bootstrap.sh` always downloads a release archive, so it is not how
+a checkout installs its own local files. Build the installer and point it at
+the checkout with `--source` instead:
 
 ```bash
-./install.sh
+cargo build --release -p installer
+./target/release/installer interactive --source .
 ```
 
-The installer also accepts `AI_SKILLS_REPO_URL` and `AI_SKILLS_REF` when a
-different repository or branch must be used.
+`--package dev` (also read from `$PACKAGE_SELECTION`) ships the `MODE: DEV`
+files too — tests, maintainer docs — instead of filtering them out, for
+installing a working development copy rather than the prod set.
+
+`installer/bootstrap.sh` itself accepts `AI_SKILLS_REPO_URL` (a different
+`owner/repo` to resolve GitHub's "latest release" redirect against) and
+`AI_SKILLS_RELEASE_URL` (an exact archive URL, bypassing that redirect
+entirely — how [RELEASE.md](RELEASE.md) verifies one specific tag).
 
 ## Notes
 

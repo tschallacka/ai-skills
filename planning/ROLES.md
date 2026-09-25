@@ -31,6 +31,17 @@ MUST exist under `planning/`; the persona-drift test
 (`planning/tests/test-persona-drift.sh`, goal 05) asserts registry : shipped
 scope docs stay in sync.
 
+**`alex` is permanently excluded from `.agents/profiles/*.json` extraction**
+(persona-profile-migration plan, goal 4 -- closing goal 2's own deferred
+question for good, not deferring it again). Every other persona in this
+matrix has its own role-scoped snapshot; `alex`'s live `role-context` payload
+is `SKILL.md` plus all four generated `parts/*.md` files -- the entire
+planning skill, roughly 105KB, not a role-specific persona document. No
+harness spawns `alex` as a distinct subagent the way it spawns `chris` or
+`dana`: `alex` IS the coordinator's own working context, not a worker persona
+a coordinator dispatches. A profile file for it would duplicate the skill
+itself under another name rather than describe a role.
+
 | Canonical id | Canonical name | Reader docs (role-context scope) |
 |---|---|---|
 | `alex` | Alex | `SKILL.md`, `ROLES.md`, `roles/planning.md`, `roles/execution.md` |

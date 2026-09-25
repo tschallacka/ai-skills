@@ -6,3 +6,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+planning-core = { path = "../planning-core" }
+planning-progress = { path = "../planning-progress" }

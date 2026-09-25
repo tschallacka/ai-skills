@@ -8,4 +8,5 @@ description = "Repair and validate planning JSON registers"
 license = "MIT"
 
 [dependencies]
+planning-register = { path = "../planning-register" }
 serde_json = { version = "1", features = ["preserve_order"] }

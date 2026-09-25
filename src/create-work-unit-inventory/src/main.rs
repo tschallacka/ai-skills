@@ -58,7 +58,19 @@ fn main() {
         );
         std::process::exit(73)
     }
-    let name = plan.file_name().unwrap().to_string_lossy();
+    // file_name() is None for a path that is exactly "." or ".." (or the
+    // filesystem root), which a caller can legitimately pass -- canonicalize
+    // resolves those to a real absolute path first (B338).
+    let name = plan
+        .canonicalize()
+        .ok()
+        .and_then(|resolved| {
+            resolved
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+        .or_else(|| plan.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| ".".to_string());
     let output=format!("# Work-unit inventory: {name}\n\n## Definition-of-done coverage\n\n| Required outcome or proof | Work unit IDs | Notes |\n|---|---|---|\n| <outcome> | W01 | <why this work unit covers it> |\n\n## Work units\n\n| ID | Type | File | Primary symbol or file scope | Subscope | Intended change | Depends on | Goal | Step |\n|---|---|---|---|---|---|---|---|---|\n| W01 | source | `path/to/file` | `Class::method()` | `N/A` | <one concrete change> | — | 01-<goal> | 01-step-<slug> |\n\n## Decomposition review\n\n- [ ] Every definition-of-done item maps to one or more work units.\n- [ ] Every known affected file and changing symbol has its own work unit.\n- [ ] Every work unit has exactly one goal and one step.\n- [ ] Each goal has 2–10 work units, or records an allowed exception.\n- [ ] Each step has exactly one work unit and no unnamed incidental edits.\n- [ ] Dependencies form an executable order with no cycle.\n");
     let temporary = inventory.with_extension(format!("md.tmp.{}", std::process::id()));
     fs::write(&temporary, output).unwrap_or_else(|e| {

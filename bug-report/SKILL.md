@@ -18,12 +18,17 @@ impression.
 
 ## The file
 
-`BUGS.json` at the root of whatever holds the defect.
+`BUGS.json` at the root of whatever holds the defect. **If it does not exist
+yet**, `bugs` will not create it for you — write it yourself first, as the
+skeleton below with an empty `bugs` array and `skill_version` copied exactly
+as shown (this is the one supported way to bootstrap a fresh register; a
+stale or invented version number is refused by name on the very next
+command).
 
 ```json
 {
   "skill": "bug-report",
-  "skill_version": "1.4.2",
+  "skill_version": "2.0.0-alpha.1",
   "comment": "Defects found in <subject>, with reproduction and verification.",
   "bugs": [
     {
@@ -109,6 +114,13 @@ It prints the id it allocated. `--title`, `--reproduce`, `--observed` and
 `--expected` are required and the command refuses without them: a defect nobody
 can reproduce is a rumour, and one with no stated expectation is an opinion.
 
+Pass `--notes "..."` to `add` for an initial note (e.g. "not locally
+reproduced yet"). A note added later — after the fact, once something new is
+learned — goes through `bugs update <ID> --append-note "..."` instead, which
+appends rather than replacing. There is no `--help` on `add`/`update`
+specifically; `bugs --help` (or `-h`, anywhere in the command line) always
+shows the full usage.
+
 ### Prose from a file, not the shell
 
 `--reproduce`, `--observed`, `--expected`, `--mechanism`, `--fix` and
@@ -134,28 +146,19 @@ none of them.
 
 ### Where `bugs` is
 
-Under a **per-triple** directory — `bin/<target-triple>/bugs`, at the skill root
-when installed and at the repository root in a development tree, e.g.
-`bin/x86_64-unknown-linux-musl/bugs`. There is no unsuffixed `bin/bugs`, and
-nothing puts it on `PATH` for you, so every `bugs …` line below is written for a
-shell that can already find it. Resolve it once and use that:
+Under one shared location every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/bugs`. Nothing puts it
+on `PATH` for you, so every `bugs …` line below is written for a shell that
+can already find it there:
 
 ```sh
-triple="$(uname -s):$(uname -m)"
-case "$triple" in
-    Linux:x86_64|Linux:amd64)   triple=x86_64-unknown-linux-musl ;;
-    Linux:aarch64|Linux:arm64)  triple=aarch64-unknown-linux-musl ;;
-    Darwin:x86_64)              triple=x86_64-apple-darwin ;;
-    Darwin:arm64)               triple=aarch64-apple-darwin ;;
-    MINGW*|MSYS*|CYGWIN*)       triple=x86_64-pc-windows-msvc ;;
-esac
-bugs="$PWD/bin/$triple/bugs"          # a development tree
-[ -x "$bugs" ] || bugs="<skill root>/bin/$triple/bugs"
+bugs="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/bugs"
 ```
 
-`./setup-dev-env.sh` prints the `export PATH=` line for this host, which is the
-one thing that makes a bare `bugs` work. Failing that, build it with
-`cargo build --release --manifest-path src/bug-report/Cargo.toml`.
+In a development tree that has run `./setup-dev-env.sh`, the same binary is
+also at `bin/<target-triple>/bugs` under the repository root, and that
+script prints the `export PATH=` line for this host. Failing both, build it
+with `cargo build --release --manifest-path src/bug-report/Cargo.toml`.
 
 The vocabulary is fixed and the binary will not accept anything outside it:
 

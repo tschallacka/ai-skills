@@ -10,6 +10,22 @@ pub enum DocumentKind {
     Testing,
 }
 
+/// Distinguishes a real testing-companion stem (e.g. `foo-testing`, whose
+/// base step `foo` genuinely exists) from a base step whose own name simply
+/// happens to end in "-testing" (e.g. because its target script is named
+/// `create-step-testing.sh`). A bare suffix match cannot tell these apart --
+/// both end in the same literal substring -- so callers with filesystem or
+/// document-tree access must confirm the stripped base actually exists
+/// before treating `stem` as a companion (B336). `sibling_exists` is called
+/// with the stem stripped of its trailing "-testing" only when that stripped
+/// form is non-empty.
+pub fn is_testing_companion(stem: &str, sibling_exists: impl FnOnce(&str) -> bool) -> bool {
+    match stem.strip_suffix("-testing") {
+        Some(base) if !base.is_empty() => sibling_exists(base),
+        _ => false,
+    }
+}
+
 pub fn document_kind(id: &str) -> Result<DocumentKind, String> {
     match id {
         "plan" => Ok(DocumentKind::Plan),
@@ -19,6 +35,10 @@ pub fn document_kind(id: &str) -> Result<DocumentKind, String> {
         value if value.starts_with("goal-progress:") => Ok(DocumentKind::Reference),
         value if value.starts_with("goal:") => Ok(DocumentKind::Goal),
         value if value.starts_with("step:") => {
+            // No filesystem access here to confirm a real sibling exists, so
+            // this stays the old suffix heuristic -- callers that can check
+            // (document_kind_for_step below, and the other call sites named
+            // in B336) use is_testing_companion instead.
             if value.ends_with("-testing") {
                 Ok(DocumentKind::Testing)
             } else {
@@ -28,6 +48,28 @@ pub fn document_kind(id: &str) -> Result<DocumentKind, String> {
         value if value.starts_with("unit:") => Ok(DocumentKind::Step),
         value => Err(format!("Unknown document ID: {value}")),
     }
+}
+
+/// Like `document_kind`, but for a `step:<goal>/<step>` id resolves the
+/// Step-vs-Testing ambiguity by checking whether the stripped base step's
+/// own file actually exists in `steps_dir`, instead of guessing from the
+/// bare "-testing" suffix (B336). Every other id shape defers to
+/// `document_kind` unchanged.
+pub fn document_kind_for_step(
+    id: &str,
+    steps_dir: &std::path::Path,
+) -> Result<DocumentKind, String> {
+    if let Some(rest) = id.strip_prefix("step:") {
+        let step = rest.split_once('/').map_or(rest, |(_, step)| step);
+        let is_companion =
+            is_testing_companion(step, |base| steps_dir.join(format!("{base}.md")).is_file());
+        return Ok(if is_companion {
+            DocumentKind::Testing
+        } else {
+            DocumentKind::Step
+        });
+    }
+    document_kind(id)
 }
 
 pub fn section_spec(kind: DocumentKind, section: &str) -> Option<(&'static str, u8)> {
@@ -366,8 +408,8 @@ pub fn missing_section_message(file_name: &str, heading: &str, document: &str) -
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_paragraph, document_kind, insert_paragraph, missing_section_message,
-        replace_section, section_spec, DocumentKind,
+        delete_paragraph, document_kind, document_kind_for_step, insert_paragraph,
+        is_testing_companion, missing_section_message, replace_section, section_spec, DocumentKind,
     };
 
     #[test]
@@ -378,6 +420,64 @@ mod tests {
             DocumentKind::Testing
         );
         assert_eq!(document_kind("unit:W01").unwrap(), DocumentKind::Step);
+    }
+
+    #[test]
+    fn is_testing_companion_requires_an_existing_sibling() {
+        assert!(is_testing_companion("02-step-testing", |base| base == "02-step"));
+        assert!(!is_testing_companion("02-step-testing", |_| false));
+        assert!(!is_testing_companion("02-step", |_| true));
+        assert!(!is_testing_companion("-testing", |_| true));
+    }
+
+    // B336: a step whose own target script name ends in "-testing" (e.g.
+    // wiring create-step-testing.sh) must not be classified as a testing
+    // companion just because its id ends in the same literal substring --
+    // only a step id whose stripped base ALSO exists as a real sibling file
+    // is a companion.
+    #[test]
+    fn document_kind_for_step_disambiguates_via_the_real_steps_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "planning-document-b336-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // No sibling base file exists: "wire-create-step-testing" is a real
+        // step in its own right, not a companion.
+        assert_eq!(
+            document_kind_for_step("step:01-a/wire-create-step-testing", &dir).unwrap(),
+            DocumentKind::Step
+        );
+
+        // Its real testing companion DOES have an existing base sibling.
+        std::fs::write(dir.join("wire-create-step-testing.md"), "").unwrap();
+        assert_eq!(
+            document_kind_for_step("step:01-a/wire-create-step-testing-testing", &dir).unwrap(),
+            DocumentKind::Testing
+        );
+
+        // An ordinary step/companion pair still classifies as before.
+        std::fs::write(dir.join("02-step.md"), "").unwrap();
+        assert_eq!(
+            document_kind_for_step("step:01-a/02-step", &dir).unwrap(),
+            DocumentKind::Step
+        );
+        assert_eq!(
+            document_kind_for_step("step:01-a/02-step-testing", &dir).unwrap(),
+            DocumentKind::Testing
+        );
+
+        assert_eq!(
+            document_kind_for_step("goal:01-a", &dir).unwrap(),
+            DocumentKind::Goal
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -1,0 +1,8 @@
+# MODE: DEV
+# MODE-MANIFEST.tsv -- see planning/MODE-MANIFEST.tsv for the full format
+# description. Read ONLY by src/installer/src/install.rs's own
+# collect_relative_files, as an override consulted before a file's own
+# header; not read by install.sh/skill_files() or installer/build-release.sh.
+#
+# path	mode
+TODO.json	DEV

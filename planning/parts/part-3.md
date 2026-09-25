@@ -64,22 +64,29 @@ wholesale file read of a plan artifact is a context-overflow violation. If the
 gate cannot give you something, report it as a limitation — do not bypass it."
 
 The fresh adversary assumes the **chris placeholder persona** (oriented scout):
-spawn it with `ROLE_ID=chris`, have it load its scoped role docs and voice via
-`"<PLANNING_SKILL_DIR>/scripts/role-context.sh" chris` (which injects its
-stance preamble), and require it to state its persona id in the returned
-findings. The adversary forms its own findings from the bounded-read gate and
-its scoped role docs; it never receives the planning agent's conclusions. A
-spawn that cannot resolve ROLE_ID=chris fails closed (the reader refuses) and
-must be respawned with a valid identity.
+spawn it as the installed `chris` subagent, using whatever native
+subagent-launch mechanism the coordinator's own tool surface offers (e.g. an
+Agent-style tool with a `subagent_type` matching the profile name) — the
+installed profile already carries chris's own scoped bootstrap instructions
+and voice, baked in at install time from `.agents/profiles/chris.json`, so no
+further identity setup is needed at dispatch — and require it to state its
+persona id in the returned findings. The adversary forms its own findings
+from the bounded-read gate and its scoped role docs; it never receives the
+planning agent's conclusions. A spawn that cannot resolve the chris identity
+fails closed (the reader refuses) and must be respawned with a valid
+identity.
 
 **Scope note: the persona, capsule, and Reviewer A/B machinery describe the
-review harness.** When the role-context/capsule tooling (`role-context.sh`, a
-capsule workspace) is present in the environment, use it as described. When it
-is not — an ordinary plan in a generic environment — the requirement reduces
-to: use a **fresh secondary agent with a new session and no prior conclusions**
-(bounded-read locked and skill-locked as above) to produce the adversarial
-review; the persona, capsule manifest, and two-reviewer A/B split are
-harness-specific and OPTIONAL.
+review harness.** When the installed `chris`/`christian`/`christoph` profiles
+are present, use them as described. When they are not — the current harness
+offers no named-subagent launch mechanism, or the profiles were never
+installed, an ordinary plan in a generic environment — the requirement
+reduces to: use a **fresh secondary agent with a new session and no prior
+conclusions** (bounded-read locked and skill-locked as above), pasting the
+persona's own instructions content directly into its spawn prompt if the
+profile file (`.agents/profiles/chris.json`) is reachable, to produce the
+adversarial review; the persona, capsule manifest, and two-reviewer A/B split
+are harness-specific and OPTIONAL.
 
 Do not hand the adversary a command that dumps a plan file or directory in
 full. Require the adversary's returned findings to state that all plan reads
@@ -290,9 +297,12 @@ comparable run made five interpretations that were only written down afterwards,
 in a postmortem, once they had already shaped the plan.
 
 **A reviewer report records what the cycle cost.** The review-scope block carries
-the reviewer's session id, the wall time, and the number of findings this cycle
-produced. The session id is what lets a claim be traced to the run that made it;
-the other two are the only signal anyone has that a review is converging.
+the reviewer's session id, the wall time, the number of findings this cycle
+produced, and the tokens it spent. The session id is what lets a claim be traced
+to the run that made it; the other three are the only signal anyone has that a
+review is converging. Tokens, like the wall time, is self-reported prose — there
+is no mechanical measurement for a reviewing session to report through, so it is
+only as accurate as the session that fills it in.
 
 A falling findings count across cycles means the plan is improving. A flat one
 means the cycles are not finding less, and the plan may not be the thing at
@@ -300,6 +310,17 @@ fault — one comparable run reached seventeen cycles and 41.7 million tokens
 before anyone asked that question, because no cycle recorded what it had cost.
 Nothing enforces a ceiling; the point is that the number is visible when someone
 decides whether to run another.
+
+Once a plan has real cycles archived in `adversarial-review-history.md`, run
+`"$PLANNING_SKILL_DIR/scripts/generate-postmortem.sh" <plan-directory>
+[--output PATH]` to render a per-cycle cost/findings summary — cycle count and
+findings count are always exact (mechanically counted from the archived
+Findings tables), and any self-reported Reviewer-session/Elapsed/Tokens field
+renders as "not reported" when a cycle's own reviewer never filled it in,
+rather than a silent zero. The default output path is
+`<plan-directory>/../postmortems/<plan-directory's-own-basename>.md`. Run it
+once a plan's review history is worth summarizing — after closing it out, or
+whenever its own cost so far is worth seeing at a glance.
 
 **A reviewer runs `--check` on its own rows before handing them over.** The shape
 gate and the mint preview already run on the write path, so a malformed row can
@@ -484,9 +505,6 @@ step's `## Artifact comparisons` table is checked against
 `planning/artifact-comparisons.json`, so asking for `exact` on a PDF or an image
 fails.
 
-<!-- SKILL-LOAD-PROOF part=part-3 token=eaf2a31ae377241d -->
-
-
 Beyond structure, propagation, the advisory wording sweep, and the placeholder
 registry, the validator checks two more things. The **serve check** WARNs when a goal
 that changes module state, schema, or configuration (per
@@ -510,6 +528,9 @@ disproven claim rather than making a new ordering promise.
 It also WARNs (never blocks) when a unit's instructions mention a project
 symbol (one whose namespace root or path prefix the plan edits) that no
 inventory row owns — this rule cannot distinguish "edit this" from "this is
+
+<!-- SKILL-LOAD-PROOF part=part-3 token=1bb864f223f09de7 -->
+
 where we attach" from text alone, so it is a skimmable signal, not a gate. It
 does not flag mere vendor/core seams (`Magento\...`, `Amasty\...`,
 `Vendor_Module::path` templates), `X::class` constants, or cross-plan
@@ -539,10 +560,10 @@ step files and run it again. The validator checks the structural guarantees;
 the decomposition review remains required for semantic completeness.
 
 For a goal marked `Test required: yes`, every implementation, markup, style,
-configuration, data, or generated work unit must have a downstream `test` or
-`verification` unit in the dependency graph. A goal marked `no` may omit that
-proof when its rationale records why testing is not meaningful or possible.
-Do not use `no` to avoid testing observable behavior.
+configuration, data, generated, or relocation work unit must have a
+downstream `test` or `verification` unit in the dependency graph. A goal
+marked `no` may omit that proof when its rationale records why testing is not
+meaningful or possible. Do not use `no` to avoid testing observable behavior.
 
 Create plan and goal progress trackers with the bundled creation helpers;
 they enforce the table shape and initialize every item as `💤 incomplete`.

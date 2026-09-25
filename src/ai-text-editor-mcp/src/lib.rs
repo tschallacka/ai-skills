@@ -152,6 +152,36 @@ fn mutating_required() -> Vec<&'static str> {
     vec!["expected_revision"]
 }
 
+/// T127 (Codex prompts for approval on every ai-text-editor call, unlike a
+/// normal read-only tool): a conforming MCP client may skip its per-call
+/// approval prompt for a tool this schema marks `readOnlyHint`, per the MCP
+/// tool annotations spec. Confirmed live 2026-09-12 by driving a real Codex
+/// session through the interactive-shell skill: `read` ran with zero prompts
+/// while `insert` (not in this list) still asked "Allow the ai-text-editor
+/// MCP server to run tool insert?" in the same session -- the hint changes
+/// exactly the calls it should and nothing else. None
+/// of these ever change the bytes of the file a tab addresses or delete
+/// anything: `open` only creates in-memory tab state (the file on disk is
+/// untouched until `save`), `history`/`page`/`search`/`cursor` inspect
+/// existing state, and `job_poll` only reads a job record. Everything else —
+/// including `index` (persists a cache to SQLite), `save_as` (creates a file),
+/// `close` (can delete journal/metadata under `journal_action: clean`), and
+/// `resolve` (can discard external bytes under `force_save`) — writes
+/// something, so it is left with the schema's default (not read-only) rather
+/// than guessed safe.
+const READ_ONLY_TOOLS: &[&str] = &[
+    "open",
+    "capabilities",
+    "resources",
+    "read",
+    "history",
+    "jump_points",
+    "page",
+    "search",
+    "cursor",
+    "job_poll",
+];
+
 type ToolProperties = Vec<(&'static str, Value)>;
 type ToolSpec = (
     &'static str,
@@ -173,7 +203,10 @@ type ToolSpec = (
 /// one class — the request builder forwarded a key the advertised schema did
 /// not offer. A fifth per-tool patch would not have stopped a sixth.
 ///
-/// `file` is not here: the server routes on it, so it stays in the payload.
+/// `file` itself is not here: the server routes on it, so it stays in the
+/// payload. `path` (B310/T124) IS here: it is a synonym a caller may send
+/// instead of `file`, coalesced into `file` before the strip loop below runs
+/// so the server only ever sees the one key it understands.
 /// `expected_revision` is not here either — it is declared on the mutating
 /// tools only, and `mutating_required` is what pins that.
 pub const ADAPTER_ARGUMENTS: &[&str] = &[
@@ -187,6 +220,7 @@ pub const ADAPTER_ARGUMENTS: &[&str] = &[
     "takeover_stale_endpoint",
     "auth_token",
     "session_token",
+    "path",
 ];
 
 /// The advertised schema for one `ADAPTER_ARGUMENTS` key. Exhaustive on
@@ -222,6 +256,9 @@ fn adapter_argument(key: &str) -> Value {
         "session_token" => string(
             "Server-issued tab token, supplied explicitly instead of the one discovery cached.",
         ),
+        "path" => string(
+            "Synonym for file (B310, T124): an agent's instinct is to say path, and this accepts it as-is. Coalesced into file before the call reaches the server; if both are given, file wins.",
+        ),
         other => panic!("ADAPTER_ARGUMENTS lists {other} with no advertised schema"),
     }
 }
@@ -242,14 +279,13 @@ fn tool_definitions() -> Vec<Value> {
     let routing = || {
         let mut properties: ToolProperties = Vec::from([
             (
-                // B310: the argument name IS "file" (not "path") -- the
-                // description leads with that spelling because a caller's
-                // instinct otherwise costs a round trip through
-                // unknown_argument before it reads the accepted_keys the
-                // refusal already lists.
+                // B310/T124: the argument's real name is "file", but "path"
+                // is accepted too (see ADAPTER_ARGUMENTS) so a caller's
+                // instinct no longer costs a round trip through
+                // unknown_argument first.
                 "file",
                 string(
-                    "The file path (this argument is named \"file\", not \"path\"); routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
+                    "The file path (aka \"path\" -- either name works); routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
                 ),
             ),
             // T96: declared on every tool, including the job verbs, because
@@ -259,7 +295,7 @@ fn tool_definitions() -> Vec<Value> {
             (
                 "tab_id",
                 string(
-                    "The tab_id a previous answer reported, and addressing enough on its own: with it, no file or endpoint is needed for any verb. Wins over file and tab_path, and is refused by name (tab_unknown) rather than falling back to some other tab if it names none.",
+                    "The tab_id a previous answer reported, and addressing enough on its own: with it, no file or endpoint is needed for any verb. It is the shortest prefix unambiguous among currently open tabs (git-style), not always the full id. Wins over file and tab_path, and is refused by name -- tab_unknown if it names no tab, tab_ambiguous (naming the candidates) if it is too short to name just one -- rather than falling back to some other tab.",
                 ),
             ),
             // T99: on every tool, because the ladder applies to every
@@ -303,6 +339,12 @@ fn tool_definitions() -> Vec<Value> {
         Vec::new(),
         vec![],
     ));
+    tools.push((
+        "jump_points",
+        "Inspect this file's outbound CodeGraph references (calls, imports, instantiations, and similar) computed server-side at open and after every save -- each entry is the referring line/column, the edge kind, and where it points (target file, line, name, kind). `revision` is the tab revision they were computed at; `stale: true` means the tab has been edited since (save to recompute). `jump_points: null` means CodeGraph is not enabled for this project (no .codegraph/ index) or its index is not in a shape this reader supports -- not that the file has no references.",
+        Vec::new(),
+        vec![],
+    ));
     tools.push(("read", "Read the current document or a bounded byte/line range. Line ranges are inclusive on text tabs; byte ranges half-open on raw and hex tabs; offset/length is a byte window snapped to UTF-8 boundaries.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("cursor_id", int("Numeric cursor whose position anchors a before/after window.")),
         ("before", int("Lines before the cursor to include.")),
@@ -342,7 +384,7 @@ fn tool_definitions() -> Vec<Value> {
     ));
     tools.push((
         "replace",
-        "Replace a span with text or base64 bytes; preserve the revision guard. Address the span four ways: offset plus delete_len in bytes, range_start_line/range_end_line (inclusive 1-based whole lines, the last line's newline included, so replacing with no text deletes the lines outright), range_start_byte/range_end_byte (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across), or match_id (a search hit's own id — preferred when the span came from a search, since it carries its own content guard and needs no expected_text). Pass expected_text to have the server verify the bytes at the span before deleting them.",
+        "Replace a span with text or base64 bytes; preserve the revision guard. Address the span six ways: offset plus delete_len in bytes, range_start_line/range_end_line (inclusive 1-based whole lines, the last line's newline included, so replacing with no text deletes the lines outright), range_start_byte/range_end_byte (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across), match_id (a search hit's own id — preferred when the span came from a search, since it carries its own content guard and needs no expected_text), range_start_match/range_end_before_match (a pair of exact-text or regex anchors resolved server-side, so an endpoint is never hand-inferred — refused as ambiguous if either anchor matches more than once, or not-found if it matches nowhere), or symbol (a CodeGraph-indexed name resolved to its own defining extent — refused as ambiguous if more than one node in the file shares the name). Pass expected_text to have the server verify the bytes at the span before deleting them.",
         {
             let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
@@ -388,12 +430,97 @@ fn tool_definitions() -> Vec<Value> {
                     "match_id",
                     string("A search hit's own id (<result_id>#<index>). Resolves to that hit's exact span and its own content guard, refused as match_id_stale if the document moved under it since. Takes no range key, offset, cursor_id or expected_text alongside it."),
                 ),
+                (
+                    "range_start_match",
+                    string("Text (or, with range_match_regex, a Rust regex) whose match's own start is the beginning of the span. Needs range_end_before_match. Refused as range_start_match_not_found if it matches nowhere, or range_start_match_ambiguous if it matches more than once — never silently the first occurrence."),
+                ),
+                (
+                    "range_end_before_match",
+                    string("Text (or, with range_match_regex, a Rust regex) whose match marks where the span ends — up to but not including this match's own start, so an inferred endpoint is never hand-computed. Same not-found/ambiguous refusals as range_start_match, under their own names."),
+                ),
+                (
+                    "range_match_regex",
+                    boolean("When true, range_start_match/range_end_before_match are Rust regexes instead of exact text. Refused as range_match_invalid if either does not parse as one."),
+                ),
+                (
+                    "symbol",
+                    string("A name CodeGraph's index (.codegraph/codegraph.db) has for this file, resolved to that symbol's own defining line extent — the caller says what to edit, not where it starts and ends. Refused as symbol_unavailable with no index, symbol_not_found with no matching node, or symbol_ambiguous if more than one node in this file shares the name."),
+                ),
                 ("expected_revision", revision_guard()),
             ]));
             p
         },
         mutating_required(),
     ));
+    for verb in ["move", "copy"] {
+        tools.push((
+            verb,
+            match verb {
+                "move" => "Relocate a span to another point in the same tab, server-side, with no content in the request or response -- the server already holds the bytes. One atomic operation (one revision, one undo step) even though it performs two splices internally. Address the source exactly like replace's own: range_start_line/range_end_line, range_start_byte/range_end_byte, match_id, range_start_match/range_end_before_match, or symbol (never offset/delete_len/cursor_id -- refused by name, since a point has no length to relocate). The destination is a point: dest_offset (a byte position) or dest_line (1-based, insert immediately before that line, text tabs only; one past the last line appends at end of file) -- exactly one of the two. expected_text/expected_bytes_base64 verify the source span first, same as replace. A destination strictly inside the source span is refused as move_destination_inside_source.",
+                _ => "Duplicate a span to another point in the same tab, server-side, with no content in the request or response -- the server already holds the bytes. One atomic operation (one revision, one undo step). Address the source exactly like replace's own: range_start_line/range_end_line, range_start_byte/range_end_byte, match_id, range_start_match/range_end_before_match, or symbol (never offset/delete_len/cursor_id -- refused by name, since a point has no length to duplicate). The destination is a point: dest_offset (a byte position) or dest_line (1-based, insert immediately before that line, text tabs only; one past the last line appends at end of file) -- exactly one of the two. expected_text/expected_bytes_base64 verify the source span first, same as replace. A destination strictly inside the source span is refused as move_destination_inside_source.",
+            },
+            {
+                let mut p: ToolProperties = Vec::new();
+                p.extend(Vec::from([
+                    (
+                        "range_start_line",
+                        int("Inclusive first line of the source span (text tabs). Needs range_end_line."),
+                    ),
+                    (
+                        "range_end_line",
+                        int("Inclusive last line of the source span; its newline goes with it."),
+                    ),
+                    (
+                        "range_start_byte",
+                        int("Inclusive first byte of the source span — a search hit's byte_start. Needs range_end_byte."),
+                    ),
+                    (
+                        "range_end_byte",
+                        int("Exclusive last byte of the source span — a search hit's byte_end."),
+                    ),
+                    (
+                        "match_id",
+                        string("A search hit's own id (<result_id>#<index>) naming the source span. Resolves to that hit's exact span and its own content guard, refused as match_id_stale if the document moved under it since."),
+                    ),
+                    (
+                        "range_start_match",
+                        string("Text (or, with range_match_regex, a Rust regex) whose match's own start is the beginning of the source span. Needs range_end_before_match. Refused as range_start_match_not_found if it matches nowhere, or range_start_match_ambiguous if it matches more than once."),
+                    ),
+                    (
+                        "range_end_before_match",
+                        string("Text (or, with range_match_regex, a Rust regex) whose match marks where the source span ends -- up to but not including this match's own start. Same not-found/ambiguous refusals as range_start_match, under their own names."),
+                    ),
+                    (
+                        "range_match_regex",
+                        boolean("When true, range_start_match/range_end_before_match are Rust regexes instead of exact text."),
+                    ),
+                    (
+                        "symbol",
+                        string("A name CodeGraph's index (.codegraph/codegraph.db) has for this file, resolved to that symbol's own defining line extent as the source span. Refused as symbol_unavailable with no index, symbol_not_found with no matching node, or symbol_ambiguous if more than one node in this file shares the name."),
+                    ),
+                    (
+                        "expected_text",
+                        string("The bytes the caller believes are at the source span. Verified before anything moves and refused by name on mismatch."),
+                    ),
+                    (
+                        "expected_bytes_base64",
+                        string("expected_text for a raw or hex tab, or for bytes that are not UTF-8. Pass one of the two, not both."),
+                    ),
+                    (
+                        "dest_offset",
+                        int("Destination byte position. Exactly one of dest_offset/dest_line is required."),
+                    ),
+                    (
+                        "dest_line",
+                        int("Destination line (1-based, text tabs only): insert immediately before this line. One past the last line appends at end of file."),
+                    ),
+                    ("expected_revision", revision_guard()),
+                ]));
+                p
+            },
+            mutating_required(),
+        ));
+    }
     tools.push(("large_edit", "Stream an acknowledged job-owned rewrite of a large file and atomically replace it.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("job_id", int("Queued job this edit executes.")),
         ("resume_token", string("The job's resume token; required, and never disclosed to callers without it.")),
@@ -564,7 +691,7 @@ fn tool_definitions() -> Vec<Value> {
         ("range_start_byte", int("Inclusive first byte for exact_bytes on large tabs.")),
         ("range_end_byte", int("Exclusive last byte for exact_bytes on large tabs.")),
         ("preview_lines", int("When a match spans more than double this many lines, shrink its shown contents to its first and last preview_lines lines (contents_preview) instead of the whole span. byte_start/byte_end, and so match_id, stay exact regardless. 0 (default) shows the full contents unshrunk.")),
-    ])); p }, vec!["mode", "query"]));
+    ])); p }, vec!["mode"]));
     tools.push((
         "job_start",
         "Create a lifecycle record for agent-owned long work; this tool does not execute the work.",
@@ -685,6 +812,15 @@ fn tool_definitions() -> Vec<Value> {
                     "properties": Value::Object(properties),
                     "required": required,
                     "additionalProperties": false
+                },
+                // T127: readOnlyHint lets a conforming client skip its
+                // per-call approval prompt on a tool that never writes.
+                // openWorldHint is false on every tool: this server only ever
+                // reaches the local filesystem and its own SQLite metadata,
+                // never an external system.
+                "annotations": {
+                    "readOnlyHint": READ_ONLY_TOOLS.contains(&name),
+                    "openWorldHint": false
                 }
             })
         })
@@ -699,6 +835,15 @@ fn call_tool(id: Value, params: Value) -> Value {
         .unwrap_or_else(|| json!({}));
     let method = server_method(name);
     let mut payload = arguments.as_object().cloned().unwrap_or_default();
+    // B310/T124: "path" is a synonym for "file", promoted before anything
+    // else reads either key. file wins if both are given; ADAPTER_ARGUMENTS'
+    // strip loop below removes the raw "path" key, so the server only ever
+    // sees "file".
+    if !payload.contains_key("file") {
+        if let Some(path_value) = payload.get("path").cloned() {
+            payload.insert("file".to_string(), path_value);
+        }
+    }
     let file = payload
         .get("file")
         .and_then(Value::as_str)
@@ -1032,6 +1177,34 @@ mod tests {
         assert!(found >= 7, "expected the mutating tools, found {found}");
     }
 
+    /// search accepts `query` OR `query_base64` -- the server itself refuses
+    /// only when both are absent. Declaring `query` required forced a
+    /// schema-following client to always send it, even when it meant to
+    /// search with `query_base64` alone.
+    #[test]
+    fn search_does_not_require_query_since_query_base64_is_an_alternative() {
+        let tools = tools();
+        let search = tools
+            .iter()
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some("search"))
+            .expect("search is advertised");
+        let required = search
+            .pointer("/inputSchema/required")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            required,
+            vec![Value::from("mode")],
+            "search must require only mode, not query: {required:?}"
+        );
+        let properties = properties(search);
+        assert!(
+            properties.contains_key("query") && properties.contains_key("query_base64"),
+            "both remain available, just neither is forced"
+        );
+    }
+
     /// B251 and B252, the schema half. The server refusing these by name is
     /// pinned in cli_flow; this pins that the schema no longer OFFERS them,
     /// which is the half that matters to a schema-following client — it would
@@ -1077,6 +1250,67 @@ mod tests {
                 properties(named(name)).contains_key("action"),
                 "{name} reads action and must still advertise it"
             );
+        }
+    }
+
+    /// T127: a conforming client (Codex among them) can skip its per-call
+    /// approval prompt on a tool marked readOnlyHint. Walk every advertised
+    /// tool rather than naming one, so a tool added to READ_ONLY_TOOLS with a
+    /// typo'd name is caught here instead of silently advertising nothing.
+    #[test]
+    fn every_read_only_tool_is_named_and_no_other_tool_claims_the_hint() {
+        let tools = tools();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        for expected in super::READ_ONLY_TOOLS {
+            assert!(
+                names.contains(expected),
+                "READ_ONLY_TOOLS names {expected}, which tools/list does not advertise"
+            );
+        }
+        for tool in &tools {
+            let name = tool["name"].as_str().unwrap();
+            let hint = tool["annotations"]["readOnlyHint"].as_bool().unwrap();
+            assert_eq!(
+                hint,
+                super::READ_ONLY_TOOLS.contains(&name),
+                "{name}'s readOnlyHint does not match READ_ONLY_TOOLS"
+            );
+        }
+    }
+
+    /// A tool that writes the document must never claim readOnlyHint, however
+    /// READ_ONLY_TOOLS is edited later — this pins specific, known-mutating
+    /// tool names directly rather than only round-tripping the same const.
+    #[test]
+    fn a_mutating_tool_never_claims_read_only() {
+        let tools = tools();
+        let named = |n: &str| {
+            tools
+                .iter()
+                .find(|t| t["name"] == n)
+                .unwrap_or_else(|| panic!("tools/list does not advertise {n}"))
+        };
+        for name in [
+            "insert",
+            "replace",
+            "save",
+            "large_edit",
+            "close",
+            "resolve",
+        ] {
+            assert_eq!(
+                named(name)["annotations"]["readOnlyHint"],
+                json!(false),
+                "{name} writes something and must not claim readOnlyHint"
+            );
+        }
+    }
+
+    /// This server never reaches an external system; every tool should say so.
+    #[test]
+    fn every_tool_declares_a_closed_world() {
+        for tool in tools() {
+            assert_eq!(tool["annotations"]["openWorldHint"], json!(false));
         }
     }
 

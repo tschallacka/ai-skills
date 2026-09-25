@@ -42,20 +42,23 @@ predictable skeleton, one way of doing each job, and no platform surprises.
 
 Reference implementations to copy from, in order of how much they get right:
 `resource-limited-testing/scripts/limited-run.sh` (skeleton, `uname` dispatch,
-exit codes), `plan-context-lib.sh`'s `context_hash_file` (guarded optional
-dependency), `planning/scripts/plan-root.sh` (docblock, decision rules stated
+exit codes), `planning/scripts/plan-root.sh` (docblock, decision rules stated
 before the code).
 
 ---
 
 ## 1. Portability contract
 
-**Target: bash 3.2 on macOS, bash 4/5 on Linux, GNU *or* BSD userland.**
+**Target: bash 3.2 on macOS, bash 4/5 on Linux, GNU *or* BSD userland, and
+Git for Windows' bash with its bundled coreutils on Windows.**
 
 macOS ships `/bin/bash` 3.2.57 and has done for over a decade. `#!/usr/bin/env
 bash` resolves to it unless the user installed Homebrew bash *and* has it first
 on `PATH`, which we do not get to assume. So bash 3.2 is the floor, and BSD
-coreutils are the floor for utilities.
+coreutils are the floor for utilities. Git for Windows' bash plus its bundled
+coreutils is a supported floor alongside them; the CI evidence and the
+conventions it adds (paths, `.exe`, line endings) are in `.agents/MAINTAINER.md`
+1.16.
 
 Interpretation of "works in every shell": the **shebang stays bash** — these are
 bash scripts and rewriting them for `dash`/busybox `ash` would cost more than it
@@ -106,14 +109,16 @@ fi
 The dependency budget differs between what we ship to a user's machine and what
 only a contributor runs. Know which side of the line your file is on.
 
-**Shipped runtime** — `install.sh`, `planning/scripts/**`, anything registered
-in `planning/PACKAGE-MANIFEST.tsv`, and the other skill directories:
+**Shipped runtime** — `installer/bootstrap.sh`, `planning/scripts/**`,
+anything registered in `planning/PACKAGE-MANIFEST.tsv`, and the other skill
+directories (the compiled installer itself, `src/installer/`, is Rust, not
+shell, and is covered by its own dependency rules — see section 1b):
 
 | Tool | Status |
 |---|---|
 | `bash`, POSIX `coreutils`, `awk`, `sed`, `grep`, `git` | assumed present |
 | `rjq` | allowed — the furthest a runtime dependency may go. Declared `hard` in `planning/requires.tsv`, so the installer refuses to install *that skill* up front with a per-platform hint rather than failing halfway |
-| `openssl` | **no longer used, and no longer declared**. It was the last rung of the planning skill's SHA-256 chain and its only source of random bytes. Both are now the shipped `plan-crypt` binary (section 1b), so the `soft` row left `planning/requires.tsv`: a static binary asks the target machine for nothing. A new `openssl` call needs the row back, and `installer/build.sh` fails the build if one appears without it |
+| `openssl` | **no longer used, and no longer declared**. It was the last rung of the planning skill's SHA-256 chain and its only source of random bytes. Both are now the shipped `plan-crypt` binary (section 1b), so the `soft` row left `planning/requires.tsv`: a static binary asks the target machine for nothing. A new `openssl` call needs the row back, and `planning/tests/test-runtime-dependencies.sh` fails if one appears without it |
 | `memlimit` | allowed for `resource-limited-testing` on Apple Silicon macOS only — the documented exception to the `rjq` ceiling, because macOS offers no other way to cap memory at all. Declared `soft` in `resource-limited-testing/requires.tsv`, so the skill installs with a warning and degrades to `nice` + `cpulimit`; never vendored |
 | **`python3`** | **not allowed, in any form — not even guarded-optional** |
 
@@ -148,9 +153,11 @@ that reason — `validate-plan.sh` exits 69 without it.
 `python3` is banned here rather than merely guarded because a guard turns a
 documented feature into one that silently does not exist on a machine without
 the interpreter. Text and line processing goes to `awk`; JSON goes to `rjq`.
-Neither of the two former python sites needed it: `install.sh`'s permission
-editors became `rjq` (already guaranteed present — the permission step only runs
-when `planning` was selected, and `planning` requires `rjq`), and
+Neither of the two former python sites needed it: the bash installer's
+permission editors became `rjq` (already guaranteed present — the permission
+step only runs when `planning` was selected, and `planning` requires `rjq`;
+the compiled installer's own permission editing in `src/installer/src/permissions.rs`
+carries the same guarantee, in Rust rather than `rjq`), and
 `plan-content.sh diff` became `awk`, which is its natural home since it is
 parsing `git diff -U0` hunk headers line by line.
 
@@ -183,10 +190,10 @@ one unit and say which in a comment.
 
 ### Enforcement
 
-Portability is enforced by CI, not by good intentions: `.github/workflows/ci.yml`
-runs the suite on `ubuntu-latest` **and** `macos-latest`, plus a `shellcheck`
-pass. A rule in this file without a CI leg or a regression test in
-`planning/tests/` is a suggestion, and suggestions rot.
+Portability is enforced by CI, not by good intentions; what each job proves is
+mapped in `.agents/MAINTAINER.md` section 3. A rule in this file without a CI
+leg or a regression test in `planning/tests/` is a suggestion, and suggestions
+rot.
 
 ---
 
@@ -244,9 +251,36 @@ Every script, in this order, no exceptions:
 set -euo pipefail
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "$(plan_resolve_symlink "${BASH_SOURCE[0]}")")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism.
+xyz_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$xyz_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present <name> "$xyz_script_dir" "$@"
+unset xyz_script_dir
+
+plan_die "<name>: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it" 69
 ```
+
+Every `planning/scripts/*.sh` entry point is this wiring block and nothing
+else: the compiled Rust binary is the only real implementation, and the shell
+file exists solely to find and exec it, or die loudly naming the missing
+binary if it isn't there. `<name>` is the script's own basename, and the
+`script_dir` variable is prefixed uniquely per file (`xyz_` above stands for a
+short, file-specific prefix) since the wiring block must run before any
+library is sourced and cannot rely on a bare `script_dir` not colliding with
+one a caller already set. There is no library sourced beyond `plan-core-lib.sh`
+here — a new capability is a Rust crate under `src/` (section 1b), never a
+new bash implementation grown behind this stub. `setup-dev-env.sh`,
+`pre-push-check.sh`, and `render-plans-board.sh` are the three permanent
+exceptions that still source their own full required library and keep real
+bash logic below the wiring block, each for a documented, load-bearing reason
+(bootstrapping a fresh clone with no binaries at all, surviving a scratch
+clone with zero build artifacts, and belonging to a separate migration,
+respectively) — no other script follows their shape.
 
 The docblock is at the top and starts at line 2 because `monitor-read.sh`,
 `supervision-frame.sh` and `role-context.sh` print it as their own `--help` via
@@ -265,20 +299,32 @@ text. That is nearly all of them, so just put it everywhere.
 
 | Unit | Limit | On exceeding |
 |---|---|---|
-| Executable script | 400 lines | extract a `*-lib.sh` sibling |
+| Executable script | 400 lines | see below — this now applies only to the three permanent bash-implementation exceptions |
 | Library | 500 lines | split by concern |
+
+Every `planning/scripts/*.sh` entry point is a wiring-only stub (section 2) far
+under this limit — there is no bash reimplementation left in any of them to
+grow past 400 lines. `*-lib.sh` extraction is a live pattern only for
+`setup-dev-env.sh`, `pre-push-check.sh`, and `render-plans-board.sh`, the three
+scripts that still carry real bash logic; **a new capability needing real
+logic is a Rust crate under `src/` (section 1b), never a bash file grown
+toward this ceiling.**
 
 **A library function lives in its own file, and the library is compiled.**
 `planning/scripts/lib/<group>/<function>.sh` holds one function, its comment, and
 nothing else. `planning/scripts/build-plan-libs.sh` concatenates each group into
 the `plan-*-lib.sh` that ships, so the runtime cost stays one file per library --
 sourcing 47 files measured 2.6x the cost of one, paid on every helper
-invocation -- while the maintained form is one function per file.
+invocation -- while the maintained form is one function per file. This
+mechanism remains fully live (`plan-core-lib.sh`'s own wiring functions and the
+three permanent exceptions' own real logic both still depend on it), but it is
+not where a NEW capability's logic goes — see above.
 
-Adding a function means creating one file in the right group directory and
-running the build. The directory is the registration; there is no list to
-update. Group state goes in `00-*.sh`, which sorts first, and anything that must
-run after every definition goes in `99-*.sh`, which sorts last.
+Adding a function to one of the still-live generated bundles means creating
+one file in the right group directory and running the build. The directory is
+the registration; there is no list to update. Group state goes in `00-*.sh`,
+which sorts first, and anything that must run after every definition goes in
+`99-*.sh`, which sorts last.
 
 Each file carries its own shebang so a test can source it alone, and the compiler
 strips the shebang and the `set` line so the output declares them once. Sourcing
@@ -298,7 +344,7 @@ question about.
 
 Split by **concern**, not by line count: each extracted file gets a docblock
 naming the one job it owns. Sibling libraries are named
-`<subject>-lib.sh` (`plan-document-lib.sh`, `plan-context-lib.sh`) and are
+`<subject>-lib.sh` (`plan-document-lib.sh`, `plan-core-lib.sh`) and are
 sourced, never executed.
 
 When a file in `planning/` is added, renamed, or removed, four places move
@@ -306,27 +352,31 @@ together or `planning/tests/test-installer-manifest.sh` fails:
 
 1. `planning/PACKAGE-MANIFEST.tsv`
 2. `planning/PACKAGE-MAP.tsv`
-3. `installer/src/50-manifest.sh` → `skill_files()`, then `installer/build.sh`
+3. `installer/src/50-manifest.sh` → `skill_files()`
 4. `package.json` `files` (directory level only — no change for a new sibling)
 
-`install.sh` is the one file that must ship as a single artifact — it is fetched
-and run standalone (`curl … | bash`) and is the npm `bin`, so it has no siblings
-to source. It is no longer hand-maintained as one file: it is **assembled from
-parts** by `installer/build.sh` out of `installer/src/NN-<concern>.sh`, plus the
-dependency tables generated from `installer/tools.tsv` and each skill's
-`requires.tsv`. Edit a part and run the build; never edit `install.sh` itself.
-`planning/tests/test-installer-build.sh` and the `installer-build` CI job fail on
-a hand edit.
+`installer/bootstrap.sh` is the one shell file that must ship as a single
+artifact — it is fetched and run standalone (`curl … | bash`) and is the npm
+`bin`, so at the moment it runs nothing else from this repository is on disk
+yet to source. It stays self-contained by design, not by generation: its own
+header explains why the mascot/palette pixels are copied in verbatim rather
+than sourced: `ART` from `installer/src/05-config.sh`, while the palette functions
+live only there and in `src/installer/src/ui/mascot.rs`.
 
-Long section banners inside a part, so the assembled artifact stays navigable:
+The actual installer — the skill picker, headless install, permission and
+MCP registration — is the compiled Rust binary under `src/installer/`, not a
+shell file at all; its own size and decomposition rules are Rust's, not this
+section's. `installer/src/05-config.sh` and `installer/src/50-manifest.sh` are
+the two bash files that still matter here: the last surviving fragments of the
+retired bash installer, sourced directly by `installer/build-release.sh` for
+the skill list and file manifest above. Long section banners in either one,
+same as any other file past the size limits in this section:
 
 ```bash
 # ─────────────────────────────────────────────────────────────────────────────
 # Skill registry — the single list every other section derives from.
 # ─────────────────────────────────────────────────────────────────────────────
 ```
-
-and a table of contents in the docblock listing the banners in order.
 
 ---
 
@@ -480,8 +530,15 @@ use site.
 
 ```bash
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
+source "$script_dir/plan-core-lib.sh"
 ```
+
+A wiring-only entry point (section 2) sources only `plan-core-lib.sh`, for
+`plan_exec_compiled_binary_if_present` and `plan_die`. `setup-dev-env.sh`,
+`pre-push-check.sh`, and `render-plans-board.sh` are the three exceptions:
+each sources its own fuller required library (e.g. `register-lib.sh` for
+`pre-push-check.sh`) because each keeps real bash logic below its wiring
+block.
 
 - Lowercase `script_dir` — it is script-local, not exported.
 - `${BASH_SOURCE[0]}`, never `$0` (wrong when sourced) and never
@@ -514,29 +571,32 @@ script_dir="$(cd "$(dirname "$self")" && pwd)"
 
 `monitor-read.sh` is the one script with that requirement today.
 
-Every executable script sources `plan-document-lib.sh` unconditionally. No
-`[ -f … ] && source …` — a missing library is a broken install, so fail loudly.
+Every executable script sources a library unconditionally — `plan-core-lib.sh`
+for a wiring-only stub, or the fuller library one of the three permanent
+exceptions still needs. No `[ -f … ] && source …` — a missing library is a
+broken install, so fail loudly.
 
-`plan-reconcile-lib.sh` requires `plan-document-lib.sh` first; a library that
-depends on another sources it itself rather than trusting the caller's order.
+A library that depends on another sources it itself rather than trusting the
+caller's order — still true of the generated bundles' own internal
+composition (`plan-document-lib.sh`'s own `99-facade.sh` sources
+`plan-map-lib.sh` and `plan-inventory-lib.sh` directly, rather than expecting
+whatever sources `plan-document-lib.sh` to have sourced them first).
 
 **Every function in a sourced file carries its file's prefix.** Bare names in a
 sourced file shadow the caller's functions. `usage`, `help` and `main` are the
 only bare names allowed, and only in files that are never sourced.
 
-The prefix is per-library and must be used consistently within it, not globally
-`plan_`: `plan-document-lib.sh` and `plan-reconcile-lib.sh` use `plan_`,
-`plan-context-lib.sh` uses `context_` (all 32 of its functions), and the
-`validate-plan-*-lib.sh` pass drivers use `plan_validate_`. Any of those
-prevents collision, which is the point of the rule. Match the file you are in
-rather than renaming a whole library to satisfy a global spelling.
+The prefix is per-library and must be used consistently within it, not
+globally `plan_`: the generated bundles (`plan-core-lib.sh`,
+`plan-document-lib.sh`, etc.) use `plan_`, while `register-lib.sh` (sourced by
+`pre-push-check.sh`) uses `reg_`. Either prevents collision, which is the
+point of the rule. Match the file you are in rather than renaming a whole
+library to satisfy a global spelling.
 
-Two known deviations, left deliberately because the churn outweighs the risk —
-neither file is sourced by anything today, so nothing can shadow:
-`validate-plan-*-lib.sh` keeps the pre-existing bare `fail`/`warn`/`trim`/
-`require_heading` and the command-detector helpers (~24 functions, ~200 call
-sites), and `plan-env.sh` keeps bare `die`/`usage`/`absolute_path` behind a
-`# Not sourced:` note. If either becomes sourceable, the rename comes first.
+One known deviation, left deliberately because the churn outweighs the risk:
+`plan-env.sh` keeps bare `die`/`usage`/`absolute_path` behind a
+`# Not sourced:` note, since nothing sources it today and nothing can shadow.
+If it becomes sourceable, the rename comes first.
 
 Before writing a helper, grep the libs — the five clusters below were each
 re-implemented between 3 and 26 times, and any new copy is a review finding:
@@ -737,7 +797,7 @@ A portability workaround gets a marker, because without one the next reader
 - The untagged `# PORTABILITY:` form is rejected: it cannot be indexed.
 
 `generate-portability.sh` harvests these into `PORTABILITY.md` — generated on
-demand and never committed (`planning/MAINTAINER.md` §2.16), so run the
+demand and never committed (`.agents/MAINTAINER.md` 1.10), so run the
 generator to read the catalogue — and the marker does double duty: a local
 warning and the catalogue's index. That is also how the cross-file
 information stays out of comments: it is generated, not written.
@@ -910,7 +970,7 @@ hold.
 ```bash
 bash -n <every edited script>
 shellcheck -s bash <every edited script>      # 0 new findings
-./run-tests.sh                                # 30+ PASS, 0 FAIL
+./run-tests.sh                                # 0 FAIL
 git diff --check
 ```
 

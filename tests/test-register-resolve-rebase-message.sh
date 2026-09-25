@@ -11,9 +11,7 @@
 # REAL git merge the same way and asserts the ORIGINAL branch-oriented wording
 # is unchanged there, so the fix cannot be "always say the new thing".
 #
-# A missing cargo and no prebuilt bin/ binaries is a loud SKIP, not a failure
-# (mirrors tests/test-register-file-flags.sh, the sibling test this one
-# borrows its build/skip structure from).
+# A missing cargo and no prebuilt bin/ binaries is a loud SKIP, not a failure.
 #
 # Usage: test-register-resolve-rebase-message.sh
 set -uo pipefail

@@ -12,4 +12,5 @@ name = "planning_validator_stale"
 path = "src/lib.rs"
 
 [dependencies]
+planning-document = { path = "../planning-document" }
 planning-validator-common = { path = "../planning-validator-common" }

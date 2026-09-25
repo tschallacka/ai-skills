@@ -1,0 +1,24 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "interactive-shell-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP adapter for interactive-shell: PTY sessions as typed tool calls"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "interactive-shell-mcp"
+path = "src/main.rs"
+
+[dependencies]
+interactive-shell = { path = "../interactive-shell" }
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+# tests/mcp_flow.rs only: setsid()/killpg() to reap the adapter's own
+# spawned interactive-shell grandchild after each test.
+libc = "0.2"

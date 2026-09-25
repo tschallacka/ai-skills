@@ -35,6 +35,18 @@ check_stray_src_dirs() {
     exit 70
 }
 
+# Whether $1's compiled binary belongs in planning/scripts/ alongside its bin/
+# copy. Normally that is exactly the crates whose `.sh` predecessor still
+# exists (it names this repository's own oracle for that shell test), but
+# register-rebuild retired its `.sh` once skill_files() took over listing the
+# binary directly (planning/PACKAGE-MAP.tsv) -- that retirement left no `.sh`
+# for a bare existence check to find, so it is named here explicitly instead.
+# ci.yml's own two build steps carry the same exception for the same reason.
+stages_into_planning_scripts() {
+    [ -f "$repo_root/planning/scripts/$1.sh" ] && return 0
+    [ "$1" = register-rebuild ]
+}
+
 # The host's Rust target triple, using the same five-row house list the skills
 # resolve against at runtime (rust-development-guidelines.md section 4). A
 # machine outside the list has no row to build and is refused by name.
@@ -94,6 +106,7 @@ ai-text-editor	ai-text-editor-server
 ai-text-editor-mcp	ai-text-editor-mcp
 interactive-shell	interactive-shell
 interactive-shell	interactive-shell-input
+interactive-shell-mcp	interactive-shell-mcp
 PLAN
 }
 
@@ -110,6 +123,7 @@ add-work-unit	add-work-unit
 chat-client-rs	chat-client-rs
 chat-mcp	chat-mcp
 chat-server-rs	chat-server-rs
+chat-spool-watch	chat-spool-watch
 configure-ui-story-cache	configure-ui-story-cache
 create-adversarial-review	create-adversarial-review
 create-plan	create-plan
@@ -154,6 +168,12 @@ plan_primary() {
 }
 
 plan_secondary() {
+    plan_secondary_core
+    plan_secondary_ported
+}
+
+# The original, pre-T145 secondary-command roster.
+plan_secondary_core() {
     cat <<'PLAN'
 mint-fix-keys	mint-fix-keys
 plan-crypt	plan-crypt
@@ -173,8 +193,37 @@ tony-the-pony	tony-the-pony
 update-adversarial-review	update-adversarial-review
 update-progress	update-progress
 update-ui-story	update-ui-story
+PLAN
+}
+
+# T145's own bash-to-rust conversions (rjq/bug-report/todo predate T145 but
+# are grouped here since they were already adjacent to it), in the order
+# each goal closed. function-length-ratchet: this function grows by one row
+# per goal, so it is split from plan_secondary_core() here specifically to
+# stay under the 40-line cap rather than let the combined roster cross it
+# again the next time a goal appends a row.
+plan_secondary_ported() {
+    cat <<'PLAN'
 rjq	rjq
 bug-report	bugs
 todo	todo
+build-plan-libs	build-plan-libs
+generate-skill-docs	generate-skill-docs
+verify-skill-load	verify-skill-load
+ci-failures	ci-failures
+pre-push-check	pre-push-check
+run-tests	run-tests
+planning-server	planning-server
+planning-server	planning-client
+planning-mcp	planning-mcp
+setup-dev-env	setup-dev-env
+generate-portability	generate-portability
+blast-radius	blast-radius
+verify-both-shells	verify-both-shells
+ci-subjects	ci-subjects
+ci-scope	ci-scope
+ci-test-scope	ci-test-scope
+test-mermaid-accuracy	test-mermaid-accuracy
+generate-postmortem	generate-postmortem
 PLAN
 }

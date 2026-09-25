@@ -106,34 +106,28 @@ case "$out" in
     *) note_fail 'unsupported-view refusal did not list valid values and recovery guidance' ;;
 esac
 
-# ---- the entry hash covers every input --------------------------------------
-hash_entry() {
-    "$BASH" -c '
-        set -euo pipefail
-        source "$1/plan-map-lib.sh"; source "$1/plan-document-lib.sh"
-        source "$1/plan-inventory-lib.sh"; source "$1/plan-context-lib.sh"
-        context_hash_entry "$2" "$3"
-    ' _ "$scripts_dir" "$plan" "$2"
-}
-
-before="$(hash_entry _ unit:W01)"
-step_before="$(hash_entry _ 'step:01-lossless-finding-contract/01-step-preserve-finding-envelope')"
-printf '\n' >> "$plan/work-unit-inventory.md"
-after="$(hash_entry _ unit:W01)"
-[ "$before" != "$after" ] \
-    || note_fail 'editing the inventory did not change the work unit entry hash'
-
-# A single-input entry must keep the plain file hash, so existing entries and
-# any outstanding token are untouched by the composite.
-plain="$("$BASH" -c '
-    set -euo pipefail
-    source "$1/plan-map-lib.sh"; source "$1/plan-document-lib.sh"
-    source "$1/plan-inventory-lib.sh"; source "$1/plan-context-lib.sh"
-    context_hash_file "$2/plan-description.md"
-' _ "$scripts_dir" "$plan")"
-[ "$(hash_entry _ plan)" = "$plain" ] \
-    || note_fail 'a single-input entry hash diverged from the plain file hash'
-[ -n "$step_before" ] || note_fail 'step entry hash was empty'
+# ---- B340: two entries sharing a backing file must not share a hash ----------
+# `inventory` and `coverage` both resolve to work-unit-inventory.md. A hash
+# keyed only on file content collided for them, so a --token minted while
+# reading one was silently accepted as fresh for the other -- the token
+# validation compares only the hash and view, not the entry id, so this was
+# the only thing standing between a reader and silently-wrong content. The
+# read command itself must refuse a token minted for a different entry.
+read_rc=0
+inventory_token="$(read_unit --document inventory --max-records 1 \
+    | awk -F= '/^next_token=/ { print $2; found=1 } END { if (!found) exit 1 }')" || read_rc=$?
+[ "$read_rc" -eq 0 ] && [ -n "$inventory_token" ] \
+    || note_fail 'could not obtain a paging token from --document inventory to test the cross-entry refusal'
+if [ -n "$inventory_token" ]; then
+    cross_rc=0
+    cross_out="$(read_unit --document coverage --token "$inventory_token")" || cross_rc=$?
+    [ "$cross_rc" -eq 65 ] \
+        || note_fail "reusing inventory's token against --document coverage exited $cross_rc, want 65 (B340)"
+    case "$cross_out" in
+        *'stale'*) ;;
+        *) note_fail "the cross-entry token refusal did not report 'stale' (B340)" ;;
+    esac
+fi
 
 if [ "$(t_failures)" -ne 0 ]; then
     printf 'test-plan-context-unit-entry: %d failure(s).\n' "$(t_failures)" >&2

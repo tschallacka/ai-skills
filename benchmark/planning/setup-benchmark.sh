@@ -193,8 +193,8 @@ cp "$SRC_ROOT/planning/SKILL.md" "$CAPSULE_ROOT/planning/SKILL.md"
 cp -R "$SRC_ROOT/planning/parts/." "$CAPSULE_ROOT/planning/parts/"
 cp "$SRC_ROOT/planning/skill-source.txt" "$CAPSULE_ROOT/planning/skill-source.txt"
 cp -R "$SRC_ROOT/planning/scripts/." "$CAPSULE_ROOT/planning/scripts/"
-# The compiled libraries are generated and never tracked (MAINTAINER.md section
-# 2.15), so a git-archive capsule cannot carry them: build into the capsule from
+# The compiled libraries are generated and never tracked (.agents/MAINTAINER.md
+# 1.10), so a git-archive capsule cannot carry them: build into the capsule from
 # the group sources the copy above brought over.
 libs_missing=0
 for lib in plan-core-lib.sh plan-crypt-lib.sh plan-document-lib.sh plan-progress-lib.sh plan-table-lib.sh; do
@@ -207,7 +207,7 @@ if [ "$libs_missing" -eq 1 ]; then
         || { echo "setup-benchmark: building the capsule libraries failed" >&2; exit 1; }
 fi
 if [ ! -f "$CAPSULE_ROOT/planning/REVIEWER.md" ] && [ -f "$CAPSULE_ROOT/planning/skill-source.txt" ]; then
-    # Generated, never committed (MAINTAINER.md section 2.16): a git-archive
+    # Generated, never committed (.agents/MAINTAINER.md 1.10): a git-archive
     # capsule cannot carry it, so the capsule generates its own from the
     # skill-source.txt it already has. The capsule's generator resolves its
     # paths from its own location, and the capsule lib build above has

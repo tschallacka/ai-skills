@@ -2,6 +2,9 @@
 // PACKAGE: PROD
 //! Rust orchestration for the planning validation passes.
 
+use planning_validator_coherence::{
+    validate_countable_enumeration, validate_stale_wording_retained,
+};
 use planning_validator_commands::CommandRegistry;
 use planning_validator_common::Findings;
 use planning_validator_comparisons::ComparisonRegistry;
@@ -14,8 +17,8 @@ use planning_validator_goals::{
 use planning_validator_inventory::Inventory;
 use planning_validator_placeholders::PlaceholderValidator;
 use planning_validator_propagation::{
-    validate_companions, validate_completion, validate_freshness, validate_leaves, validate_reach,
-    validate_roster, validate_symbols,
+    validate_companions, validate_completion, validate_freshness, validate_handoff,
+    validate_leaves, validate_reach, validate_roster, validate_symbols,
 };
 use planning_validator_serve::{ServeRegistry, Unit as ServeUnit};
 use planning_validator_stale::validate_stale;
@@ -66,6 +69,13 @@ fn main() {
         options.stale.as_deref().map(Path::new),
         &mut findings,
     );
+    let stale_docs = documents
+        .plan_docs
+        .iter()
+        .map(PathBuf::as_path)
+        .collect::<Vec<_>>();
+    validate_stale_wording_retained(&stale_docs, &mut findings);
+    validate_countable_enumeration(&stale_docs, &mut findings);
     let inventory = Inventory::parse(&plan.join("work-unit-inventory.md"), &mut findings);
     inventory.validate_dependency_graph(&mut findings);
     inventory.validate_target_paths(options.repo_root.as_deref(), &mut findings);
@@ -116,6 +126,7 @@ fn main() {
         validate_symbols(&plan, &inventory, &mut findings);
         validate_reach(&plan, &inventory, &mut findings);
         validate_companions(&plan, &inventory, &mut findings);
+        validate_handoff(&plan, &inventory, &mut findings);
         validate_leaves(&inventory, &mut findings);
         validate_roster(&plan, &inventory, &mut findings);
         if let Some(repo_root) = options.repo_root.as_deref() {
@@ -127,13 +138,14 @@ fn main() {
     if findings.errors > 0 {
         eprintln!("Plan validation failed with {} error(s).", findings.errors);
         eprintln!(
-            "Gates: structurally valid=no (errors above)  adversarially approved={}  implementation complete={}",
-            review_gate(&plan, documents.review_approved),
-            if options.complete {
-                "yes"
-            } else {
-                "not checked (pass --complete)"
-            }
+            "{}",
+            report_gates(
+                options.complete,
+                findings.errors,
+                placeholder_result.warnings,
+                &plan,
+                documents.review_approved,
+            )
         );
         std::process::exit(1);
     }
@@ -149,15 +161,50 @@ fn main() {
         );
     }
     println!(
-        "Gates: structurally valid={}  adversarially approved={}  implementation complete={}",
-        if findings.errors == 0 { "yes" } else { "no" },
-        review_gate(&plan, documents.review_approved),
-        if options.complete {
+        "{}",
+        report_gates(
+            options.complete,
+            findings.errors,
+            placeholder_result.warnings,
+            &plan,
+            documents.review_approved,
+        )
+    );
+}
+
+/// Under `--complete` the error count mixes structural defects with
+/// execution state and the two cannot be separated after the fact, so the
+/// structural gate says that rather than inferring yes/no from a number
+/// answering a different question (T55).
+fn report_gates(
+    complete_mode: bool,
+    errors: usize,
+    placeholder_warnings: usize,
+    plan: &Path,
+    review_approved: bool,
+) -> String {
+    let structural = if complete_mode {
+        "not separable here (run without --complete)".to_owned()
+    } else if errors > 0 {
+        "no (errors above)".to_owned()
+    } else if placeholder_warnings > 0 {
+        "no (placeholders)".to_owned()
+    } else {
+        "yes".to_owned()
+    };
+    let complete = if complete_mode {
+        if errors == 0 {
             "yes"
         } else {
-            "not checked (pass --complete)"
+            "no"
         }
-    );
+    } else {
+        "not checked (pass --complete)"
+    };
+    format!(
+        "Gates: structurally valid={structural}  adversarially approved={}  implementation complete={complete}",
+        review_gate(plan, review_approved)
+    )
 }
 
 fn review_gate(plan: &Path, approved: bool) -> &'static str {
@@ -220,15 +267,67 @@ fn parse(args: Vec<String>) -> Result<Options, i32> {
     Ok(options)
 }
 
+/// The directory the registries (goal-tables.json, placeholders.json, ...)
+/// live in. `PLANNING_SKILL_ROOT`, when set, is the directory that CONTAINS
+/// `planning/scripts`, so the registries sit in its `planning/`
+/// subdirectory; without the variable the cwd-relative `planning` already
+/// names that subdirectory. Reading the variable as the registry directory
+/// itself made every wrapper-launched run fail with "goal-tables.json
+/// registry is missing at <root>/goal-tables.json".
 fn skill_root() -> PathBuf {
-    env::var_os("PLANNING_SKILL_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("planning"))
+    registry_dir(env::var_os("PLANNING_SKILL_ROOT").map(PathBuf::from))
+}
+
+fn registry_dir(skill_root: Option<PathBuf>) -> PathBuf {
+    match skill_root {
+        None => PathBuf::from("planning"),
+        // The wrapper exports an EMPTY root when no ancestor of the script has
+        // a `planning/scripts` directory -- a hand-copied skill tree. That must
+        // read as "the registries are not there", not fall back to whatever
+        // `planning/` the cwd happens to hold, so the gate names the absence.
+        Some(root) if root.as_os_str().is_empty() => {
+            PathBuf::from("<PLANNING_SKILL_ROOT unresolved>")
+        }
+        Some(root) if root.join("planning/goal-tables.json").is_file() => root.join("planning"),
+        Some(root) => root,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{parse, registry_dir};
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn registry_dir_defaults_to_the_relative_planning_directory() {
+        assert_eq!(registry_dir(None), PathBuf::from("planning"));
+    }
+
+    #[test]
+    fn registry_dir_reads_the_skill_root_as_the_parent_of_planning() {
+        let root = std::env::temp_dir().join(format!("validate-plan-root-{}", std::process::id()));
+        fs::create_dir_all(root.join("planning")).unwrap();
+        fs::write(root.join("planning/goal-tables.json"), "{}").unwrap();
+        assert_eq!(registry_dir(Some(root.clone())), root.join("planning"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_empty_skill_root_does_not_fall_back_to_the_cwd_planning_directory() {
+        let dir = registry_dir(Some(PathBuf::new()));
+        assert!(!dir.join("goal-tables.json").is_file());
+        assert_ne!(dir, PathBuf::from("planning"));
+    }
+
+    #[test]
+    fn registry_dir_still_accepts_a_root_that_holds_the_registries_directly() {
+        let root = std::env::temp_dir().join(format!("validate-plan-flat-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("goal-tables.json"), "{}").unwrap();
+        assert_eq!(registry_dir(Some(root.clone())), root);
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn parses_plan_dir_and_propagation_switch() {

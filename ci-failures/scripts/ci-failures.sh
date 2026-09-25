@@ -59,243 +59,46 @@
 set -euo pipefail
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=ci-failures/scripts/ci-failures-glab-lib.sh
-source "$script_dir/ci-failures-glab-lib.sh"
-
-repo_override="${CI_FAILURES_REPO:-}"
-forge_override="${CI_FAILURES_FORGE:-}"
-target="${1:-}"
-raw_dir=''
-want_all=false
-
-case "$target" in
-    -h|--help)
-        # The usage block above, minus the shebang and the marker.
-        awk 'NR <= 2 { next }
-             /^#/ { sub(/^#[[:space:]]?/, ""); print; next }
-             { exit }' "$0"
-        exit 0
-        ;;
-esac
-
-shift || true
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --raw)
-            [ "$#" -ge 2 ] || { printf 'ci-failures: --raw needs a directory\n' >&2; exit 64; }
-            raw_dir="$2"
-            shift 2
-            ;;
-        --raw=*) raw_dir="${1#--raw=}"; shift ;;
-        --all) want_all=true; shift ;;
-        *) printf 'ci-failures: unknown option: %s\n' "$1" >&2; exit 64 ;;
-    esac
-done
-
-command -v rjq >/dev/null 2>&1 || {
-    printf 'ci-failures: rjq is required (run ./bootstrap.sh, or see the release page for T70)\n' >&2
-    exit 69
-}
-
-# ESC as a literal byte. `\x1b` is a GNU sed extension and this repository
-# targets a BSD userland too, so the pattern carries the character itself.
-esc="$(printf '\033')"
-
-# The patterns worth printing, learned from the failures this repository
-# actually produces. `panicked at` pulls the four lines after it, because a
-# Rust panic's message and this repo's added diagnostics -- the last screen
-# rows, the wrapper's stderr, the last connect error -- are on the lines below
-# the location.
-extract() {
-    awk -v esc="$esc" '
-        { gsub(esc "\\[[0-9;]*[a-zA-Z]", ""); sub(/\r$/, "") }
-        # Drop the leading ISO timestamp GitHub prefixes to every line; a
-        # no-op on a GitLab trace, which carries none.
-        { line = $0; sub(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z[[:space:]]?/, "", line) }
-        # A failing test row is followed by its own findings, indented deeper
-        # than the row. Continuing on indentation rather than on a line count
-        # is what keeps the next test PASS row out of the extract: a fixed
-        # window pulled in three of them.
-        detail && line ~ /^[[:space:]][[:space:]][[:space:]][[:space:]]/ { print "    " line; next }
-        detail { detail = 0 }
-        after > 0 { print "    " line; after--; next }
-        line ~ /panicked at/ { print "    " line; after = 4; next }
-        line ~ /^[[:space:]]*Failed:/ { print "    " line; next }
-        line ~ /Total ran:/ { print "    " line; next }
-        line ~ /test result: FAILED/ { print "    " line; next }
-        line ~ /##\[error\]/ { print "    " line; next }
-        # `run-tests.sh` prints "  <name>    FAIL (exit 1)" and then the test
-        # own findings, indented, on the lines below. The space before the
-        # paren is why a `FAIL[:(]` pattern missed the whole class -- caught by
-        # this script failing to explain a ratchet failure it was pointed at.
-        line ~ /FAIL[[:space:]]*[:(]/ { print "    " line; detail = 1; next }
-        line ~ /^[[:space:]]*(FAIL|portability):/ { print "    " line; next }
-        line ~ /^error(\[|:)/ { print "    " line; next }
-        line ~ /timed out waiting/ { print "    " line; after = 2; next }
-    '
-}
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Forge detection: the remote decides, an explicit override is honoured
-# outright, and either way the choice is named -- never silent.
+# Compiled-binary preference
 # ─────────────────────────────────────────────────────────────────────────────
-detect_forge() {
-    if [ -n "$forge_override" ]; then
-        case "$forge_override" in
-            gh|glab) printf '%s\n' "$forge_override"; return ;;
-            *) printf 'ci-failures: CI_FAILURES_FORGE must be gh or glab, not %s\n' "$forge_override" >&2
-               exit 64 ;;
-        esac
-    fi
-    local url
-    url="$(git remote get-url origin 2>/dev/null || true)"
-    case "$url" in
-        *github.com*) printf 'gh\n'; return ;;
-        *gitlab.com*) printf 'glab\n'; return ;;
-    esac
-    # A self-hosted forge names neither host, so the guess falls back to
-    # whichever CLI is present and already speaks for this remote -- gh first
-    # only because it was written first, not because it is preferred.
-    if command -v gh >/dev/null 2>&1 && gh repo view >/dev/null 2>&1; then
-        printf 'gh\n'
-        return
-    fi
-    if command -v glab >/dev/null 2>&1 && glab repo view >/dev/null 2>&1; then
-        printf 'glab\n'
-        return
-    fi
-    printf 'ci-failures: could not tell which forge %s is; set CI_FAILURES_FORGE=gh or glab\n' \
-        "${url:-this remote}" >&2
-    exit 66
-}
-
-# ═════════════════════════════════════════════════════════════════════════════
-# GitHub, via gh
-# ═════════════════════════════════════════════════════════════════════════════
-# Resolve the target to a run id.
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. This script takes no --plan-dir and does not
+# hoist one, so there is no hoist ordering to preserve; placed immediately
+# after both anchor lines above. ci-failures/ is a top-level skill directory,
+# not under planning/, so the relative path to plan-core-lib.sh crosses two
+# directory levels up from ci-failures/scripts.
 #
-# The order matters. A bare number is ambiguous -- run ids and PR numbers are
-# both integers -- and the disambiguation is by MAGNITUDE, which is a
-# heuristic and therefore stated out loud rather than hidden: a GitHub Actions
-# run id is a 10+ digit snowflake, a PR number in this repository is two or
-# three digits. `pr/47` says which is meant when that guess is not good
-# enough.
-gh_resolve_run() { # <repo-slug> <target> -> run id
-    local repo_slug="$1" want="$2" branch head_branch
-    case "$want" in
-        pr/*)
-            head_branch="$(gh pr view "${want#pr/}" --repo "$repo_slug" \
-                --json headRefName | rjq -r .headRefName)" \
-                || { printf 'ci-failures: no PR %s\n' "${want#pr/}" >&2; exit 66; }
-            gh_latest_run_for "$repo_slug" "$head_branch"
-            return
-            ;;
-        '')
-            branch="$(git symbolic-ref --short -q HEAD || true)"
-            [ -n "$branch" ] || { printf 'ci-failures: detached HEAD; name a run, PR or branch\n' >&2; exit 64; }
-            gh_latest_run_for "$repo_slug" "$branch"
-            return
-            ;;
-    esac
-    case "$want" in
-        *[!0-9]*)
-            gh_latest_run_for "$repo_slug" "$want"
-            return
-            ;;
-    esac
-    if [ "${#want}" -ge 9 ]; then
-        printf '%s\n' "$want"
-        return
+# planning is a SOFT dependency here, not a hard one: ci-failures must work
+# when installed on its own, with no other skill present (confirmed broken
+# this way -- an installed-alone ci-failures previously crashed at this exact
+# `source` with a raw "No such file or directory", since a per-skill install
+# never copies another skill's directory in). Guard the source on the file
+# actually existing, the same shape every other repo-root caller of
+# plan-core-lib.sh already uses (verify-both-shells.sh, pre-push-check.sh,
+# etc.) for the fresh-checkout case; here the reason is a fresh INSTALL
+# instead, but the fix is identical. When planning is not present, resolve
+# the compiled binary with the same two highest-priority checks
+# plan_bin_dir() itself uses (AI_SKILLS_BIN_ROOT, then the shared per-user
+# install location) duplicated inline -- intentionally NOT the dev-tree
+# bin/<triple> walk-up, which only matters for a checkout, not an install,
+# and is not worth vendoring a second copy of. This keeps ci-failures fully
+# functional standalone; if planning also happens to be installed, its own
+# (fuller) resolution runs instead and wins.
+cif_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$cif_script_dir/../../planning/scripts/plan-core-lib.sh" ]; then
+    source "$cif_script_dir/../../planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present ci-failures "$cif_script_dir" "$@"
+else
+    cif_bin_dir="${AI_SKILLS_BIN_ROOT:-}"
+    [ -n "$cif_bin_dir" ] && [ -d "$cif_bin_dir" ] || cif_bin_dir="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin"
+    if [ -x "$cif_bin_dir/ci-failures" ]; then
+        exec "$cif_bin_dir/ci-failures" "$@"
     fi
-    head_branch="$(gh pr view "$want" --repo "$repo_slug" \
-        --json headRefName | rjq -r .headRefName)" \
-        || { printf 'ci-failures: %s is neither a run id nor a PR\n' "$want" >&2; exit 66; }
-    gh_latest_run_for "$repo_slug" "$head_branch"
-}
+    unset cif_bin_dir
+fi
+unset cif_script_dir
 
-# The newest run for a branch, ignoring the artifact-render workflow: it is
-# almost always green and never the reason a check suite is red.
-gh_latest_run_for() { # <repo-slug> <branch> -> run id
-    local repo_slug="$1" branch="$2" id
-    id="$(gh run list --repo "$repo_slug" --branch "$branch" --limit 20 \
-        --json databaseId,name \
-        | rjq -r '[.[] | select(.name != "render-artifacts")][0].databaseId')"
-    [ -n "$id" ] && [ "$id" != null ] \
-        || { printf 'ci-failures: no runs for branch %s\n' "$branch" >&2; exit 66; }
-    printf '%s\n' "$id"
-}
-
-# One gh job's section: header, then the failure-identifying lines extract()
-# finds in its log (or the whole de-escaped log too, under --raw).
-gh_print_job() { # <repo-slug> <raw-dir> <job-id> <job-conclusion> <job-name>
-    local repo_slug="$1" raw_dir="$2" job_id="$3" job_conclusion="$4" job_name="$5" log found
-    printf '\n== %s  [%s]  job %s\n' "$job_name" "$job_conclusion" "$job_id"
-    # --allow-escape-sequences is required: gh refuses a body carrying
-    # terminal colour codes, and every CI log carries them. Without it this
-    # prints nothing at all and the run looks empty.
-    log="$(gh api --allow-escape-sequences \
-        "repos/$repo_slug/actions/jobs/$job_id/logs" 2>/dev/null || true)"
-    if [ -z "$log" ]; then
-        printf '    (no log; a job that never started has none)\n'
-        return
-    fi
-    if [ -n "$raw_dir" ]; then
-        printf '%s\n' "$log" | sed -e "s/${esc}\[[0-9;]*[a-zA-Z]//g" -e 's/\r$//' \
-            > "$raw_dir/$job_id.log"
-        printf '    raw: %s/%s.log\n' "$raw_dir" "$job_id"
-    fi
-    found="$(printf '%s\n' "$log" | extract)"
-    if [ -n "$found" ]; then
-        printf '%s\n' "$found"
-    else
-        printf '    (nothing matched the failure patterns; read the raw log)\n'
-    fi
-}
-
-run_gh() {
-    command -v gh >/dev/null 2>&1 || { printf 'ci-failures: gh is required\n' >&2; exit 69; }
-    local repo_slug="${repo_override:-tschallacka/ai-skills}"
-    local run_id status conclusion jobs
-
-    run_id="$(gh_resolve_run "$repo_slug" "$target")"
-    status="$(gh run view "$run_id" --repo "$repo_slug" --json status | rjq -r .status)"
-    conclusion="$(gh run view "$run_id" --repo "$repo_slug" --json conclusion \
-        | rjq -r '.conclusion // "pending"')"
-    printf 'forge: gh\nrun %s  %s/%s  https://github.com/%s/actions/runs/%s\n' \
-        "$run_id" "$status" "$conclusion" "$repo_slug" "$run_id"
-
-    # A job whose conclusion is empty is still running; `select(.conclusion ==
-    # "failure")` therefore reports only settled failures, which is what "what
-    # failed" means. --all keeps every job so a run can be surveyed.
-    if [ "$want_all" = true ]; then
-        jobs="$(gh run view "$run_id" --repo "$repo_slug" --json jobs \
-            | rjq -r '.jobs[] | (.databaseId|tostring) + "\t" + (.conclusion // "running") + "\t" + .name')"
-    else
-        jobs="$(gh run view "$run_id" --repo "$repo_slug" --json jobs \
-            | rjq -r '.jobs[] | select(.conclusion == "failure") | (.databaseId|tostring) + "\tfailure\t" + .name')"
-    fi
-
-    if [ -z "$jobs" ]; then
-        if [ "$conclusion" = failure ]; then
-            printf '\nno job reports failure yet, though the run does: it may still be settling,\n'
-            printf 'or the failure is at the workflow level (a cancelled or skipped required job).\n'
-            printf 'Re-run with --all to see every job.\n'
-            return 0
-        fi
-        printf '\nno failing jobs.\n'
-        return 0
-    fi
-
-    [ -z "$raw_dir" ] || mkdir -p "$raw_dir"
-    printf '%s\n' "$jobs" | while IFS="$(printf '\t')" read -r job_id job_conclusion job_name; do
-        [ -n "$job_id" ] || continue
-        gh_print_job "$repo_slug" "$raw_dir" "$job_id" "$job_conclusion" "$job_name"
-    done
-}
-
-forge="$(detect_forge)"
-case "$forge" in
-    gh) run_gh ;;
-    glab) run_glab ;;
-esac
+printf '%s: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it, or install the planning skill alongside ci-failures\n' "${0##*/}" >&2
+exit 69

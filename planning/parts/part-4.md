@@ -301,13 +301,10 @@ adversarial review plus complete plan validation; a design review is not a
 runtime installation.
 
 After approval, install with the repository installer's explicit planning
-target command and the exact manifest: `bash install.sh --install-skill
-planning --target TARGET --approval yes`. Before that boundary, use
-`--print-skill-files planning --format=tsv` and
-`--resolve-source planning RELATIVE_PATH` only for inspection. Declined
-
-<!-- SKILL-LOAD-PROOF part=part-4 token=dab0e0a71faab7f7 -->
-
+target command and the exact manifest: `installer install-skill planning
+--target TARGET --approval yes`. Before that boundary, use
+`installer print-skill-files planning` and
+`installer resolve-source planning RELATIVE_PATH` only for inspection. Declined
 approval and destination collisions fail before copy or backup; preserve the
 target, record the failure, resolve the collision or approval decision, and
 resume the same manifest rather than installing a partial package.
@@ -343,6 +340,9 @@ marker is a separate file rather than a key in `.env` or a status line in
 manifest whose key allow-list rejects an unknown key and whose schema check
 demands the current version, and the `- Status:` field is already owned by the
 review-status gate, which permits only `💤 pending` and `✅ approved`. A file is
+
+<!-- SKILL-LOAD-PROOF part=part-4 token=2c51bf581dc0df91 -->
+
 also visible in a directory listing, which is where somebody about to resume the
 wrong plan is looking.
 

@@ -1,7 +1,26 @@
 # MODE: PROD
 # The native artifact is built by the Nix flake. Other platforms use the same
 # Rust sources and the TCP transport fallback; release builds are added by CI.
+#
+# T70/AR-30: this registry declared only the one target a developer's own
+# Nix flake builds locally, while installer/src/50-manifest.sh's
+# skill_files() already ships all five (built by ci.yml's own matrix job,
+# same as every other cross-compiled skill) -- an ordinary bookkeeping gap,
+# not a design decision; the four rows below just declare what already
+# ships.
 target	condition	binary	why
 x86_64-unknown-linux-musl	Linux:x86_64|amd64	ai-text-editor-server	Editor server for Linux x86_64
 x86_64-unknown-linux-musl	Linux:x86_64|amd64	ai-text-editor	Short-lived editor client for Linux x86_64
 x86_64-unknown-linux-musl	Linux:x86_64|amd64	ai-text-editor-mcp	Optional MCP bridge for Linux x86_64
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	ai-text-editor-server	Editor server for Linux aarch64
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	ai-text-editor	Short-lived editor client for Linux aarch64
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	ai-text-editor-mcp	Optional MCP bridge for Linux aarch64
+x86_64-apple-darwin	Darwin:x86_64	ai-text-editor-server	Editor server for Intel macOS
+x86_64-apple-darwin	Darwin:x86_64	ai-text-editor	Short-lived editor client for Intel macOS
+x86_64-apple-darwin	Darwin:x86_64	ai-text-editor-mcp	Optional MCP bridge for Intel macOS
+aarch64-apple-darwin	Darwin:arm64	ai-text-editor-server	Editor server for Apple Silicon macOS
+aarch64-apple-darwin	Darwin:arm64	ai-text-editor	Short-lived editor client for Apple Silicon macOS
+aarch64-apple-darwin	Darwin:arm64	ai-text-editor-mcp	Optional MCP bridge for Apple Silicon macOS
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	ai-text-editor-server.exe	Editor server for 64-bit Windows (loopback TCP transport)
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	ai-text-editor.exe	Short-lived editor client for 64-bit Windows
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	ai-text-editor-mcp.exe	Optional MCP bridge for 64-bit Windows

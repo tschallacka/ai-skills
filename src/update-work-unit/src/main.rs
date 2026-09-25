@@ -1,8 +1,10 @@
 // MODE: DEV
 // PACKAGE: PROD
 use planning_core::{atomic_write, git_snapshot, require_safe_value};
+use planning_document::replace_paragraph;
 use planning_inventory::{find, is_unit_id, update_row};
-use planning_progress::{step_objective, table_cell};
+use planning_progress::step_objective;
+use planning_table::table_cell;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -46,29 +48,6 @@ fn replace_line(content: &str, prefix: &str, replacement: &str) -> String {
             output.push_str(body);
         }
         output.push_str(newline);
-    }
-    output
-}
-
-fn replace_paragraph(content: &str, paragraph: &str, value: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let Some(start) = lines.iter().position(|line| *line == paragraph) else {
-        return content.to_string();
-    };
-    let mut end = start + 1;
-    while end < lines.len()
-        && !lines[end].is_empty()
-        && !lines[end].starts_with('§')
-        && !lines[end].starts_with("## ")
-    {
-        end += 1;
-    }
-    let mut result: Vec<String> = lines[..=start].iter().map(|line| (*line).into()).collect();
-    result.push(value.into());
-    result.extend(lines[end..].iter().map(|line| (*line).into()));
-    let mut output = result.join("\n");
-    if content.ends_with('\n') {
-        output.push('\n');
     }
     output
 }
@@ -446,7 +425,7 @@ fn main() {
     }
     if let Some(value) = updates.get("description") {
         if !value.is_empty() {
-            step = replace_paragraph(&step, "§ 4.1", value);
+            step = replace_paragraph(&step, "§ 4.1", value).unwrap_or_else(|error| die(error, 65));
         }
     }
     atomic_write(&step_file, step.as_bytes()).unwrap_or_else(|error| die(error, 73));

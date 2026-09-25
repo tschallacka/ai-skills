@@ -92,8 +92,23 @@ fn usage(code: i32) -> ! {
     std::process::exit(code);
 }
 fn locate_script_dir() -> PathBuf {
-    env::var_os("PLANNING_SKILL_ROOT")
-        .map(|path| PathBuf::from(path).join("scripts"))
+    // PLANNING_SKILL_ROOT is the directory that CONTAINS `planning/scripts` (the
+    // wrapper exports it that way, and an empty value means it found none), so
+    // the scripts directory is `<root>/planning/scripts`; a root that carries
+    // `scripts/` directly is still honoured.
+    script_dir_for(env::var_os("PLANNING_SKILL_ROOT").map(PathBuf::from))
+}
+fn script_dir_for(skill_root: Option<PathBuf>) -> PathBuf {
+    skill_root
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(|root| {
+            let nested = root.join("planning/scripts");
+            if nested.is_dir() {
+                nested
+            } else {
+                root.join("scripts")
+            }
+        })
         .unwrap_or_else(|| {
             env::current_dir()
                 .unwrap_or_default()
@@ -184,8 +199,20 @@ fn inventory_unit_ids(path: &Path) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::copy_tree;
+    use super::{copy_tree, script_dir_for};
     use std::fs;
+
+    #[test]
+    fn the_skill_root_is_the_parent_of_planning_scripts() {
+        let root =
+            std::env::temp_dir().join(format!("adversary-probe-root-{}", std::process::id()));
+        fs::create_dir_all(root.join("planning/scripts")).unwrap();
+        assert_eq!(
+            script_dir_for(Some(root.clone())),
+            root.join("planning/scripts")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn copies_dotfiles_and_nested_fixture_content() {

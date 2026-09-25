@@ -5,7 +5,12 @@
 # snapshots that record the migration itself, not call sites that execute jq.
 # .npmignore is a generated inventory of paths; a fixture step file named
 # 02-step-remove-jq-renderer.md puts the word in the list without any code
-# calling jq.
+# calling jq. src/installer/src/requirements.rs is the one place a real jq
+# reference is intentional and permanent, not a migration leftover: rjq is a
+# jq-compatible reimplementation, so runtime_tool_verify() falls back to a
+# system jq only once a bundled and a PATH rjq have both come up empty, and
+# a_missing_rjq_falls_back_to_a_system_jq is the test proving that fallback
+# actually works.
 set -euo pipefail
 export LC_ALL=C
 
@@ -18,6 +23,7 @@ offenders="$(git -C "$repo_root" grep -n -w jq -- \
     ':!BUGS.json' ':!TODO.json' ':!*.archive.json' ':!*.back.json' \
     ':!benchmark/results/**' \
     ':!tests/test-rjq-active-references.sh' ':!src/rjq/tests/differential.rs' \
+    ':!src/installer/src/requirements.rs' \
     ':!planning/bin/**' ':!ai-text-editor/bin/**' ':!planning/tests/fixtures/**' ':!.npmignore' || true)"
 offenders="$(printf '%s\n' "$offenders" | awk -F: '
     # B154: a comment is prose wherever it sits, not only at column zero.

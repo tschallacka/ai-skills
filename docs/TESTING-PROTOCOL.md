@@ -143,12 +143,19 @@ subworker run is evidence of agent operation, but it predates the stricter
 file-pane navigation and internal-editor requirements; it should not be
 treated as a complete result for this revised protocol.
 
-For a resource-capped fixture validation run, use the repository's test wrapper:
+For a resource-capped fixture validation run, use the repository's test wrapper.
+(T145 goal 25: the bash fixture this once drove directly,
+`interactive-shell/tests/test-interactive-shell-exploration.sh`, was migrated
+into `src/interactive-shell/tests/pty_orchestration.rs`'s own
+`observation_driven_exploration_across_nano_mc_and_less` test -- a scripted,
+fixed-keystroke replay proving the wrapper itself works, which the
+agent-driven evaluation below still assumes as its own precondition.)
 
 ```sh
 nix develop .#default --command \
   resource-limited-testing/scripts/limited-run.sh 6G 400 -- \
-  tests/test-interactive-shell-exploration.sh
+  cargo test -p interactive-shell --test pty_orchestration \
+  observation_driven_exploration_across_nano_mc_and_less
 ```
 
 The fixture starts each application through `interactive-shell`, waits for
@@ -213,9 +220,6 @@ nix develop .#default --command cargo clippy --all-targets --locked \
   --manifest-path src/interactive-shell/Cargo.toml -- -D warnings
 cargo fmt --all --manifest-path src/interactive-shell/Cargo.toml -- --check
 git diff --check
-bash -n tests/test-interactive-shell-exploration.sh
-nix develop .#default --command shellcheck -s bash --severity=error \
-  tests/test-interactive-shell-exploration.sh
 ```
 
 The test's temporary directory is removed by its cleanup trap. If a run is

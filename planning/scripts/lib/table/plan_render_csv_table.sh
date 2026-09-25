@@ -11,7 +11,12 @@ plan_render_csv_table() {
     # message actionable.
     plan_csv_diag="$(mktemp "${TMPDIR:-/tmp}/plan-table-diag.XXXXXX")"
     trap 'rm -f "$csv_file" "$plan_csv_diag"' RETURN
-    plan_decode_escaped_newlines "$csv" > "$csv_file"
+    # A carriage return is turned into a control character (SOH) on the way to
+    # awk, and awk looks for that. Reading the CR through awk itself was not
+    # reliable: Git for Windows' gawk treats CR as part of the line ending on
+    # text input, so a CRLF file was accepted as clean instead of refused.
+    # tr moves bytes and nothing else, so the answer is the same everywhere.
+    plan_decode_escaped_newlines "$csv" | tr '\r' '\001' > "$csv_file"
     awk -v diag="$plan_csv_diag" -v expected="$columns" "$(plan_render_csv_table_awk)" "$csv_file" || csv_status=$?
     if [ "${csv_status:-0}" -ne 0 ]; then
         plan_csv_where="$(cat "$plan_csv_diag" 2>/dev/null || true)"

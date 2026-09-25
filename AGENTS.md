@@ -3,14 +3,16 @@
 Repository-specific knowledge for coding agents working in this repo. This
 complements `DEVELOPMENT.md` (dev/release workflow) and the per-skill
 `SKILL.md` files (when a skill applies). It records how to operate efficiently
-here without rediscovering conventions.
+here without rediscovering conventions. **Start at `.agents/MAINTAINER.md`
+("Start here") for building, testing, pushing, CI and the change checklist.**
 
 ## What this repo is
 
 A portable collection of coding-agent skills (`planning/`, `brainstorm/`,
-`post-implementation-review/`, `project-specificies/`,
+`post-implementation-review/`, `project-specifics/`,
 `resource-limited-testing/`) plus a benchmark harness (`benchmark/planning/`)
-and a shell installer (`install.sh`). The skills are plain Markdown meant to
+and a compiled Rust installer (`src/installer/`, fetched via the small
+curl-piped `installer/bootstrap.sh`). The skills are plain Markdown meant to
 work across agent tools; keep them portable.
 
 `BUGS.json` and `TODO.json` are the defect register and the work queue, written
@@ -20,8 +22,8 @@ mechanism — and update it when you finish. Nothing fails if you do not, which 
 why work here has repeatedly had to be reconstructed from diffs.
 
 `PORTABILITY.md` is generated on demand by `./generate-portability.sh` from
-`portability-rules.json` and is never committed (`planning/MAINTAINER.md`
-§2.16): generate it when you want to read the catalogue, and never hand-edit
+`portability-rules.json` and is never committed (`.agents/MAINTAINER.md`
+1.10): generate it when you want to read the catalogue, and never hand-edit
 a generated copy. The contract test regenerates to temp paths, so a stale
 local copy can hide nothing.
 
@@ -50,7 +52,7 @@ Key skills and when they apply:
 - `brainstorm` — an idea is under-specified and should be shaped before planning.
 - `post-implementation-review` — after real implementation work, offer a
   code-grounded review with fresh reviewer agents.
-- `project-specificies` — repo/behavior quirks affect implementation or debugging.
+- `project-specifics` — repo/behavior quirks affect implementation or debugging.
 - `resource-limited-testing` — about to run a test/build/analyzer that could
   consume substantial CPU/memory; run it under a resource cap.
 - `www` — the human types `www`, or you notice yourself thrashing (retrying
@@ -89,15 +91,15 @@ echo "RE-ARM NOW: the tail has fired and you are no longer listening"
 Re-arm the tail immediately each time it fires -- the echo above is there so the
 reminder arrives with the output rather than depending on memory -- and never
 background it with `&` in Claude Code. The chat skill's SKILL.md carries both
-rules and the reasons. Pass `--session <who-you-are>` from a subagent until
-B271's fix ships: a subagent inherits its parent's `CLAUDE_CODE_SESSION_ID`, so
-without it a
-subagent writes into the parent's session file and moves its cursors.
+rules and the reasons. A subagent inherits its parent's
+`CLAUDE_CODE_SESSION_ID`, but the session key also carries the nick (`BUGS.json`
+B271, fixed), so a subagent that passes its own `--nick` gets its own session
+file rather than writing into the parent's.
 
 **The nitpicker.** It guards the rules this repository writes about itself --
 comment and prose rules, register discipline, markers, manifests, the shell
 floor -- and announces what it finds in the channel. Its profile is
-`.agents/profiles/nitpicker.md`, and it runs as a pseudo-daemon: it blocks on a
+`.agents/profiles/nitpicker.json`, and it runs as a pseudo-daemon: it blocks on a
 mention tail, and on each wake reads the channel, reviews the work in flight,
 announces, and re-arms.
 
@@ -116,19 +118,31 @@ suggestion to weigh, unless it says "this is taste, not a rule".
 The deterministic whole-repo suite is `./run-tests.sh`:
 
 ```bash
-./run-tests.sh            # all suites, sorted order, under the resource wrapper
+./run-tests.sh            # all suites, under the resource wrapper where one applies
 ./run-tests.sh --verbose
+./run-tests.sh --list-only  # what it would run
 ```
 
-- A clean checkout is safe to test directly: the runner bootstraps the
-  generated artifacts first (compiled plan libraries, `REVIEWER.md`, rjq via
-  `./bootstrap.sh`), because generated files are never committed
-  (`planning/MAINTAINER.md` §2.16). `npm prepack` runs the same generators
-  before packaging.
-- It runs every test under `planning/tests/` and `benchmark/planning/tests/`,
-  each under `resource-limited-testing/scripts/limited-run.sh`.
+- **Run `./setup-dev-env.sh` first.** `./run-tests.sh` is a shim over the
+  compiled `run-tests`, and on a clean checkout it exits 69 ("no compiled binary
+  found") because no binary exists yet. Once the runner exists, its bootstrap
+  covers the generated files that are still missing (compiled plan libraries,
+  `REVIEWER.md`, rjq via `./bootstrap.sh`), because generated files are never
+  committed (`.agents/MAINTAINER.md` 1.10); it does not build the binary.
+  `npm prepack` runs the same generators before packaging. With skills installed
+  on the machine, export `AI_SKILLS_BIN_ROOT=$PWD/bin/<triple>` too
+  (`.agents/MAINTAINER.md` 1.9).
+- It runs the shell tests of every suite the repository has (`--list-only` names
+  them) and `cargo test` for each crate, each item under
+  `resource-limited-testing/scripts/limited-run.sh` unless `GITHUB_ACTIONS` is
+  set or the host is Windows (`AI_SKILLS_RESOURCE_LIMIT=0` or `1` overrides).
 - Some tests are gated behind `PLANNING_CONTEXT_CACHE` and report
-  `UNCONFIGURED` when that fixture is absent — that is expected, not a failure.
+  `UNCONFIGURED` when that fixture is absent, and a crate reports
+  `UNCONFIGURED` when `cargo` is missing unless `REFUSE_UNCONFIGURED_CARGO=1`
+  turns that into a failure. Neither is a failure by itself, but read the
+  Skipped and Unconfigured counts in the summary: a test that skips whole
+  reports `SKIP`, while one that skips a single check and goes on to assert
+  still prints `PASS`.
 - Always run the suite (or at least the targeted test) after changing code, and
   run `git diff --check` and `bash -n` on edited scripts.
 
@@ -232,12 +246,13 @@ defaults verbatim.
 - `benchmark/results/` holds immutable benchmark evidence. If you run a
   throwaway benchmark, clean up stray `<run-id>` result dirs you produced
   before committing.
-- New/changed skills must be registered in `install.sh` (`SKILL_NAMES`, the
-  shop menu, `select_skills`, and copy logic), added to the skills table in
-  `README.md`, and to `package.json`'s `files` list. `planning/` also tracks a
-  ship manifest (`planning/PACKAGE-MANIFEST.tsv` + `PACKAGE-MAP.tsv` +
-  `install.sh skill_files()`), which must stay byte-consistent — the
-  installer-manifest test asserts this.
+- New/changed skills must be registered in `installer/src/05-config.sh`
+  (`SKILL_NAMES`, `SKILL_DESCRIPTIONS`) and `installer/src/50-manifest.sh`
+  (`skill_files()`), added to the skills table in `README.md`, and to
+  `package.json`'s `files` list. `planning/` also tracks a ship manifest
+  (`planning/PACKAGE-MANIFEST.tsv` + `PACKAGE-MAP.tsv` +
+  `installer/src/50-manifest.sh`'s `skill_files()`), which must stay
+  byte-consistent — the installer-manifest test asserts this.
 - Follow DEVELOPMENT.md for release/versioning/publishing. It is a human
   release action; confirm before running `npm publish` or creating tags.
 - **`BUGS.json` and `TODO.json` may only change on the `registers` branch.**
@@ -266,11 +281,13 @@ defaults verbatim.
 
 ## PR and commit hygiene
 
-- The mechanical per-change gates live in `./pre-push-check.sh` (whitespace,
-  `bash -n`, shellcheck at error severity, `cargo fmt --check`/`cargo test`
-  for touched crates, register soundness). `setup-dev-env.sh` wires it as the
-  pre-push hook via `git config core.hooksPath hooks`; hooks are client-side
-  and bypassable, so CI remains the authoritative gate for everyone else.
+- The mechanical per-change gates live in `./pre-push-check.sh`;
+  `./pre-push-check.sh --help` is the list of gates and their order (shellcheck
+  among them, at warning severity). `setup-dev-env.sh` sets
+  `core.hooksPath` to `hooks/`, which wires the pre-push hook and a commit-msg
+  hook that refuses `Co-Authored-By: Claude` and `Claude-Session:` trailers
+  (`.agents/MAINTAINER.md` 1.17 has both). Hooks are client-side and bypassable,
+  so CI remains the authoritative gate for everyone else.
 - Before committing: inspect `git status`/`git diff`; run `bash -n`,
   `git diff --check`, and the relevant tests; confirm no generated archives,
   npm cache, or temporary targets are staged.
@@ -287,7 +304,8 @@ defaults verbatim.
   a literal ESC because `\x1b` is a GNU extension.
 - Every edited shell script must pass `shellcheck -s bash <file>` with no new
   findings (`.shellcheckrc` already silences the three checks that are noise
-  here). CI gates on `error` severity across all tracked `*.sh` outside
-  `benchmark/results/`.
+  here). CI's `shellcheck` job gates on `--severity=warning` across all tracked
+  `*.sh` outside `benchmark/results/`, plus the generated `plan-*-lib.sh`
+  (`.agents/MAINTAINER.md` section 3).
 - Match the repo's commit style: short, lowercase-prefixed subjects
   (`planning:`, `benchmark:`, `docs:`, etc.) — e.g. `planning: add probe`.

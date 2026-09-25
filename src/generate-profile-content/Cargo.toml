@@ -1,0 +1,16 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "generate-profile-content"
+version = "0.1.0"
+edition = "2021"
+description = "Regenerates .agents/profiles/*.json instructions content from role-context"
+license = "MIT"
+
+[[bin]]
+name = "generate-profile-content"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

@@ -2,23 +2,166 @@
 // PACKAGE: PROD
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::ffi::CString;
-use std::ffi::OsStr;
 use std::fs;
-use std::fs::File;
 use std::io::{self, Read, Write};
-use std::net::Shutdown;
-use std::os::fd::AsRawFd;
-use std::os::fd::RawFd;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::net::{Shutdown, TcpStream};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+mod tcp;
+
+#[cfg(unix)]
+mod posix;
+#[cfg(unix)]
+use posix::install_interrupt_handler;
+#[cfg(unix)]
+type PlatformBackend = posix::PosixBackend;
+#[cfg(unix)]
+type PlatformListener = posix::PosixListener;
+
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows::install_interrupt_handler;
+#[cfg(windows)]
+type PlatformBackend = windows::WindowsBackend;
+#[cfg(windows)]
+type PlatformListener = tcp::TcpTransportListener;
+
 const MAX_LINE: usize = 65_536;
-static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+pub(crate) static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// A platform's PTY/process backend: spawn a child behind a real
+/// pseudoterminal, then write/resize/read/stop it and detect its exit.
+/// `posix.rs` provides `PosixBackend` (openpty/fork/exec + `libc::kill`);
+/// goal 2 provides a `windows.rs` implementation (ConPTY + a Job Object).
+/// `client()`/`run()` call only through this trait -- never a platform
+/// function by name -- so the same shared dispatch loop serves both.
+trait Backend: Sized {
+    fn spawn(command: &[String], cols: u16, rows: u16) -> Result<Self, String>;
+    fn write(&mut self, bytes: &[u8]) -> Result<(), String>;
+    fn resize(&mut self, cols: u16, rows: u16) -> Result<(), String>;
+    /// Best-effort: escalates SIGTERM to SIGKILL (or the platform's
+    /// equivalent) and reaps the child. Never fails outwardly, matching the
+    /// original free function's own infallible contract.
+    fn stop(&mut self);
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize>;
+    /// Named after `std::process::Child::try_wait`: `Ok(None)` while the
+    /// child is still alive, `Ok(Some(exit_code))` once reaped.
+    fn try_wait(&mut self) -> io::Result<Option<i32>>;
+}
+
+/// The stream type `client()` speaks JSONL over: a Unix-domain `UnixStream`
+/// on `cfg(unix)`, a loopback `TcpStream` on `cfg(windows)` (goal 3). Only
+/// `set_read_timeout`/`shutdown` need a trait at all -- both are already
+/// inherent, identically-shaped methods on both concrete types; `Read`/
+/// `Write` are already implemented for both by std.
+trait Transport: Read + Write {
+    fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()>;
+    fn shutdown(&self, how: Shutdown) -> io::Result<()>;
+}
+
+/// A platform's connection listener for `run()`'s shared accept loop:
+/// `bind()` takes the SAME `socket: &Path` `run()` already receives (from
+/// `session_socket()`, per AR-06/AR-19 unedited) and each platform
+/// reinterprets it -- Unix as the literal socket path, Windows as a
+/// discovery-file location holding an ephemeral port + nonce (goal 3).
+/// `accept()` is non-blocking: `Ok(None)` means no connection is waiting yet.
+trait Listener: Sized {
+    type Stream: Transport;
+    fn bind(socket: &Path) -> Result<Self, String>;
+    fn accept(&self) -> io::Result<Option<Self::Stream>>;
+}
+
+/// The stream `bin/interactive-shell-input.rs` gets back from
+/// `connect_in_directory`: whichever transport a session at `socket` turns
+/// out to be, decided at runtime by `connect_in_directory` itself, not by
+/// platform (Unix defaults to `Unix`, but an explicit `--tcp` session there
+/// connects over `Tcp` exactly like Windows always does). Exposes
+/// `shutdown`/`set_read_timeout` as INHERENT methods -- exactly like the
+/// concrete `UnixStream`/`TcpStream` this replaces -- so the calling binary
+/// needs no `Transport` trait import to use them (AR-06/AR-19's original
+/// reason for returning a concrete type still applies; this enum is the
+/// concrete type now, on every platform).
+pub enum ClientStream {
+    #[cfg(unix)]
+    Unix(UnixStream),
+    Tcp(TcpStream),
+}
+
+impl ClientStream {
+    pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(stream) => stream.shutdown(how),
+            Self::Tcp(stream) => stream.shutdown(how),
+        }
+    }
+
+    pub fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(stream) => stream.set_read_timeout(dur),
+            Self::Tcp(stream) => stream.set_read_timeout(dur),
+        }
+    }
+}
+
+impl Read for ClientStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(stream) => stream.read(buf),
+            Self::Tcp(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl Write for ClientStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(stream) => stream.write(buf),
+            Self::Tcp(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(stream) => stream.flush(),
+            Self::Tcp(stream) => stream.flush(),
+        }
+    }
+}
+
+/// Connects to whatever is actually running at `socket`. A `--tcp` session
+/// left a small discovery file there (port + nonce, the same shape a
+/// Windows `bind()` always writes); a default Unix session left a real
+/// Unix-domain socket special file. Tried in that order: `tcp::parse_discovery`
+/// fails fast and cheaply on a real socket special file (a local read that
+/// either parses or does not, never a costly wrong guess), and once it DOES
+/// parse, a dial failure is reported as-is rather than falling through to a
+/// Unix-connect attempt against a path that is a text file, not a socket.
+pub fn connect_in_directory(socket: &Path) -> Result<ClientStream, String> {
+    if let Some((port, nonce)) = tcp::parse_discovery(socket) {
+        return tcp::dial(port, &nonce).map(ClientStream::Tcp);
+    }
+    #[cfg(unix)]
+    {
+        posix::connect_in_directory(socket).map(ClientStream::Unix)
+    }
+    #[cfg(not(unix))]
+    Err(format!(
+        "no discovery file at {}: expected the port+nonce file a --tcp session writes",
+        socket.display()
+    ))
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Session {
@@ -29,6 +172,12 @@ pub struct Session {
     pub command: Vec<String>,
     #[serde(default)]
     pub agent: String,
+    /// Whether this session's server was (or should be, on a later restart)
+    /// bound with `--tcp` rather than the platform default. `#[serde(default)]`
+    /// so an old session file with no such field loads as `false`, the
+    /// behavior it always had.
+    #[serde(default)]
+    pub use_tcp: bool,
 }
 
 fn session_root() -> PathBuf {
@@ -78,19 +227,34 @@ pub fn load_session(id: &str) -> Result<Option<Session>, String> {
         .map_err(|error| format!("session file {} is malformed: {error}", path.display()))
 }
 
+/// Restrict `path` to the owning user only: `mode` on Unix (via
+/// `PermissionsExt`, since `std::fs::Permissions` carries no mode bits of its
+/// own on any other platform). A no-op on Windows -- this achieves Windows
+/// COMPILABILITY, not Windows-equivalent file-permission hardening; a
+/// Windows-ACL equivalent is a separate concern this crate does not attempt
+/// (per T84's own scope).
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path, mode: u32) -> Result<(), String> {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|error| error.to_string())
+}
+#[cfg(windows)]
+fn restrict_to_owner(_path: &Path, _mode: u32) -> Result<(), String> {
+    Ok(())
+}
+
 pub fn save_session(id: &str, session: &Session) -> Result<(), String> {
     let path = session_path(id)?;
     let parent = path.parent().ok_or("session path has no parent")?;
     let root = parent.parent().ok_or("session path has no root")?;
     fs::create_dir_all(root).map_err(|error| format!("create session root: {error}"))?;
-    fs::set_permissions(root, fs::Permissions::from_mode(0o700))
+    restrict_to_owner(root, 0o700)
         .map_err(|error| format!("set session root permissions: {error}"))?;
     fs::create_dir_all(parent).map_err(|error| format!("create session directory: {error}"))?;
-    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+    restrict_to_owner(parent, 0o700)
         .map_err(|error| format!("set session directory permissions: {error}"))?;
     let json = serde_json::to_string_pretty(session).map_err(|error| error.to_string())?;
     fs::write(&path, json).map_err(|error| format!("write session {}: {error}", path.display()))?;
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+    restrict_to_owner(&path, 0o600)
         .map_err(|error| format!("set session file permissions: {error}"))
 }
 
@@ -99,14 +263,14 @@ pub fn session_socket(id: &str) -> Result<PathBuf, String> {
     let root = session_root();
     let sockets = root.join("sockets");
     fs::create_dir_all(&sockets).map_err(|error| format!("create session socket root: {error}"))?;
-    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+    restrict_to_owner(&root, 0o700)
         .map_err(|error| format!("set session root permissions: {error}"))?;
-    fs::set_permissions(&sockets, fs::Permissions::from_mode(0o700))
+    restrict_to_owner(&sockets, 0o700)
         .map_err(|error| format!("set session socket root permissions: {error}"))?;
     let dir = sockets.join(id);
     fs::create_dir_all(&dir)
         .map_err(|error| format!("create session socket directory: {error}"))?;
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
+    restrict_to_owner(&dir, 0o700)
         .map_err(|error| format!("set session socket directory permissions: {error}"))?;
     Ok(dir.join("term.sock"))
 }
@@ -346,6 +510,8 @@ struct Screen {
     wrap_pending: bool,
     saved_cursor: Option<(usize, usize)>,
     line_drawing: bool,
+    /// The last graphic byte `put` wrote, which `CSI Ps b` (REP) repeats.
+    last_printed: Option<u8>,
     parser: Parser,
     saved_primary: Option<ScreenState>,
     active_link: Option<String>,
@@ -384,6 +550,7 @@ impl Screen {
             wrap_pending: false,
             saved_cursor: None,
             line_drawing: false,
+            last_printed: None,
             parser: Parser::Ground,
             saved_primary: None,
             active_link: None,
@@ -506,6 +673,7 @@ impl Screen {
         }
     }
     fn put(&mut self, byte: u8) {
+        self.last_printed = Some(byte);
         if self.wrap_pending {
             self.wrap_pending = false;
             self.col = 0;
@@ -701,6 +869,19 @@ impl Screen {
             }
             b'J' => self.erase_display(s),
             b'K' => self.erase_line(s),
+            // REP: repeat the preceding graphic character Ps times. ncurses
+            // uses it to compress runs (`> canary ESC[6b5% of ...` for the
+            // seven spaces inside a reverse-video row); ignoring it dropped
+            // the run and left the row's stale tail showing beneath. Bounded
+            // by the screen size so a hostile `ESC[999999999b` cannot spin.
+            b'b' if !private => {
+                if let Some(byte) = self.last_printed {
+                    let limit = self.rows.len() * self.rows[0].len();
+                    for _ in 0..n(0).min(limit) {
+                        self.put(byte);
+                    }
+                }
+            }
             b'h' if private && s == "25" => self.visible = true,
             b'l' if private && s == "25" => self.visible = false,
             b'h' if private && s == "1" => self.application_cursor = true,
@@ -1661,330 +1842,18 @@ fn json<T: Serialize>(out: &mut impl Write, value: &T) -> io::Result<()> {
     out.write_all(b"\n")?;
     out.flush()
 }
-fn valid_dir(path: &Path) -> Result<(), String> {
-    let m = fs::metadata(path).map_err(|e| e.to_string())?;
-    if !m.is_dir() || m.uid() != unsafe { libc::getuid() } || m.permissions().mode() & 0o077 != 0 {
-        return Err("socket parent must be a private directory owned by the current user".into());
-    }
-    Ok(())
-}
-struct SocketIdentity {
-    parent: File,
-    name: CString,
-    // libc's own aliases, not u64: dev_t is i32 on macOS and u64 on Linux, so
-    // hardcoding either side makes the comparison in remove_socket() a type
-    // error on the other platform.
-    device: libc::dev_t,
-    inode: libc::ino_t,
-}
-
-fn remove_socket(identity: &SocketIdentity) {
-    let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
-    let same_entry = unsafe {
-        libc::fstatat(
-            identity.parent.as_raw_fd(),
-            identity.name.as_ptr(),
-            &mut stat,
-            libc::AT_SYMLINK_NOFOLLOW,
-        ) == 0
-            && stat.st_dev == identity.device
-            && stat.st_ino == identity.inode
-    };
-    if same_entry {
-        unsafe {
-            libc::unlinkat(identity.parent.as_raw_fd(), identity.name.as_ptr(), 0);
-        }
-    }
-}
-
-/// Bind `name` inside the directory `parent_fd` holds open, by name alone.
-///
-/// WHY THROUGH THE FD AND NOT THE SOCKET'S OWN PATH. The open fd pins the
-/// directory: once it exists, nothing can substitute another directory for it,
-/// so a socket bound relative to it lands in the directory valid_dir() checked
-/// and nowhere else. Binding the absolute path re-walks every component, and a
-/// parent swapped in between would take the socket. Verifying afterwards --
-/// which capture_socket_identity() does -- only DETECTS that, once the socket
-/// already exists in the attacker's directory, which is a weaker guarantee than
-/// never creating it there.
-///
-/// WHY NOT A PATH THROUGH /proc OR /dev/fd, WHICH IS WHAT THIS REPLACED. That
-/// was `/proc/self/fd/<n>/<name>` on Linux and `/dev/fd/<n>/<name>` on macOS.
-/// The Linux form works because /proc/self/fd/<n> is a magic symlink TO THE
-/// DIRECTORY, so a trailing component traverses into it. macOS's /dev/fd is the
-/// fdesc filesystem, whose entries stand in for the OPEN FILE rather than a
-/// traversable directory entry, so `/dev/fd/<n>/<name>` does not resolve at all.
-/// The prefix was swapped and the traversal assumed to port with it; it does
-/// not, and every socket-dependent test failed on both macOS legs because of it.
-///
-/// fchdir plus a relative bind behaves identically on both, and it reduces
-/// sun_path to the length of the name -- six bytes for "socket" -- which retires
-/// macOS's 104-byte sun_path cap as a consideration permanently, rather than
-/// leaving it as headroom to be re-measured whenever the socket moves.
-///
-/// THE CWD IS PROCESS-GLOBAL, so it is held for the bind alone. The wrapper
-/// spawns no threads (grep the crate: only thread::sleep), so there is no
-/// concurrent observer inside this process, and the restore is CHECKED rather
-/// than assumed: run() execs the child immediately after this, and the child's
-/// arguments are relative to the caller's directory, not to the socket's.
-/// Run `action` with the process cwd inside the directory `dir_fd` holds.
-///
-/// The outer Result is the cwd machinery; the inner one is the action's own, so
-/// each caller words its own failure. The cwd is restored on every path before
-/// either outcome is reported, so no failure leaves the process sitting in the
-/// socket's directory.
-fn in_held_directory<T>(
-    dir_fd: &File,
-    dir: &Path,
-    what: &str,
-    action: impl FnOnce() -> io::Result<T>,
-) -> Result<io::Result<T>, String> {
-    let previous =
-        File::open(".").map_err(|e| format!("cannot hold the current directory: {e}"))?;
-    if unsafe { libc::fchdir(dir_fd.as_raw_fd()) } < 0 {
-        return Err(format!(
-            "cannot enter {} to {what}: {}",
-            dir.display(),
-            io::Error::last_os_error()
-        ));
-    }
-    let outcome = action();
-    let restored = unsafe { libc::fchdir(previous.as_raw_fd()) };
-    let restore_error = io::Error::last_os_error();
-    if restored < 0 {
-        return Err(format!(
-            "{what} in {} {}, but the previous directory could not be restored: {}",
-            dir.display(),
-            if outcome.is_ok() {
-                "succeeded"
-            } else {
-                "failed"
-            },
-            restore_error
-        ));
-    }
-    Ok(outcome)
-}
-
-fn bind_in_directory(parent_fd: &File, dir: &Path, name: &OsStr) -> Result<UnixListener, String> {
-    let bound = in_held_directory(parent_fd, dir, "bind the socket", || {
-        let old_umask = unsafe { libc::umask(0o177) };
-        let bound = UnixListener::bind(Path::new(name));
-        unsafe { libc::umask(old_umask) };
-        bound
-    })?;
-    // The directory is named even though the bind was relative: without it the
-    // message says which name failed and not where, which is the gap that made
-    // this defect take three rounds to identify.
-    bound.map_err(|e| {
-        format!(
-            "bind {} relative to {} failed: {e}",
-            Path::new(name).display(),
-            dir.display()
-        )
-    })
-}
-
-/// Connect to `socket` by name from inside its own directory.
-///
-/// The mirror of bind_in_directory, and needed for the same two reasons. The
-/// security one: connecting by absolute path re-walks every component, so a
-/// swapped parent could hand the client a different socket than the one whose
-/// directory was checked; an open fd on the directory cannot be substituted.
-///
-/// The portability one is what CI caught. macOS caps sun_path at 104 bytes and
-/// $TMPDIR there is `/var/folders/<12>/<28>/T/`, so a session socket under it
-/// overran the cap and the client failed with "path must be shorter than
-/// SUN_LEN" -- on CONNECT, after the bind side had already been moved off
-/// absolute paths. Both ends have to be relative or the shorter one just moves
-/// the failure. A bare name is six bytes and the cap stops being a
-/// consideration.
-pub fn connect_in_directory(socket: &Path) -> Result<UnixStream, String> {
-    let dir = socket.parent().ok_or("socket needs parent")?;
-    let name = socket.file_name().ok_or("socket needs a filename")?;
-    let dir_fd = File::open(dir).map_err(|e| format!("cannot open {}: {e}", dir.display()))?;
-    let connected = in_held_directory(&dir_fd, dir, "connect to the socket", || {
-        UnixStream::connect(Path::new(name))
-    })?;
-    connected.map_err(|e| {
-        format!(
-            "connect to {} relative to {} failed: {e}",
-            Path::new(name).display(),
-            dir.display()
-        )
-    })
-}
-
-fn capture_socket_identity(path: &Path, parent_fd: File) -> Result<SocketIdentity, String> {
-    let name = path.file_name().ok_or("socket needs a filename")?;
-    let name_c = CString::new(name.as_bytes()).map_err(|e| e.to_string())?;
-    let fd = parent_fd.as_raw_fd();
-    loop {
-        let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
-        let result =
-            unsafe { libc::fstatat(fd, name_c.as_ptr(), &mut stat, libc::AT_SYMLINK_NOFOLLOW) };
-        if result == 0 {
-            let mode = stat.st_mode as libc::mode_t;
-            if mode & libc::S_IFMT != libc::S_IFSOCK {
-                return Err("bound socket entry is not a socket".into());
-            }
-            return Ok(SocketIdentity {
-                parent: parent_fd,
-                name: name_c,
-                device: stat.st_dev,
-                inode: stat.st_ino,
-            });
-        }
-        let error = io::Error::last_os_error();
-        if error.kind() == io::ErrorKind::NotFound {
-            return Err("bound socket disappeared before identity capture".into());
-        }
-        std::thread::sleep(Duration::from_millis(1));
-    }
-}
-
-struct SocketGuard {
-    identity: Option<SocketIdentity>,
-}
-
-impl SocketGuard {
-    fn new() -> Self {
-        Self { identity: None }
-    }
-}
-
-impl Drop for SocketGuard {
-    fn drop(&mut self) {
-        if let Some(identity) = self.identity.as_ref() {
-            remove_socket(identity);
-        }
-    }
-}
-
-extern "C" fn interrupt_handler(_: libc::c_int) {
-    INTERRUPTED.store(true, Ordering::Relaxed);
-}
-
-struct Cleanup {
-    master: RawFd,
-    pid: libc::pid_t,
-    identity: SocketIdentity,
-    reaped: bool,
-}
-
-impl Drop for Cleanup {
-    fn drop(&mut self) {
-        if !self.reaped {
-            stop(self.pid);
-        }
-        unsafe {
-            libc::close(self.master);
-        }
-        remove_socket(&self.identity);
-    }
-}
-fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, libc::pid_t), String> {
-    let mut master = 0;
-    let mut slave = 0;
-    let mut size = libc::winsize {
-        ws_row: rows,
-        ws_col: cols,
-        ws_xpixel: 0,
-        ws_ypixel: 0,
-    };
-    let winp: *mut libc::winsize = &mut size;
-    if unsafe {
-        // Raw *mut pointers, not &mut references: macOS declares termp and
-        // winp as *mut and Linux as *const. *mut coerces to *const, so the
-        // mut form is the one shape both accept -- but passing `&mut size`
-        // directly trips clippy::unnecessary_mut_passed on Linux, where the
-        // parameter is const. Naming the pointer satisfies both.
-        libc::openpty(
-            &mut master,
-            &mut slave,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            winp,
-        )
-    } < 0
-    {
-        return Err(io::Error::last_os_error().to_string());
-    }
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        unsafe {
-            libc::close(master);
-            libc::close(slave)
-        };
-        return Err(io::Error::last_os_error().to_string());
-    }
-    if pid == 0 {
-        unsafe {
-            libc::setsid();
-            libc::ioctl(slave, libc::TIOCSCTTY as _, 0);
-            for fd in [0, 1, 2] {
-                libc::dup2(slave, fd);
-            }
-            libc::close(master);
-            libc::close(slave);
-            libc::setpgid(0, 0);
-            std::env::set_var("TERM", "xterm-256color");
-            std::env::set_var("LC_ALL", "C");
-            let c: Vec<CString> = command
-                .iter()
-                .map(|x| CString::new(x.as_bytes()).unwrap())
-                .collect();
-            // c_char, not i8: it is signed on x86_64 and UNSIGNED on both
-            // aarch64 targets, so the hardcoded i8 compiled on Intel and failed
-            // to compile on aarch64-unknown-linux-musl and aarch64-apple-darwin.
-            let p: Vec<*const libc::c_char> = c
-                .iter()
-                .map(|x| x.as_ptr())
-                .chain(std::iter::once(std::ptr::null()))
-                .collect();
-            libc::execvp(p[0], p.as_ptr());
-            libc::_exit(127);
-        }
-    }
-    unsafe {
-        libc::close(slave);
-        let flags = libc::fcntl(master, libc::F_GETFL);
-        if flags < 0 || libc::fcntl(master, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
-            libc::kill(-pid, libc::SIGKILL);
-            libc::waitpid(pid, std::ptr::null_mut(), 0);
-            libc::close(master);
-            return Err(io::Error::last_os_error().to_string());
-        }
-    };
-    Ok((master, pid))
-}
-fn stop(pid: libc::pid_t) {
-    unsafe {
-        libc::kill(-pid, libc::SIGTERM);
-        let until = Instant::now() + Duration::from_millis(300);
-        while Instant::now() < until {
-            let mut s = 0;
-            if libc::waitpid(pid, &mut s, libc::WNOHANG) == pid {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        libc::kill(-pid, libc::SIGKILL);
-        libc::waitpid(pid, std::ptr::null_mut(), 0);
-    }
-}
-
-fn status(s: i32) -> i32 {
-    if s & 0x7f == 0 {
-        s >> 8
-    } else {
-        -(s & 0x7f)
-    }
-}
+// valid_dir/SocketIdentity/remove_socket/in_held_directory/bind_in_directory/
+// capture_socket_identity/SocketGuard/interrupt_handler/Cleanup/spawn/stop/
+// status all moved to posix.rs (W02/W03) as the concrete Unix Backend/Listener
+// implementations (PosixBackend/PosixListener); connect_in_directory moves
+// with them but is re-exported above (`pub use posix::connect_in_directory`)
+// since bin/interactive-shell-input.rs calls it unconditionally by that exact
+// name (AR-06/AR-19) -- windows.rs (goal 2/3) provides the same name under
+// cfg(windows) via its own re-export.
 #[allow(clippy::too_many_arguments)]
 fn client(
-    mut stream: UnixStream,
-    master: RawFd,
+    mut stream: impl Transport,
+    backend: &mut impl Backend,
     screen: &mut Screen,
     seq: &mut u64,
     out: &mut impl Write,
@@ -2050,10 +1919,10 @@ fn client(
         }
     };
     match req {
-        Request::Text { v: 1, text } => write_master(master, text.as_bytes())?,
+        Request::Text { v: 1, text } => backend.write(text.as_bytes())?,
         Request::Key { v: 1, key } => {
             match key_sequence_for_screen(&key, screen.application_cursor) {
-                Some(bytes) => write_master(master, &bytes)?,
+                Some(bytes) => backend.write(&bytes)?,
                 None => {
                     json(
                         &mut stream,
@@ -2075,7 +1944,7 @@ fn client(
             alt,
             shift,
         } => match key_combo_sequence(&key, KeyModifiers { ctrl, alt, shift }) {
-            Ok(bytes) => write_master(master, &bytes)?,
+            Ok(bytes) => backend.write(&bytes)?,
             Err(message) => {
                 json(
                     &mut stream,
@@ -2090,7 +1959,7 @@ fn client(
             }
         },
         Request::Raw { v: 1, hex } => match decode_hex(&hex) {
-            Ok(bytes) => write_master(master, &bytes)?,
+            Ok(bytes) => backend.write(&bytes)?,
             Err(message) => {
                 json(
                     &mut stream,
@@ -2257,32 +2126,31 @@ fn client(
                 .any(|row| row.contains(&contains));
             while !matched && Instant::now() < deadline {
                 let mut buf = [0; 8192];
-                let n = unsafe { libc::read(master, buf.as_mut_ptr().cast(), buf.len()) };
-                if n > 0 {
-                    *last = Instant::now();
-                    screen.feed(&buf[..n as usize]);
-                    *seq += 1;
-                    let event = ScreenEvent {
-                        v: 1,
-                        event: "screen",
-                        seq: *seq,
-                        base: *seq - 1,
-                        rows: screen.delta(),
-                        cursor: screen.cursor(),
-                        elements: screen.elements(),
-                        styles: screen.styles(),
-                        scrollback: screen.scrollback(),
-                    };
-                    json(out, &event).map_err(|e| e.to_string())?;
-                    json(&mut stream, &event).map_err(|e| e.to_string())?;
-                    matched = screen
-                        .snapshot()
-                        .values()
-                        .any(|row| row.contains(&contains));
-                } else if n < 0 && io::Error::last_os_error().kind() != io::ErrorKind::WouldBlock {
-                    break;
-                } else {
-                    std::thread::sleep(Duration::from_millis(10));
+                match backend.read(&mut buf) {
+                    Ok(n) if n > 0 => {
+                        *last = Instant::now();
+                        screen.feed(&buf[..n]);
+                        *seq += 1;
+                        let event = ScreenEvent {
+                            v: 1,
+                            event: "screen",
+                            seq: *seq,
+                            base: *seq - 1,
+                            rows: screen.delta(),
+                            cursor: screen.cursor(),
+                            elements: screen.elements(),
+                            styles: screen.styles(),
+                            scrollback: screen.scrollback(),
+                        };
+                        json(out, &event).map_err(|e| e.to_string())?;
+                        json(&mut stream, &event).map_err(|e| e.to_string())?;
+                        matched = screen
+                            .snapshot()
+                            .values()
+                            .any(|row| row.contains(&contains));
+                    }
+                    Err(error) if error.kind() != io::ErrorKind::WouldBlock => break,
+                    _ => std::thread::sleep(Duration::from_millis(10)),
                 }
             }
             json(
@@ -2302,9 +2170,9 @@ fn client(
             .map_err(|e| e.to_string())?;
         }
         Request::Paste { v: 1, text } => {
-            write_master(master, b"\x1b[200~")?;
-            write_master(master, text.as_bytes())?;
-            write_master(master, b"\x1b[201~")?;
+            backend.write(b"\x1b[200~")?;
+            backend.write(text.as_bytes())?;
+            backend.write(b"\x1b[201~")?;
         }
         Request::Mouse {
             v: 1,
@@ -2312,7 +2180,7 @@ fn client(
             y,
             button,
             action,
-        } => write_master(master, &mouse_bytes(x, y, button, &action)?)?,
+        } => backend.write(&mouse_bytes(x, y, button, &action)?)?,
         Request::Click {
             v: 1,
             id,
@@ -2335,11 +2203,11 @@ fn client(
                     _ => return Err("click needs a known id/label or x and y".into()),
                 },
             };
-            write_master(master, &mouse_bytes(x, y, button, "down")?)?;
-            write_master(master, &mouse_bytes(x, y, button, "up")?)?;
+            backend.write(&mouse_bytes(x, y, button, "down")?)?;
+            backend.write(&mouse_bytes(x, y, button, "up")?)?;
         }
         Request::Resize { v: 1, cols, rows } => {
-            resize_master(master, cols, rows)?;
+            backend.resize(cols, rows)?;
             screen.resize(rows as usize, cols as usize);
         }
         Request::Shutdown { v: 1 } => {
@@ -2360,49 +2228,9 @@ fn client(
     let _ = stream.shutdown(Shutdown::Both);
     Ok(())
 }
-fn write_master(fd: RawFd, bytes: &[u8]) -> Result<(), String> {
-    let mut offset = 0;
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while offset < bytes.len() {
-        let n = unsafe { libc::write(fd, bytes[offset..].as_ptr().cast(), bytes.len() - offset) };
-        if n > 0 {
-            offset += n as usize;
-            continue;
-        }
-        if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::WouldBlock {
-            if Instant::now() >= deadline {
-                return Err("PTY write timed out".into());
-            }
-            let mut poll = libc::pollfd {
-                fd,
-                events: libc::POLLOUT,
-                revents: 0,
-            };
-            if unsafe { libc::poll(&mut poll, 1, 100) } < 0 {
-                return Err(io::Error::last_os_error().to_string());
-            }
-            continue;
-        }
-        return Err(io::Error::last_os_error().to_string());
-    }
-    Ok(())
-}
-
-fn resize_master(fd: RawFd, cols: u16, rows: u16) -> Result<(), String> {
-    if !(1..=240).contains(&cols) || !(1..=100).contains(&rows) {
-        return Err("dimensions must be within cols 1..240 and rows 1..100".into());
-    }
-    let size = libc::winsize {
-        ws_row: rows,
-        ws_col: cols,
-        ws_xpixel: 0,
-        ws_ypixel: 0,
-    };
-    if unsafe { libc::ioctl(fd, libc::TIOCSWINSZ as _, &size) } < 0 {
-        return Err(io::Error::last_os_error().to_string());
-    }
-    Ok(())
-}
+// write_master/resize_master moved to posix.rs (W03) as PosixBackend's
+// concrete write()/resize() methods; client() above now calls only through
+// the Backend trait.
 
 fn mouse_bytes(x: u16, y: u16, button: u8, action: &str) -> Result<Vec<u8>, String> {
     if x == 0 || y == 0 || button > 7 {
@@ -2422,58 +2250,48 @@ fn mouse_bytes(x: u16, y: u16, button: u8, action: &str) -> Result<Vec<u8>, Stri
     Ok(format!("\x1b[<{};{};{}{}", code, x, y, suffix).into_bytes())
 }
 
+/// `use_tcp` chooses the transport `run_generic` binds -- `PlatformListener`
+/// (the platform default: `PosixListener` on Unix, always-TCP on Windows) or
+/// `tcp::TcpTransportListener` explicitly, an opt-in alongside the Unix
+/// default for a sandbox that runs the command but blocks `AF_UNIX` for it.
+/// On Windows both arms are the SAME type (`PlatformListener` already IS the
+/// TCP listener there), so `use_tcp` is accepted but has nothing left to
+/// choose between.
 pub fn run(
     socket: PathBuf,
     cols: u16,
     rows: u16,
     idle: u64,
     command: Vec<String>,
+    use_tcp: bool,
 ) -> Result<(), String> {
-    INTERRUPTED.store(false, Ordering::Relaxed);
-    unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
-        libc::signal(
-            libc::SIGTERM,
-            interrupt_handler as *const () as libc::sighandler_t,
-        );
-        libc::signal(
-            libc::SIGINT,
-            interrupt_handler as *const () as libc::sighandler_t,
-        );
-    }
+    install_interrupt_handler();
     if !(1..=240).contains(&cols) || !(1..=100).contains(&rows) {
         return Err("dimensions must be within cols 1..240 and rows 1..100".into());
     }
     if command.is_empty() {
         return Err("command is required".into());
     }
-    valid_dir(socket.parent().ok_or("socket needs parent")?)?;
-    let parent_fd = File::open(socket.parent().unwrap()).map_err(|e| e.to_string())?;
-    if socket.exists() {
-        return Err("refusing existing socket".into());
-    };
-    let name = socket.file_name().ok_or("socket needs a filename")?;
-    let listener = bind_in_directory(&parent_fd, socket.parent().unwrap(), name)?;
-    let mut socket_guard = SocketGuard::new();
-    socket_guard.identity = Some(capture_socket_identity(&socket, parent_fd)?);
-    if let Err(error) = listener.set_nonblocking(true) {
-        remove_socket(socket_guard.identity.as_ref().unwrap());
-        return Err(error.to_string());
-    }
-    let (master, pid) = match spawn(&command, cols, rows) {
-        Ok(x) => x,
-        Err(e) => {
-            remove_socket(socket_guard.identity.as_ref().unwrap());
-            return Err(e);
+    #[cfg(unix)]
+    {
+        if use_tcp {
+            return run_generic::<tcp::TcpTransportListener>(socket, cols, rows, idle, command);
         }
-    };
-    let mut cleanup = Cleanup {
-        master,
-        pid,
-        identity: socket_guard.identity.take().unwrap(),
-        reaped: false,
-    };
-    std::mem::forget(socket_guard);
+    }
+    #[cfg(not(unix))]
+    let _ = use_tcp;
+    run_generic::<PlatformListener>(socket, cols, rows, idle, command)
+}
+
+fn run_generic<L: Listener>(
+    socket: PathBuf,
+    cols: u16,
+    rows: u16,
+    idle: u64,
+    command: Vec<String>,
+) -> Result<(), String> {
+    let listener = L::bind(&socket)?;
+    let mut backend = PlatformBackend::spawn(&command, cols, rows)?;
     let mut screen = Screen::new(rows as usize, cols as usize);
     let mut out = io::BufWriter::new(io::stdout());
     let start = Instant::now();
@@ -2482,71 +2300,53 @@ pub fn run(
     let mut reason = "child_exit";
     let mut code = 0;
     let mut seq = 0;
+    let mut child_reaped = false;
     while !stopped && !INTERRUPTED.load(Ordering::Relaxed) {
         let mut buf = [0; 8192];
-        let n = unsafe { libc::read(master, buf.as_mut_ptr().cast(), buf.len()) };
-        if n > 0 {
-            last = Instant::now();
-            screen.feed(&buf[..n as usize]);
-            seq += 1;
-            json(
-                &mut out,
-                &ScreenEvent {
-                    v: 1,
-                    event: "screen",
-                    seq,
-                    base: seq - 1,
-                    rows: screen.delta(),
-                    cursor: screen.cursor(),
-                    elements: screen.elements(),
-                    styles: screen.styles(),
-                    scrollback: screen.scrollback(),
-                },
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        if let Ok((s, _)) = listener.accept() {
-            // THE ACCEPTED SOCKET INHERITS O_NONBLOCK ON BSD, AND NOT ON LINUX.
-            //
-            // The listener is non-blocking on purpose: this loop polls it
-            // between reads of the pty master. On Linux accept() hands back a
-            // BLOCKING socket regardless, so client() could read a request and
-            // wait for the rest of it. macOS copies the listener's O_NONBLOCK
-            // onto the connection, so every read returned EAGAIN before the
-            // request had arrived, client() failed, and the wrapper logged
-            //
-            //   interactive-shell client: Resource temporarily unavailable
-            //                             (os error 35)
-            //
-            // twice per attempt while the screen stayed empty and the input the
-            // caller sent was never delivered. `os error 35` is EAGAIN on
-            // macOS; Linux numbers it 11, so the errno in a CI log does not
-            // even match across legs.
-            //
-            // Setting it explicitly is the portable form: it is what Linux
-            // already did implicitly, so nothing changes there.
-            if let Err(e) = s.set_nonblocking(false) {
-                eprintln!("interactive-shell client: cannot block the accepted socket: {e}");
-                continue;
-            }
-            if let Err(e) = client(
-                s,
-                master,
-                &mut screen,
-                &mut seq,
-                &mut out,
-                &mut last,
-                &mut stopped,
-                &mut reason,
-            ) {
-                eprintln!("interactive-shell client: {e}");
+        if let Ok(n) = backend.read(&mut buf) {
+            if n > 0 {
+                last = Instant::now();
+                screen.feed(&buf[..n]);
+                seq += 1;
+                json(
+                    &mut out,
+                    &ScreenEvent {
+                        v: 1,
+                        event: "screen",
+                        seq,
+                        base: seq - 1,
+                        rows: screen.delta(),
+                        cursor: screen.cursor(),
+                        elements: screen.elements(),
+                        styles: screen.styles(),
+                        scrollback: screen.scrollback(),
+                    },
+                )
+                .map_err(|e| e.to_string())?;
             }
         }
-        let mut st = 0;
-        if unsafe { libc::waitpid(pid, &mut st, libc::WNOHANG) } == pid {
+        match listener.accept() {
+            Ok(Some(stream)) => {
+                if let Err(e) = client(
+                    stream,
+                    &mut backend,
+                    &mut screen,
+                    &mut seq,
+                    &mut out,
+                    &mut last,
+                    &mut stopped,
+                    &mut reason,
+                ) {
+                    eprintln!("interactive-shell client: {e}");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => eprintln!("interactive-shell client: cannot accept connection: {e}"),
+        }
+        if let Ok(Some(exit_code)) = backend.try_wait() {
             stopped = true;
-            code = status(st);
-            cleanup.reaped = true;
+            code = exit_code;
+            child_reaped = true;
         }
         if last.elapsed() >= Duration::from_secs(idle) {
             stopped = true;
@@ -2555,17 +2355,17 @@ pub fn run(
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    if cleanup.reaped {
+    if child_reaped {
         // Exit-time redraws can still sit in the pty's kernel buffer after
-        // waitpid reports death; drain it so child_exit reports the settled
+        // try_wait reports death; drain it so child_exit reports the settled
         // screen, not whatever the last 8192-byte read happened to catch.
         loop {
             let mut buf = [0; 8192];
-            let n = unsafe { libc::read(master, buf.as_mut_ptr().cast(), buf.len()) };
-            if n <= 0 {
+            let n = backend.read(&mut buf).unwrap_or(0);
+            if n == 0 {
                 break;
             }
-            screen.feed(&buf[..n as usize]);
+            screen.feed(&buf[..n]);
             seq += 1;
             json(
                 &mut out,
@@ -2598,143 +2398,25 @@ pub fn run(
         },
     )
     .map_err(|e| e.to_string())?;
-    drop(cleanup);
+    // Idempotent (a concrete Backend tracks whether the child is already
+    // reaped): harmless if the loop already exited via try_wait succeeding.
+    backend.stop();
+    // backend/listener are ordinary local bindings now: PosixBackend's own
+    // Drop (close(master)) and PosixListener's own Drop (remove_socket) run
+    // automatically when they go out of scope below, replacing the old
+    // Cleanup/SocketGuard/mem::forget dance.
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    /// Serialises every test that moves the process directory.
-    ///
-    /// `in_held_directory` fchdirs the WHOLE PROCESS, and cargo runs unit tests
-    /// as threads of one process, so two such tests interleave. Both halves of
-    /// that were seen on the aarch64-apple-darwin leg, one per run: master's run
-    /// 33868523959 failed `the_socket_is_bound_by_name_inside_the_held_directory`
-    /// on "the cwd leaked", and run 33870346097 failed
-    /// `a_directory_too_long_for_sun_path_still_binds_and_connects` on "the
-    /// socket is not where it was asked for" -- a relative bind that landed in
-    /// the other test's directory. Reproduced locally at roughly three runs in
-    /// four with `interactive_shell_core-<hash> --test-threads 2 held_directory
-    /// sun_path`, which is the pair on its own; the full suite hides it because
-    /// nineteen tests rarely put these two on the two threads at once.
-    ///
-    /// The comment on the first test used to carry the invariant "No other test
-    /// in this module touches the filesystem", which is exactly right and was
-    /// true when it was written. The second cwd-moving test broke it. A lock
-    /// enforces what a comment could only ask for.
-    ///
-    /// Not a product defect: nothing in this crate spawns a thread (there is no
-    /// `thread::spawn` in it), `run()` binds once before it does anything else,
-    /// and the input CLI is a one-shot process. The hazard is real for any
-    /// FUTURE concurrent caller, so it is recorded here rather than only fixed.
-    static CWD: Mutex<()> = Mutex::new(());
-
-    /// Take the cwd lock, treating a poisoned mutex as simply held.
-    ///
-    /// Without this, the first of these tests to fail poisons the mutex and the
-    /// second fails too, on the lock rather than on its own subject -- one
-    /// defect reported as two, with the second one misdescribed.
-    fn cwd_lock() -> std::sync::MutexGuard<'static, ()> {
-        CWD.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    /// The bind is RELATIVE, lands in the held directory, and gives the cwd back.
-    ///
-    /// A functional test cannot tell the two mechanisms apart on Linux, because
-    /// `/proc/self/fd/<n>/socket` works there -- which is exactly how a
-    /// Linux-only construction reached both macOS legs unnoticed. So this
-    /// asserts the mechanism itself, through the address the kernel recorded:
-    /// a relative bind stores the bare name in sun_path, and the path-based
-    /// construction this replaced stores `/proc/self/fd/<n>/socket`. Restoring
-    /// fd_path() makes the first assertion fail on Linux, which is the point.
-    ///
-    /// The cwd is process-wide, so this test holds `CWD` for its whole body.
-    /// See that lock's comment: this test and the sun_path one below both move
-    /// the process directory, and without the lock they corrupt each other.
-    #[test]
-    fn the_socket_is_bound_by_name_inside_the_held_directory() {
-        let _cwd = cwd_lock();
-        let before = std::env::current_dir().unwrap();
-        let dir = std::env::temp_dir().join(format!("is-bind-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
-        let socket = dir.join("socket");
-        let _ = fs::remove_file(&socket);
-        let parent_fd = File::open(&dir).unwrap();
-
-        let listener = bind_in_directory(&parent_fd, &dir, socket.file_name().unwrap()).unwrap();
-
-        // The mechanism: sun_path is the name, not a path through /proc or /dev/fd.
-        assert_eq!(
-            listener.local_addr().unwrap().as_pathname(),
-            Some(Path::new("socket")),
-            "the bind was not relative, so sun_path carries a path the caller never chose"
-        );
-        // ...and "relative" was not achieved by binding somewhere else: the
-        // socket exists at the absolute path the caller asked for, and is 0600.
-        let mode = fs::metadata(&socket).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "the socket is not private");
-        // ...and the process is back where it started, or the child run() is
-        // about to exec would resolve its arguments against the wrong directory.
-        assert_eq!(std::env::current_dir().unwrap(), before, "the cwd leaked");
-
-        drop(listener);
-        let _ = fs::remove_file(&socket);
-        let _ = fs::remove_dir(&dir);
-    }
-
-    /// A directory whose absolute path cannot fit in sun_path still binds AND
-    /// connects.
-    ///
-    /// sun_path is 108 bytes on Linux and 104 on macOS. Binding or connecting
-    /// the socket's absolute path -- the obvious "fix" for the /dev/fd problem
-    /// -- fails here while the relative form does not care, so this pins the
-    /// property that made fchdir the choice rather than a shorter prefix.
-    ///
-    /// The CONNECT leg is here because its absence let a real defect through:
-    /// the bind side was moved off absolute paths and the client was not, so
-    /// macOS still failed with "path must be shorter than SUN_LEN" -- on
-    /// connect, one CI round later. Half a fix moves the failure rather than
-    /// removing it, and a test that only covered bind could not see that.
-    #[test]
-    fn a_directory_too_long_for_sun_path_still_binds_and_connects() {
-        let _cwd = cwd_lock();
-        let mut dir = std::env::temp_dir().join(format!("is-long-{}", std::process::id()));
-        while dir.as_os_str().len() <= 120 {
-            dir = dir.join("nested-directory-component");
-        }
-        fs::create_dir_all(&dir).unwrap();
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
-        let socket = dir.join("socket");
-        let _ = fs::remove_file(&socket);
-        assert!(
-            socket.as_os_str().len() > 108,
-            "the fixture is not long enough to exercise the cap"
-        );
-        // The control: the absolute forms this replaced cannot do it.
-        assert!(
-            UnixListener::bind(&socket).is_err(),
-            "sun_path accepted a {}-byte bind path, so this test proves nothing",
-            socket.as_os_str().len()
-        );
-
-        let parent_fd = File::open(&dir).unwrap();
-        let listener = bind_in_directory(&parent_fd, &dir, socket.file_name().unwrap()).unwrap();
-        assert!(socket.exists(), "the socket is not where it was asked for");
-
-        assert!(
-            UnixStream::connect(&socket).is_err(),
-            "sun_path accepted a {}-byte connect path, so the connect leg proves nothing",
-            socket.as_os_str().len()
-        );
-        connect_in_directory(&socket).expect("a relative connect must not care about the length");
-
-        drop(listener);
-        let _ = fs::remove_file(&socket);
-    }
+    // the_socket_is_bound_by_name_inside_the_held_directory and
+    // a_directory_too_long_for_sun_path_still_binds_and_connects (plus the
+    // CWD/cwd_lock helper they share) moved to posix.rs's own #[cfg(test)]
+    // mod tests (W02): both exercise bind_in_directory/connect_in_directory,
+    // which are Unix-only.
 
     #[test]
     fn keys_are_stable() {
@@ -2833,6 +2515,44 @@ mod tests {
         s.feed(b"\x1b[1Gabcdef\x1b[1G\x1b[K");
         assert_eq!(String::from_utf8_lossy(&s.rows[0]), "      ");
     }
+    /// The exact stream ncurses sent when a menu selection moved down a row:
+    /// the seven spaces inside `> canary       5% of ...` arrive as one space
+    /// plus `ESC[6b`. Without REP the row read `> canary 5% of production
+    /// trafficraffic` -- six columns short, with the previous frame's tail
+    /// (`raffic`) still showing beneath.
+    #[test]
+    fn rep_repeats_the_preceding_character_over_a_curses_row_update() {
+        let mut screen = Screen::new(2, 40);
+        screen.feed(b"  canary       5% of production traffic\r");
+        screen.feed(b"\x1b[0;7m> canary \x1b[6b5% of production traffic");
+        assert_eq!(
+            String::from_utf8_lossy(&screen.rows[0]).trim_end(),
+            "> canary       5% of production traffic"
+        );
+    }
+
+    #[test]
+    fn rep_uses_the_last_printed_byte_defaults_to_one_and_wraps_like_typing() {
+        let mut screen = Screen::new(2, 4);
+        screen.feed(b"x\x1b[b");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "xx  ");
+        screen.feed(b"\x1b[4b");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "xxxx");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[1]), "xx  ");
+    }
+
+    #[test]
+    fn rep_with_nothing_printed_yet_or_a_huge_count_is_harmless() {
+        let mut screen = Screen::new(2, 4);
+        screen.feed(b"\x1b[5b");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "    ");
+        // Bounded by rows*cols (8 puts here): it terminates, and every cell
+        // that was written holds the repeated byte.
+        screen.feed(b"z\x1b[999999999b");
+        assert_eq!(screen.rows[0], b"zzzz");
+        assert_eq!(screen.rows[1][0], b'z');
+    }
+
     #[test]
     fn cursor_save_and_restore_sequences_round_trip() {
         let mut screen = Screen::new(3, 8);

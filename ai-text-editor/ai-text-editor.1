@@ -18,8 +18,9 @@ After \fBopen\fR, the server returns a tab-scoped \fBsession_token\fR. Save it
 with \fB--save-session-token PATH\fR and reuse it with \fB--session-token PATH\fR;
 requests without the current token are rejected before mutation.
 .PP
-Mutating commands \fBinsert\fR, \fBreplace\fR, \fBlarge-edit\fR, \fBrestore\fR,
-\fBundo\fR, \fBredo\fR, and \fBsave\fR require \fB--expected-revision\fR. A
+Mutating commands \fBinsert\fR, \fBreplace\fR, \fBmove\fR, \fBcopy\fR,
+\fBlarge-edit\fR, \fBrestore\fR, \fBundo\fR, \fBredo\fR, and \fBsave\fR require
+\fB--expected-revision\fR. A
 missing or stale value is refused; read \fBopen\fR or \fBhistory\fR again before
 retrying. The server has no project-root jail: the session token grants the
 server process's normal filesystem permissions, so keep the endpoint private
@@ -45,8 +46,8 @@ with the skill and is available with \fBman -l\fR when binaries are not on PATH.
 Naming \fB--file PATH\fR on any command means "act on that file's tab", and
 opening it is part of that: every command opens the tab and starts a server if
 none is running, not only \fBopen\fR. The exception is the revision-guarded
-commands \fBinsert\fR, \fBreplace\fR, \fBlarge-edit\fR, \fBrestore\fR,
-\fBundo\fR, \fBredo\fR and \fBsave\fR on a file with no tab: the revision they
+commands \fBinsert\fR, \fBreplace\fR, \fBmove\fR, \fBcopy\fR, \fBlarge-edit\fR,
+\fBrestore\fR, \fBundo\fR, \fBredo\fR and \fBsave\fR on a file with no tab: the revision they
 carry cannot have come from a tab that never existed, so they are refused by
 name and \fBopen\fR (or any read) comes first.
 .PP
@@ -87,6 +88,36 @@ and \fBinsert\fR refuses it as \fBedit_range_unsupported\fR, the same as a
 range. \fBsearch --preview-lines N\fR shrinks a large hit's shown contents to
 its first and last N lines; \fBbyte_start\fR/\fBbyte_end\fR, and so
 \fB--match-id\fR, stay exact regardless.
+.PP
+\fB--range-start-match TEXT --range-end-before-match TEXT\fR address a
+\fBreplace\fR span by the content at its boundaries instead of a position \(em
+the span runs from the start match's own beginning up to, but not including,
+the end match's beginning, resolved server-side so an endpoint that used to
+be inferred ("up to where the next function starts") never is. Add
+\fB--range-match-regex\fR to read both as Rust regexes instead of exact text.
+Either matching nowhere or more than once is refused by name
+(\fBrange_start_match_not_found\fR/\fBrange_start_match_ambiguous\fR and the
+\fBrange_end_before_match\fR equivalents) rather than silently resolved to
+the first occurrence. \fB--symbol NAME\fR resolves to that name's own
+defining extent in CodeGraph's index (\fB.codegraph/codegraph.db\fR) for
+this file \(em refused as \fBsymbol_unavailable\fR with no index,
+\fBsymbol_not_found\fR with no matching node, or \fBsymbol_ambiguous\fR if
+more than one node shares the name. Neither may be combined with a range,
+\fB--match-id\fR, or each other, and \fBinsert\fR refuses both the same way
+it refuses \fB--match-id\fR.
+.PP
+\fBmove\fR and \fBcopy\fR relocate or duplicate a span with no content in the
+request or response \(em the server already holds the bytes. The source is
+addressed exactly like \fBreplace\fR's own (a range, \fB--match-id\fR,
+\fB--range-start-match\fR/\fB--range-end-before-match\fR, or \fB--symbol\fR,
+never a bare \fB--offset\fR, which is refused as \fBmove_source_required\fR
+since a point has no length to relocate); the destination is a point,
+\fB--dest-offset N\fR or \fB--dest-line N\fR (one past the last line appends
+at end of file), exactly one of the two. Both are one atomic operation \(em
+one revision, one undo step \(em even though \fBmove\fR performs two splices
+internally, which is why \fBbegin-transaction\fR/\fBend-transaction\fR
+(undo-grouping only) is not the same guarantee. A destination strictly inside
+the source span is refused as \fBmove_destination_inside_source\fR.
 .PP
 For TCP startup use exactly one of \fB--auth-token TOKEN\fR or an owner-only
 \fB--auth-token-file PATH\fR. Clients pass \fB--auth-token TOKEN\fR or reuse a
@@ -235,6 +266,15 @@ delimiter and a fresh stream. Consumers must discard frames before that
 delimiter.
 .SH HISTORY AND CURSORS
 \fBhistory\fR reports undo and redo depths without exposing another tab.
+\fBjump-points\fR reports this file's outbound CodeGraph references (calls,
+imports, instantiations, and similar), recomputed server-side at open and
+after every save by reading CodeGraph's own SQLite index directly. Each entry
+names the referring line and column, the edge kind, and the target file, line,
+name and kind it points to. The response's \fBrevision\fR is the tab revision
+they were computed at; \fBstale: true\fR means the tab has since been edited
+and \fBsave\fR would recompute them. \fBjump_points: null\fR means CodeGraph is
+not enabled for this project, or its index is not in a shape this reader
+supports -- not that the file has no references.
 \fBresources\fR reports available memory, estimated server overhead, the
 recommended working set, and the active large-file threshold.
 Mutation responses include every numeric cursor position. The \fBcursor\fR

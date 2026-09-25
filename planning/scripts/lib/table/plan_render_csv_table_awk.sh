@@ -49,7 +49,7 @@ plan_render_csv_table_awk_emit_row() {
                 while ((p = index(cleaned, "\\|")) > 0)
                     cleaned = substr(cleaned, 1, p - 1) substr(cleaned, p + 2)
                 if (index(cleaned, "|") > 0) { printf "row %d, column %d", NR, i > diag; exit 4 }
-                if (fields[i] ~ /\r/) { printf "row %d, column %d", NR, i > diag; exit 7 }
+                if (index(fields[i], sprintf("%c", 1)) > 0) { printf "row %d, column %d", NR, i > diag; exit 7 }
                 printf " %s |", fields[i]
             }
             printf "\n"
@@ -67,7 +67,12 @@ plan_render_csv_table_awk_functions() {
 plan_render_csv_table_awk_main() {
     printf '%s\n' '
         {
-            if ($0 ~ /^[[:space:]]*$/) { printf "row %d", NR > diag; exit 5 }
+            # The SOH the caller put where a carriage return was counts as
+            # whitespace here, as the CR itself did, so a row of nothing but a
+            # CR is still "blank" rather than a wrong column count.
+            blank = $0
+            gsub(sprintf("%c", 1), " ", blank)
+            if (blank ~ /^[[:space:]]*$/) { printf "row %d", NR > diag; exit 5 }
             count = parse_csv($0, fields)
             if (count < 0) { printf "row %d", NR > diag; exit 2 }
             if (count != expected) { printf "row %d has %d", NR, count > diag; exit 3 }

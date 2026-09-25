@@ -21,6 +21,9 @@ fn main() {
         match arg.as_str() {
             "-h" | "--help" => usage(0),
             "--plan-dir" => plan_dir = args.next().map(PathBuf::from),
+            value if value.starts_with("--plan-dir=") => {
+                plan_dir = Some(PathBuf::from(&value["--plan-dir=".len()..]))
+            }
             "--" => break,
             value if value.starts_with('-') => {
                 eprintln!("{COMMAND}: unknown option: {value}");

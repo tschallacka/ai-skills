@@ -135,27 +135,33 @@ pass, no state directory, and no `--insecure`.
 It ships only in `mcp` integration mode:
 
 ```bash
-install.sh --integration chat=mcp     # chat-mcp instead of chat-client-rs
+installer install --integration chat=mcp --skill chat --target DIR --yes     # chat-mcp instead of chat-client-rs
 ```
 
-`chat-server-rs` installs in both modes. The adapter finds a server; it does
-not start one, so step 2 of *Connecting to a channel* is still yours.
+`chat-server-rs` installs in both modes; `start_server` starts one if
+needed.
 
-Register it with your harness pointing at the per-triple binary, e.g.
+Register it with your harness pointing at the shared bin every skill's
+compiled binaries live in, e.g.
 
 ```bash
-claude mcp add chat -- "$HOME/.claude/skills/chat/bin/x86_64-unknown-linux-musl/chat-mcp"
+claude mcp add chat -- "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-mcp"
 ```
 
-That path is inside the skill root, and switching the skill back to `skill`
-mode deletes the binary it names: the registration survives the switch and
-stops working, in every config that holds it. Re-register after a switch back
-to `mcp`, and remove the entry when you leave the mode (`BUGS.json` B285).
+The installer registers and unregisters this automatically for `claude`,
+`codex` and `opencode` when you switch `chat`'s mode. A manual registration
+like the one above does not: switching away from `mcp` leaves it stale,
+still pointing at a file that exists but is the wrong mode. Re-register
+after switching back, and remove it by hand if you leave the mode for good
+(`BUGS.json` B285).
 
 | tool | takes | answers |
 |---|---|---|
 | `status` | — | resolved server, nick, session key and its rung, chat home, cursors |
+| `set_nick` | `nick` | the nick to register as |
+| `session_clear` | `cursors_only` | forgets the saved session, or just its cursors |
 | `discover` | `wait_seconds` | servers announcing on the beacon — check before starting one |
+| `start_server` | — | starts one if none is found |
 | `channels` | — | channels with stored messages |
 | `join` | `channel`, `since` | subscribes, seeds the cursor to the channel's end |
 | `leave` | `channel` | parts and drops the cursor |
@@ -169,6 +175,24 @@ connection for the life of the session, so a message is delivered when it
 arrives rather than on the next poll — `tail`'s liveness without a process to
 babysit. A mention-filtered `wait` deliberately leaves the shared cursor where
 it is, so the messages it skipped are still unread for a plain `read`.
+
+**A `wait` blocks only itself (B363).** The adapter answers each call on its own
+thread, holds no lock while it waits, and serves a wait as 100 ms polls, so
+another identity's `send` (a subagent's, say) or the same identity's own `send`
+or `who` runs at once instead of after the timeout. Before that fix a wait held
+every other call to the adapter behind it: two agents that both waited starved
+each other, and a wait reported "nothing arrived" while the other side's sends
+sat queued. What the adapter cannot change is when the harness sends a call. A
+harness may send one call to an MCP server at a time, and measured on Claude
+Code on 2026-09-21, before the fix, a `send` issued during a `wait` was stored
+only when the wait ended. If your other calls stall behind a pending `wait`,
+keep its timeout short. Plain MCP wakes no idle session: a message that
+arrives while no call is pending is found by the next `read` or `wait`. A `wait`
+the harness moves to the background (Claude Code does for a call past two
+minutes) reports when it finishes.
+
+**Interrupts (T150).** `interrupt_add` and `timer_set` tell you of a matching
+message or a timer at your next tool call, or pushed: docs/interrupts.md.
 
 **That held connection is also your presence, and it needs no tail.** The
 adapter registers once and keeps the connection for the life of the MCP
@@ -189,14 +213,14 @@ with no server at all. That is a maintenance path, and it has no tool.
 
 ## The rust server
 
-Start it with the prebuilt binary, which lives under a **per-triple**
-directory — `bin/<target-triple>/chat-server-rs`, at the skill root when
-installed and at the repository root in a development tree, e.g.
-`bin/x86_64-unknown-linux-musl/chat-server-rs`. There is no unsuffixed
-`bin/chat-server-rs`, and nothing puts it on `PATH` for you;
-`./setup-dev-env.sh` prints the `export PATH=` line for this host. Failing
-that, build it with
-`cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`.
+Start it with the prebuilt binary, which lives in the one shared location
+every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-server-rs`.
+Nothing puts it on `PATH` for you. In a development tree that has run
+`./setup-dev-env.sh`, the same binary is also at
+`bin/<target-triple>/chat-server-rs` under the repository root, and that
+script prints the `export PATH=` line for this host. Failing both, build it
+with `cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`.
 
 The server mints its self-signed cert on first run, binds the port, writes
 `server.port`, and broadcasts a UDP beacon so clients can discover it —
@@ -691,8 +715,10 @@ in one shot. `tail` has no `--since`; after JOIN it waits for pushed messages.
 
 ### 2. If nothing answers, start the server yourself
 
+An `mcp`-mode install has `start_server`; the CLI has none:
+
 ```bash
-chat/bin/chat-server-rs &
+"${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-server-rs" &
 ```
 
 That is the whole command. **Set no environment variables.** The defaults are
@@ -797,10 +823,12 @@ and the key is resolved per invocation from the first of these that applies.
    inherits that agent's `CLAUDE_CODE_SESSION_ID` unchanged while adding its
    own. **Claude Code does not give a subagent its own id** (B303, measured
    2026-09-08): `CLAUDE_CODE_SESSION_ID` and every other identifying variable
-   are identical between a main agent and its subagents, so this rung alone
-   cannot tell them apart — a main agent and all of its subagents resolve to
-   one session here. Use `--session ID` (rung 1) whenever a subagent needs its
-   own.
+   are identical between a main agent and its subagents, so the identity alone
+   cannot tell them apart. So **the nick is appended to the key** on this rung
+   and the two below it: `h-<hash>-<nick>`, `w-<hash>-<nick>`, `shared-<nick>`
+   (bare with no `--nick`). A subagent that joins under its own nick gets its
+   own session file without `--session`. Use `--session ID` (rung 1, taken as
+   given, no suffix) only when two agents share a nick or give none.
 3. **The worktree root.** The zero-config default for the case this bus exists
    for: agents on one project, each in its own checkout. Sibling worktrees get
    separate sessions; the shared repository directory is deliberately not part

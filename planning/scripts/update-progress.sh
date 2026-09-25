@@ -17,59 +17,15 @@
 set -euo pipefail
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism.
+up_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$up_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present update-progress "$up_script_dir" "$@"
+unset up_script_dir
 
-usage() {
-    local rc="${1:-64}"
-    cat <<USAGE
-Usage: ${0##*/} <goal-directory>
-       ${0##*/} --help
-USAGE
-    exit "$rc"
-}
-
-goal_dir=""
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        -h|--help) usage 0 ;;
-        --) shift; break ;;
-        -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
-        *) [ -z "$goal_dir" ] || usage; goal_dir="$1"; shift ;;
-    esac
-done
-[ -n "$goal_dir" ] || usage
-
-progress_file="$goal_dir/progress.md"
-[ -f "$progress_file" ] || plan_die "Progress file not found: $progress_file" 66
-plan_git_snapshot "$(dirname "$goal_dir")"
-
-read -r completed total < <(plan_count_progress_rows "$progress_file" 5)
-
-# Canonical percent/bar/icon derivation. Half-up rounding (+ total / 2) and the
-# 20-column width are the on-disk contract.
-width=20
-percent=0
-if [ "$total" -gt 0 ]; then
-    percent=$(( (completed * 100 + total / 2) / total ))
-fi
-
-filled=$(( percent * width / 100 ))
-empty=$(( width - filled ))
-bar="$(printf '%*s' "$filled" '' | tr ' ' '#')$(printf '%*s' "$empty" '' | tr ' ' '-')"
-
-icon='💤'
-if [ "$completed" -gt 0 ]; then
-    icon='⏳'
-fi
-if [ "$percent" -eq 100 ]; then
-    icon='✅'
-fi
-
-temporary_file="${progress_file}.tmp.$$"
-trap 'rm -f "$temporary_file"' EXIT
-sed "s|^\*\*Progress:\*\*.*$|**Progress:** \`${percent}%  ${bar}  100%\` ${icon}|" \
-    "$progress_file" > "$temporary_file"
-mv "$temporary_file" "$progress_file"
-
-printf 'Updated %s (%s/%s steps, %s%%)\n' "$progress_file" "$completed" "$total" "$percent"
+plan_die "update-progress: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it" 69

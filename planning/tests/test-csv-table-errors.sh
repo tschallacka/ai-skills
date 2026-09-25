@@ -48,7 +48,11 @@ expect_message() { # <label> <columns> <csv> <needle>...
     done
 }
 
-expect_message 'CRLF'            5 "AR-01,item,change,open,W01$(printf '\r')" 'carriage return' 'CRLF' 'row 1'
+# The carriage return is written with ANSI-C quoting, not `$(printf '\r')`: Git
+# for Windows' bash drops a trailing CR from a command substitution, which
+# turned this CRLF case into a clean one-row file.
+cr=$'\r'
+expect_message 'CRLF'            5 "AR-01,item,change,open,W01${cr}" 'carriage return' 'CRLF' 'row 1'
 expect_message 'column count'    5 'AR-01,item,change'            'expected 5' 'row 1 has 3'
 expect_message 'raw pipe in a cell' 5 'AR-01,it|em,change,open,W01'  'unescaped pipe character' 'row 1, column 2'
 expect_message 'unbalanced quote' 5 'AR-01,"item,change,open,W01' 'unbalanced double quote' 'row 1'
@@ -70,7 +74,7 @@ expect_message 'escaped and raw pipe' 5 'AR-01,it\|em,ch|nge,open,W01' 'unescape
 # Each message must be distinguishable from the others, or the reader is no
 # better off than with the single message this replaced.
 seen=""
-for csv in "AR-01,item,change,open,W01$(printf '\r')" 'AR-01,item,change' 'AR-01,it|em,change,open,W01' \
+for csv in "AR-01,item,change,open,W01${cr}" 'AR-01,item,change' 'AR-01,it|em,change,open,W01' \
            'AR-01,"item,change,open,W01' 'AR-01,a,b,open,W01\n\nAR-02,a,b,open,W02'; do
     out="$(render 5 "$csv" || true)"
     first="$(printf '%s\n' "$out" | head -1)"

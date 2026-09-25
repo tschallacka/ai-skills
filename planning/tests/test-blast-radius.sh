@@ -23,7 +23,7 @@ probe_test=planning/tests/test-blast-radius-probe.sh
 probe_part=/tmp/blast-radius-part.$$
 cleanup() {
     rm -f "$probe_json" "$probe_test"
-    [ -f "$probe_part" ] && cp "$probe_part" installer/src/00-header.sh
+    [ -f "$probe_part" ] && cp "$probe_part" installer/src/50-manifest.sh
     rm -f "$probe_part"
 }
 trap cleanup EXIT
@@ -71,27 +71,32 @@ rc=0; "$tool" --nonsense >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 64 ] || note_fail "an unknown option exited $rc, want 64"
 
 # ---- a consistent tree is quiet ---------------------------------------------
-run 0 'consistent tree' planning/MAINTAINER-STYLE-CONTRACT.md installer/src/00-header.sh
+run 0 'consistent tree' planning/MAINTAINER-STYLE-CONTRACT.md installer/src/50-manifest.sh
 out="$RUN_OUT"
 case "$out" in
     *'0 failure(s)'*) ;;
     *) note_fail 'a consistent change set reported failures' ;;
 esac
 case "$out" in
-    *'install.sh is generated'*) ;;
-    *) note_fail 'the installer coupling was not reported for an installer part' ;;
+    *'the file list must name files that exist'*) ;;
+    *) note_fail 'the installer-manifest coupling was not reported for an installer part' ;;
 esac
 
 # ---- a stale generated artifact fails ---------------------------------------
-cp installer/src/00-header.sh "$probe_part"
-printf '\n# blast-radius probe\n' >> installer/src/00-header.sh
-run 1 'stale install.sh' installer/src/00-header.sh
+# skill_files()'s planning arm names a file that must exist on disk
+# (tests/test-skill-files-manifest.sh's own invariant); inserting a bogus
+# entry right after its first real one breaks that invariant the same way
+# the old install.sh-generation probe broke build.sh's --check.
+cp installer/src/50-manifest.sh "$probe_part"
+awk '1; /^SKILL\.md$/ && !done { print "zzz-blast-radius-probe-nonexistent-file.txt"; done=1 }' \
+    "$probe_part" > installer/src/50-manifest.sh
+run 1 'stale installer manifest' installer/src/50-manifest.sh
 out="$RUN_OUT"
 case "$out" in
-    *'install.sh is stale'*) ;;
-    *) note_fail 'a stale install.sh was not reported with its remedy' ;;
+    *'the file list must name files that exist'*) ;;
+    *) note_fail 'a stale installer manifest was not reported with its remedy' ;;
 esac
-cp "$probe_part" installer/src/00-header.sh
+cp "$probe_part" installer/src/50-manifest.sh
 rm -f "$probe_part"
 
 # ---- a new runtime registry that would not ship fails -----------------------

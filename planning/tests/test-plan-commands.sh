@@ -228,7 +228,11 @@ if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/missing-companio
     echo 'A required testing companion unexpectedly passed validation when missing.' >&2
     exit 1
 fi
-grep -Fq "W02 requires testing instructions at $missing_companion" "$temporary_root/missing-companion.log"
+# The validator is a native program: it names the file as C:/..., possibly with
+# backslash separators, not as the bash-side /tmp/... path. t_native_path and
+# t_slashes are the identity on unix.
+missing_companion_log="$(t_slashes < "$temporary_root/missing-companion.log")"
+grep -Fq "W02 requires testing instructions at $(t_native_path "$missing_companion")" <<< "$missing_companion_log"
 mv "$missing_companion.missing" "$missing_companion"
 
 "$script_dir/add-goal.sh" "$plan_dir" 02-research 'Research only' \
@@ -695,14 +699,18 @@ printf '{"status":"pending"}\n' > "$plan_dir/approval.json"
 # report 12: roster↔inventory set check — a goal §9.x roster that omits an
 # inventory-assigned unit is a propagation fail.
 git -C "$plan_dir" checkout -- 03-wire/goal.md 2>/dev/null || true
-python3 - "$plan_dir/03-wire/goal.md" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-for block in ("§ 9.2\n`W11` — Verify the order history block renders.\n",):
-    s = s.replace(block, "")
-open(p, "w").write(s)
-PY
+# Edited with awk rather than python3: Windows' python reads a UTF-8 file as
+# cp1252 (so the § in the block never matched) and writes CRLF back out.
+awk '
+    held != "" {
+        if ($0 == "`W11` — Verify the order history block renders.") { held = ""; next }
+        print held; held = ""
+    }
+    $0 == "§ 9.2" { held = $0; next }
+    { print }
+    END { if (held != "") print held }
+' "$plan_dir/03-wire/goal.md" > "$plan_dir/03-wire/goal.md.new"
+mv "$plan_dir/03-wire/goal.md.new" "$plan_dir/03-wire/goal.md"
 if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/roster.log" 2>&1; then
     echo 'report 12: roster omitting an assigned unit validated clean.' >&2
     exit 1
@@ -712,22 +720,24 @@ git -C "$plan_dir" checkout -- 03-wire/goal.md 2>/dev/null || true
 # report 13: a summary §9.1 that lists all units bare before the em-dash (with
 # a cross-plan W99 after it) plus only ONE per-unit blurb is a valid roster —
 # the per-unit blurbs are NOT guaranteed to exist for every unit. Must not FAIL.
-python3 - "$plan_dir/03-wire/goal.md" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-start = s.index('## Owned work units')
-end = s.index('## Goal-size exception')
-repl = ("## Owned work units\n\n"
-        "§ 9.1\n"
-        "W10, W11, in that order as steps 01 to 02 — both units, including the extended-rendering plan's W99\n\n"
-        "## Testing requirement\n\n"
-        "| Test required | Rationale |\n|---|---|\n"
-        "| yes | observable |\n\n"
-        "§ 9.2\n`W10` — Render the order history block.\n")
-s = s[:start] + repl + s[end:]
-open(p, 'w').write(s)
-PY
+{
+    printf '%s\n' '## Owned work units' ''
+    printf '%s\n' '§ 9.1'
+    printf '%s\n' "W10, W11, in that order as steps 01 to 02 — both units, including the extended-rendering plan's W99" ''
+    printf '%s\n' '## Testing requirement' ''
+    printf '%s\n' '| Test required | Rationale |' '|---|---|' '| yes | observable |' ''
+    printf '%s\n' '§ 9.2' '`W10` — Render the order history block.'
+} > "$temporary_root/roster13-block.md"
+awk -v block="$temporary_root/roster13-block.md" '
+    /^## Owned work units/ && !done {
+        while ((getline line < block) > 0) print line
+        skipping = 1; done = 1; next
+    }
+    /^## Goal-size exception/ { skipping = 0 }
+    skipping { next }
+    { print }
+' "$plan_dir/03-wire/goal.md" > "$plan_dir/03-wire/goal.md.new"
+mv "$plan_dir/03-wire/goal.md.new" "$plan_dir/03-wire/goal.md"
 "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/roster13.log" 2>&1 || true
 if grep -qE 'roster (omits|lists)' "$temporary_root/roster13.log"; then
     echo 'report 13: a summary-roster goal with partial blurbs and a cross-plan ref was flagged.' >&2
@@ -790,6 +800,38 @@ fi
 if ! grep -Fq 'still contains a registered placeholder' "$temporary_root/fresh-complete.log"; then
     echo 'report 16: a fresh plan with emitted placeholders did not FAIL under --complete.' >&2
     cat "$temporary_root/fresh-complete.log" >&2
+    exit 1
+fi
+# find --in all/--in stories must not crash on a plan with no ui-user-stories.md
+# (most plans, since it's only created when UI is affected). A bare `[ -f FILE ]
+# && CMD` guard under set -euo pipefail propagates the false test's exit status
+# as a real failure, unwinding through every caller; the EXIT trap holding the
+# local matches_file variable then fires at the top level, where set -u finds
+# it unbound. $fresh_plan never gained a ui-user-stories.md.
+if [ -f "$fresh_plan/ui-user-stories.md" ]; then
+    echo 'test fixture assumption broken: fresh_plan unexpectedly has ui-user-stories.md.' >&2
+    exit 1
+fi
+if ! "$script_dir/plan-content.sh" find "$fresh_plan" 'Fresh goal' --in all \
+    >"$temporary_root/find-all-no-stories.log" 2>&1; then
+    echo 'find --in all crashed on a plan with no ui-user-stories.md.' >&2
+    cat "$temporary_root/find-all-no-stories.log" >&2
+    exit 1
+fi
+if grep -Fq 'unbound variable' "$temporary_root/find-all-no-stories.log"; then
+    echo 'find --in all surfaced an unbound-variable error.' >&2
+    cat "$temporary_root/find-all-no-stories.log" >&2
+    exit 1
+fi
+if "$script_dir/plan-content.sh" find "$fresh_plan" 'anything' --in stories \
+    >"$temporary_root/find-stories-no-stories.log" 2>&1; then
+    echo 'find --in stories on a plan with no ui-user-stories.md unexpectedly matched.' >&2
+    cat "$temporary_root/find-stories-no-stories.log" >&2
+    exit 1
+fi
+if grep -Fq 'unbound variable' "$temporary_root/find-stories-no-stories.log"; then
+    echo 'find --in stories surfaced an unbound-variable error instead of a clean no-match.' >&2
+    cat "$temporary_root/find-stories-no-stories.log" >&2
     exit 1
 fi
 # retargeting a unit lists the verification units that grade it.

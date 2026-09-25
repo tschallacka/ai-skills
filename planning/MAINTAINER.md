@@ -25,28 +25,16 @@ the maintainer must behave going forward.
 | `roles/VOICES.md` | Per-role voice/stance identity preamble, keyed by canonical `ROLE_ID`, byte-budgeted (≤512 B). | Injected by `role-context.sh` `voice_for()`; asserted by `test-voice-artifact-drift.sh` + `test-persona-drift.sh`. |
 | `scripts/monitor-read.sh` | Maintainer-only monitor reader: bounded supervision frames, pull-on-exception, grant log (case+command). | Reads frames written by `supervision-frame.sh`; identity-gates to maintainer (fail closed). |
 | `scripts/supervision-frame.sh` | Bounded supervision-frame emitter + grant log (case+command, never reasoning); footer-overwrites. | Written by each subagent at end; read by `monitor-read.sh`; asserted by `test-supervision-frame.sh`. |
-| `scripts/plan-context.sh` | Bounded plan-context reader (init/read/check/refresh/checkpoint). | Gates per `ROLE_ID` via `plan-context-lib.sh`; context IDs tagged (`plan`, `goal:<id>`, `step:<goal>/<step>`, `unit:WNN`). |
-| `scripts/plan-context-lib.sh` | Shared bounded plan-context cache helper; owns per-role reader composition (`context_role_gate` / `context_role_reader_composition`). | Reads registry via `role-context.sh`; gates `plan-context.sh` per `ROLE_ID`. |
+| `scripts/plan-context.sh` | Bounded plan-context reader (init/read/check/refresh/checkpoint); wiring-only stub over the compiled `plan-context` binary (T145 goal 27/29). | Gates per `ROLE_ID` via `role_cap()` (`src/plan-context/src/main.rs`); context IDs tagged (`plan`, `goal:<id>`, `step:<goal>/<step>`, `unit:WNN`). |
 | `scripts/plan-document-lib.sh` | Shared document helpers (sections, paragraphs, replace, guard). | All mutating helpers. |
-| `scripts/plan-reconcile-lib.sh` | Shared reconciliation (coverage prune, owned-work-units rewrite, progress rebuild). | `add-work-unit.sh`, `remove-work-unit.sh`, `update-adversarial-review.sh`. |
-| `scripts/validate-plan.sh` | Plan gate entry point: flags, the skill-root path, the single EXIT cleanup, and the ORDER of the 13 validation passes. Owns no check itself. | Sources every `validate-plan-*-lib.sh`; the pass order is load-bearing (see the file's docblock). |
-| `scripts/validate-plan-common-lib.sh` | `fail`/`warn` finding vocabulary, `trim`, `require_heading`, `get_single_field` (returns via the `field_value` global). `warn` never touches `errors` — the `--complete`-promotes-WARN-to-FAIL pattern depends on it. | Required by every other `validate-plan-*-lib.sh`. |
-| `scripts/validate-plan-docs-lib.sh` | Existence gate, plan-description headings, `UI affected` verdict, adversarial-review gate and mirror, inventory section shape, hand-edit damage (helper-flag text, duplicate `§` labels, `$script_dir` fragments). | Publishes `ui_affected` and the `plan_docs` list the placeholder and stale passes iterate. |
-| `scripts/validate-plan-placeholders-lib.sh` | Registered-template-token sweep; the registry surface (authored/generated) decides WARN vs FAIL. | Reads `planning/placeholders.json` via `skill_root`. |
-| `scripts/validate-plan-stale-lib.sh` | `--stale` phrase sweep, including the `*-testing.md` companions; bundled case-count and byte-identical phrase list. | Registers its temp phrase file with the entry script's `cleanup_files`, never its own EXIT trap. |
-| `scripts/validate-plan-inventory-lib.sh` | Work-unit row parser and all row rules, definition-of-done cross-links, dependency-cycle walk, and the (KNOWN DEAD) proof-coverage rule. | Owns the `unit_*` / `goal_units` data model every later pass reads. |
-| `scripts/validate-plan-ui-lib.sh` | UI user stories, browser run caches, story status vocabulary, `bugs.md` linkage. | Runs only when `ui_affected` is `yes`. |
-| `scripts/validate-plan-goals-lib.sh` | `goal.md` headings, the testing-requirement table, goal-size band and exception, step-file/inventory agreement, step-file naming. | Only writer of `goal_testing_required`. Reads `planning/goal-tables.json` via `skill_root` for the sections whose first column may be `yes`/`no`; a table under any other heading is hand-edit damage and fails. |
-| `scripts/validate-plan-serve-lib.sh` | The "the application still serves" WARN for a goal that changes module state, schema, or configuration. | Reads `planning/state-change-registry.json` via `skill_root`. |
-| `scripts/validate-plan-commands-lib.sh` | Command-literal detector (rules 1-8) against the plan's `commands.json`. | Reads `planning/never-executable-extensions.json` via `skill_root`; registry maintained by `register-command.sh`. |
-| `scripts/validate-plan-propagation-lib.sh` | `--complete` progress gate plus propagation (a) unowned edit targets, (c) verifier reachability, (c2) companion references, (d) unverified graph leaves, (e) §9.x roster vs inventory. | Runs only when `--propagation` (the default) is on. |
-| `scripts/*.sh` | Thin, single-purpose helpers. | Source `plan-document-lib.sh` (+ `plan-reconcile-lib.sh`). |
+| `scripts/validate-plan.sh` | Plan gate entry point; wiring-only stub over the compiled `validate-plan` binary (T145 goal 27) — sources no `validate-plan-*-lib.sh` siblings any more; the 13 validation passes are implemented in the Rust binary. | -- |
+| `scripts/*.sh` | Thin, single-purpose helpers; every entry point is now a wiring-only stub (section 2, `CODE-STYLE.md`) preferring its own compiled binary. | Source `plan-core-lib.sh`; the three permanent bash-implementation exceptions (`setup-dev-env.sh`, `pre-push-check.sh` via `register-lib.sh`, `render-plans-board.sh` via `plans-board-lib.sh`) still source their own fuller library. |
 | `PACKAGE-MANIFEST.tsv` / `PACKAGE-MAP.tsv` | Ship manifest / source-destination map. | Every installed file must be registered here. |
-| `install.sh` `skill_files()` | Installer file list. | Must match manifest + map. Every name must exist on disk and every tracked skill file must either be listed or parked in `../installer/unshipped-planning-files.txt` — asserted by `../tests/test-skill-files-manifest.sh`, which also runs as npm `prepack`. |
+| `installer/src/50-manifest.sh` `skill_files()` | Installer file list. | Must match manifest + map. Every name must exist on disk and every tracked skill file must either be listed or parked in `../installer/unshipped-planning-files.txt` — asserted by `../tests/test-skill-files-manifest.sh`, which also runs as npm `prepack`. |
 | `../installer/unshipped-planning-files.txt` | Planning files no install delivers, awaiting a ship-or-not decision. | A ratchet: entries leave by being registered for shipping. Adding one is a decision, and a stale entry fails the test. |
 | Benchmark capsule copy (`setup-benchmark.sh`) | Copies a fixed set into the worker capsule: `SKILL.md`, `REVIEWER.md` (generated into the capsule when absent), `scripts/`, and the UI reference doc. | New files under `scripts/` and changes to `SKILL.md`/`REVIEWER.md` must be reflected here; `ROLES.md`, `roles/*`, `VOICES.md`, and `MAINTAINER-STYLE-CONTRACT.md` are NOT copied into the capsule. |
 | `../verify-both-shells.sh` | Runs the suite on the working tree under the local bash and the bash 3.2 floor, in a linked worktree in `TMPDIR` so editing can continue. Prints each failing test's own output. | Sweeps its own leftover worktrees; never place one under the repo, or the filesystem scans land machine-specific paths in generated artifacts. |
-| `../blast-radius.sh` | Integration-safety report over a change set: freshness of generated artifacts, missing manifest rows, base drift, and the couplings in `coupling.tsv`. Not a correctness check and not shipped. | Reads `coupling.tsv`; runs `installer/build.sh --check`, `generate-portability.sh --check`, `test-reviewer-projection.sh`. Asserted by `test-blast-radius.sh`. |
+| `../blast-radius.sh` | Integration-safety report over a change set: freshness of generated artifacts, missing manifest rows, base drift, and the couplings in `coupling.tsv`. Not a correctness check and not shipped. | Reads `coupling.tsv`; runs `generate-portability.sh --check`, `test-reviewer-projection.sh`. Asserted by `test-blast-radius.sh`. |
 | `../coupling.tsv` | The couplings a change must honour, as data rather than prose: glob, level, consequence, check. | Read by `blast-radius.sh`. Add a row when a new generated artifact or registry appears. |
 | `../BUGS.json` / `../TODO.json` | The defect register and the work queue, written by this repo's own `bug-report` and `todo` skills. Tracked, so they survive a machine. | Update them in the same change (checklist step 8). No gate enforces this — nothing can tell that a commit resolved a defect — so the checklist is the only mechanism. |
 | `../CODE-CONTRACTS.md` | Cross-script behavioural contracts: section shapes and their sole writer, irreversible-last, advisory vs gate, generated artifacts, registry-plus-gate, and human-followable documents. Each entry names the incident behind it. | Read with `CODE-STYLE.md` before changing a helper. Contract 1 is enforced by `document-sections.json` + `test-document-sections.sh`. |
@@ -57,44 +45,30 @@ the maintainer must behave going forward.
 ## 2. Behavior rules for the future
 
 ### 2.1 No backwards compatibility
-- A changed command/format is a **clean break**. No aliases, legacy modes, or
-  inferred defaults. Old forms fail loudly.
-- Coordinated migration: update producer, parser/validator, fixtures, tests,
-  manifest/map, `install.sh skill_files`, capsule copy, and the hash test in
-  the **same** change. Run the plan validator and installer-manifest check.
+The rule is `../.agents/MAINTAINER.md` 1.1. Planning-specific: run the plan
+validator and the installer-manifest check with the coordinated migration.
 
 ### 2.2 Small, scoped, single-source docs
-- `SKILL.md` stays a lean index/contract. Never let it regrow into the
-  monolithic document it replaced.
-- Agents read only the doc for the task they are doing. Phase scoping prevents
-  "future knowledge" leaking into a planning/execution/cleanup context.
-- Shared facts live in exactly one place: the contract in `SKILL.md`, the
-  canonical roles in `MAINTAINER-STYLE-CONTRACT.md`. Phase docs and role docs
-  **reference, never duplicate**.
+The rule is `../.agents/MAINTAINER.md` 1.2. Planning-specific: `SKILL.md` is the
+contract and `MAINTAINER-STYLE-CONTRACT.md` holds the canonical roles; phase
+docs and role docs reference them, never duplicate them, and phase scoping keeps
+"future knowledge" out of a planning, execution or cleanup context.
 
 ### 2.3 Proactive, reconciling tools
-- When a mutation happens, the tool reconciles every reference automatically —
-  coverage rows, Owned-work-units, "Depends on", step/testing files, and
-  progress trackers. Do not make an agent issue a follow-up call the tool
-  knew it needed.
-- Keep helpers **small**; put shared logic in library files
-  (`plan-document-lib.sh`, `plan-reconcile-lib.sh`).
+The rule is `../.agents/MAINTAINER.md` 1.3. Planning-specific: the references a
+mutation reconciles are coverage rows, Owned-work-units, "Depends on",
+step/testing files and progress trackers. Shared logic goes in
+`plan-document-lib.sh` or, for a new capability, in a Rust crate under `src/`
+(`CODE-STYLE.md` section 1b), not a new bash library.
 
 ### 2.4 Deterministic command contracts
-- Every subcommand has one fixed, documented positional signature. An explicit
-  `document-id` where applicable. No positional overloading, no value-sniffing.
-- Every mutating helper has `--help` (exit 0, concise) and **actionable
-  errors**: state the problem and what the agent can do to resolve it.
+The rule is `../.agents/MAINTAINER.md` 1.4.
 
 ### 2.5 Identity-gated capabilities
-- Revealing capabilities (e.g. `--paths`) are gated by caller role (`ROLE_ID`);
-  `--list` is deliberately open (id/name only). Default print mode only ever
-  emits the requested role's own docs.
-- Content reads FAIL CLOSED: an unset or unknown `ROLE_ID` is a hard refusal
-  with a `FAIL-CLOSED identity` message — the worker is denied a persona and
-  must be respawned. Only `--list` is identity-free.
-- Shell gates are **advisory, not a security boundary**; the agent framework
-  confines the process. Document that.
+The rule is `../.agents/MAINTAINER.md` 1.5. Planning-specific: `--paths` is a
+revealing capability gated by `ROLE_ID`, `--list` (id/name only) is the one
+identity-free read, and default print mode emits only the requested role's own
+docs.
 
 ### 2.6 Plans are transient work orders
 - Plans are not fixtures. `.plans/` is gitignored; `.env` manifests are
@@ -111,25 +85,29 @@ the maintainer must behave going forward.
   persona matrix only because scope-doc shipping requires every `ROLES=()` id to
   be present, but their authority is not defined there.
 
-### 2.7a `role-context.sh` is dual-natured
+### 2.7a `role-context.sh`'s registry logic lives in Rust now
 
-- It is a CLI **and** a sourceable registry: the sourcing guard stops the CLI
-  main flow when the file is sourced, so `plan-context-lib.sh` can reuse
-  `resolve_id()` without the arg parsing, usage and exit firing in the caller.
-- `ROLES`, `resolve_id`, `canonical_name`, `role_docs`, `list_roles`,
-  `voice_for` and `can_access` are the public surface of the sourced form.
-  `ROLES` keeps its UPPER_CASE name and none of these carry the `plan_` prefix
-  CODE-STYLE.md section 7 asks of a sourced file; renaming any of them is a
-  cross-file change. Everything script-local to the CLI half is lower-case.
+- `role-context.sh` used to be dual-natured (a CLI plus a sourceable registry:
+  `plan-context-lib.sh` sourced it directly to reuse `resolve_id()` without the
+  CLI's own arg parsing, usage and exit firing in the caller). That consumer
+  was deleted in T145 goal 29, and the sourceable bash body itself (the
+  `ROLES` array, `resolve_id`, `canonical_name`, `role_docs`, `list_roles`,
+  `voice_for`, `can_access`) was deleted in T145 goal 27's own die-loudly-stub
+  sweep once nothing sourced it any more (B360) — `role-context.sh` is now a
+  wiring-only stub like every other `planning/scripts/*.sh` entry point,
+  preferring the compiled `role-context` binary or dying loudly if it is
+  missing. All of the logic above now lives in `src/role-context/src/main.rs`.
 - Resolution accepts the canonical id and the canonical name
   (case-insensitive) plus id/name aliases (`willie`/`maintainer`,
   `pythia`/`oracle`, `benny-02` → `benny`). Unset or unknown `ROLE_ID` is a hard
   refusal and the worker is denied a persona; `--paths` is maintainer-only.
-  Shell gates are advisory, not a security boundary — the agent framework is
-  what confines the process.
-- `ROLES=()` and `role_docs()` are the machine source of the persona registry
-  and per-role scope; the `ROLES.md` matrix is a maintained mirror, and
-  scope-doc shipping is enforced by `tests/test-persona-drift.sh`.
+  These gates are enforced by the compiled binary itself now, not shell —
+  still advisory rather than a security boundary, since the agent framework is
+  what actually confines the process.
+- The compiled binary's own `ROLES` constant and `role_docs()` function are the
+  machine source of the persona registry and per-role scope; the `ROLES.md`
+  matrix is a maintained mirror, and scope-doc shipping is enforced by
+  `tests/test-persona-drift.sh`.
 
 ### 2.8 Review protocol invariants
 - Protocol 1.4.2: Reviewer A (`christian`) is handoff-only, never approves;
@@ -180,16 +158,17 @@ library, and `test-plan-libs-build.sh` runs it.
   opportunistically-built `plan-crypt` binary first, then the GNU tool, then
   the BSD one, refusing with 69 only when none exists. `openssl` was the last
   rung and is gone from the chain and from `requires.tsv`. The binary is
-  found the way the chat skill's own binary lookup works — `PLAN_CRYPT_BIN`,
-  then `PATH`, then `planning/bin/<target triple>/plan-crypt` and
-  `planning/bin/plan-crypt`. **Unlike `plan-overview` and `rjq`
-  (`planning/binaries.tsv`), plan-crypt has no shipped row** (B101): CI builds
-  and tests it against the NIST vector, but delivers it to no installed
-  skill, so an installed planning skill runs the shell fallback chain only,
-  and a `planning/bin/<triple>` path exists only after a local
-  `setup-dev-env.sh` build. A pin naming a file that does not exist is a
-  refusal rather than a fall-through, which is how a test takes the compiled
-  rung out of the picture.
+  resolved through `plan_bin_dir` (`planning/scripts/lib/crypt/plan_bin_dir.sh`):
+  `PLAN_CRYPT_BIN` pinned explicitly, then a bare `plan-crypt` already on
+  `PATH`, then `plan_bin_dir`'s own answer joined with `plan-crypt` -- the
+  shared install-time location every skill's compiled binaries live in
+  (T72), falling back to a dev checkout's own root `bin/<triple>` when
+  neither exists yet. `plan-crypt` now has a shipped row in
+  `planning/binaries.tsv`, same as `plan-overview` and `rjq` (T72 also fixed
+  the B101 gap this bullet used to describe: it was built and tested but
+  declared nowhere). A pin naming a file that does not exist is a refusal
+  rather than a fall-through, which is how a test takes the compiled rung
+  out of the picture.
 - Two implementations of one algorithm can disagree, so they are pinned to each
   other rather than trusted: `tests/test-plan-crypt.sh` asserts the compiled and
   shell rungs produce identical hex across the empty string, the 55/56/64-byte
@@ -212,7 +191,7 @@ library, and `test-plan-libs-build.sh` runs it.
 ### 2.9 Per-role reader composition
 - `role-context.sh` (persona scope) and `plan-context.sh` (bounded plan content)
   are two distinct gates; there is **no global composition rule**, only a
-  per-role allow-list (`plan-context-lib.sh` `context_role_reader_composition`).
+  per-role allow-list (`role_cap()`, `src/plan-context/src/main.rs`).
   `installer`/`oracle`/`eve` read no plan content; all other roles are capped
   per role.
 - Keep that function and the `ROLES.md` reader allow-list in sync; they must
@@ -241,8 +220,9 @@ library, and `test-plan-libs-build.sh` runs it.
 Every command literal in a step file or testing companion must be registered in
 the plan's `commands.json` (seeded empty by `create-plan.sh`, maintained with
 `register-command.sh`), so the "when" context travels with the command instead
-of being lost when steps are copied. `validate-plan-commands-lib.sh` decides
-what is a command literal with ordered rules, no language table:
+of being lost when steps are copied. `src/planning-validator-commands/src/lib.rs`
+(`command_candidate`/`command_disqualified`) decides what is a command literal
+with ordered rules, no language table:
 
 A span is a **candidate** when any of these holds —
 
@@ -286,7 +266,8 @@ entry carries a surface that drives the verdict:
 
 ### 2.14 One EXIT trap, process-wide
 
-`plan-document-lib.sh` installs a single `plan_cleanup` on `EXIT INT TERM` at
+The rule is `../.agents/MAINTAINER.md` 1.8; this section is how the planning
+library implements it. `plan-document-lib.sh` installs a single `plan_cleanup` on `EXIT INT TERM` at
 load and keeps one accumulating temp list, replacing the per-call
 `trap … EXIT` / `trap - EXIT` pair that leaked temps whenever two of them
 nested (CODE-STYLE §8).
@@ -309,78 +290,21 @@ vocabulary, removes the overlap. Until then, never use `trap - EXIT` to
 
 ### 2.15 A working local tree needs the crates built
 
-Run `../setup-dev-env.sh` once after cloning. It builds every crate under
-`../src/` for this machine's target triple into ONE `bin/<target triple>` at
-the repository root — the directory `plan_bin_dir` walks up to find — rather
-than a bin/ inside each skill. Only the host triple is built; cross-building
-the other four is what a release (`installer/build-release.sh`) and CI do.
-
-For every planning command that has a `.sh` oracle, the same build also copies
-the extensionless Rust executable to `scripts/<command>` beside
-`scripts/<command>.sh`. Those sibling files are generated, executable, and
-ignored; they are the developer-facing command layout for the Rust migration.
-The shared root copy remains because existing shell helpers use it for runtime
-discovery, and because the target artifact pipeline still consumes that layout.
-
-Why this needs saying: exactly one artifact is committed, and every helper that
-wants a compiled one degrades honestly when it is absent. `plan_crypt_resolve`
-falls through to the shell rungs, the chat server drops to an interpreter tier.
-So a tree with nothing built still passes the suite, and the compiled path —
-the one a target actually runs — is never exercised locally. A green run on an
-unbuilt tree is not evidence about the code a user gets.
-
-- **The script refuses to run without nix, and does not fall back to a system
-  cargo.** The flake pins the newest stable rust the locked nixpkgs offers,
-  with the five house targets; another toolchain produces a different artifact
-  from the one CI and a release ship. It exits 69 and prints how to install
-  nix.
-- **`rjq` is invoked by name.** Building it is not enough — the planning helpers
-  find it on PATH, so until the root `bin/<triple>` is on PATH the tree uses
-  whatever `rjq` the machine happens to have, or none. The script prints the
-  export line; `--check` reports what is present or missing without building.
+What `../setup-dev-env.sh` builds and generates, its exit codes, how `rjq` and
+an installed copy are resolved, and why an unbuilt tree cannot run the suite are
+in `../.agents/MAINTAINER.md` section 1.9, and are not repeated here. That
+includes the copy of each planning command into `scripts/<command>` and the
+requirement for nix.
 
 ### 2.16 Generated files are CI's job, not the repo's
 
-- Every binary and compiled output is built by a CI runner and delivered as a
-  release artifact. The repo carries no generated files — nothing
-  machine-produced is committed, ever. A generated file in git is a blob: it
-  cannot be rebuilt on every maintainer box (no darwin or msvc link here), it
-  rots out of sight of the build that produces it, and every clone pays for it
-  forever.
-- This is absolute, and it names the files that are tracked today and must
-  leave: the committed `planning/bin/x86_64-unknown-linux-musl/rjq` binary
-  (T70a), the compiled `plan-*-lib.sh` outputs of `build-plan-libs.sh` (§2.8),
-  `PORTABILITY.md` and `REVIEWER.md`. Each moves to a CI build that publishes
-  the artifact, and its in-repo copy is removed in the same coordinated
-  change. T73 tracks the migration; its per-file work lands as sub-tasks. (An
-  earlier recording of this rule named T71; master had already assigned that
-  id to the planning/SKILL.md phase-doc split before it landed.)
-- Until a file's migration lands, its existing gate keeps running and a stale
-  generated file still fails it. The rule does not downgrade any gate; it adds
-  "not tracked" as the required end state. Declared-but-unbuilt is the legal
-  resting state on disk (`binaries.tsv` rows; rust-development-guidelines.md
-  §6: declare before building — the building happens on the runner).
-- Consumers that read a generated file from the working tree — the installer,
-  npm pack, test harnesses, `blast-radius.sh`'s freshness checks — must be
-  reconciled to fetch the artifact from the release or publish pipeline in the
-  same change that untracks the file. An artifact neither tracked nor
-  delivered is a broken install, which is the failure this rule exists to
-  prevent, so the reconciliation is part of the work, never a follow-up.
-- The lint gate is one of those consumers, and not an obvious one. shellcheck
-  resolves a `source=` directive only against files named on the same command
-  line, so an untracked library drops out of `git ls-files` and every variable
-  a sourcing script reads from it reads as unassigned (SC2154). The CI job
-  therefore builds the libraries and appends them to the file list; a
-  generated file that is linted, or sourced by something linted, belongs in
-  that list.
-- **`install.sh` is the one standing exception, and it stays committed.** It is
-  fetched and run standalone (`curl … | bash`) and is the npm `bin`, so at
-  runtime it has no siblings to source and no pipeline to fetch it from — the
-  artifact *is* the entry point. It keeps its generator (`installer/build.sh`)
-  and its freshness gate (`installer/build.sh --check`, the `installer-build`
-  CI job) instead. Read the rule above as "nothing machine-produced is
-  committed except the one artifact whose whole purpose is to be downloaded on
-  its own", and see `CONTRIBUTING.md` and `RELEASE.md`, which say the same.
+The rule, the table of every generated file with its generator, the
+`.npmignore` exception and the npm size baseline are in
+`../.agents/MAINTAINER.md` sections 1.10 and 1.10a, and are not repeated here.
+The planning-specific part: `plan-*-lib.sh` come from `build-plan-libs.sh`
+(section 2.8 below) and `REVIEWER.md` from `generate-reviewer.sh`; both are
+untracked and gitignored, as are the extensionless compiled copies of the
+planning commands that `setup-dev-env.sh` stages into `planning/scripts/`.
 
 ## 3. Pending consolidation (the duplication inventory)
 
@@ -394,12 +318,12 @@ what keeps this table from rotting the way the comments did.
 
 | Duplicated logic | Sites | Canonical helper | State |
 |---|---|---|---|
-| Hand-rolled `"$f.tmp.$$"` + `trap` + `mv` | 42 in 27 files | `plan_atomic_write`, `plan_track_tmp` | helper exists; call sites not migrated. Fell 43 -> 42 when B73's fix (test-duplication-ratchet.sh no longer counts a full-line comment naming the pattern) removed one comment-only hit; no call site changed. |
-| Inline `awk -F'\|'` inventory-row parsing with hard-coded field indices (`$2` ID … `$10` Step) | 23 in scripts/*.sh | `plan_inventory_row`, `plan_inventory_rows`, `plan_inventory_split` | helper exists in `scripts/plan-inventory-lib.sh`; the ten work-unit *readers* are migrated. What is left is not all inventory: the two `update-work-unit.sh` rewriters and `plan_prune_work_unit` edit rows in place (a writer helper, not this one), `plan-content.sh find` needs the raw row text rather than trimmed cells, and the rest parse other tables (coverage, `VOICES.md`, the progress trackers). The adversarial-review Findings table is no longer among them: `plan_review_gated_pairs` in `plan-document-lib.sh` owns it, and `mint-fix-keys.sh`, `verify-fix-keys.sh` and `add-fix-claim.sh` all call it — three copies of those field indices were three chances for the writer to accept a pair the verifier does not gate. The cap counts every literal `awk -F'|'` in `scripts/*.sh`, including three docblock mentions and the helper's own parser, so its floor is 1, not 0. Two sites are admitted generic readers rather than migrated inventory parses: `render-plan-overview.sh` cells() (29th) and `remove-coverage.sh`'s outcome match (30th, T17) — a shared canonical-table reader that would absorb both is future work. After the harden-plan-data-parsing goal-03 batches (W09-W13, W26), the shared plan_table_cell/plan_table_set_cell/plan_table_cells helpers also own the plan-content find scanners, both update-work-unit rewriters, the update-step status rewrite, plan_prune_work_unit, the progress status carry, and the propagation/inventory validation readers; the cap fell 30 -> 23 with those batches, then to 21 with W22 (mint-fix-keys) and W25 (cleanup-plans reader), to 19 with W19 (render-plan-overview cells() and the NF probe), and to 15 with W21/W23/W24 (overview-state, both progress counters), then to 11 when B73's fix (test-duplication-ratchet.sh no longer counts a full-line comment naming the pattern) removed four comment-only hits; no call site changed. The admitted generic readers note is obsolete: cells() is now the shared-helper port. |
-| Seed progress-bar literal `` `0%  #### ----------------  100%` `` | 3 files | `plan_progress_bar` | helper exists; glyphs are pinned by `tests/test-progress-bar-shape.sh`, so any migration must stay byte-identical. `rebuild-plan-progress.sh` left the set in T5, which is why the cap is 3, not 4. |
-| percent / bar / icon derivation | 3 files | `plan_progress_percent`, `plan_progress_bar`, `plan_progress_icon` | helper exists; `update-progress.sh` is the canonical copy and the library's arithmetic and glyphs are transcribed from it. The other two agree on output but not on spelling, so do not assume a textual match when converting: `update-plan-progress.sh` collapses the filled/empty and icon branches to one-liners. `rebuild-plan-progress.sh` was migrated onto the helpers in T5, which is why the cap dropped from 4. Half-up rounding (`+ total / 2`) and the 20-column default width are part of the byte-identical contract. |
+| Hand-rolled `"$f.tmp.$$"` + `trap` + `mv` | 7 in 2 files | `plan_atomic_write`, `plan_track_tmp` | helper exists; call sites not migrated. Fell 42 -> 13 with T145 goal 27: most of the remaining sites lived in planning/scripts/*.sh entry points whose whole bash reimplementation body (fallback code, now dead weight once the compiled binary is the production path) was deleted in that goal, taking their own copies of this pattern with them -- not a migration onto the helper, just the surrounding code going away. Fell further, 13 -> 7, with T145 goal 29's deletion of the now-orphaned hand-written `plan-content-lib.sh`/`plan-content-diff-lib.sh`, which carried their own copies. The 2 sites still standing (`plan-document-lib.sh`, `plan-table-lib.sh`) are the still-active generated bundles, out of goal 29's own scope. |
+| Inline `awk -F'\|'` inventory-row parsing with hard-coded field indices (`$2` ID … `$10` Step) | 3 in scripts/*.sh | `plan_inventory_row`, `plan_inventory_rows`, `plan_inventory_split` | helper exists in `scripts/plan-inventory-lib.sh`; the ten work-unit *readers* are migrated. What is left is not all inventory: the two `update-work-unit.sh` rewriters and `plan_prune_work_unit` edit rows in place (a writer helper, not this one), `plan-content.sh find` needs the raw row text rather than trimmed cells, and the rest parse other tables (coverage, `VOICES.md`, the progress trackers). The adversarial-review Findings table is no longer among them: `plan_review_gated_pairs` in `plan-document-lib.sh` owns it, and `mint-fix-keys.sh`, `verify-fix-keys.sh` and `add-fix-claim.sh` all call it — three copies of those field indices were three chances for the writer to accept a pair the verifier does not gate. The cap counts every literal `awk -F'|'` in `scripts/*.sh`, including docblock mentions and the helper's own parser, so its floor is 1, not 0. Two sites are admitted generic readers rather than migrated inventory parses: `render-plan-overview.sh` cells() (29th) and `remove-coverage.sh`'s outcome match (30th, T17) — a shared canonical-table reader that would absorb both is future work. After the harden-plan-data-parsing goal-03 batches (W09-W13, W26), the shared plan_table_cell/plan_table_set_cell/plan_table_cells helpers also own the plan-content find scanners, both update-work-unit rewriters, the update-step status rewrite, plan_prune_work_unit, the progress status carry, and the propagation/inventory validation readers; the cap fell 30 -> 23 with those batches, then to 21 with W22 (mint-fix-keys) and W25 (cleanup-plans reader), to 19 with W19 (render-plan-overview cells() and the NF probe), and to 15 with W21/W23/W24 (overview-state, both progress counters), then to 11 when B73's fix (test-duplication-ratchet.sh no longer counts a full-line comment naming the pattern) removed four comment-only hits, then to 6 with T145 goal 27's own planning/scripts/*.sh bash-body deletion sweep, which took some remaining docblock mentions and stub-adjacent sites down with the deleted bodies (no call site was migrated onto the helper by that goal), then to 4 with T145 goal 29's deletion of the now-orphaned `plan-context-lib.sh`, `plan-reconcile-lib.sh`, and the six `validate-plan-*-lib.sh` files, whose own docblocks and mentions of the pattern went with them, then to 3 with B360's deletion of role-context.sh's own now-dead `voice_for()` function, which held its own `awk -F'|'` VOICES.md parser (the same lookup now lives in src/role-context/src/main.rs's `voice()`, a plain Rust line scan with no awk involved). The admitted generic readers note is obsolete: cells() is now the shared-helper port. |
+| Seed progress-bar literal `` `0%  #### ----------------  100%` `` | 0 files | `plan_progress_bar` | helper exists; glyphs are pinned by `tests/test-progress-bar-shape.sh`, so any migration must stay byte-identical. `rebuild-plan-progress.sh` left the set in T5, which is why the cap was 3, not 4. Fell 3 -> 0 with T145 goal 27: `create-progress.sh`, `create-plan-progress.sh` and `plan-mutate.sh` -- the last three sites -- had this literal only in their now-deleted bash bodies. |
+| percent / bar / icon derivation | 1 file | `plan_progress_percent`, `plan_progress_bar`, `plan_progress_icon` | helper exists; `plan-progress-lib.sh` (the shared library, not one of the stripped entry points) now holds the one remaining copy, the helper's own arithmetic and glyphs. `update-progress.sh` was the canonical copy before T145 goal 27 deleted its bash body along with `update-plan-progress.sh`'s own derivation, falling the count 3 -> 1 (the library's own floor). Half-up rounding (`+ total / 2`) and the 20-column default width remain part of the byte-identical contract, now enforced from the library alone. |
 | Status `case` map (`incomplete`/`in-progress`/`completed` → glyph) | 1 file | `plan_status_label` | helper exists in `scripts/plan-document-lib.sh`; `update-step.sh` and `update-plan-progress.sh` are migrated. `rebuild-plan-progress.sh` is the remaining site and is a different shape — it derives the glyph from the goal's own progress file rather than from a requested status word, so it needs a second helper or a rewrite, not this one. The glyphs are the on-disk contract. |
-| A test that does not source `lib-test.sh` | 7 of 64 (W17 converted test-progress-helpers to the harness; the remaining seven are benchmark-frozen or self-contained contract probes) | `t_begin` / `t_record` / `t_fail` / `t_end` (`tests/lib-test.sh`) | helper exists; six tests kept a byte-identical copy of its reporter that exited on the first finding, and that count is now 0. The cap counts the library-source line instead, because "a reporter whose body exits" needs brace matching and CODE-STYLE.md section 12 rules out parsing shell structure with a pattern. A `fail() { t_fail "$*"; }` shim is deliberate and is not counted: 32 tests have one, and they are why the call sites did not change. |
+| A test that does not source `lib-test.sh` | 6 of 64 (W17 converted test-progress-helpers to the harness; the remaining six are benchmark-frozen or self-contained contract probes) | `t_begin` / `t_record` / `t_fail` / `t_end` (`tests/lib-test.sh`) | helper exists; six tests kept a byte-identical copy of its reporter that exited on the first finding, and that count is now 0. The cap counts the library-source line instead, because "a reporter whose body exits" needs brace matching and CODE-STYLE.md section 12 rules out parsing shell structure with a pattern. A `fail() { t_fail "$*"; }` shim is deliberate and is not counted: 32 tests have one, and they are why the call sites did not change. The cap fell 7 -> 6 when `test-platform-selection.sh` (one of the bash `install.sh`-specific tests) was deleted with the rest of the retired installer's test suite. |
 | `stat(1)` GNU-vs-BSD probe | `plan-env.sh` + `plan-document-lib.sh` | `plan_stat_mode`, `plan_stat_uid` | helper exists, but `plan-env.sh` sources no library, so migrating it is a structural change |
 
 Migrating any row is a behaviour-preserving change and must be proved as one:
@@ -407,45 +331,35 @@ capture the affected scripts' stdout, stderr and exit codes over real inputs
 before and after, and diff. `test-progress-bar-shape.sh` and
 `test-plan-commands.sh` pin much of the observable output already.
 
-## 4. Change checklist (minimum, per change)
+## 4. Change checklist (planning additions)
 
-1. Identify every consumer (parser/validator, other helpers, tests, `role_docs()`
-   in `role-context.sh`, manifest/map, `install.sh skill_files`, capsule copy,
-   hash test).
-2. Update shared logic in the library, keep the helper thin.
-3. Add/update a regression fixture + test for the new behavior, including the
-   actionable-error path.
-4. If the change alters a flow that crosses more than two scripts, or adds/removes
-   a plan artifact, update the affected diagram in `ARCHITECTURE.md` in the same
-   change (`CODE-STYLE.md` §11 picks the diagram form).
-5. If a doc changed: keep `SKILL.md` small, update the phase/role docs and their
-   references, regenerate `REVIEWER.md` if a reviewer section changed. Keep
-   `roles/VOICES.md` registry-aligned and keep `ROLES.md`'s persona doc matrix +
-   `plan-context-lib.sh` reader composition in sync with `role_docs()`/`ROLES=()`;
-   re-run `test-persona-drift.sh` + `test-voice-artifact-drift.sh`.
-6. Register new files in `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv`,
-   and `install.sh skill_files`. If the file is a benchmark capsule dependency
-   (`scripts/*`, `SKILL.md`, `REVIEWER.md`), reflect it in `setup-benchmark.sh`'s
-   capsule copy. The manifest line-count is derived from the map (no constant to
-   bump) — `test-installer-manifest.sh` asserts the reconcile.
-7. Run `bash -n`, `git diff --check`, `test-plan-commands.sh`,
-   `test-installer-manifest.sh` (asserts `skill_files()` ↔ manifest/map
-   reconcile), `test-plan-env.sh`, the plan validator, and — after any
-   role/reader/VOICES change — `test-persona-drift.sh`,
-   `test-voice-artifact-drift.sh`, `test-supervision-frame.sh`,
-   `test-progress-bar-shape.sh`, and `test-reviewer-projection.sh`. For
-   every change under `src/`, also `cargo fmt --check` and `cargo test`
-   on each touched crate before pushing: CI runs fmt first and test per
-   target leg, so unformatted or failing rust turns four chat legs red
-   and burns a cycle.
-8. Update the registers, which nothing else will. A defect this change fixes is
-   closed in `../BUGS.json` with the commit and the mutation that proves it; a
-   defect it *finds* and does not fix is added there rather than left in a commit
-   message; queued work goes in `../TODO.json`. Recipes are in
-   `../bug-report/SKILL.md` and `../todo/SKILL.md`. This is the one step on this
-   list with no gate behind it — no test can tell that a commit resolved a bug —
-   so it is the one that gets skipped, and then the next reader has to
-   reconstruct the change from its diff.
-9. Commit as one coordinated, no-backwards-compat change. The message carries the
-   *why* that does not belong in a comment (`CODE-STYLE.md` §12) and names the
-   register entries it closes, so the two can be checked against each other.
+Do the repo-wide checklist first: `../.agents/MAINTAINER.md` section 2 (every
+consumer, a regression test, the registers, one coordinated commit), 2a (adding
+a file) and 2b (adding a crate). A change to the planning skill adds these:
+
+1. The consumers to check include `role_docs()` in `role-context.sh`, the
+   manifest and map, `skill_files()`, the capsule copy and the hash test.
+2. If the change alters a flow that crosses more than two scripts, or
+   adds/removes a plan artifact, update the affected diagram in
+   `ARCHITECTURE.md` in the same change (`CODE-STYLE.md` §11 picks the diagram
+   form).
+3. If a doc changed: keep `SKILL.md` small, update the phase/role docs and their
+   references, and regenerate `REVIEWER.md` if a reviewer section changed. Keep
+   `roles/VOICES.md` registry-aligned and keep `ROLES.md`'s persona doc matrix
+   and `role_cap()`'s reader composition (`src/plan-context/src/main.rs`) in sync
+   with `role_docs()`/`ROLES=()`; re-run `test-persona-drift.sh` and
+   `test-voice-artifact-drift.sh`.
+4. Register new files in `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv` and
+   `installer/src/50-manifest.sh`'s `skill_files()`. If the file is a benchmark
+   capsule dependency (`scripts/*`, `SKILL.md`, `REVIEWER.md`), reflect it in
+   `setup-benchmark.sh`'s capsule copy. The manifest line-count is derived from
+   the map (no constant to bump); `test-installer-manifest.sh` asserts the
+   reconcile.
+5. Run `test-plan-commands.sh`, `test-installer-manifest.sh` (asserts
+   `skill_files()` ↔ manifest/map reconcile), `test-plan-env.sh`, the plan
+   validator and, after any role/reader/VOICES change,
+   `test-persona-drift.sh`, `test-voice-artifact-drift.sh`,
+   `test-supervision-frame.sh`, `test-progress-bar-shape.sh` and
+   `test-reviewer-projection.sh`, in addition to `bash -n`, `git diff --check`
+   and, for a change under `src/`, `cargo fmt --check` and `cargo test` on each
+   touched crate.

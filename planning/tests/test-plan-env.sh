@@ -20,8 +20,12 @@ PLANS_ROOT="$plans_root" "$repo_dir/planning/scripts/create-plan.sh" "$plan_root
 
 [ -f "$plans_root/.env" ]
 [ -f "$plan_root/.env" ]
-[ "$(t_stat_mode "$plans_root/.env")" = 600 ]
-[ "$(t_stat_mode "$plan_root/.env")" = 600 ]
+# NTFS has no permission bits: a manifest cannot be mode 600 there, stat says
+# 644 whatever was set, and the checker has no mode to enforce.
+if ! t_is_windows; then
+    [ "$(t_stat_mode "$plans_root/.env")" = 600 ]
+    [ "$(t_stat_mode "$plan_root/.env")" = 600 ]
+fi
 "$env_tool" check "$plan_root" "$plans_root" >/dev/null
 
 global_before="$(t_sha256 "$plans_root/.env")"
@@ -31,6 +35,19 @@ PLANS_ROOT="$plans_root" "$env_tool" write-plan "$plan_root" "$plans_root"
 [ "$global_before" = "$(t_sha256 "$plans_root/.env")" ]
 [ "$plan_before" = "$(t_sha256 "$plan_root/.env")" ]
 [ -f "$plan_root/keep.me" ]
+
+# A plans root whose path needs shell quoting (every Windows path does: C:\...).
+# create-plan and plan-env each wrote the manifests in their own quoting style,
+# identical only for shell-safe paths, so write-plan rewrote the global manifest
+# create-plan had just made. They share one quoting function now; this pins it
+# with a path that is unsafe on every platform.
+spaced_root="$tmp/plans with space"
+spaced_plan="$spaced_root/demo-plan"
+PLANS_ROOT="$spaced_root" "$repo_dir/planning/scripts/create-plan.sh" "$spaced_plan" 'Demo plan' >/dev/null
+spaced_before="$(t_sha256 "$spaced_root/.env")"
+PLANS_ROOT="$spaced_root" "$env_tool" write-plan "$spaced_plan" "$spaced_root"
+[ "$spaced_before" = "$(t_sha256 "$spaced_root/.env")" ]
+"$env_tool" check "$spaced_plan" "$spaced_root" >/dev/null
 
 helper_output="$tmp/helper-output"
 cat > "$tmp/helper.sh" <<'EOF'
@@ -48,7 +65,11 @@ printf '%s\n' "$PLAN_NAME|$PLAN_DESCRIPTION_FILE|$PLAN_STEPS_ROOT"
 EOF
 chmod 700 "$tmp/helper.sh"
 "$tmp/helper.sh" "$plan_root" "$plans_root" "$env_tool" > "$helper_output"
-grep -Fqx "demo-plan|$plan_root/plan-description.md|$plan_root/steps" "$helper_output"
+# The manifest holds the paths as the native tool spelled them (C:\... on
+# Windows); t_native_path and t_slashes are the identity on unix.
+native_plan_root="$(t_native_path "$plan_root")"
+helper_slashed="$(t_slashes < "$helper_output")"
+grep -Fqx "demo-plan|$native_plan_root/plan-description.md|$native_plan_root/steps" <<< "$helper_slashed"
 usage_file="$tmp/plan-env-usage"
 if "$env_tool" >"$usage_file" 2>&1; then
     printf '%s\n' 'missing plan-env arguments were accepted' >&2
@@ -68,11 +89,14 @@ if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
 fi
 [ ! -e "$tmp/sentinel" ]
 
-cp "$plan_root/.env" "$bad/.env"
-chmod 644 "$bad/.env"
-if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
-    printf '%s\n' 'weak manifest mode was accepted' >&2
-    exit 1
+# A weak mode is only a fault where a mode can be weak (see above).
+if ! t_is_windows; then
+    cp "$plan_root/.env" "$bad/.env"
+    chmod 644 "$bad/.env"
+    if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
+        printf '%s\n' 'weak manifest mode was accepted' >&2
+        exit 1
+    fi
 fi
 
 cp "$plan_root/.env" "$bad/.env"
@@ -149,71 +173,24 @@ if nobody_uid="$(id -u nobody 2>/dev/null)" && chown "$nobody_uid" "$bad/.env" 2
 fi
 
 mv "$bad/.env" "$bad/.env.real"
-ln -s .env.real "$bad/.env"
-if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
-    printf '%s\n' 'symlinked manifest was accepted' >&2
-    exit 1
+# Needs a real link: Git for Windows copies the target for `ln -s` unless told
+# otherwise, and a copy is an ordinary manifest (t_enable_symlinks says which).
+if t_enable_symlinks; then
+    ln -s .env.real "$bad/.env"
+    if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
+        printf '%s\n' 'symlinked manifest was accepted' >&2
+        exit 1
+    fi
 fi
 
 # ── Duplication parity (T6) ───────────────────────────────────────────────────
-# plan-env.sh sources no library on purpose — the manifest gate verifies a skill
-# root before any library is trusted — so read_pinned_snapshot_repo here
-# re-implements lib/core/plan_snapshot_repo.sh, and the GNU/BSD stat probe is
-# carried twice (here and in plan_stat_probe.sh). The copies cannot share code,
-# so this pins them to identical behaviour instead: same verdict on the same
-# manifest fixtures, and the same stat flag pair. The known deliberate
-# difference is return-status shape only (this reader reports absence as empty
-# output with status 0; the library reports it as status 1), so parity compares
-# output, not status.
-parity="$tmp/parity"
-mkdir -p "$parity/with-pin" "$parity/hostile" "$parity/pipe" "$parity/empty" "$parity/absent"
-printf 'PLAN_SNAPSHOT_REPO=%q\n' "$plans_root/a repo with spaces" > "$parity/with-pin/.env"
-printf "PLAN_SNAPSHOT_REPO='/tmp/x\$(touch y);rm -r / | true'\n" > "$parity/hostile/.env"
-# A pipe is the only metacharacter here: each refused class needs an isolated
-# fixture, or a rule weakened on one character stays hidden behind another.
-printf "PLAN_SNAPSHOT_REPO='/tmp/a|b'\n" > "$parity/pipe/.env"
-printf 'PLAN_SNAPSHOT_REPO=\n' > "$parity/empty/.env"
-
-awk '/^read_pinned_snapshot_repo\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$env_tool" \
-    > "$parity/reader-fn.sh"
-grep -Fq 'read_pinned_snapshot_repo()' "$parity/reader-fn.sh"
-{
-    printf '#!/usr/bin/env bash\nset -uo pipefail\n'
-    cat "$parity/reader-fn.sh"
-    printf '\nread_pinned_snapshot_repo "$1"\n'
-} > "$parity/reader.sh"
-mkdir -p "$parity/hostile" "$parity/pipe"
-# Both runners always exit 0: parity is compared through their output, and the
-# library's deliberate status-1 for an absent pin would otherwise fire this
-# test's ERR trap on every clean run. A broken runner shows up as an output
-# mismatch below.
-run_reader() { "$BASH" "$parity/reader.sh" "$1" 2>/dev/null; return 0; }
-run_library_reader() {
-    "$BASH" -c '
-        set -uo pipefail
-        source "'"$repo_dir"'/planning/scripts/lib/core/plan_snapshot_repo.sh"
-        plan_snapshot_repo "$1"
-    ' parity-library "$1" 2>/dev/null || true
-}
-
-# Values are captured into variables before comparing: a bare [ ] whose
-# operands come straight from $( ) does not abort under set -e when it fails,
-# and this epilogue would then print PASS over a failed assertion.
-reader_value="$(run_reader "$parity/with-pin/.env")"
-[ "$reader_value" = "$plans_root/a repo with spaces" ]
-for parity_case in with-pin hostile pipe empty absent; do
-    reader_value="$(run_reader "$parity/$parity_case/.env")"
-    library_value="$(run_library_reader "$parity/$parity_case")"
-    [ "$reader_value" = "$library_value" ]
-done
-
-# The stat probes must name the same set of formats, so a format fix on one
-# side cannot leave the other side probing something the other abandoned.
-# Compared as a set: the load-time probe lines legitimately repeat a format the
-# function definitions also use.
-env_stat_flags="$(grep -oE "stat -[cf] '[^']+'" "$env_tool" | LC_ALL=C sort -u | tr '\n' ';')"
-probe_stat_flags="$(grep -oE "stat -[cf] '[^']+'" "$repo_dir/planning/scripts/lib/core/plan_stat_probe.sh" | LC_ALL=C sort -u | tr '\n' ';')"
-[ -n "$env_stat_flags" ]
-[ "$env_stat_flags" = "$probe_stat_flags" ]
+# This block used to pin plan-env.sh's private read_pinned_snapshot_repo and its
+# GNU/BSD stat probe to lib/core/plan_snapshot_repo.sh and plan_stat_probe.sh,
+# because the bash body sourced no library and so carried its own copies. That
+# body is gone (T145): plan-env.sh is an exec shim onto the compiled binary,
+# which reads the pin in-process, so there is no second shell copy left to
+# drift. What the compiled reader owes -- a pin that survives `write-plan` and is
+# refused when it names neither the plans root nor the plan -- is covered above
+# and by src/plan-env's own tests.
 
 printf '%s\n' 'test-plan-env: PASS'

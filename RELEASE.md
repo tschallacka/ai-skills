@@ -2,7 +2,7 @@
 # Release protocol
 
 A release ships a **prod package**: the files an end user needs and nothing else.
-The maintainer's files — the per-function library sources, the 70 test scripts and
+The maintainer's files — the per-function library sources, the test scripts and
 their fixtures, the compiler, the architecture and maintainer documentation — stay
 in the repository. They are not bloat to a maintainer and they are nothing but
 bloat to a user, so the two are separated by declaration rather than by judgement.
@@ -22,7 +22,9 @@ Every file says so in its own header:
 `MODE` alone, because that axis belongs to inputs.
 
 Two independent lists have to agree, and neither is derived from the other:
-the marker in each file, and `skill_files()` in `installer/src/50-manifest.sh`.
+the marker in each file, and `skill_files()` in `installer/src/50-manifest.sh`
+(the one surviving fragment of the retired bash install.sh — see git history —
+that `installer/build-release.sh` still sources for exactly this list).
 `tests/test-mode-markers.sh` fails on any disagreement. That duplication is the
 cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
 
@@ -47,8 +49,7 @@ cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
    `--check` that fails rather than silently rebuilding:
 
    ```sh
-   ./installer/build.sh --check                    # install.sh
-   ./planning/scripts/build-plan-libs.sh --check   # the four plan-*-lib.sh
+   ./planning/scripts/build-plan-libs.sh --check   # the five plan-*-lib.sh
    ./generate-portability.sh --check               # PORTABILITY.md
    ./blast-radius.sh                               # every coupling in coupling.tsv
    ```
@@ -69,7 +70,12 @@ cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
    step. Read `--list` before tagging: it is the last point at which a file that
    should not ship is cheap to catch.
 
-6. **Regenerate `.npmignore`** so `npm publish` excludes the same set:
+6. **Check that `.npmignore` is current**, so `npm publish` excludes the same set.
+   It is generated, and its own header says to regenerate it after adding a
+   file: the change that adds, removes or renames a tracked file regenerates it
+   in that same change, so at release time this is a re-check and the file
+   should already be current. No gate enforces this, so run the command and
+   commit any difference it shows:
 
    ```sh
    ./installer/build-release.sh --npmignore > .npmignore
@@ -79,31 +85,61 @@ cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
    otherwise publish the maintainer's files. `npm pack --dry-run` lists what would
    go; it should match `--list`.
 
-7. **Tag and push**, then attach the tarball to the GitHub release. The tag is
-   what the installer resolves, so it must exist before the asset is useful.
+7. **Tag and push, then create the release as a DRAFT** with the universal
+   tarball attached, and run `release-installer.yml` to attach the five
+   per-platform installer assets and publish it:
+
+   ```sh
+   gh release create <tag> dist/ai-skills-<version>.tar.gz --draft --title <tag> --notes <notes>
+   gh workflow run release-installer.yml --ref <branch the workflow lives on> -f tag=<tag>
+   ```
+
+   Draft, not published: a real end-to-end rehearsal (T70/W06) found that
+   GitHub's immutable-releases protection locks a published release against
+   new asset uploads within roughly 5-6 minutes, shorter than
+   `release-installer.yml`'s own multi-platform build takes. A draft has no
+   such window — `release-installer.yml`'s own last step is what publishes
+   it, once every asset has landed, so nothing is ever uploaded to it after
+   it goes public. The tag is what the installer resolves, so it must exist
+   (via the draft) before the workflow has anywhere to attach assets to.
+
+   The moment the release goes public, `.github/workflows/release-npm.yml`
+   reacts to that same `release: published` event on its own: its `build` job
+   cross/natively builds every shipping skill for all five targets, `assemble`
+   gathers them into one npm package and dry-run verifies it, and `publish`
+   actually runs `npm publish` -- gated behind the `npm-publish` environment's
+   required-reviewer approval (someone with access must approve the pending
+   deployment before it runs). There is no separate manual `npm publish` step
+   in this checklist: approving that deployment is the release.
 
 8. **Verify the published article, not the local one.** Install from the tag into a
    scratch directory and confirm no maintainer file arrived:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/<tag>/install.sh \
-     | bash -s -- --all --target /tmp/release-check
+   curl -fsSL "https://raw.githubusercontent.com/tschallacka/ai-skills/<tag>/installer/bootstrap.sh" \
+     | AI_SKILLS_RELEASE_URL="https://github.com/tschallacka/ai-skills/releases/download/<tag>/ai-skills-<target>.tar.gz" \
+       bash -s -- install --all --target /tmp/release-check
    find /tmp/release-check -path '*/tests/*' -o -path '*/scripts/lib/*' | head
    ```
+
+   `<target>` is the release target triple for your host
+   (`x86_64-unknown-linux-musl`, `aarch64-apple-darwin`, …) — `AI_SKILLS_RELEASE_URL`
+   pins the exact tag's asset instead of bootstrap.sh's default of GitHub's
+   "latest release" redirect, which the just-tagged release is not yet.
 
    That `find` should print nothing.
 
 ## The two packages
 
 ```sh
-install.sh --all                    # prod: what an end user needs
-install.sh --all --package dev      # prod plus the maintainer's files
+installer install --all --source . --target DIR                  # prod: what an end user needs
+installer install --all --source . --target DIR --package dev    # prod plus the maintainer's files
 ```
 
 `--package dev` exists so a contributor can install a working development copy
 anywhere: the per-function library sources, the compiler, every test and fixture,
-`ARCHITECTURE.md` and `MAINTAINER.md`. For the planning skill that is 241 files
-against 85 in a prod install.
+`ARCHITECTURE.md` and `MAINTAINER.md`. For the planning skill that is several
+times as many files as a prod install.
 
 `prod` is the default deliberately. The one-line install is the common path and
 must never quietly deliver a maintainer's tree.

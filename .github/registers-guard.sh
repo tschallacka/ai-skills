@@ -6,9 +6,9 @@
 # arrays: two branches that each file an entry both take the same next free id,
 # and git cannot see that collision. The additions land at different array
 # positions, so it merges them textually with NO conflict and the result carries
-# two unrelated entries under one id. Eight of those landed in one merge on
-# 2026-09-04, invisible until reg_findings ran. A single writer removes the
-# class, and this script is what makes that branch safe to fast-forward.
+# two unrelated entries under one id, invisible until reg_findings ran. A
+# single writer removes the class, and this script is what makes that branch
+# safe to fast-forward.
 #
 # Two refusals, and the second is the load-bearing one:
 #
@@ -96,8 +96,8 @@ fi
 
 # ---- 2. the collision git cannot see ---------------------------------------
 # python3 rather than the register binaries: this must be able to refuse on a
-# runner with nothing built. CODE-STYLE.md §1 allows python3 for development
-# tooling, and this never ships to a skill.
+# runner with nothing built. python3 is fine for development tooling that
+# never ships to a skill.
 command -v python3 >/dev/null 2>&1 \
     || { refuse "python3 is required to check the registers for duplicate ids"; exit 1; }
 

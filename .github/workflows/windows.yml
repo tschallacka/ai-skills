@@ -1,0 +1,220 @@
+name: windows
+
+# The dedicated Windows leg: a push to the `windows` branch, or a manual run,
+# builds, lints and tests the whole workspace on x86_64-pc-windows-msvc and runs
+# the unsharded shell suite, and nothing else. It gates nothing; the same target
+# is also covered by the main workflow. Put content in .github/windows-focus.txt
+# to run one thing only (see the first job).
+
+on:
+  push:
+    branches: [windows]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: 0
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: x86_64-pc-windows-msvc builds, lints and tests the whole workspace
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      # Before checkout, so it applies to it: without this Git for Windows
+      # writes CRLF into every shell script it checks out. .gitattributes
+      # pins the same thing for a developer's own clone.
+      - name: Check out with LF endings
+        shell: bash
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          # Everything except benchmark/results: its archived runs hold paths
+          # longer than Windows allows, and nothing reads them.
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/benchmark/results/
+
+      - name: Pin the toolchain
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      # `bash` on a windows-latest PATH can resolve to C:\Windows\System32\
+      # bash.exe, the WSL launcher, which exits with an error when no distro
+      # is installed. Every test that spawns `bash script.sh` then fails for a
+      # reason that has nothing to do with the script. Git for Windows' own
+      # bash goes first, along with the GNU tools (awk, sed, cut, ...) it
+      # carries beside it.
+      - name: Put Git for Windows' bash and coreutils first on PATH
+        shell: bash
+        run: |
+          {
+            echo 'C:\Program Files\Git\bin'
+            echo 'C:\Program Files\Git\usr\bin'
+          } >> "$GITHUB_PATH"
+
+      - name: Say which shell tools the tests will find
+        shell: bash
+        run: |
+          command -v bash awk sed cut sort git || true
+          bash --version | head -1
+
+      - name: Build rjq and put it on PATH
+        shell: bash
+        run: |
+          cargo build -p rjq
+          echo "$GITHUB_WORKSPACE/target/debug" >> "$GITHUB_PATH"
+
+      # The generated shell libraries the wrappers and several tests need
+      # (plan-core-lib.sh and friends) are gitignored, so a fresh checkout has
+      # none of them.
+      - name: Generate the plan shell libraries
+        shell: bash
+        run: ./planning/scripts/build-plan-libs.sh
+
+      # A quick loop for one failing thing. When .github/windows-focus.txt has
+      # content, the run builds and does ONLY that: line 1 is passed to cargo
+      # (e.g. `test -p chat-server-rs --test end_to_end -- --nocapture`), any
+      # further lines are a bash script run afterwards from the repository
+      # root. Empty or absent means the full run below.
+      - name: Read the focus file
+        id: focus
+        shell: bash
+        run: |
+          if [ -s .github/windows-focus.txt ]; then
+            echo "focused=true" >> "$GITHUB_OUTPUT"
+            head -1 .github/windows-focus.txt > focus-cargo.txt
+            tail -n +2 .github/windows-focus.txt > focus-script.sh
+            echo "focused run: cargo $(cat focus-cargo.txt)"
+          else
+            echo "focused=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Focused cargo command
+        if: steps.focus.outputs.focused == 'true'
+        shell: bash
+        env:
+          RUST_BACKTRACE: '1'
+        run: |
+          set +e
+          # shellcheck disable=SC2046
+          cargo $(cat focus-cargo.txt) 2>&1 | tee windows-test.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Focused script
+        if: steps.focus.outputs.focused == 'true' && !cancelled()
+        shell: bash
+        run: |
+          [ -s focus-script.sh ] || exit 0
+          bash focus-script.sh 2>&1 | tee -a windows-test.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Format
+        if: steps.focus.outputs.focused != 'true'
+        shell: bash
+        run: cargo fmt --all --check
+
+      - name: Lint every crate
+        if: ${{ !cancelled() && steps.focus.outputs.focused != 'true' }}
+        shell: bash
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # --no-fail-fast: one failing test binary must not hide the crates after
+      # it, or listing the failures takes one run per failure.
+      - name: Test every crate
+        if: ${{ !cancelled() && steps.focus.outputs.focused != 'true' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --all-targets --no-fail-fast 2>&1 | tee windows-test.log
+
+      - name: Keep the full test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-log
+          path: windows-test.log
+          if-no-files-found: ignore
+
+  # The shell test suite is part of what "works on Windows" means: the planning
+  # skills are bash scripts that exec compiled binaries, and Windows users run
+  # them under Git for Windows' bash. This is the same suite the shard jobs in
+  # ci.yml run on Linux and macOS.
+  shell-suite:
+    name: The shell test suite passes under Git for Windows' bash
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out with LF endings
+        shell: bash
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/benchmark/results/
+
+      # A focused run (see the first job) is about one thing, so it skips the
+      # shell suite.
+      - name: Skip when a focused run is requested
+        id: focus
+        shell: bash
+        run: |
+          if [ -s .github/windows-focus.txt ]; then
+            echo "focused=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "focused=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pin the toolchain
+        if: steps.focus.outputs.focused != 'true'
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Put Git for Windows' bash and coreutils first on PATH
+        if: steps.focus.outputs.focused != 'true'
+        shell: bash
+        run: |
+          {
+            echo 'C:\Program Files\Git\bin'
+            echo 'C:\Program Files\Git\usr\bin'
+          } >> "$GITHUB_PATH"
+
+      - name: Build every compiled helper into bin/<triple>
+        if: steps.focus.outputs.focused != 'true'
+        shell: bash
+        run: |
+          SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
+          triple="$(./setup-dev-env.sh --list | sed -n 's/^host target: //p')"
+          [ -n "$triple" ] || { echo "::error::setup-dev-env.sh --list named no host target"; exit 1; }
+          echo "AI_SKILLS_BIN_ROOT=$PWD/bin/$triple" >> "$GITHUB_ENV"
+
+      - name: Run the suite
+        if: steps.focus.outputs.focused != 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          ./run-tests.sh 2>&1 | tee windows-shell-suite.log
+
+      - name: Keep the suite log
+        if: always() && steps.focus.outputs.focused != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-shell-suite-log
+          path: windows-shell-suite.log
+          if-no-files-found: ignore

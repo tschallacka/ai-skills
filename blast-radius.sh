@@ -41,6 +41,15 @@ case "${1:-}" in
         ;;
 esac
 
+# PORTABILITY(empty-array-setu): saved here, before the arg-parsing loop
+# below consumes "$@" via shift, so the compiled-binary wiring further down
+# (necessarily placed after repo_root is computed, which this script only
+# resolves AFTER parsing args) can still exec with the caller's own argv
+# exactly as received rather than an already-emptied "$@". Guarded the same
+# way `paths` is below: an empty array's [@] expansion is an
+# unbound-variable error under bash 3.2's own set -u semantics.
+br_original_args=("$@")
+
 base=master
 paths=()
 while [ "$#" -gt 0 ]; do
@@ -56,116 +65,40 @@ done
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
     printf '%s: not a git work tree\n' "${0##*/}" >&2; exit 69
 }
-cd "$repo_root"
-registry="$repo_root/coupling.tsv"
-[ -f "$registry" ] || { printf '%s: coupling.tsv not found\n' "${0##*/}" >&2; exit 69; }
 
-failures=0
-warnings=0
-report_fail() { printf 'FAIL: %s\n' "$1" >&2; failures=$((failures + 1)); }
-report_warn() { printf 'WARN: %s\n' "$1" >&2; warnings=$((warnings + 1)); }
-
-# ---- the change set ----------------------------------------------------------
-changed_file="$(mktemp "${TMPDIR:-/tmp}/blast-changed.XXXXXX")"
-trap 'rm -f "$changed_file"' EXIT
-# PORTABILITY(empty-array-setu)
-if [ "${#paths[@]}" -gt 0 ]; then
-    printf '%s\n' ${paths[@]+"${paths[@]}"} > "$changed_file"
-else
-    # Porcelain rather than diff, so untracked files count: a new registry that
-    # was never added is exactly the case this pass exists to catch.
-    git status --porcelain | awk '{ $1=""; sub(/^ +/, ""); if ($0 ~ / -> /) sub(/^.* -> /, ""); print }' \
-        > "$changed_file"
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed immediately after repo_root is
+# computed and BEFORE the `cd "$repo_root"` below -- matching the placement
+# already used in pre-push-check.sh, run-tests.sh, and setup-dev-env.sh
+# (wiring block immediately after repo_root is computed, strictly before any
+# subsequent cd), not merely "before registry is set" (which the cd below
+# would also satisfy). This script already declares set -euo pipefail above,
+# matching what sourcing plan-core-lib.sh itself wants, so no call-site
+# set +e fix is needed here. blast-radius.sh lives at the repository root
+# itself, one level shallower than planning/scripts, so the relative path to
+# plan-core-lib.sh crosses one directory level down, matching
+# generate-portability.sh/pre-push-check.sh/setup-dev-env.sh's own precedent.
+#
+# Forwards br_original_args, NOT "$@": unlike every other already-wired
+# script, this one parses its own args (consuming "$@" via shift) BEFORE
+# computing repo_root, so by this point "$@" is empty and would silently
+# strip every argument from the compiled binary's own invocation.
+br_script_dir="$repo_root"
+# plan-core-lib.sh is generated (gitignored) by build-plan-libs.sh, so it does
+# not exist on a genuinely fresh checkout -- guard the source+exec on it
+# already being present, unconditionally falling through to this script's own
+# bash implementation when it is not, matching B346's fix for
+# build-plan-libs.sh's own self-referential case.
+if [ -f "$br_script_dir/planning/scripts/plan-core-lib.sh" ]; then
+    source "$br_script_dir/planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present blast-radius "$br_script_dir" \
+        ${br_original_args[@]+"${br_original_args[@]}"}
 fi
-changed_count="$(grep -c . "$changed_file" || true)"
-if [ "${changed_count:-0}" -eq 0 ]; then
-    printf 'blast-radius: no changes to analyse\n'
-    exit 0
-fi
-printf 'blast-radius: %s changed path(s), base %s\n' "$changed_count" "$base"
+unset br_script_dir br_original_args
 
-matches_any() { # <path> <glob>...
-    local path="$1"; shift
-    local glob
-    for glob in "$@"; do
-        # shellcheck disable=SC2254  # the glob is data and must stay unquoted.
-        case "$path" in $glob) return 0 ;; esac
-    done
-    return 1
-}
-
-# ---- 1 + 4. the coupling registry -------------------------------------------
-# One pass over the registry; a matched row either runs its check (freshness) or
-# reports the consequence (contract).
-ran_checks=""
-while IFS="$(printf '\t')" read -r glob level consequence check; do
-    case "${glob:-}" in ''|'#'*) continue ;; esac
-    hit=""
-    while IFS= read -r path; do
-        [ -n "$path" ] || continue
-        if matches_any "$path" "$glob"; then hit="$path"; break; fi
-    done < "$changed_file"
-    [ -n "$hit" ] || continue
-    if [ -n "${check:-}" ]; then
-        case " $ran_checks " in *" $check "*) continue ;; esac
-        ran_checks="$ran_checks $check"
-        if out="$(eval "$check" 2>&1)"; then
-            printf 'ok:   %s\n' "$consequence"
-        else
-            # Every script here reports as "name.sh: message"; prefer that line
-            # over whatever a diff or a trace happened to print first.
-            reason="$(printf '%s\n' "$out" | { grep -E '^[A-Za-z0-9._/-]+\.sh: ' || true; } | head -1)"
-            [ -n "$reason" ] || reason="$(printf '%s\n' "$out" | { grep -E '[^[:space:]]' || true; } | tail -1)"
-            [ -n "$reason" ] || reason="check failed with no output"
-            report_fail "$consequence — \`$check\`: $reason"
-        fi
-    elif [ "$level" = fail ]; then
-        report_fail "$hit: $consequence"
-    else
-        report_warn "$hit: $consequence"
-    fi
-done < "$registry"
-
-# ---- 2. registry rows for new files -----------------------------------------
-while IFS= read -r path; do
-    [ -n "$path" ] || continue
-    case "$path" in planning/*) ;; *) continue ;; esac
-    # Only files that are new to the tree can be missing a row.
-    git ls-files --error-unmatch "$path" >/dev/null 2>&1 && continue
-    rows="$(grep -Fc "$path" planning/PACKAGE-MANIFEST.tsv 2>/dev/null || true)"
-    [ "${rows:-0}" -eq 0 ] || continue
-    case "$path" in
-        *.json)
-            report_fail "$path: a new registry under planning/ with no PACKAGE-MANIFEST row will not ship, and a gate reading it through skill_root will die looking for it" ;;
-        *)
-            report_warn "$path: new under planning/ with no PACKAGE-MANIFEST row — ship it, or record why it is dev-only" ;;
-    esac
-done < "$changed_file"
-
-# ---- 3. base drift ----------------------------------------------------------
-# A fresh clone, and a CI checkout, have origin/master but no local master, so
-# naming the branch alone resolves nothing and drift goes unchecked -- which read
-# as a second warning and failed the count assertion on CI while passing locally,
-# where master exists. Fall back to the remote-tracking ref before giving up.
-if ! git rev-parse --verify --quiet "$base" >/dev/null 2>&1 \
-    && git rev-parse --verify --quiet "origin/$base" >/dev/null 2>&1; then
-    base="origin/$base"
-fi
-
-if merge_base="$(git merge-base HEAD "$base" 2>/dev/null)"; then
-    drifted=0
-    while IFS= read -r path; do
-        [ -n "$path" ] || continue
-        [ -e "$path" ] || continue
-        commits="$(git log --oneline "$merge_base..HEAD" -- "$path" 2>/dev/null | grep -c . || true)"
-        [ "${commits:-0}" -gt 0 ] || continue
-        drifted=$((drifted + 1))
-        printf 'note: %s changed in %s commit(s) since %s\n' "$path" "$commits" "$base"
-    done < "$changed_file"
-    [ "$drifted" -eq 0 ] || printf 'note: rebase or verify those commits survive before merging\n'
-else
-    report_warn "cannot resolve a merge base with $base; drift not checked"
-fi
-
-printf 'blast-radius: %s failure(s), %s warning(s)\n' "$failures" "$warnings"
-[ "$failures" -eq 0 ] || exit 1
+printf '%s: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it\n' "blast-radius" >&2
+exit 69

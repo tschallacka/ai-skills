@@ -3,15 +3,14 @@
 # build-release.sh — assemble the prod tarball a release ships.
 #
 # A GitHub source archive carries the whole repository: the per-function library
-# sources, 70 test scripts, the fixtures, the maintainer documentation, the
+# sources, the test scripts, the fixtures, the maintainer documentation, the
 # benchmark tree. An end user needs none of it, and the installer downloading it
 # means every install pays for it. So a release carries an asset built here,
 # holding only what is marked MODE: PROD.
 #
 # The markers are the manifest. Nothing is listed twice: a file ships because it
 # says it ships, and tests/test-mode-markers.sh has already cross-checked every
-# marker against skill_files(). install.sh is added on top because it is the
-# entry point and is generated rather than tracked as a skill file.
+# marker against skill_files().
 #
 # Usage:
 #   build-release.sh                  # write dist/ai-skills-<version>.tar.gz
@@ -23,6 +22,16 @@
 # npm publishing is the same question with a different mechanism: package.json's
 # files array ships whole directories, so .npmignore is generated from the same
 # marker set by --npmignore.
+#
+# installer/src/05-config.sh and installer/src/50-manifest.sh are two
+# surviving fragments of the retired bash install.sh; this script is
+# now their only real consumer (a handful of tests source them too, for the
+# same skill_files()/manifest cross-checks). They are not trimmed down to
+# only what this script reads -- most of 05-config.sh is install.sh-picker
+# state nothing here touches -- because the safe, low-risk move was keeping
+# them intact and working rather than a from-scratch extraction under this
+# same change. A future cleanup can narrow them once nothing else depends on
+# the untouched parts either.
 
 set -euo pipefail
 export LC_ALL=C
@@ -32,9 +41,9 @@ out_dir="$repo_root/dist"
 mode=build
 
 # The release collector and its pipeline use the same logical-to-physical path
-# resolver as the generated installer. Load it in the parent shell as well as
-# in listed_by_installer(), because pipeline subshells do not inherit functions
-# defined by a sibling subshell.
+# resolver install.sh once generated from this same file. Load it in the
+# parent shell as well as in listed_by_installer(), because pipeline subshells
+# do not inherit functions defined by a sibling subshell.
 # shellcheck disable=SC1090
 source "$repo_root/installer/src/05-config.sh"
 # shellcheck disable=SC1090
@@ -77,13 +86,54 @@ host_target() {
     esac
 }
 
+# Whether $1 belongs beside its shell oracle in planning/scripts/. Normally
+# that is exactly the candidates whose `.sh` still exists; register-rebuild
+# retired its `.sh` once skill_files() took over listing the binary directly
+# (planning/PACKAGE-MAP.tsv), so it is named here explicitly instead -- same
+# exception ci.yml's own two build steps and setup-dev-env-lib.sh's
+# stages_into_planning_scripts carry for the same reason.
+stages_beside_shell_oracle() {
+    [ -f "$repo_root/planning/scripts/$1.sh" ] && return 0
+    [ "$1" = register-rebuild ]
+}
+
+# Resolves the release artifact for one planning command, building it if the
+# bin/<target> copy from setup-dev-env.sh isn't already there. Echoes the
+# artifact path and returns 0 on success; returns 2 (no output) for
+# render-plans-board, intentionally absent from this branch; returns 66 (with
+# a message on stderr) for any other failure.
+resolve_planning_command_artifact() { # <candidate> <target> <exe>
+    local candidate="$1" target="$2" exe="$3" source artifact
+    artifact="$repo_root/bin/$target/$candidate$exe"
+    if [ ! -x "$artifact" ]; then
+        source="$candidate"
+        [ "$candidate" = overview-state ] && source=plan-overview
+        if [ ! -f "$repo_root/src/$source/Cargo.toml" ]; then
+            [ "$candidate" = render-plans-board ] && return 2
+            printf '%s: no crate for planning command %s\n' "${0##*/}" "$candidate" >&2
+            return 66
+        fi
+        command -v cargo >/dev/null 2>&1 || {
+            printf '%s: cargo is required to build planning command %s\n' "${0##*/}" "$candidate" >&2
+            return 66
+        }
+        ( cd "$repo_root" && cargo build --release \
+            --manifest-path "$repo_root/src/$source/Cargo.toml" --target "$target" ) \
+            || { printf '%s: cargo build %s failed\n' "${0##*/}" "$candidate" >&2; return 66; }
+        artifact="$repo_root/target/$target/release/$candidate$exe"
+    fi
+    [ -x "$artifact" ] || {
+        printf '%s: no executable artifact for planning command %s\n' "${0##*/}" "$candidate" >&2
+        return 66
+    }
+    printf '%s\n' "$artifact"
+}
+
 # Stage extensionless planning commands beside their shell oracles. The
 # migration registry is the source of truth for the command-to-crate mapping;
-# the renderer is deliberately omitted because another agent owns it. A root
-# bin artifact from setup-dev-env.sh is reused, while a clean release build
-# compiles the individual crate in the pinned target environment.
+# the renderer is deliberately omitted because another agent owns it.
 prepare_planning_rust_commands() {
-    local target exe candidate artifact source
+    local target exe candidate artifact rc
     target="$(host_target)" || {
         printf '%s: unsupported host for planning Rust commands\n' "${0##*/}" >&2
         return 66
@@ -92,34 +142,20 @@ prepare_planning_rust_commands() {
     case "$target" in *windows-msvc) exe='.exe' ;; esac
     while IFS= read -r candidate; do
         [ -n "$candidate" ] || continue
-        [ -f "$repo_root/planning/scripts/$candidate.sh" ] || continue
-        artifact="$repo_root/bin/$target/$candidate$exe"
-        if [ ! -x "$artifact" ]; then
-            source="$candidate"
-            [ "$candidate" = overview-state ] && source=plan-overview
-            [ -f "$repo_root/src/$source/Cargo.toml" ] || {
-                # render-plans-board is intentionally absent from this branch.
-                [ "$candidate" = render-plans-board ] && continue
-                printf '%s: no crate for planning command %s\n' "${0##*/}" "$candidate" >&2
-                return 66
-            }
-            command -v cargo >/dev/null 2>&1 || {
-                printf '%s: cargo is required to build planning command %s\n' "${0##*/}" "$candidate" >&2
-                return 66
-            }
-            ( cd "$repo_root" && cargo build --release \
-                --manifest-path "$repo_root/src/$source/Cargo.toml" --target "$target" ) \
-                || { printf '%s: cargo build %s failed\n' "${0##*/}" "$candidate" >&2; return 66; }
-            artifact="$repo_root/target/$target/release/$candidate$exe"
-        fi
-        [ -x "$artifact" ] || {
-            printf '%s: no executable artifact for planning command %s\n' "${0##*/}" "$candidate" >&2
-            return 66
+        stages_beside_shell_oracle "$candidate" || continue
+        artifact="$(resolve_planning_command_artifact "$candidate" "$target" "$exe")" && {
+            cp "$artifact" "$repo_root/planning/scripts/$candidate$exe"
+            chmod +x "$repo_root/planning/scripts/$candidate$exe"
+            continue
         }
-        cp "$artifact" "$repo_root/planning/scripts/$candidate$exe"
-        chmod +x "$repo_root/planning/scripts/$candidate$exe"
-    done < <(awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" { print $3 }' \
-        "$repo_root/planning/rust-migration.tsv" | LC_ALL=C sort -u)
+        rc=$?
+        [ "$rc" -eq 2 ] && continue
+        return "$rc"
+    done < <({
+        printf 'register-rebuild\n' # declared in planning/PACKAGE-MAP.tsv
+        awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" { print $3 }' \
+            "$repo_root/planning/rust-migration.tsv"
+    } | LC_ALL=C sort -u)
 }
 
 # A file's own header decides. Read the top only: a heredoc further down mentions
@@ -159,15 +195,79 @@ EOF
     done
 }
 
+# The exact files src/installer/src/plugins.rs's own
+# TUI_HINT_PLUGIN_CLAUDE_FILES/EDITOR_GATE_PLUGIN_FILES carry (the retired
+# bash install.sh had a matching pair, installer/src/70-permissions.sh's
+# tui_hint_plugin_claude_files/editor_gate_plugin_files, before it and
+# install.sh were removed -- see git history).
+#
+# Neither existing mechanism above covers these: they are not a skill (no
+# entry in skill_files()) and most of their files have no comment syntax a
+# MODE marker could sit in (.json, .js). installer/build-release.sh's
+# tarball is scoped to only what a marker or skill_files() actually lists,
+# and installer/bootstrap.sh downloads exactly that tarball, so leaving
+# these two plugin directories out of collect() silently degrades the Rust
+# installer's tui-hint-plugin/editor-gate-plugin steps to a no-op with no
+# error -- caught by running a real install from a real packaged release
+# and finding neither plugin on disk despite "Installed: …" having printed.
+tui_hint_plugin_files() {
+    printf 'tui-hint-plugin/.claude-plugin/plugin.json\n'
+    printf 'tui-hint-plugin/hooks/hooks.json\n'
+    printf 'tui-hint-plugin/hooks/lib.sh\n'
+    printf 'tui-hint-plugin/hooks/pre-tool-use.sh\n'
+    printf 'tui-hint-plugin/opencode/tui-hint-plugin.js\n'
+}
+
+editor_gate_plugin_files() {
+    printf 'editor-gate-plugin/.claude-plugin/plugin.json\n'
+    printf 'editor-gate-plugin/hooks/hooks.json\n'
+    printf 'editor-gate-plugin/hooks/lib.sh\n'
+    printf 'editor-gate-plugin/hooks/editor-token\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-bash.sh\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-edit-write.sh\n'
+}
+
+# The exact files src/installer/src/plugins.rs's own
+# AGENT_IDENTITY_PLUGIN_FILES carries. T122/T123: rides unconditionally with
+# chat/ai-text-editor/interactive-shell on a Claude Code root, same as the
+# two plugins above.
+agent_identity_plugin_files() {
+    printf 'agent-identity-plugin/.claude-plugin/plugin.json\n'
+    printf 'agent-identity-plugin/hooks/hooks.json\n'
+    printf 'agent-identity-plugin/hooks/lib.sh\n'
+    printf 'agent-identity-plugin/hooks/subagent-start.sh\n'
+}
+
+# T102: agent profiles are not a skill (no entry in skill_files()) and their
+# canonical source is JSON, a format with no comment syntax a MODE marker
+# could sit in -- the same reason the three plugin-file functions above are
+# hardcoded lists rather than relying on declares_prod(). Delegates to
+# installer/src/50-manifest.sh's own profile_files() (source of truth also
+# checked by tests/test-profile-files-manifest.sh) rather than a second copy
+# of the file list.
+profile_files_for_release() {
+    local profile
+    for profile in "${PROFILE_NAMES[@]}"; do
+        while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            printf '.agents/profiles/%s\n' "$path"
+        done < <(profile_files "$profile")
+    done
+}
+
 collect() {
     {
-        printf 'install.sh\ninstall-ui.sh\nREADME.md\nLICENSE\npackage.json\n'
+        printf 'README.md\nLICENSE\npackage.json\n'
+        tui_hint_plugin_files
+        editor_gate_plugin_files
+        agent_identity_plugin_files
+        profile_files_for_release
         local path
         while IFS= read -r path; do
             [ -n "$path" ] || continue
             declares_prod "$path" && printf '%s\n' "$path"
         done < <(cd "$repo_root" && git ls-files \
-            planning project-specificies resource-limited-testing brainstorm \
+            planning project-specifics resource-limited-testing brainstorm \
             post-implementation-review todo bug-report)
         listed_by_installer
     } | while IFS= read -r path; do
@@ -213,31 +313,95 @@ case "$mode" in
         # chat/bin/<host-triple>/ so the collect() copy loop below finds them
         # (skill_files resolves the host's platform to one triple dir). If cargo
         # is absent the build fails loudly rather than producing an empty package.
+        #
+        # ALWAYS built with --target, even though every case below names the
+        # very host this is running on: `uname` cannot tell a glibc host from
+        # a musl one, so a plain `cargo build --release` here would link
+        # against whatever libc the host's default toolchain happens to use
+        # and land the result under a directory named for the musl triple
+        # regardless -- the same bug installer/build-installer-release.sh's
+        # own history already records and fixed for the installer binary.
+        # host_target() -- the resolver this whole file already uses for
+        # prepare_planning_rust_commands() -- names the target once so the
+        # build and the destination directory can never disagree.
+        # T70/AR-9: every skill built in this section needs the same Windows
+        # exe suffix the register-binary block below already computes once
+        # and reuses -- resolved here, first, so the chat block (which
+        # previously had no suffix handling at all and would have hard-failed
+        # the first time this ever ran on windows-latest) and the
+        # interactive-shell/ai-text-editor blocks T70 adds all share it.
+        skill_dir="$(host_target)" \
+            || { printf '%s: unsupported host for skill binaries\n' "${0##*/}" >&2; exit 66; }
+        skill_exe=''
+        case "$skill_dir" in *windows*) skill_exe='.exe' ;; esac
         if command -v cargo >/dev/null 2>&1; then
-            ( cd "$repo_root" && cargo build --release --package chat-server-rs ) \
+            chat_dir="$skill_dir"
+            ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-server-rs ) \
                 || { printf '%s: cargo build chat-server-rs failed\n' "${0##*/}" >&2; exit 66; }
-            ( cd "$repo_root" && cargo build --release --package chat-client-rs ) \
+            ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-client-rs ) \
                 || { printf '%s: cargo build chat-client-rs failed\n' "${0##*/}" >&2; exit 66; }
-            ( cd "$repo_root" && cargo build --release --package chat-mcp ) \
+            ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-mcp ) \
                 || { printf '%s: cargo build chat-mcp failed\n' "${0##*/}" >&2; exit 66; }
-            case "$(uname -s):$(uname -m)" in
-                Linux:x86_64|Linux:amd64) chat_dir=x86_64-unknown-linux-musl ;;
-                Linux:aarch64|Linux:arm64) chat_dir=aarch64-unknown-linux-musl ;;
-                Darwin:x86_64) chat_dir=x86_64-apple-darwin ;;
-                Darwin:arm64) chat_dir=aarch64-apple-darwin ;;
-                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64) chat_dir=x86_64-pc-windows-msvc ;;
-                *) printf '%s: unsupported host for chat binaries\n' "${0##*/}" >&2; exit 66 ;;
-            esac
+            ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-spool-watch ) \
+                || { printf '%s: cargo build chat-spool-watch failed\n' "${0##*/}" >&2; exit 66; }
             mkdir -p "$repo_root/chat/bin/$chat_dir"
-            cp "$repo_root/target/release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
-            cp "$repo_root/target/release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
-            cp "$repo_root/target/release/chat-mcp" "$repo_root/chat/bin/$chat_dir/chat-mcp"
+            chat_release="$repo_root/target/$chat_dir/release"
+            cp "$chat_release/chat-server-rs$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-server-rs$skill_exe"
+            cp "$chat_release/chat-client-rs$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-client-rs$skill_exe"
+            cp "$chat_release/chat-mcp$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-mcp$skill_exe"
+            cp "$chat_release/chat-spool-watch$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-spool-watch$skill_exe"
         else
             # Prebuilt binaries must already be in place (CI build step).
-            ls "$repo_root/chat/bin/"*/chat-server-rs >/dev/null 2>&1 \
-                && ls "$repo_root/chat/bin/"*/chat-client-rs >/dev/null 2>&1 \
-                && ls "$repo_root/chat/bin/"*/chat-mcp >/dev/null 2>&1 || {
+            ls "$repo_root/chat/bin/"*/"chat-server-rs$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/chat/bin/"*/"chat-client-rs$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/chat/bin/"*/"chat-mcp$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/chat/bin/"*/"chat-spool-watch$skill_exe" >/dev/null 2>&1 || {
                 printf '%s: cargo not found and chat/bin binaries absent\n' "${0##*/}" >&2
+                exit 66
+            }
+        fi
+        # T70/W13: interactive-shell and ai-text-editor were never built here
+        # at all before this -- build-release.sh silently shipped a package
+        # missing both skills for every target, since skill_files() only
+        # requires what actually exists on disk (AR-1/AR-2). Same
+        # cargo-then-require-prebuilt structure as the chat block above.
+        # interactive-shell-fixture (a third bin the interactive-shell
+        # package also produces) and ai-text-editor-schema-gen (ai-text-editor's
+        # own third bin) are both MODE: DEV tooling, absent from either
+        # skill's binaries.tsv, and deliberately not built here.
+        if command -v cargo >/dev/null 2>&1; then
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package interactive-shell --bin interactive-shell --bin interactive-shell-input ) \
+                || { printf '%s: cargo build interactive-shell failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package interactive-shell-mcp ) \
+                || { printf '%s: cargo build interactive-shell-mcp failed\n' "${0##*/}" >&2; exit 66; }
+            mkdir -p "$repo_root/interactive-shell/bin/$skill_dir"
+            ish_release="$repo_root/target/$skill_dir/release"
+            cp "$ish_release/interactive-shell$skill_exe" "$repo_root/interactive-shell/bin/$skill_dir/interactive-shell$skill_exe"
+            cp "$ish_release/interactive-shell-input$skill_exe" "$repo_root/interactive-shell/bin/$skill_dir/interactive-shell-input$skill_exe"
+            cp "$ish_release/interactive-shell-mcp$skill_exe" "$repo_root/interactive-shell/bin/$skill_dir/interactive-shell-mcp$skill_exe"
+        else
+            ls "$repo_root/interactive-shell/bin/"*/"interactive-shell$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/interactive-shell/bin/"*/"interactive-shell-input$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/interactive-shell/bin/"*/"interactive-shell-mcp$skill_exe" >/dev/null 2>&1 || {
+                printf '%s: cargo not found and interactive-shell/bin binaries absent\n' "${0##*/}" >&2
+                exit 66
+            }
+        fi
+        if command -v cargo >/dev/null 2>&1; then
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package ai-text-editor --bin ai-text-editor --bin ai-text-editor-server ) \
+                || { printf '%s: cargo build ai-text-editor failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package ai-text-editor-mcp ) \
+                || { printf '%s: cargo build ai-text-editor-mcp failed\n' "${0##*/}" >&2; exit 66; }
+            mkdir -p "$repo_root/ai-text-editor/bin/$skill_dir"
+            ate_release="$repo_root/target/$skill_dir/release"
+            cp "$ate_release/ai-text-editor$skill_exe" "$repo_root/ai-text-editor/bin/$skill_dir/ai-text-editor$skill_exe"
+            cp "$ate_release/ai-text-editor-server$skill_exe" "$repo_root/ai-text-editor/bin/$skill_dir/ai-text-editor-server$skill_exe"
+            cp "$ate_release/ai-text-editor-mcp$skill_exe" "$repo_root/ai-text-editor/bin/$skill_dir/ai-text-editor-mcp$skill_exe"
+        else
+            ls "$repo_root/ai-text-editor/bin/"*/"ai-text-editor$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/ai-text-editor/bin/"*/"ai-text-editor-server$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/ai-text-editor/bin/"*/"ai-text-editor-mcp$skill_exe" >/dev/null 2>&1 || {
+                printf '%s: cargo not found and ai-text-editor/bin binaries absent\n' "${0##*/}" >&2
                 exit 66
             }
         fi
@@ -246,16 +410,13 @@ case "$mode" in
         # for each -- so the copy loop below requires them for THIS host. Build
         # them when cargo is here and otherwise require the CI step's output,
         # rather than letting the loop fail with a bare "does not exist" on a
-        # path nothing in this script ever writes.
-        register_dir=''
-        case "$(uname -s):$(uname -m)" in
-            Linux:x86_64|Linux:amd64) register_dir=x86_64-unknown-linux-musl ;;
-            Linux:aarch64|Linux:arm64) register_dir=aarch64-unknown-linux-musl ;;
-            Darwin:x86_64) register_dir=x86_64-apple-darwin ;;
-            Darwin:arm64) register_dir=aarch64-apple-darwin ;;
-            MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64) register_dir=x86_64-pc-windows-msvc ;;
-            *) printf '%s: unsupported host for the register binaries\n' "${0##*/}" >&2; exit 66 ;;
-        esac
+        # path nothing in this script ever writes. host_target(), not a fourth
+        # copy of the case statement -- same --target reasoning as the chat
+        # binaries above: uname cannot distinguish a glibc host from a musl
+        # one, so the build and the destination directory it is named for must
+        # come from the same resolved target or they can silently disagree.
+        register_dir="$(host_target)" \
+            || { printf '%s: unsupported host for the register binaries\n' "${0##*/}" >&2; exit 66; }
         register_exe=''
         case "$register_dir" in *windows*) register_exe='.exe' ;; esac
         for register_pair in 'bug-report:bugs' 'todo:todo'; do
@@ -264,11 +425,11 @@ case "$mode" in
             if [ -x "$repo_root/$register_skill/bin/$register_dir/$register_bin" ]; then
                 continue
             elif command -v cargo >/dev/null 2>&1; then
-                ( cd "$repo_root" && cargo build --release \
+                ( cd "$repo_root" && cargo build --release --target "$register_dir" \
                     --manifest-path "src/$register_skill/Cargo.toml" ) \
                     || { printf '%s: cargo build %s failed\n' "${0##*/}" "$register_skill" >&2; exit 66; }
                 mkdir -p "$repo_root/$register_skill/bin/$register_dir"
-                cp "$repo_root/target/release/$register_bin" \
+                cp "$repo_root/target/$register_dir/release/$register_bin" \
                     "$repo_root/$register_skill/bin/$register_dir/$register_bin"
                 chmod +x "$repo_root/$register_skill/bin/$register_dir/$register_bin"
             else
@@ -278,7 +439,7 @@ case "$mode" in
             fi
         done
         # The compiled plan libraries are generated and never tracked
-        # (MAINTAINER.md section 2.15), so a clean tree has none. Build-if-missing
+        # (.agents/MAINTAINER.md 1.10), so a clean tree has none. Build-if-missing
         # here; staleness stays the tests' job. A listed file still missing after
         # this is the hard error below.
         libs_missing=0
@@ -289,8 +450,8 @@ case "$mode" in
             "$repo_root/planning/scripts/build-plan-libs.sh" \
                 || { printf '%s: build-plan-libs.sh failed\n' "${0##*/}" >&2; exit 66; }
         fi
-        # REVIEWER.md is generated and never tracked (MAINTAINER.md section
-        # 2.16); generation needs the compiled plan-crypt-lib.sh, so the library
+        # REVIEWER.md is generated and never tracked (.agents/MAINTAINER.md
+        # 1.10); generation needs the compiled plan-crypt-lib.sh, so the library
         # step above must have run first. A present file is left alone - the
         # projection test owns staleness.
         if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then
@@ -322,6 +483,30 @@ case "$mode" in
             else
                 printf '%s: no rjq at planning/bin/%s/%s, no copy in bin/%s, and no cargo to build one\n' \
                     "${0##*/}" "$rjq_dir" "$rjq_bin" "$rjq_dir" >&2
+                exit 66
+            fi
+        fi
+        # T70/W05: binaries.tsv declares plan-crypt for all five targets (a
+        # hash/random-bytes fallback, same role as rjq) and 50-manifest.sh's
+        # skill_files lists it the same existence-gated way -- but nothing
+        # ever actually built or staged it here, so it silently never shipped
+        # for any target (found via a real npm pack --dry-run: rjq appeared,
+        # plan-crypt never did). Same three-way fallback as rjq's block just
+        # above, same $rjq_dir target resolution (identical case mapping),
+        # different binary name.
+        plan_crypt_bin='plan-crypt'
+        case "$rjq_dir" in *windows*) plan_crypt_bin='plan-crypt.exe' ;; esac
+        if [ -n "$rjq_dir" ] && [ ! -x "$repo_root/planning/bin/$rjq_dir/$plan_crypt_bin" ]; then
+            mkdir -p "$repo_root/planning/bin/$rjq_dir"
+            if [ -x "$repo_root/bin/$rjq_dir/$plan_crypt_bin" ]; then
+                cp "$repo_root/bin/$rjq_dir/$plan_crypt_bin" "$repo_root/planning/bin/$rjq_dir/$plan_crypt_bin"
+            elif command -v cargo >/dev/null 2>&1; then
+                ( cd "$repo_root/src/plan-crypt" && cargo build --release --target "$rjq_dir" ) \
+                    || { printf '%s: cargo build plan-crypt failed\n' "${0##*/}" >&2; exit 66; }
+                cp "$repo_root/target/$rjq_dir/release/$plan_crypt_bin" "$repo_root/planning/bin/$rjq_dir/$plan_crypt_bin"
+            else
+                printf '%s: no plan-crypt at planning/bin/%s/%s, no copy in bin/%s, and no cargo to build one\n' \
+                    "${0##*/}" "$rjq_dir" "$plan_crypt_bin" "$rjq_dir" >&2
                 exit 66
             fi
         fi

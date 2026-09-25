@@ -42,7 +42,10 @@ impl ServeRegistry {
     ) {
         for (goal_name, units) in goals {
             let touched = units.iter().any(|unit| {
-                let step = plan.join(goal_name).join("steps").join(&unit.step);
+                let step = plan
+                    .join(goal_name)
+                    .join("steps")
+                    .join(format!("{}.md", unit.step));
                 contains_indicator(&step, &self.indicators)
                     || contains_indicator(&companion(&step), &self.indicators)
             });
@@ -53,7 +56,10 @@ impl ServeRegistry {
                 if unit.kind != "test" && unit.kind != "verification" {
                     return false;
                 }
-                let step = plan.join(goal_name).join("steps").join(&unit.step);
+                let step = plan
+                    .join(goal_name)
+                    .join("steps")
+                    .join(format!("{}.md", unit.step));
                 let acceptance = section(&step, "## Acceptance criteria");
                 let companion_acceptance = section(&companion(&step), "## Automated tests");
                 let combined = format!("{acceptance}\n{companion_acceptance}").to_ascii_lowercase();
@@ -159,7 +165,7 @@ mod tests {
             &[(
                 "01-goal".into(),
                 vec![Unit {
-                    step: "01-step.md".into(),
+                    step: "01-step".into(),
                     kind: "source".into(),
                 }],
             )],
@@ -196,7 +202,7 @@ mod tests {
             &[(
                 "01-goal".into(),
                 vec![Unit {
-                    step: "01-test.md".into(),
+                    step: "01-test".into(),
                     kind: "verification".into(),
                 }],
             )],

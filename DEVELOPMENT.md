@@ -7,13 +7,18 @@ directory.
 ## Repository layout
 
 - `planning/` — durable planning skill and helper scripts.
-- `project-specificies/` — project-deviation skill and example note files.
+- `project-specifics/` — project-deviation skill and example note files.
 - `resource-limited-testing/` — resource-limiting guidance and wrapper.
-- `install.sh` — interactive and non-interactive skill installer. **Generated**:
-  edit `installer/src/` and run `./installer/build.sh`.
-- `installer/` — the installer's source parts, the build script, and
-  `tools.tsv`, the shared registry of how to verify and install each
-  runtime tool. Each skill's own `requires.tsv` says what it needs.
+- `src/installer/` — the compiled Rust installer: interactive picker,
+  headless `install`/`install-skill` subcommands, MCP/permission registration.
+- `installer/` — `bootstrap.sh` (the curl-piped entry point that downloads
+  a release and hands off to the binary above), `build-release.sh` (packs a
+  release tarball), and `tools.tsv`, the shared registry of how to verify and
+  install each runtime tool (`include_str!`'d into the compiled binary). Each
+  skill's own `requires.tsv` says what it needs. `installer/src/05-config.sh`
+  and `installer/src/50-manifest.sh` are the two surviving fragments of the
+  retired bash install.sh — see git history — still sourced by
+  `build-release.sh` for the skill list and file manifest.
 - `package.json` — npm package metadata and the `ai-skills-install` binary.
 
 Each skill directory contains a `SKILL.md` with YAML frontmatter. Supporting
@@ -24,14 +29,13 @@ scripts and references should stay inside the skill directory that uses them.
 1. Create or update the skill directory at the repository root.
 2. Add a valid `SKILL.md` with a unique `name` and a precise `description`.
 3. Document when the skill should and should not be used.
-4. Add the skill to the installer parts if it is new, then run
-   `./installer/build.sh`:
+4. Register the skill if it is new:
    - `SKILL_NAMES` and `SKILL_DESCRIPTIONS` in `installer/src/05-config.sh`
    - `skill_files()` in `installer/src/50-manifest.sh`
    - a `<skill>/requires.tsv`, even when the skill needs nothing — the empty
      table is the statement that it has no runtime dependencies
-   The shop menu and numeric selection derive from `SKILL_NAMES`, so they need
-   no separate edit.
+   The picker's list and numeric selection derive from `SKILL_NAMES`, so they
+   need no separate edit.
 5. Add it to the skills table in `README.md` and the npm `files` list in
    `package.json`.
 
@@ -42,43 +46,47 @@ runtime dependencies unless the skill genuinely needs them.
 
 Every shell file here targets bash 3.2 on macOS, bash 4/5 on Linux, and GNU
 *or* BSD userland — macOS `/bin/bash` is the floor, so bash 4 syntax and
-GNU-only utility flags are out. `PORTABILITY.md` (generated) catalogues the traps already hit.
+GNU-only utility flags are out. Git for Windows' bash is a supported floor too
+(`CODE-STYLE.md` section 1). `PORTABILITY.md` (generated) catalogues the traps already hit.
 `CODE-STYLE.md` is the authority: it lists the
 banned constructs with their replacements, the file skeleton, the exit-code
-vocabulary, and the pre-commit checklist. CI enforces it by running the suite on
-`ubuntu-latest` and `macos-latest` (including explicitly under system bash 3.2)
-plus a `shellcheck` pass.
+vocabulary, and the pre-commit checklist. What CI runs to enforce it, on which
+platforms, is in `.agents/MAINTAINER.md` section 3.
 
 ## Testing the installer
 
 Check shell syntax and formatting before committing:
 
 ```bash
-./installer/build.sh --check                          # install.sh matches its parts
-bash -n install.sh installer/build.sh installer/src/*.sh
+cargo build --release -p installer
+cargo test -p installer
+cargo clippy -p installer --all-targets -- -D warnings
+bash -n installer/bootstrap.sh installer/build-release.sh installer/src/*.sh
 bash -n planning/scripts/*.sh
 bash -n resource-limited-testing/scripts/limited-run.sh
-shellcheck -s bash install.sh planning/scripts/*.sh   # no new findings
-./run-tests.sh                                        # all 30 tests
+shellcheck -s bash installer/bootstrap.sh planning/scripts/*.sh   # no new findings
+./run-tests.sh                                        # all bash suites
 git diff --check
 ```
 
-`./run-tests.sh` runs every test under `planning/tests/` and
-`benchmark/planning/tests/`; run it rather than naming individual test scripts.
-Two context-cache tests report `UNCONFIGURED` without `PLANNING_CONTEXT_CACHE`,
-which is expected.
+`./run-tests.sh` runs every shell test suite in the repository and `cargo test`
+for each crate (`./run-tests.sh --list-only` names them); run it rather than
+naming individual test scripts. It needs the compiled runner, so run
+`./setup-dev-env.sh` first (`.agents/MAINTAINER.md` 1.9). Two context-cache tests
+report `UNCONFIGURED` without `PLANNING_CONTEXT_CACHE`, which is expected.
 
 Show installer options without making changes:
 
 ```bash
-AI_SKILLS_NO_SPLASH=1 ./install.sh --help
+./target/release/installer --help
 ```
 
-For an isolated non-interactive install, use a temporary target:
+For an isolated non-interactive install from the checkout, use a temporary
+target:
 
 ```bash
 target="$(mktemp -d)"
-AI_SKILLS_NO_SPLASH=1 ./install.sh --all --target "$target" --yes
+./target/release/installer install --all --source . --target "$target" --yes
 find "$target" -maxdepth 2 -name SKILL.md -print
 ```
 
@@ -95,14 +103,15 @@ npm_config_cache="$(mktemp -d)" npm pack --dry-run --json
 npm run install-skills -- --help
 ```
 
-The package contents should include `install.sh`, `package.json`, `README.md`,
-`LICENSE`, and every skill directory. The `ai-skills-install` binary must point
-to the existing `install.sh`; do not duplicate the installer in JavaScript or
-move the skills to satisfy npm packaging.
+The package contents should include `installer/bootstrap.sh`, `package.json`,
+`README.md`, `LICENSE`, and every skill directory. The `ai-skills-install`
+binary must point to `installer/bootstrap.sh`, which downloads the matching
+compiled installer release on first run; do not duplicate the installer in
+JavaScript or move the skills to satisfy npm packaging.
 
 The generated artifacts the package ships — the five compiled plan libraries
 and `planning/REVIEWER.md` — are built by `npm prepack` from the tracked
-sources, never committed (`planning/MAINTAINER.md` §2.16). A pack from a clean
+sources, never committed (`.agents/MAINTAINER.md` 1.10). A pack from a clean
 checkout is therefore complete without any generated file in git.
 
 ## Verifying on both shells
@@ -117,7 +126,11 @@ of CI are blocking, so this is also where a BSD-only failure first shows.
   red run; everything else cleans up after itself.
 - Never rewrite `verify-both-shells.sh` while a run is in flight. Bash reads
   its source incrementally, so an edit lands mid-parse and executes comment
-  fragments as commands (B17, the `been: command not found` ghost).
+  fragments as commands (B17, the `been: command not found` ghost). This is a
+  bash-fallback-path hazard specifically: once `setup-dev-env.sh` has staged
+  the compiled `verify-both-shells` binary (T145 goal 19), a run through it
+  reads no script source at all, so a concurrent edit to the `.sh` file
+  cannot land mid-parse there.
 - Editing any other file during a run is fine: the worktree is overlaid once,
   at startup, from the then-current tree — later edits belong to the next run.
 - A failure that only exists on macOS cannot be reproduced on Linux. Diagnose
@@ -146,20 +159,22 @@ git tag -a v<version> -m "Release <version>"
 git push origin master --follow-tags
 ```
 
-Then publish the exact package version and create the corresponding GitHub
-release:
+Then cut the GitHub release; `RELEASE.md`'s own protocol (tag and push, create
+the release as a draft with the universal tarball, run `release-installer.yml`
+to attach the per-platform assets and publish it) is the one to follow, not a
+shortened version here -- it exists specifically because a published-then-
+attach ordering hits GitHub's immutable-releases protection (T70/W06).
 
-Review the dry-run package contents, then publish from a clean checkout with
-the appropriate npm credentials:
-
-```bash
-npm_config_cache="$(mktemp -d)" npm pack --dry-run
-npm publish --access public
-gh release create v<version> --title "<version>" --generate-notes
-```
-
-Publishing is an external release action. Confirm the version, package name,
-and included files before running `npm publish`.
+Publishing to npm is no longer a local step run by hand. The moment the
+release goes public, `.github/workflows/release-npm.yml` reacts to that same
+`release: published` event on its own: it builds every shipping skill for all
+five targets, assembles and dry-run verifies the npm package, then runs `npm
+publish` -- gated behind the `npm-publish` environment's required-reviewer
+approval. Review the dry-run package contents beforehand with
+`npm_config_cache="$(mktemp -d)" npm pack --dry-run`, or trigger
+`release-npm.yml` via `workflow_dispatch` for the same dry run without cutting
+a release at all; running `npm publish` locally is only for reproducing a
+packaging problem, never the release path.
 
 ## Commits and review
 

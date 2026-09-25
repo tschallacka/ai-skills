@@ -2,7 +2,7 @@
 // PACKAGE: PROD
 use planning_core::{atomic_write, git_snapshot, require_safe_value};
 use planning_document::{
-    delete_paragraph, document_kind, insert_paragraph, replace_field, replace_paragraph,
+    delete_paragraph, document_kind_for_step, insert_paragraph, replace_field, replace_paragraph,
     replace_section, replace_title,
 };
 use planning_inventory::find;
@@ -194,8 +194,13 @@ fn document_path(plan: &Path, id: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn section_spec(id: &str, section: &str) -> Result<(&'static str, u8), String> {
-    let kind = document_kind(id)?;
+fn section_spec(plan: &Path, id: &str, section: &str) -> Result<(&'static str, u8), String> {
+    let steps_dir = id
+        .strip_prefix("step:")
+        .and_then(|rest| rest.split_once('/'))
+        .map(|(goal, _)| plan.join(goal).join("steps"))
+        .unwrap_or_else(|| plan.to_path_buf());
+    let kind = document_kind_for_step(id, &steps_dir)?;
     planning_document::section_spec(kind, section)
         .ok_or_else(|| {
             let kind_name = match kind {
@@ -462,15 +467,7 @@ fn update_review_status(plan: &Path, requested: &str) {
     let (review_value, description_value) = if requested == "pending" {
         ("`💤 pending`", "💤 pending")
     } else {
-        let open = review_text.lines().any(|line| {
-            line.starts_with('|')
-                && planning_table::table_cell(line, 2).starts_with("AR-")
-                && matches!(
-                    planning_table::table_cell(line, 5).as_str(),
-                    "💤 open" | "⏳ in progress"
-                )
-        });
-        if open {
+        if review_has_open_finding(&review_text) {
             die("Cannot approve a review with unresolved findings", 64);
         }
         if let Ok(keys) = fs::read_to_string(plan.join("fix-keys.json")) {
@@ -479,7 +476,11 @@ fn update_review_status(plan: &Path, requested: &str) {
             let claimant = env::var("CLAIMED_BY").unwrap_or_else(|_| id.clone());
             let verifier = env::current_exe()
                 .ok()
-                .and_then(|path| path.parent().map(|parent| parent.join("verify-fix-keys")))
+                .and_then(|path| {
+                    path.parent().map(|parent| {
+                        parent.join(format!("verify-fix-keys{}", env::consts::EXE_SUFFIX))
+                    })
+                })
                 .unwrap_or_else(|| PathBuf::from("verify-fix-keys"));
             let result = Command::new(verifier)
                 .arg(plan)
@@ -610,6 +611,31 @@ fn paragraph_args(args: &[String], section: u8) -> Result<String, String> {
         records.push(format!("§ {label}\n{text}"));
     }
     Ok(records.join("\n\n"))
+}
+
+/// True if adversarial-review.md's Findings table still has a row that is not
+/// resolved -- the approval gate's only real check.
+///
+/// The Status cell's own convention varies by writer: add-adversarial-finding
+/// emoji-prefixes it ("💤 open", "⏳ in progress"), but
+/// update-adversarial-review.sh (the tool part-3.md's review protocol
+/// actually tells a fresh reviewer to use) passes a CSV's Status column
+/// through unprefixed ("open", "in-progress"). Matching only the
+/// emoji-prefixed spellings meant this gate never once refused a real open
+/// finding recorded the second way -- caught by direct reproduction, not by
+/// inspection. Column 5 by position (planning_table::table_cell), not a
+/// substring search across the whole row, so free text in an earlier cell
+/// that happens to contain the word "open" cannot trip this.
+fn review_has_open_finding(review_text: &str) -> bool {
+    review_text.lines().any(|line| {
+        if !(line.starts_with('|') && planning_table::table_cell(line, 2).starts_with("AR-")) {
+            return false;
+        }
+        let status = planning_table::table_cell(line, 5).to_lowercase();
+        status.ends_with("open")
+            || status.ends_with("in-progress")
+            || status.ends_with("in progress")
+    })
 }
 
 fn main() {
@@ -752,7 +778,7 @@ fn main() {
             };
             let section_id = args.get(goal_or_section).unwrap_or_else(|| usage(64));
             let (heading, number) =
-                section_spec(&id, section_id).unwrap_or_else(|error| die(error, 1));
+                section_spec(&plan, &id, section_id).unwrap_or_else(|error| die(error, 1));
             let body = paragraph_args(&args[goal_or_section + 1..], number)
                 .unwrap_or_else(|error| die(error, 64));
             let file = document_path(&plan, &id).unwrap_or_else(|error| die(error, 64));
@@ -871,7 +897,8 @@ fn main() {
                     64,
                 );
             }
-            let (_, section) = section_spec(id, section_id).unwrap_or_else(|error| die(error, 1));
+            let (_, section) =
+                section_spec(&plan, id, section_id).unwrap_or_else(|error| die(error, 1));
             let file = document_path(&plan, id).unwrap_or_else(|error| die(error, 64));
             let text = fs::read_to_string(&file).unwrap_or_else(|error| die(error.to_string(), 66));
             let max = text
@@ -970,8 +997,43 @@ fn main() {
 mod tests {
     use super::{
         auto_create_paragraph, normalize_paragraph_id, paragraph_content_error,
-        reject_swallowed_flags,
+        reject_swallowed_flags, review_has_open_finding,
     };
+
+    #[test]
+    fn detects_an_emoji_prefixed_open_finding() {
+        let review = "| ID | Missing or over-broad item | Required plan change | Status | Work unit |\n|---|---|---|---|---|\n| AR-01 | thing | fix it | 💤 open | N/A |\n";
+        assert!(review_has_open_finding(review));
+    }
+
+    #[test]
+    fn detects_a_plain_text_open_finding_from_update_adversarial_review() {
+        // update-adversarial-review.sh (the tool a fresh reviewer actually
+        // uses) passes the CSV Status column through unprefixed -- this is
+        // the exact row shape that the emoji-only check used to miss.
+        let review = "| ID | Missing or over-broad item | Required plan change | Status | Work unit |\n|---|---|---|---|---|\n| AR-01 | thing | fix it | open | N/A |\n";
+        assert!(review_has_open_finding(review));
+    }
+
+    #[test]
+    fn detects_a_plain_text_in_progress_finding() {
+        let review = "| AR-02 | thing | fix it | in-progress | W03 |\n";
+        assert!(review_has_open_finding(review));
+    }
+
+    #[test]
+    fn a_resolved_finding_in_either_convention_is_not_open() {
+        let review = "| AR-01 | thing | fixed | ✅ resolved | N/A |\n| AR-02 | thing | fixed | resolved | N/A |\n";
+        assert!(!review_has_open_finding(review));
+    }
+
+    #[test]
+    fn the_word_open_in_an_earlier_cell_does_not_false_positive() {
+        // "Required plan change" is free text; it must not be mistaken for
+        // the Status cell just because it contains the word "open".
+        let review = "| AR-01 | thing | leave the door open for a follow-up | resolved | N/A |\n";
+        assert!(!review_has_open_finding(review));
+    }
 
     #[test]
     fn auto_creates_next_contiguous_paragraph() {

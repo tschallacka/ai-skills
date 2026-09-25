@@ -1,0 +1,31 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-server"
+version = "0.1.0"
+edition = "2021"
+description = "Revision-guarded CAS core, server, and CLI client for concurrent plan-file access"
+license = "MIT"
+
+[lib]
+name = "planning_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "planning-server"
+path = "src/bin/planning-server.rs"
+
+[[bin]]
+name = "planning-client"
+path = "src/bin/planning-client.rs"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+plan-context-core = { path = "../plan-context-core" }
+blake3.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

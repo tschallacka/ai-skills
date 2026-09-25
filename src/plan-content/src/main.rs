@@ -172,12 +172,22 @@ fn format_document(plan: &Path, id: &str, format: &str) {
 
 fn summary(plan: &Path, format: &str) {
     let rows = inventory_rows(&plan.join("work-unit-inventory.md"));
+    // file_name() is None for a path that is exactly "." or ".." (or the
+    // filesystem root), which a caller can legitimately pass -- canonicalize
+    // resolves those to a real absolute path first (B338).
+    let plan_name = plan
+        .canonicalize()
+        .ok()
+        .and_then(|resolved| {
+            resolved
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+        .or_else(|| plan.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| ".".to_string());
     match format {
         "markdown" => {
-            println!(
-                "# Plan summary: {}\n",
-                plan.file_name().unwrap().to_string_lossy()
-            );
+            println!("# Plan summary: {plan_name}\n");
             println!("| ID | Type | File | Scope | Depends on | Goal | Step |\n|---|---|---|---|---|---|---|");
             for row in rows {
                 println!(
@@ -195,10 +205,7 @@ fn summary(plan: &Path, format: &str) {
             }
         }
         "json" => {
-            print!(
-                "{{\"plan\":\"{}\",\"work_units\":[",
-                plan.file_name().unwrap().to_string_lossy()
-            );
+            print!("{{\"plan\":\"{plan_name}\",\"work_units\":[");
             for (index, row) in rows.iter().enumerate() {
                 if index > 0 {
                     print!(",");
@@ -616,20 +623,35 @@ fn find_command(plan: &Path, args: &[String]) {
             results.extend(scan_file(&id, &path, pattern, full));
         }
     }
-    if matches!(scope, "steps" | "all") {
-        for (id, path) in all_documents(plan)
-            .into_iter()
-            .filter(|(id, _)| id.starts_with("step:") && !id.ends_with("-testing"))
-        {
-            results.extend(scan_file(&id, &path, pattern, full));
+    if matches!(scope, "steps" | "testing" | "all") {
+        let documents = all_documents(plan);
+        let step_ids: std::collections::HashSet<&str> = documents
+            .iter()
+            .filter(|(id, _)| id.starts_with("step:"))
+            .map(|(id, _)| id.as_str())
+            .collect();
+        let is_testing_id = |id: &str| {
+            id.rsplit_once('/').is_some_and(|(goal_prefixed, step)| {
+                planning_document::is_testing_companion(step, |base| {
+                    step_ids.contains(format!("{goal_prefixed}/{base}").as_str())
+                })
+            })
+        };
+        if matches!(scope, "steps" | "all") {
+            for (id, path) in documents
+                .iter()
+                .filter(|(id, _)| id.starts_with("step:") && !is_testing_id(id))
+            {
+                results.extend(scan_file(id, path, pattern, full));
+            }
         }
-    }
-    if matches!(scope, "testing" | "all") {
-        for (id, path) in all_documents(plan)
-            .into_iter()
-            .filter(|(id, _)| id.starts_with("step:") && id.ends_with("-testing"))
-        {
-            results.extend(scan_file(&id, &path, pattern, full));
+        if matches!(scope, "testing" | "all") {
+            for (id, path) in documents
+                .iter()
+                .filter(|(id, _)| id.starts_with("step:") && is_testing_id(id))
+            {
+                results.extend(scan_file(id, path, pattern, full));
+            }
         }
     }
     if matches!(scope, "units" | "inventory" | "all") {
@@ -864,8 +886,14 @@ fn main() {
     };
     let (plan, rest) = hoist(&args[1..]);
     require_dir(&plan);
+    // `hoist` has already taken the plan directory out of `rest`, so `get` and
+    // `blast-radius` see `<id>` or `<id> <format>`: one or two arguments. The
+    // guards said 2..=3, which counted a plan directory that is no longer
+    // there, so `get <plan> <id>` printed usage and exited 64 unless a format
+    // was also given -- and a missing document could never reach its own
+    // "not found" exit code.
     match command.as_str() {
-        "get" if (2..=3).contains(&rest.len()) => format_document(
+        "get" if (1..=2).contains(&rest.len()) => format_document(
             &plan,
             &rest[0],
             rest.get(1).map(String::as_str).unwrap_or("markdown"),
@@ -874,7 +902,7 @@ fn main() {
             &plan,
             rest.first().map(String::as_str).unwrap_or("markdown"),
         ),
-        "blast-radius" if (2..=3).contains(&rest.len()) => blast_radius(
+        "blast-radius" if (1..=2).contains(&rest.len()) => blast_radius(
             &plan,
             &rest[0],
             rest.get(1).map(String::as_str).unwrap_or("markdown"),

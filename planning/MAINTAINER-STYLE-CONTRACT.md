@@ -119,8 +119,9 @@ Verdict by document surface:
 
 Adding a new template placeholder to any generator script requires registering
 it (with the correct `surface`) in `placeholders.json`; the installer-manifest
-test keeps `placeholders.json` listed in `install.sh`, `PACKAGE-MANIFEST.tsv`,
-and `PACKAGE-MAP.tsv`. A typo'd placeholder (`<shortdescription>`) is a
+test keeps `placeholders.json` listed in `installer/src/50-manifest.sh`'s
+`skill_files()`, `PACKAGE-MANIFEST.tsv`, and `PACKAGE-MAP.tsv`. A typo'd
+placeholder (`<shortdescription>`) is a
 maintainer bug caught by the test suite, not by the validator.
 
 ## Persona & reader system
@@ -251,4 +252,4 @@ shims.
 | `dana` | Dana | Monitor: steers long-running worker/reviewer processes (bounded polling, next-action commands, terminal-evidence stop). Process stepper; NOT the supervision-frame monitor. | execution | 1 | Read-only observer of child processes; does not edit plan artifacts directly. Does **not** read supervision frames; those are maintainer-only (`monitor-read.sh`). |
 | `frank` | Frank | Housekeeper: post-plan cleanup (temp/capsule scratch, `.env` regen, `.gitignore`, archive, final validation). | cleanup | 1 | May delete transient/temp data; never edits archived frozen results. |
 | `maintainer` | Willie | Edits the skill and this registry as one coordinated change. Also the supervision monitor: reads only bounded supervision frames via `monitor-read.sh` (pull-on-exception) and the grant log (case + command, **never reasoning**). | all | 1..N | Keeps registry and skill in sync; no backwards-compat shims. Fails closed to any non-maintainer caller. |
-| `installer` | Felix | Runs `install.sh` to copy the skill, create plan roots, grant agent permissions. | all | 1 | Tool; honors confirm prompts and `.bak.<timestamp>` backups. |
+| `installer` | Felix | Runs the compiled installer (`src/installer/`, fetched via `installer/bootstrap.sh`) to copy the skill, create plan roots, grant agent permissions. | all | 1 | Tool; honors confirm prompts and `.bak.<timestamp>` backups. |

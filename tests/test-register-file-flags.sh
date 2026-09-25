@@ -6,7 +6,7 @@
 # case; the `-` stdin path is not, because a Rust unit test has no shell
 # stdin to read from. This drives the built binaries themselves, piping into
 # stdin, so that path is actually exercised. A missing cargo and no prebuilt
-# bin/ binaries is a loud SKIP, not a failure (mirrors chat/tests/test-chat.sh).
+# bin/ binaries is a loud SKIP, not a failure.
 
 set -euo pipefail
 

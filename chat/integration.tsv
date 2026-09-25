@@ -28,3 +28,4 @@
 mode	binary	why
 skill	chat-client-rs	Short-lived client the skill's own instructions drive
 mcp	chat-mcp	MCP bridge an agent calls as typed tools instead
+mcp	chat-spool-watch	Watcher an agent arms as a Monitor to be woken when its interrupts go unread (interrupts are an MCP feature)

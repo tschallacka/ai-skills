@@ -7,6 +7,9 @@ edition = "2021"
 description = "Load per-worker planning context and launch the bounded reader"
 license = "MIT"
 
+[dependencies]
+planning-core = { path = "../planning-core" }
+
 [[bin]]
 name = "plan-context-wrapper"
 path = "src/main.rs"

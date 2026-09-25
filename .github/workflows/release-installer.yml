@@ -1,5 +1,6 @@
 # MODE: DEV
-# Attach the Rust installer's per-platform release assets to a GitHub Release.
+# Attach the Rust installer's per-platform release assets to a GitHub Release,
+# then publish it.
 #
 # RELEASE.md's own protocol is otherwise entirely manual: a maintainer tags,
 # builds dist/ai-skills-<version>.tar.gz by hand, and attaches it through the
@@ -7,41 +8,58 @@
 # binary and is not split per platform, so it cannot be what
 # installer/bootstrap.sh downloads. This workflow adds the five
 # ai-skills-<target-triple>.tar.gz assets bootstrap.sh (or, on Windows, a
-# maintainer downloading the asset directly) needs, without changing
-# anything about the existing manual step -- the maintainer still creates
-# the release and still attaches the universal tarball by hand; this only
-# adds to it, once that release exists.
+# maintainer downloading the asset directly) needs, without changing anything
+# about the existing manual step -- the maintainer still creates the release
+# (now as a DRAFT, with the universal tarball already attached by hand) and
+# this workflow only adds to it and publishes it once ready.
 #
-# ONE JOB PER PLATFORM, same reasoning as ci.yml's `native` job: each asset is
-# built by installer/build-installer-release.sh on that platform's own native
-# runner, because a cross build that cannot run is not the same claim as one
-# that was actually executed there. Windows has a leg too: installer/bootstrap.sh
-# maps x86_64 Git for Windows' bash, MSYS and Cygwin to the
-# x86_64-pc-windows-msvc asset, so this is the asset that launcher downloads.
+# T70/W06: this used to trigger on `release: published` and attach assets to
+# an already-public release. A real end-to-end rehearsal found that GitHub's
+# immutable-releases protection locks a release against new asset uploads
+# within roughly 5-6 minutes of publishing -- measured directly, twice, via
+# HTTP 422 "Cannot upload assets to an immutable release" -- which is shorter
+# than this workflow's own multi-platform build takes (5-9 minutes per leg).
+# There is no job structure that outruns that clock once the release is
+# already public: the fix is to never let it become public until every asset
+# is already attached. Verified empirically (T70/W06) that a DRAFT release
+# reports `immutable: false` and accepts uploads freely no matter how long it
+# stays a draft -- immutability is a property of being published, not of the
+# release's age. So the protocol is now: create the release as a draft (with
+# the universal tarball, as before), run this workflow via workflow_dispatch,
+# and its own last step publishes the draft once every asset has landed.
 #
-# Triggered by publishing a GitHub Release (covers both a fresh tag and
-# republishing an existing draft), and by workflow_dispatch for a maintainer
-# who needs to re-run one platform's leg after the fact -- the tag must
-# already exist as a release for gh release upload to have somewhere to
-# attach to.
+# ONE JOB BUILDS, ONE JOB ATTACHES-AND-PUBLISHES. The build job keeps the same
+# reasoning ci.yml's own `native` job has: each asset is built by
+# installer/build-installer-release.sh on that platform's own native runner,
+# because a cross build that cannot run is not the same claim as one that was
+# actually executed there. Windows has a leg too: installer/bootstrap.sh maps
+# x86_64 Git for Windows' bash, MSYS and Cygwin to the x86_64-pc-windows-msvc
+# asset, so this is the asset that launcher downloads. The attach job needs
+# every leg's artifact at once (something no native runner can produce alone),
+# so it runs after all five, uploads them in a SINGLE gh release upload call
+# (matching this workflow's own release-npm.yml sibling's build/assemble
+# split), then publishes the draft as its final step.
+#
+# workflow_dispatch only: a maintainer runs this once the draft release
+# already exists (the tag must already exist as a release for gh release
+# upload to have somewhere to attach to), and it is also how a maintainer
+# re-runs after fixing a build failure without re-cutting the release.
 
 name: release-installer
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to attach the installer assets to
+        description: Existing DRAFT release tag to attach the installer assets to and publish
         required: true
 
-# Only the upload step needs write access; everything else here is read-only.
+# Only the attach-and-publish job needs write access; the build job is read-only.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-attach:
+  build:
     name: ${{ matrix.target }} installer asset
     runs-on: ${{ matrix.os }}
     strategy:
@@ -59,40 +77,118 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
+      # Windows only, and before checkout so it applies to it: Git for
+      # Windows otherwise writes CRLF into every shell script it checks out.
+      - name: Check out with LF endings
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ inputs.tag }}
+          # Everything except benchmark/results/: its archived runs hold
+          # paths longer than Windows allows, and checking them out fails
+          # the windows-latest leg the same way it does in ci.yml's own
+          # native job and release-npm.yml's build job (T70/W06, found by a
+          # real dry run: every path here failed with "Filename too long").
+          # build-installer-release.sh never reads that directory.
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/benchmark/results/
+
+      # `bash` on a windows-latest PATH can resolve to C:\Windows\System32\
+      # bash.exe, the WSL launcher, which fails when no distro is installed.
+      # Git for Windows' own bash goes first, with the GNU tools beside it.
+      - name: Put Git for Windows' bash and coreutils first on PATH
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          {
+            printf '%s\n' 'C:\Program Files\Git\bin'
+            printf '%s\n' 'C:\Program Files\Git\usr\bin'
+          } >> "$GITHUB_PATH"
 
       - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.98
         with:
           targets: ${{ matrix.target }}
 
+      # dtolnay/rust-toolchain's own targets: input does not reliably
+      # survive to a later step's cargo invocation once build-installer-
+      # release.sh's own nested cargo calls are involved (T70/W06: measured
+      # via a real dry run -- every leg failed with "can't find crate for
+      # core/std", the exact defect class release-npm.yml's own identical
+      # step already documents and fixes). Re-added explicitly, matching
+      # that precedent and this repo's other working cross-target steps.
+      - name: Ensure the target's std library is actually installed
+        shell: bash
+        run: rustup target add ${{ matrix.target }}
+
       - name: Install the musl C toolchain
         if: contains(matrix.target, 'linux-musl')
         run: sudo apt-get install -y -qq musl-tools
 
       # build-installer-release.sh's own "build" mode (via build-release.sh)
-      # is what actually builds the chat/register binaries, rjq, the plan
-      # libraries and REVIEWER.md -- everything install.sh's release already
-      # needs, so a release leg pays the same cost the manual "build the
-      # package" step in RELEASE.md already pays, once per platform instead
-      # of once on the maintainer's own machine.
-      #
-      # Explicit `shell: bash` on both remaining steps: windows-latest's
-      # default `run:` shell is PowerShell, and both of these are bash
-      # scripts (build-installer-release.sh, and the gh upload one-liner).
+      # is what actually builds the chat/register binaries, rjq, plan-crypt,
+      # the plan libraries and REVIEWER.md -- everything install.sh's release
+      # already needs, so a release leg pays the same cost the manual "build
+      # the package" step in RELEASE.md already pays, once per platform
+      # instead of once on the maintainer's own machine.
       - name: Build this platform's installer release asset
         shell: bash
         run: ./installer/build-installer-release.sh --target ${{ matrix.target }}
 
-      - name: Attach the asset to the release
+      # Uploaded as a plain build artifact, not attached to the release here:
+      # attaching happens once, for every target at once, in jobs.attach --
+      # see this file's own header for why a per-leg attach cannot outrun
+      # GitHub's immutable-releases window.
+      - name: Upload this target's installer asset
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-installer-asset-${{ matrix.target }}
+          path: dist/ai-skills-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  attach:
+    name: attach every asset and publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Every leg's own release-installer-asset-<target> artifact holds one
+      # file; merging all five into one directory is what actually gathers a
+      # complete asset set to attach in one call.
+      - name: Download every target's asset
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: release-installer-asset-*
+          path: assets
+          merge-multiple: true
+
+      - name: List what will be attached
+        run: ls -la assets/
+
+      # ONE call, every asset at once: the release is still a draft here
+      # (immutability does not apply until publish), so this has no race to
+      # lose. `--clobber` matches this workflow's prior per-leg behavior for
+      # a re-run after a partial failure.
+      - name: Attach every installer asset to the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag='${{ github.event.release.tag_name || inputs.tag }}'
-          gh release upload "$tag" "dist/ai-skills-${{ matrix.target }}.tar.gz" \
-            --repo "${{ github.repository }}" --clobber
+          gh release upload '${{ inputs.tag }}' assets/*.tar.gz \
+            --repo '${{ github.repository }}' --clobber
+
+      # The one step that makes the release public. Nothing after this
+      # point ever needs to upload to it again.
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit '${{ inputs.tag }}' --repo '${{ github.repository }}' --draft=false

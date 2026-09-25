@@ -40,6 +40,8 @@ Usage:
            [--severity major] [--priority normal] [--status reported]
            [--mechanism M] [--parent B37] [--found-by W] [--surfaces a,b]
            [--fix F] [--verification V]   (closure evidence; required with --status fixed)
+           [--notes N]   (an initial note, e.g. not locally reproduced yet;
+                          `update --append-note` adds one later)
   bugs update <ID> [--title T] [--status S] [--fix F] [--verification V]
                    [--reason R] [--priority P] [--severity S] [--mechanism M]
                    [--append-note N]
@@ -89,6 +91,7 @@ const FLAGS: &[&str] = &[
     "fix",
     "verification",
     "reason",
+    "notes",
     "append-note",
     "surface",
     "since",
@@ -124,12 +127,13 @@ fn fail<T>(message: impl Into<String>, code: u8) -> Result<T, Failure> {
 }
 
 fn run(argv: &[String]) -> Result<ExitCode, Failure> {
-    match argv.first().map(String::as_str) {
-        None | Some("--help") | Some("-h") => {
-            print!("{USAGE}");
-            return Ok(ExitCode::SUCCESS);
-        }
-        _ => {}
+    // Checked anywhere in argv, not just as the first token: `bugs add
+    // --help` used to fall through to cli::parse and refuse with "unknown
+    // option: --help" instead of showing usage, since only a bare `bugs`
+    // (or `bugs --help` with nothing else) ever reached this check before.
+    if argv.is_empty() || argv.iter().any(|a| a == "--help" || a == "-h") {
+        print!("{USAGE}");
+        return Ok(ExitCode::SUCCESS);
     }
 
     let mut args = match cli::parse(argv, FLAGS) {
@@ -245,6 +249,7 @@ fn add(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
         surfaces: args.list("surfaces"),
         fix: args.flag("fix").map(str::to_string),
         verification: args.flag("verification").map(str::to_string),
+        notes: args.flag("notes").map(str::to_string),
     };
 
     match mutate::add(&mut register, new) {
@@ -814,5 +819,66 @@ mod tests {
         );
         std::env::remove_var("BUGS_JSON");
         assert_eq!(resolve_path(None), "BUGS.json");
+    }
+
+    fn scratch_path(tag: &str) -> String {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "bug-report-test-{tag}-{}-{}.json",
+            std::process::id(),
+            clock::now().replace([':', '-', '.'], "")
+        ));
+        path.to_string_lossy().into_owned()
+    }
+
+    /// B(bugs-add-help): `bugs add --help` used to fall through to
+    /// cli::parse and refuse with "unknown option: --help", since the old
+    /// check only looked at argv[0] -- only a bare `bugs` or `bugs --help`
+    /// (nothing else) ever showed usage.
+    #[test]
+    fn help_is_recognized_after_a_subcommand_too() {
+        assert!(run(&["add".to_string(), "--help".to_string()]).is_ok());
+        assert!(run(&["update".to_string(), "--help".to_string()]).is_ok());
+        assert!(run(&["add".to_string(), "-h".to_string()]).is_ok());
+    }
+
+    /// B(bugs-add-notes): `add` had no way to attach an initial note --
+    /// the field exists on Bug, but NewBug never carried it, so the only
+    /// path was a guessed, undocumented `--notes` flag (refused) or a
+    /// separate `update --append-note` call after the fact.
+    #[test]
+    fn add_accepts_an_initial_note() {
+        let path = scratch_path("add-notes");
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"skill":"bug-report","skill_version":"{}","comment":"t","bugs":[]}}"#,
+                migrate::SUPPORTED
+            ),
+        )
+        .unwrap();
+        let status = run(&[
+            "add".to_string(),
+            "--file".to_string(),
+            path.clone(),
+            "--title".to_string(),
+            "t".to_string(),
+            "--reproduce".to_string(),
+            "r".to_string(),
+            "--observed".to_string(),
+            "o".to_string(),
+            "--expected".to_string(),
+            "e".to_string(),
+            "--notes".to_string(),
+            "not locally reproduced yet".to_string(),
+        ]);
+        assert!(
+            status.is_ok(),
+            "{}",
+            status.err().map(|f| f.message).unwrap_or_default()
+        );
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("not locally reproduced yet"));
+        std::fs::remove_file(&path).ok();
     }
 }

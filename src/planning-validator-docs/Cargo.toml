@@ -11,3 +11,4 @@ path = "src/lib.rs"
 
 [dependencies]
 planning-validator-common = { path = "../planning-validator-common" }
+regex = { workspace = true }

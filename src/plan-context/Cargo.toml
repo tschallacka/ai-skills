@@ -13,3 +13,4 @@ path = "src/main.rs"
 
 [dependencies]
 plan-context-core = { path = "../plan-context-core" }
+planning-document = { path = "../planning-document" }

@@ -26,102 +26,40 @@
 set -uo pipefail
 
 src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-keep=false
-case "${1:-}" in
-    --keep) keep=true ;;
-    -h|--help) sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    '') ;;
-    *) printf '%s: unknown argument: %s\n' "${0##*/}" "$1" >&2; exit 64 ;;
-esac
 
-wt="$(mktemp -d "${TMPDIR:-/tmp}/verify-wt.XXXXXX")/tree"
-log5="$(mktemp "${TMPDIR:-/tmp}/verify-log5.XXXXXX")"
-log3="$(mktemp "${TMPDIR:-/tmp}/verify-log3.XXXXXX")"
-status=0
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed immediately after src is computed and
+# BEFORE the case "${1:-}" argument-parsing block -- as early as structurally
+# possible, letting even --help reach the compiled binary when present
+# (unlike blast-radius.sh in goal 18, where --help was structurally
+# unreachable through the compiled binary; this script's own -h|--help exit
+# sits AFTER this point, so there is no such obstruction here). This script
+# already declares set -uo pipefail above (deliberately WITHOUT -e, so both
+# shell legs and the overlay loop tolerate individual command failures
+# without aborting the whole harness); sourcing plan-core-lib.sh would
+# otherwise silently add -e back on the fall-through path, so it is forced
+# back off immediately below. verify-both-shells.sh lives at the repository
+# root itself, one level shallower than planning/scripts, so the relative
+# path to plan-core-lib.sh crosses one directory level down, matching every
+# prior goal's own precedent. Nothing before this point consumes "$@" via
+# shift, so it is safe to forward unmodified.
+vb_script_dir="$src"
+# plan-core-lib.sh is generated (gitignored) by build-plan-libs.sh, so it does
+# not exist on a genuinely fresh checkout that has never bootstrapped -- guard
+# the source+exec on it already being present, unconditionally falling
+# through to this script's own bash implementation when it is not, matching
+# B346's fix for build-plan-libs.sh's own self-referential case.
+if [ -f "$vb_script_dir/planning/scripts/plan-core-lib.sh" ]; then
+    source "$vb_script_dir/planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present verify-both-shells "$vb_script_dir" "$@"
+fi
+unset vb_script_dir
+set +e
+set -uo pipefail
 
-cleanup() {
-    git -C "$src" worktree remove --force "$wt" 2>/dev/null
-    rm -rf "$(dirname "$wt")"
-    if [ "$keep" = true ] && [ "$status" -ne 0 ]; then
-        printf 'logs kept: %s %s\n' "$log5" "$log3" >&2
-    else
-        rm -f "$log5" "$log3"
-    fi
-}
-# INT/TERM as well as EXIT: an interrupted run must not leave a registration
-# behind. A SIGKILL still can, which is what the sweep below is for.
-trap cleanup EXIT INT TERM HUP
-
-# Self-cleaning is not a trap alone. Sweep this harness's own leftovers: a killed
-# run leaves a registered worktree, and a registration under the repo is what puts
-# machine-specific paths into generated artifacts.
-#
-# Only leftovers, never a live one. Each run records its pid beside its worktree,
-# and a worktree whose owner is still running belongs to a concurrent run. Without
-# that check this sweep deleted the tree a second run was executing in, and 56 of
-# its 87 tests failed on files that had vanished mid-run -- the same class of
-# mistake as sweeping another run's test roots, which run-tests.sh avoids the same
-# way.
-printf '%s\n' "$$" > "$(dirname "$wt")/harness.pid"
-while IFS= read -r stale; do
-    [ -n "$stale" ] || continue
-    [ "$stale" = "$wt" ] && continue
-    owner="$(cat "$(dirname "$stale")/harness.pid" 2>/dev/null || true)"
-    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
-        printf 'leaving live worktree %s (harness pid %s)\n' "$stale" "$owner"
-        continue
-    fi
-    printf 'sweeping leftover worktree %s\n' "$stale"
-    git -C "$src" worktree remove --force "$stale" 2>/dev/null
-    rm -rf "$(dirname "$stale")"
-done < <(git -C "$src" worktree list --porcelain \
-    | sed -n 's|^worktree \(.*/verify-wt\..*\)$|\1|p')
-
-git -C "$src" worktree add --detach --quiet "$wt" HEAD || exit 70
-# The working tree, including uncommitted edits, so what is verified is what is
-# in front of you. Untracked files are deliberately not carried: a stray file is
-# not part of the change.
-overlaid=0
-while IFS= read -r path; do
-    [ -n "$path" ] || continue
-    if [ -f "$src/$path" ]; then
-        mkdir -p "$wt/$(dirname "$path")"
-        cp "$src/$path" "$wt/$path"
-    else
-        rm -f "$wt/$path"
-    fi
-    overlaid=$((overlaid + 1))
-done < <(git -C "$src" diff HEAD --name-only)
-
-printf 'worktree %s (base %s, %s file(s) overlaid)\n' "$wt" \
-    "$(git -C "$src" rev-parse --short HEAD)" "$overlaid"
-
-# Report the summary, and on a failure the failing tests' own output. Printing
-# only the summary is what turned a real bash 3.2 failure into a test name with
-# no diagnosis, after the log had already been deleted.
-report() {
-    local label="$1" log="$2"
-    if ! grep -qE 'Total ran' "$log"; then
-        printf '=== %s -- NO SUMMARY, the leg did not run ===\n' "$label"
-        tail -20 "$log"
-        status=1
-        return
-    fi
-    printf '=== %s ===\n' "$label"
-    grep -E 'Total ran|^Failed:' "$log"
-    grep -qE '^Failed:' "$log" || return 0
-    status=1
-    printf '%s\n' "--- $label: what each failing test said ---"
-    # run-tests.sh prints a failing test's whole output, indented, after its
-    # FAIL line. Take each such block up to the next test's result line.
-    awk '
-        /^  [^ ].* (PASS|FAIL|UNCONFIGURED)/ { inblock = ($0 ~ /FAIL/) }
-        inblock { print }
-    ' "$log"
-}
-
-( cd "$wt" && ./run-tests.sh ) >"$log5" 2>&1
-( cd "$wt" && nix develop "$src" --command bash32-run-tests ) >"$log3" 2>&1
-report 'bash 5.3' "$log5"
-report 'bash 3.2' "$log3"
-exit "$status"
+printf '%s: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it\n' "verify-both-shells" >&2
+exit 69

@@ -9,10 +9,10 @@ fn parse(status: &str, review: &str) -> plan_overview::plan::state::State {
 
 #[test]
 fn active_state_and_subject_selection() {
-    let active = parse("in_progress", "approved");
+    let active = parse("in_progress", "✅ approved");
     assert_eq!(active_states(&active).len(), 1);
     assert_eq!(autoplay_subject(&active), Some("W01".into()));
-    let complete = parse("completed", "approved");
+    let complete = parse("completed", "✅ approved");
     assert!(active_states(&complete).is_empty());
     assert_eq!(derive_mode(&complete), Mode::Complete);
     assert_eq!(autoplay_subject(&complete), None);
@@ -20,12 +20,12 @@ fn active_state_and_subject_selection() {
 
 #[test]
 fn planning_and_complete_modes_explain_availability() {
-    let planning = parse("open", "pending");
+    let planning = parse("open", "💤 pending");
     assert_eq!(
         autoplay_subject(&planning),
         Some("plan construction".into())
     );
     assert!(autoplay_status(&planning).contains("units"));
-    let complete = parse("completed", "approved");
+    let complete = parse("completed", "✅ approved");
     assert!(autoplay_status(&complete).contains("unavailable"));
 }

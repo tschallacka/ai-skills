@@ -1,6 +1,6 @@
 ---
 name: interactive-shell
-description: Drive any program that only works in a real terminal, through a PTY-backed wrapper with compact screen observations and a Unix-socket input client. Use it for a full-screen or curses program (nano, mc, lynx, a pager, a terminal menu), for an interactive prompt or installer that asks questions, and for driving ANOTHER CLI or AI agent interactively. Reach for it whenever a headless, --print or piped invocation cannot answer the question -- because the program draws to a terminal, or because the behaviour under test only exists in an interactive session. A headless run is not a smaller version of an interactive one; it is a different program with different output, and treating it as a substitute silently answers a question you did not ask.
+description: Drive any program that only works in a real terminal, through a PTY-backed wrapper with compact screen observations and a socket-based input client (a Unix domain socket on Linux/macOS, loopback TCP on Windows, and loopback TCP as an explicit --tcp opt-in on Linux/macOS too when a sandbox blocks AF_UNIX for the wrapped command). Use it for a full-screen or curses program (nano, mc, lynx, a pager, a terminal menu), for an interactive prompt or installer that asks questions, and for driving ANOTHER CLI or AI agent interactively. Reach for it whenever a headless, --print or piped invocation cannot answer the question -- because the program draws to a terminal, or because the behaviour under test only exists in an interactive session. A headless run is not a smaller version of an interactive one; it is a different program with different output, and treating it as a substitute silently answers a question you did not ask.
 ---
 
 <!-- MODE: PROD -->
@@ -23,8 +23,22 @@ proves nothing at all -- it needs a real terminal, which is what the wrapper
 allocates. Prefer this over a headless probe whenever the interactive path is
 the one that matters.
 
+Which client you have depends on the install mode (`integration.tsv`): a
+`skill` install ships the `interactive-shell-input` CLI this page drives (the
+default), and an `mcp` install ships only `interactive-shell-mcp`, where the
+same operations are MCP tools (`start`, `text`, `key`, `view`, `observe`,
+`wait`, ...) instead of shell commands, and `start` takes the place of
+launching `interactive-shell` directly. Both modes share the one
+`interactive-shell` PTY-wrapper binary underneath -- `interactive-shell-mcp`'s
+own `start` tool spawns it exactly the way this page's own examples do. If
+`interactive-shell-input` is not on disk, you are in an `mcp` install: call
+the MCP tool of the same name instead of the CLI line.
+
 Read [docs/README.md](docs/README.md) for the command reference and an end-to-end
-workflow. Start
+workflow. `interactive-shell` and `interactive-shell-input` live in the one
+shared location every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/`. Nothing puts it on
+`PATH` for you. Start
 `interactive-shell --session <ID> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
 or `interactive-shell --socket <SOCKET> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
 and observe its JSONL stdout. Use the smallest practical `--cols` and `--rows`
@@ -86,6 +100,22 @@ that selects an agent-keyed session; when omitted, the wrapper checks
 `INTERACTIVE_SHELL_AGENT`, `CODEX_AGENT_ID`, and `AGENT_ID` in that order.
 Session files live below `$INTERACTIVE_SHELL_HOME`, or below the private
 `$XDG_RUNTIME_DIR/interactive-shell` directory when that variable is set.
+
+Pass `--tcp` to `interactive-shell` when the default Unix domain socket
+cannot be used even though the command itself is allowed to run -- a sandbox
+that permits the wrapped program but blocks `AF_UNIX` socket creation for it.
+Observed directly: codex's own command-execution sandbox refuses every
+Unix-socket bind/connect attempt even with the surrounding container's own
+confinement fully opened up, while loopback TCP still works. `--tcp` makes
+the wrapper bind a loopback TCP port instead and write it, with a per-start
+nonce, to the same path `--socket`/`--session` already names -- `--socket
+<SOCKET>` itself does not change; only what actually lives at that path does.
+`interactive-shell-input` needs no matching flag: `connect_in_directory`
+auto-detects which transport is actually there, and a `--session <ID>`
+started with `--tcp` remembers that choice across a later restart with no
+flag repeated. This is always on for the prebuilt Windows binary, which has
+no Unix domain socket at all -- `--tcp` is the explicit, opt-in form of the
+same transport on Linux/macOS.
 
 Screen events contain only rows changed since the previous event, a monotonically
 increasing `seq`, the preceding `base`, and the cursor. An `observe` request

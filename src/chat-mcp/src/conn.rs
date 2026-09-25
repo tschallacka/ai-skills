@@ -16,10 +16,13 @@
 //! subscriber whose outbox passes a megabyte, and that is indistinguishable
 //! from message loss.
 
+use crate::interrupt::{self, SharedEngine};
 use chat_client_rs as client;
 use chat_proto::{Message, FETCH_END};
+use serde_json::Value;
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
@@ -63,6 +66,32 @@ pub struct Push {
     pub text: String,
 }
 
+/// T104: a caller-defined wake condition, independent of channel and
+/// independent of the `@nick` mention `wait`/`read` already check. Held only
+/// for the life of this connection (like `mention_seen` below), not
+/// persisted to the on-disk session -- a new adapter process registers its
+/// own, same as it re-joins its own channels.
+#[derive(Clone)]
+pub struct Trigger {
+    pub id: u64,
+    pub pattern: String,
+    /// Only a message from this exact nick can fire it; `None` matches any
+    /// sender. Compared case-sensitively, same as every other nick
+    /// comparison in this file (`take_push`'s own-message check above).
+    pub sender: Option<String>,
+    pub enabled: bool,
+}
+
+/// One line of `triggers`' answer -- the registration plus what it would
+/// need to be deregistered or toggled, so a caller need not have kept the id
+/// from `trigger_add` itself.
+pub struct TriggerInfo {
+    pub id: u64,
+    pub pattern: String,
+    pub sender: Option<String>,
+    pub enabled: bool,
+}
+
 /// What the adapter asks the owner thread to do. One variant per tool that
 /// needs the connection; the tools that do not (`status`, `discover`,
 /// `channels`) never reach here.
@@ -89,8 +118,33 @@ pub enum Op {
         mentions: bool,
         timeout: Duration,
     },
+    /// One tick of a wait: what `Held::submit` runs in a loop for `Wait`, so a
+    /// long wait never occupies the owner thread for longer than a tick.
+    Poll {
+        chan: Option<String>,
+        mentions: bool,
+    },
     Who {
         chan: String,
+    },
+    TriggerAdd {
+        pattern: String,
+        sender: Option<String>,
+    },
+    TriggerRemove {
+        id: u64,
+    },
+    TriggerToggle {
+        id: u64,
+        enabled: bool,
+    },
+    Triggers,
+    /// An interrupt or timer tool: the state lives in this identity's engine
+    /// (see `interrupt`), but the call still goes through the owner thread, so
+    /// a dead connection is noticed and reopened like any other tool's.
+    Engine {
+        tool: String,
+        arguments: Value,
     },
 }
 
@@ -102,6 +156,11 @@ pub struct Answer {
     pub members: Vec<String>,
     pub timed_out: bool,
     pub note: Option<String>,
+    pub trigger_id: Option<u64>,
+    pub triggers: Vec<TriggerInfo>,
+    /// What an interrupt or timer tool reports back: the rule, the timer, or
+    /// the whole list.
+    pub data: Option<Value>,
 }
 
 impl Answer {
@@ -112,6 +171,9 @@ impl Answer {
             members: Vec::new(),
             timed_out: false,
             note: None,
+            trigger_id: None,
+            triggers: Vec::new(),
+            data: None,
         }
     }
 }
@@ -135,13 +197,21 @@ impl Failure {
     }
 }
 
-/// The adapter's handle on the owner thread.
+/// The adapter's handle on the owner thread. Cloning it shares the same owner
+/// thread, which is what lets a caller drop the connection map's lock before it
+/// runs a long operation.
+#[derive(Clone)]
 pub struct Held {
+    /// Tells two connections opened under the same key apart, so a caller that
+    /// found its connection dead forgets that one and not a fresh replacement.
+    pub id: u64,
     pub server: String,
     pub nick: String,
     pub state_dir: PathBuf,
     jobs: Sender<Job>,
 }
+
+static NEXT_HELD_ID: AtomicU64 = AtomicU64::new(1);
 
 impl Held {
     /// Connect, register, and hand the stream to its owner thread.
@@ -149,7 +219,22 @@ impl Held {
     /// `insecure` is deliberately absent: the TOFU pin is always enforced, so
     /// there is no flag for a model to reach for when a pin mismatch is
     /// inconvenient. A mismatch is a refusal with the reason in it.
-    pub fn open(server: &str, nick: &str, state_dir: &std::path::Path) -> Result<Held, String> {
+    ///
+    /// T143: `session_key` is the resolved identity `held()`'s map is keyed
+    /// by in lib.rs -- every session/cursor read or write this connection's
+    /// owner thread does must go through THIS key, not the process's own
+    /// default `session_key()`. Missing this the first time round (T143's
+    /// own initial cut) meant every distinct identity still shared one
+    /// cursor file: `send`'s `save_cursor` and `read`/`join`'s `Session::load`
+    /// all resolved the same process-wide default regardless of which
+    /// connection called them, so one identity's `send` silently advanced a
+    /// cursor another identity's `read` then trusted as its own.
+    pub fn open(
+        server: &str,
+        nick: &str,
+        state_dir: &std::path::Path,
+        session_key: &str,
+    ) -> Result<Held, String> {
         // message-tags negotiation result unused here: chat-mcp's own push
         // consumer does not yet track a msgid cursor the way chat-client-rs
         // tail does (T135 scoped there only) -- left for a follow-up.
@@ -166,11 +251,16 @@ impl Held {
             inbox: Vec::new(),
             nick: nick.to_string(),
             state_dir: state_dir.to_path_buf(),
+            session_key: session_key.to_string(),
             mention_seen: std::collections::HashMap::new(),
+            triggers: Vec::new(),
+            next_trigger_id: 1,
+            engine: interrupt::engine_for(session_key),
             closed: false,
         };
         std::thread::spawn(move || owner.run(queue));
         Ok(Held {
+            id: NEXT_HELD_ID.fetch_add(1, Ordering::Relaxed),
             server: server.to_string(),
             nick: nick.to_string(),
             state_dir: state_dir.to_path_buf(),
@@ -178,19 +268,60 @@ impl Held {
         })
     }
 
-    /// Submit one operation and wait for its answer. The wait is bounded by
-    /// the operation's own deadline plus a margin, so a wedged owner thread
-    /// surfaces as an error rather than a hung tool call.
+    /// Submit one operation and wait for its answer. Each job the owner thread
+    /// is given is bounded (twenty seconds), so a wedged owner thread surfaces
+    /// as an error rather than a hung tool call; a `Wait` is many short jobs.
     ///
     /// `dead` separates "this connection is gone" from "this operation did not
     /// work", because only the first is worth reconnecting for. Deciding that
     /// by matching on the error text would be reading tea leaves from our own
     /// prose; the owner thread's disappearance is the fact.
     pub fn submit(&self, op: Op) -> Result<Answer, Failure> {
-        let budget = match &op {
-            Op::Wait { timeout, .. } => *timeout + Duration::from_secs(10),
-            _ => Duration::from_secs(20),
-        };
+        match op {
+            Op::Wait {
+                chan,
+                mentions,
+                timeout,
+            } => self.wait_by_polling(chan, mentions, timeout),
+            other => self.submit_one(other),
+        }
+    }
+
+    /// A wait, assembled from one-tick polls. Each poll is its own job, so the
+    /// owner thread is free between ticks and any other operation for this
+    /// identity (its own `send`, `who`, a second `wait`) is served then rather
+    /// than after the whole timeout. The long wait itself holds no lock: it is
+    /// only this loop, on the caller's own thread.
+    fn wait_by_polling(
+        &self,
+        chan: Option<String>,
+        mentions: bool,
+        timeout: Duration,
+    ) -> Result<Answer, Failure> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let answer = self.submit_one(Op::Poll {
+                chan: chan.clone(),
+                mentions,
+            })?;
+            if !answer.timed_out {
+                return Ok(answer);
+            }
+            if Instant::now() >= deadline {
+                return Ok(Answer {
+                    timed_out: true,
+                    note: Some(format!(
+                        "nothing arrived within {}s",
+                        timeout.as_secs().max(1)
+                    )),
+                    ..Answer::empty()
+                });
+            }
+        }
+    }
+
+    fn submit_one(&self, op: Op) -> Result<Answer, Failure> {
+        let budget = Duration::from_secs(20);
         let (reply, answer) = channel();
         if self.jobs.send((op, reply)).is_err() {
             return Err(Failure::dead(
@@ -216,12 +347,24 @@ struct Owner {
     inbox: Vec<Push>,
     nick: String,
     state_dir: PathBuf,
+    /// T143: the resolved identity this connection belongs to. Every
+    /// session/cursor read or write below must use this, not the process's
+    /// own default `client::session_key()` -- see `Held::open`'s doc comment.
+    session_key: String,
     /// How far mention-filtered waiting has reported, per channel. Held in
     /// memory rather than in the session, because a mention read must NOT move
     /// the shared cursor -- the messages it skipped are still unread -- and yet
     /// a second `wait` must not answer with the mention the first one already
     /// returned.
     mention_seen: std::collections::HashMap<String, u64>,
+    /// T104: content-based wake conditions this agent registered, in
+    /// addition to the fixed `@nick` mention above. Checked wherever a
+    /// mention is: `pending`/`deliver` OR it in, never in place of it.
+    triggers: Vec<Trigger>,
+    next_trigger_id: u64,
+    /// The interrupt rules and timers this identity set. Shared with the
+    /// process-wide map rather than owned, so they outlive this connection.
+    engine: SharedEngine,
     closed: bool,
 }
 
@@ -230,6 +373,7 @@ impl Owner {
     /// handle or the server closes the link.
     fn run(mut self, queue: Receiver<Job>) {
         loop {
+            self.fire_timers();
             match queue.try_recv() {
                 Ok((op, reply)) => {
                     let answer = self.execute(op);
@@ -256,12 +400,95 @@ impl Owner {
                 since,
                 mentions,
             } => self.read(&chan, since, mentions),
-            Op::Wait {
-                chan,
-                mentions,
-                timeout,
-            } => self.wait(chan.as_deref(), mentions, timeout),
+            Op::Wait { .. } => Err("a wait is served as polls by Held::submit".to_string()),
+            Op::Poll { chan, mentions } => self.poll(chan.as_deref(), mentions),
             Op::Who { chan } => self.who(&chan),
+            Op::TriggerAdd { pattern, sender } => self.trigger_add(pattern, sender),
+            Op::TriggerRemove { id } => self.trigger_remove(id),
+            Op::TriggerToggle { id, enabled } => self.trigger_toggle(id, enabled),
+            Op::Triggers => self.triggers_list(),
+            Op::Engine { tool, arguments } => self.engine_call(&tool, &arguments),
+        }
+    }
+
+    // ---- interrupts -------------------------------------------------------
+
+    fn engine_call(&mut self, tool: &str, arguments: &Value) -> Result<Answer, String> {
+        let reply = self
+            .engine
+            .lock()
+            .map_err(|_| "the interrupt state is poisoned; restart the adapter".to_string())?
+            .apply(tool, arguments, Instant::now())?;
+        self.sync_active_marker();
+        Ok(Answer {
+            note: Some(reply.note),
+            data: Some(reply.data),
+            ..Answer::empty()
+        })
+    }
+
+    /// Keep `interrupt::ACTIVE` reflecting whether anything would still notify
+    /// through the hook alone: written when at least one rule or timer would
+    /// fire and delivery is `hook`, removed otherwise (nothing configured, or
+    /// `push`/`both` already cover an idle agent). Called after anything that
+    /// can change a rule, a timer, or the delivery setting, so a stale
+    /// `chat-spool-watch` heartbeat only draws a reminder when it still matters.
+    fn sync_active_marker(&self) {
+        let Ok(engine) = self.engine.lock() else {
+            return;
+        };
+        let active =
+            engine.delivery() == interrupt::Delivery::Hook && engine.is_active(Instant::now());
+        drop(engine);
+        let dir = interrupt::spool_dir(&self.state_dir, &self.session_key);
+        let marker = dir.join(chat_proto::spool::ACTIVE);
+        if active {
+            if std::fs::create_dir_all(&dir).is_ok() {
+                let _ = std::fs::write(&marker, "");
+            }
+        } else {
+            let _ = std::fs::remove_file(&marker);
+        }
+    }
+
+    /// Push a notice for every timer that has run out. Runs on every turn of
+    /// the owner loop, so a timer is late by at most one tick.
+    fn fire_timers(&self) {
+        let Ok(mut engine) = self.engine.lock() else {
+            return;
+        };
+        let notices = engine.tick(Instant::now(), &self.nick);
+        let delivery = engine.delivery();
+        drop(engine);
+        self.send_notices(delivery, &notices);
+        // A one-shot timer just consumed itself; that can turn "active" off.
+        if !notices.is_empty() {
+            self.sync_active_marker();
+        }
+    }
+
+    /// Hand notices to the agent the way it asked: pushed, spooled for the
+    /// PreToolUse hook, or both (see `interrupt::Delivery`).
+    fn send_notices(&self, delivery: interrupt::Delivery, notices: &[interrupt::Notice]) {
+        for notice in notices {
+            interrupt::deliver(&self.state_dir, &self.session_key, delivery, notice);
+        }
+    }
+
+    /// A message arrived: push a notice when one of this agent's rules wants it.
+    /// It never touches the inbox or the cursors, so `read` and `wait` see the
+    /// message exactly as they would have without the notice.
+    fn interrupt_for(&self, chan: &str, nick: &str, text: &str) {
+        let Ok(mut engine) = self.engine.lock() else {
+            return;
+        };
+        let notices = engine.on_message(Instant::now(), &self.nick, chan, nick, text);
+        let delivery = engine.delivery();
+        drop(engine);
+        self.send_notices(delivery, &notices);
+        // A `once` rule that just fired disabled itself; that can turn "active" off.
+        if !notices.is_empty() {
+            self.sync_active_marker();
         }
     }
 
@@ -277,9 +504,9 @@ impl Owner {
         self.await_line(Duration::from_secs(2), |line| line.contains(" 366 "));
         let current = self.last_id(chan)?;
         let seed = since.unwrap_or(current);
-        let mut session = client::Session::load(&self.state_dir);
+        let mut session = client::Session::load_with_key(&self.state_dir, &self.session_key);
         session.cursors.insert(chan.to_string(), seed);
-        let _ = session.save(&self.state_dir);
+        let _ = session.save_with_key(&self.state_dir, &self.session_key);
         Ok(Answer {
             cursor: seed,
             note: Some(format!(
@@ -293,9 +520,9 @@ impl Owner {
     /// Part, and drop the cursor so a later join starts at the end again.
     fn leave(&mut self, chan: &str) -> Result<Answer, String> {
         self.write(&format!("PART {}", chan))?;
-        let mut session = client::Session::load(&self.state_dir);
+        let mut session = client::Session::load_with_key(&self.state_dir, &self.session_key);
         session.cursors.remove(chan);
-        let _ = session.save(&self.state_dir);
+        let _ = session.save_with_key(&self.state_dir, &self.session_key);
         self.inbox.retain(|push| push.chan != chan);
         Ok(Answer {
             note: Some(format!("left {}", chan)),
@@ -314,7 +541,7 @@ impl Owner {
             self.write(&format!("PRIVMSG {} :{}", chan, segment))?;
         }
         let id = self.last_id(chan)?;
-        client::save_cursor(&self.state_dir, chan, id, false);
+        client::save_cursor_with_key(&self.state_dir, &self.session_key, chan, id, false);
         Ok(Answer {
             cursor: id,
             note: Some(format!(
@@ -328,6 +555,28 @@ impl Owner {
         })
     }
 
+    /// Sends FETCH and parses the rows, with no cursor or inbox side effects
+    /// -- the mechanical half `read` and `deliver` both build on.
+    /// `server_side_mentions` picks the FETCH suffix (the server's own
+    /// literal-`@nick` filter, `fetch_mentions`); it is a property of the
+    /// wire request, independent of whatever `read`/`deliver` decide to do
+    /// with the cursor afterward.
+    fn fetch_rows(
+        &mut self,
+        chan: &str,
+        since: u64,
+        server_side_mentions: bool,
+    ) -> Result<Vec<Row>, String> {
+        let suffix = if server_side_mentions {
+            " mentions"
+        } else {
+            ""
+        };
+        self.write(&format!("FETCH {} {}{}", chan, since, suffix))?;
+        let lines = self.collect_until(Duration::from_secs(5), |line| line.starts_with(FETCH_END));
+        Ok(lines.iter().filter_map(|line| Row::parse(line)).collect())
+    }
+
     /// The delta: every stored message after the cursor, from the server's own
     /// history, so each row carries its id.
     ///
@@ -339,7 +588,7 @@ impl Owner {
         // an empty channel records 0, and reading "after 0" is exactly right
         // there. Treating the two alike skipped the first message a brand-new
         // channel ever received.
-        let stored = client::Session::load(&self.state_dir)
+        let stored = client::Session::load_with_key(&self.state_dir, &self.session_key)
             .cursors
             .get(chan)
             .copied();
@@ -347,7 +596,7 @@ impl Owner {
             (Some(explicit), _) => explicit,
             (None, None) => {
                 let end = self.last_id(chan)?;
-                client::save_cursor(&self.state_dir, chan, end, false);
+                client::save_cursor_with_key(&self.state_dir, &self.session_key, chan, end, false);
                 return Ok(Answer {
                     cursor: end,
                     note: Some(format!(
@@ -359,16 +608,13 @@ impl Owner {
             }
             (None, Some(cursor)) => cursor,
         };
-        let suffix = if mentions { " mentions" } else { "" };
-        self.write(&format!("FETCH {} {}{}", chan, since, suffix))?;
-        let lines = self.collect_until(Duration::from_secs(5), |line| line.starts_with(FETCH_END));
-        let rows: Vec<Row> = lines.iter().filter_map(|line| Row::parse(line)).collect();
+        let rows = self.fetch_rows(chan, since, mentions)?;
         let top = rows.iter().map(|row| row.id).max().unwrap_or(since);
         // A mention-filtered read must not move the cursor: the messages it
         // skipped were never shown to anyone, and advancing past them would
         // lose them permanently. The CLI makes the same exception.
         if !mentions {
-            client::save_cursor(&self.state_dir, chan, top, false);
+            client::save_cursor_with_key(&self.state_dir, &self.session_key, chan, top, false);
             self.inbox.retain(|push| push.chan != chan);
         }
         Ok(Answer {
@@ -383,34 +629,27 @@ impl Owner {
     /// This is the affordance the CLI has no way to offer. The connection is
     /// already subscribed, so the wake-up is the push itself; the rows are then
     /// read back from history so they carry ids and the cursor moves.
-    fn wait(
-        &mut self,
-        chan: Option<&str>,
-        mentions: bool,
-        timeout: Duration,
-    ) -> Result<Answer, String> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if let Some(woken) = self.pending(chan, mentions) {
-                let mut answer = self.deliver(&woken, mentions)?;
-                answer.note = Some(format!("woke on a message in {}", woken));
-                return Ok(answer);
-            }
-            if Instant::now() >= deadline {
-                return Ok(Answer {
-                    timed_out: true,
-                    note: Some(format!(
-                        "nothing arrived within {}s",
-                        timeout.as_secs().max(1)
-                    )),
-                    ..Answer::empty()
-                });
-            }
-            self.next_line(Instant::now() + TICK);
-            if self.closed {
-                return Err("the server closed the link".to_string());
-            }
+    fn poll(&mut self, chan: Option<&str>, mentions: bool) -> Result<Answer, String> {
+        if let Some(woken) = self.pending(chan, mentions) {
+            return self.woken_answer(&woken, mentions);
         }
+        self.next_line(Instant::now() + TICK);
+        if self.closed {
+            return Err("the server closed the link".to_string());
+        }
+        match self.pending(chan, mentions) {
+            Some(woken) => self.woken_answer(&woken, mentions),
+            None => Ok(Answer {
+                timed_out: true,
+                ..Answer::empty()
+            }),
+        }
+    }
+
+    fn woken_answer(&mut self, woken: &str, mentions: bool) -> Result<Answer, String> {
+        let mut answer = self.deliver(woken, mentions)?;
+        answer.note = Some(format!("woke on a message in {}", woken));
+        Ok(answer)
     }
 
     /// Hand back what a wake-up is worth. The pushes it accounts for are
@@ -421,22 +660,48 @@ impl Owner {
     /// rung, which answers an empty delta on the channel a message just
     /// arrived on.
     fn deliver(&mut self, chan: &str, mentions: bool) -> Result<Answer, String> {
-        let cursor = client::Session::load(&self.state_dir).cursor(chan);
+        let cursor =
+            client::Session::load_with_key(&self.state_dir, &self.session_key).cursor(chan);
         let mention = format!("@{}", self.nick);
-        self.inbox
-            .retain(|push| !(push.chan == chan && (!mentions || push.text.contains(&mention))));
+        let triggers = self.triggers.clone();
+        self.inbox.retain(|push| {
+            !(push.chan == chan
+                && (!mentions
+                    || push.text.contains(&mention)
+                    || wakes_on_trigger(&triggers, &push.nick, &push.text)))
+        });
         let since = if mentions {
             self.mention_seen.get(chan).copied().unwrap_or(cursor)
         } else {
             cursor
         };
-        let answer = self.read(chan, Some(since), mentions)?;
-        if mentions {
-            if let Some(top) = answer.rows.iter().map(|row| row.id).max() {
-                self.mention_seen.insert(chan.to_string(), top);
-            }
+        if !mentions {
+            return self.read(chan, Some(since), false);
         }
-        Ok(answer)
+        // T104: `wakes_on_trigger` above is exactly why the server's own
+        // `fetch_mentions` (FETCH ... mentions) cannot be used here -- it
+        // matches only a literal `@nick`, so a message that woke this `wait`
+        // via a TRIGGER rather than a real mention would vanish from the
+        // fetch that is supposed to hand it back. Fetch the raw backlog
+        // instead and apply the identical (mention OR trigger) predicate
+        // client-side, so a caller only ever sees what it was allowed to
+        // wake on -- never the rest of the channel -- regardless of which
+        // half of that condition fired.
+        let rows: Vec<Row> = self
+            .fetch_rows(chan, since, false)?
+            .into_iter()
+            .filter(|row| {
+                row.text.contains(&mention) || wakes_on_trigger(&triggers, &row.nick, &row.text)
+            })
+            .collect();
+        if let Some(top) = rows.iter().map(|row| row.id).max() {
+            self.mention_seen.insert(chan.to_string(), top);
+        }
+        Ok(Answer {
+            cursor: since,
+            rows,
+            ..Answer::empty()
+        })
     }
 
     /// Who is in the channel, from the server's own membership list.
@@ -461,6 +726,90 @@ impl Owner {
         })
     }
 
+    /// Register a content-based wake condition. `pattern` is matched as a
+    /// substring by default (implicitly wrapped in `*...*`): a caller writes
+    /// `install` to mean "anywhere in the message", and adds its own `*`/`?`
+    /// only for finer control within that. Case-insensitive, since a phrase
+    /// is prose a human typed, not a regex a caller opted into.
+    fn trigger_add(&mut self, pattern: String, sender: Option<String>) -> Result<Answer, String> {
+        let pattern = pattern.trim().to_string();
+        if pattern.is_empty() {
+            return Err("trigger_add needs a non-empty pattern".to_string());
+        }
+        let id = self.next_trigger_id;
+        self.next_trigger_id += 1;
+        self.triggers.push(Trigger {
+            id,
+            pattern: pattern.clone(),
+            sender: sender.clone(),
+            enabled: true,
+        });
+        Ok(Answer {
+            trigger_id: Some(id),
+            note: Some(match &sender {
+                Some(sender) => format!(
+                    "trigger {id} registered: \"{pattern}\" from {sender} now wakes wait/read"
+                ),
+                None => format!(
+                    "trigger {id} registered: \"{pattern}\" from anyone now wakes wait/read"
+                ),
+            }),
+            ..Answer::empty()
+        })
+    }
+
+    /// Permanently remove a trigger. Refused by name rather than a silent
+    /// no-op: an id that never existed, or was already removed, is worth
+    /// saying so a caller does not assume it is still active.
+    fn trigger_remove(&mut self, id: u64) -> Result<Answer, String> {
+        let before = self.triggers.len();
+        self.triggers.retain(|t| t.id != id);
+        if self.triggers.len() == before {
+            return Err(format!("no such trigger: {id}"));
+        }
+        Ok(Answer {
+            note: Some(format!("trigger {id} removed")),
+            ..Answer::empty()
+        })
+    }
+
+    /// Enable or disable a trigger without losing its definition, so it can
+    /// be re-enabled later without re-registering the pattern/sender.
+    fn trigger_toggle(&mut self, id: u64, enabled: bool) -> Result<Answer, String> {
+        let trigger = self
+            .triggers
+            .iter_mut()
+            .find(|t| t.id == id)
+            .ok_or_else(|| format!("no such trigger: {id}"))?;
+        trigger.enabled = enabled;
+        Ok(Answer {
+            note: Some(format!(
+                "trigger {id} {}",
+                if enabled { "enabled" } else { "disabled" }
+            )),
+            ..Answer::empty()
+        })
+    }
+
+    /// Every trigger this connection holds, enabled or not -- the list a
+    /// caller who lost an id, or wants to audit what is active, reads back.
+    fn triggers_list(&self) -> Result<Answer, String> {
+        let triggers = self
+            .triggers
+            .iter()
+            .map(|t| TriggerInfo {
+                id: t.id,
+                pattern: t.pattern.clone(),
+                sender: t.sender.clone(),
+                enabled: t.enabled,
+            })
+            .collect();
+        Ok(Answer {
+            triggers,
+            ..Answer::empty()
+        })
+    }
+
     // ---- the wire ---------------------------------------------------------
 
     /// The channel with a pushed message matching the filter, if any.
@@ -470,7 +819,9 @@ impl Owner {
             .iter()
             .find(|push| {
                 chan.map(|want| want == push.chan).unwrap_or(true)
-                    && (!mentions || push.text.contains(&mention))
+                    && (!mentions
+                        || push.text.contains(&mention)
+                        || wakes_on_trigger(&self.triggers, &push.nick, &push.text))
             })
             .map(|push| push.chan.clone())
     }
@@ -596,11 +947,128 @@ impl Owner {
         if self.inbox.len() >= INBOX_MAX {
             self.inbox.remove(0);
         }
-        self.inbox.push(Push {
-            chan,
-            nick,
-            text: message.trailing.unwrap_or_default(),
-        });
+        let text = message.trailing.unwrap_or_default();
+        self.interrupt_for(&chan, &nick, &text);
+        self.inbox.push(Push { chan, nick, text });
         true
+    }
+}
+
+/// Does any enabled, sender-compatible trigger fire on this message? A free
+/// function (not a method) so `deliver`'s `self.inbox.retain(...)` can call
+/// it against a borrowed trigger list without holding `self` for the whole
+/// closure. Takes `nick`/`text` rather than a `Push` so the same check also
+/// applies to a `Row` fetched back from history (`deliver`'s own re-filter,
+/// below) without constructing a throwaway `Push` for it.
+fn wakes_on_trigger(triggers: &[Trigger], nick: &str, text: &str) -> bool {
+    triggers.iter().any(|t| {
+        t.enabled
+            && t.sender.as_deref().map(|s| s == nick).unwrap_or(true)
+            && wildcard_match(&t.pattern, text)
+    })
+}
+
+/// Substring by default, mIRC-style `*`/`?` wildcards for finer control
+/// within that: `pattern` is wrapped as `*pattern*` before matching, so
+/// "install" fires anywhere in the text the way a plain phrase should, and a
+/// caller's own `*`/`?` still composes inside that (T104: "substring, not
+/// regex, unless a caller asks for a regex" -- the wildcards ARE the regex
+/// opt-in, not a fixed anchor). Case-insensitive: a trigger phrase is prose
+/// a human typed, not a pattern language they chose to be exact in.
+pub(crate) fn wildcard_match(pattern: &str, text: &str) -> bool {
+    fn matches(pattern: &[char], text: &[char]) -> bool {
+        match pattern.first() {
+            None => text.is_empty(),
+            Some('*') => {
+                matches(&pattern[1..], text) || (!text.is_empty() && matches(pattern, &text[1..]))
+            }
+            Some('?') => !text.is_empty() && matches(&pattern[1..], &text[1..]),
+            Some(want) => {
+                !text.is_empty() && *want == text[0] && matches(&pattern[1..], &text[1..])
+            }
+        }
+    }
+    let padded: Vec<char> = format!("*{}*", pattern.to_lowercase()).chars().collect();
+    let text: Vec<char> = text.to_lowercase().chars().collect();
+    matches(&padded, &text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_phrase_matches_anywhere_in_the_text() {
+        assert!(wildcard_match("install", "please install the thing"));
+        assert!(wildcard_match("install", "install"));
+        assert!(!wildcard_match("install", "unrelated chatter"));
+    }
+
+    #[test]
+    fn matching_is_case_insensitive() {
+        assert!(wildcard_match("Install", "please INSTALL now"));
+    }
+
+    #[test]
+    fn a_star_composes_inside_the_implicit_substring_wrap() {
+        assert!(wildcard_match(
+            "install*registration",
+            "install then registration happens"
+        ));
+        assert!(!wildcard_match(
+            "install*registration",
+            "registration without install"
+        ));
+    }
+
+    #[test]
+    fn a_question_mark_matches_exactly_one_character() {
+        assert!(wildcard_match("rf?", "the rfc is done"));
+        assert!(!wildcard_match("rf?c", "the rfc is done"));
+    }
+
+    #[test]
+    fn an_empty_pattern_matches_everything() {
+        // trigger_add itself refuses an empty pattern before it ever reaches
+        // here; this pins what the matcher alone would do if it did not.
+        assert!(wildcard_match("", "anything at all"));
+    }
+
+    fn trigger(id: u64, pattern: &str, sender: Option<&str>, enabled: bool) -> Trigger {
+        Trigger {
+            id,
+            pattern: pattern.to_string(),
+            sender: sender.map(str::to_string),
+            enabled,
+        }
+    }
+
+    #[test]
+    fn an_unscoped_trigger_fires_from_any_sender() {
+        let triggers = vec![trigger(1, "install", None, true)];
+        assert!(wakes_on_trigger(&triggers, "anyone", "please install"));
+    }
+
+    #[test]
+    fn a_sender_scoped_trigger_only_fires_from_that_nick() {
+        let triggers = vec![trigger(1, "install", Some("michael"), true)];
+        assert!(wakes_on_trigger(&triggers, "michael", "please install"));
+        assert!(!wakes_on_trigger(
+            &triggers,
+            "someone-else",
+            "please install"
+        ));
+    }
+
+    #[test]
+    fn a_disabled_trigger_never_fires() {
+        let triggers = vec![trigger(1, "install", None, false)];
+        assert!(!wakes_on_trigger(&triggers, "anyone", "please install"));
+    }
+
+    #[test]
+    fn a_message_matching_no_trigger_does_not_wake() {
+        let triggers = vec![trigger(1, "install", None, true)];
+        assert!(!wakes_on_trigger(&triggers, "anyone", "unrelated chatter"));
     }
 }

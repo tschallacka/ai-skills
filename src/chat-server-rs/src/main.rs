@@ -22,7 +22,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chat_proto::message::{numeric, numerics, Message, Tag, FETCH_END};
@@ -118,16 +118,15 @@ enum Offer {
 ///
 /// The split is the fix for B122. The broadcast path used to hold `hub.writers`
 /// and then lock a second connection's state and write to its socket from the
-/// sender's thread. Two things followed, both measured:
+/// sender's thread.
 ///
-/// * A socket write blocks for as long as the peer declines to read, and it was
-///   blocking while holding `hub.writers` -- which the accept loop must take to
-///   register a new connection. So connects completed through the kernel
-///   backlog and were then never serviced.
-/// * Even with nothing blocking, the target's own thread holds its state across
-///   a 200ms `read_tls`, so a broadcaster contending for it loses that race
-///   almost every time. One idle subscriber was enough to starve the
-///   broadcaster for tens of seconds while it held `hub.writers`.
+/// A socket write blocks while the peer declines to read, and it was
+/// blocking while holding `hub.writers` -- which the accept loop must take to
+/// register a new connection, so connects completed through the kernel
+/// backlog and were then never serviced. And the target's own thread holds
+/// its state across a `read_tls` bounded by its 200ms timeout, so a
+/// broadcaster contending for that lock loses the race almost every time it
+/// runs, stalling on every other connection's state in turn.
 ///
 /// Distinct mutexes were never what made that safe -- safety needs a lock
 /// order, which the comment there claimed was unnecessary. Now there is one:
@@ -240,7 +239,11 @@ struct Hub {
     nicks: Mutex<HashMap<String, u64>>, // nick -> conn index
     // One peer per connection, keyed by index. Taken alone and held only long
     // enough to snapshot the list: nothing that can block is done under it.
-    writers: Mutex<Vec<Arc<Peer>>>,
+    // T91c: read on every broadcast (peers_except) and on every deregister,
+    // written only by the accept loop registering a new connection -- an
+    // RwLock lets concurrent broadcasts and deregisters proceed together,
+    // rather than queuing behind one another for a lock none of them mutate.
+    writers: RwLock<Vec<Arc<Peer>>>,
 }
 
 impl Hub {
@@ -303,7 +306,7 @@ impl Hub {
         // one.
         let peer = self
             .writers
-            .lock()
+            .read()
             .ok()
             .and_then(|writers| writers.get(idx).map(Arc::clone));
         if let Some(peer) = peer {
@@ -421,7 +424,7 @@ impl Hub {
     /// can block is done while holding it. Shared by `relay` and
     /// `relay_privmsg` so the two cannot drift on who gets addressed.
     fn peers_except(&self, except_idx: usize) -> Vec<Arc<Peer>> {
-        match self.writers.lock() {
+        match self.writers.read() {
             Ok(writers) => writers
                 .iter()
                 .enumerate()
@@ -710,7 +713,10 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                         }
                     }
                     Err(e) => {
-                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        ) {
                             continue;
                         }
                         // A plaintext client retrying against the TLS listener
@@ -775,8 +781,31 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
         // decrypt them before draining plaintext. read_tls returning Ok(0) is
         // the peer's TCP close: the authoritative "this connection is over"
         // signal, and discarding it was how dead sockets stayed in CLOSE-WAIT.
-        if let Ok(0) = st.conn.read_tls(&mut st.tcp) {
-            done = true;
+        match st.conn.read_tls(&mut st.tcp) {
+            Ok(0) => done = true,
+            // A peer that was killed rather than closed sends a reset, not a
+            // FIN: `ConnectionReset`/`ConnectionAborted` here, where a clean
+            // close reads as Ok(0). Windows does this for every killed
+            // process and Linux for one that died with unread data. Ignoring
+            // it left the dead connection open and its nick held for good.
+            // Only the kinds that mean the peer is gone end the connection:
+            // any other error (a read that ran out its timeout, or rustls's
+            // own "buffer full, process what you have first" refusal, which
+            // is `Other`) is not a loss of the peer, and ending on those
+            // dropped healthy connections mid-join under load.
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::NotConnected
+                        | std::io::ErrorKind::UnexpectedEof
+                ) =>
+            {
+                done = true
+            }
+            _ => {}
         }
         let _ = st.conn.process_new_packets();
         while st.conn.write_tls(&mut st.tcp).unwrap_or(0) > 0 {}
@@ -920,9 +949,6 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                     // the nick's channel membership was never dropped, leaving
                     // ghosts in NAMES; and the peer's outbox went on accepting
                     // broadcasts for a connection that was gone.
-                    //
-                    // `chat-client-rs send` sends QUIT as its last act, so this
-                    // was one leaked descriptor per message on the bus.
                     w(st, "ERROR :bye");
                     st.closed = true;
                     sess.closed = true;
@@ -1507,9 +1533,8 @@ fn bind_address(bind: &str) -> Option<std::net::IpAddr> {
 
 // Whether the client can dial this host at all.
 //
-// chat-client-rs splits a HOST:PORT on a colon and hands the head to TLS SNI
-// (`server_host`, src/chat-client-rs/src/main.rs), so a bare IPv6 literal is
-// rejected as an invalid DNS name before it is ever connected. Announcing one
+// A client resolves this host for TLS SNI, which rejects a bare IPv6
+// literal as an invalid DNS name before ever connecting. Announcing one
 // advertises an address nothing can use; announcing an IPv4 address instead
 // would advertise one this listener does not answer on. So an IPv6 bind
 // announces nothing and says why. B118 tracks the client-side support.
@@ -1608,7 +1633,11 @@ fn main() {
         let xdg = std::env::var("XDG_CONFIG_HOME")
             .ok()
             .filter(|v| !v.is_empty());
-        let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        // USERPROFILE is Windows' HOME: outside Git for Windows' bash there is
+        // no HOME at all.
+        let home_dir = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".into());
         match xdg {
             Some(v) => format!("{}/tsch-ai-skills/chat", v.trim_end_matches('/')),
             None => format!(
@@ -1729,7 +1758,7 @@ fn main() {
         channels: Mutex::new(HashMap::new()),
         topics: Mutex::new(HashMap::new()),
         nicks: Mutex::new(HashMap::new()),
-        writers: Mutex::new(Vec::new()),
+        writers: RwLock::new(Vec::new()),
     });
 
     // Announcing is on unless switched off. A server nobody can discover is
@@ -1815,7 +1844,7 @@ fn main() {
         stream.set_write_timeout(Some(WRITE_TIMEOUT)).ok();
         let hub = Arc::clone(&hub);
         let tls_config = Arc::clone(&tls_config);
-        let mut writers = hub.writers.lock().unwrap();
+        let mut writers = hub.writers.write().unwrap();
         let idx = writers.len();
         let peer = Arc::new(Peer::new());
         writers.push(Arc::clone(&peer));
@@ -2009,7 +2038,7 @@ mod membership_relay_tests {
     use super::{Hub, Peer};
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, RwLock};
 
     // The fanout is what puts a nick in another client's list. Before B244 the
     // JOIN handler wrote only to the joining connection, so a client already in
@@ -2022,7 +2051,7 @@ mod membership_relay_tests {
             channels: Mutex::new(HashMap::new()),
             topics: Mutex::new(HashMap::new()),
             nicks: Mutex::new(HashMap::new()),
-            writers: Mutex::new(peers),
+            writers: RwLock::new(peers),
         }
     }
 
@@ -2242,14 +2271,14 @@ mod outbox_tests {
 
 // T133 (CAP negotiation) and T134 (message-tags on broadcast PRIVMSG). Like
 // membership_relay_tests above, the live parts (LS/REQ/END over a real
-// connection, registration actually held) need a socket and are covered by
-// chat/tests/test-chat-cap-negotiation.sh; what is pure here is tested here.
+// connection, registration actually held) need a socket; what is pure here
+// is tested here.
 #[cfg(test)]
 mod cap_negotiation_tests {
     use super::{negotiate_req, Hub, Peer, CAPABILITIES};
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, RwLock};
 
     fn hub_with(peers: Vec<Arc<Peer>>) -> Hub {
         Hub {
@@ -2258,7 +2287,7 @@ mod cap_negotiation_tests {
             channels: Mutex::new(HashMap::new()),
             topics: Mutex::new(HashMap::new()),
             nicks: Mutex::new(HashMap::new()),
-            writers: Mutex::new(peers),
+            writers: RwLock::new(peers),
         }
     }
 
@@ -2366,7 +2395,7 @@ mod cap_negotiation_tests {
 mod append_lock_tests {
     use super::Hub;
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::{Mutex, RwLock};
 
     fn hub_at(chan_dir: std::path::PathBuf) -> Hub {
         Hub {
@@ -2375,7 +2404,7 @@ mod append_lock_tests {
             channels: Mutex::new(HashMap::new()),
             topics: Mutex::new(HashMap::new()),
             nicks: Mutex::new(HashMap::new()),
-            writers: Mutex::new(Vec::new()),
+            writers: RwLock::new(Vec::new()),
         }
     }
 

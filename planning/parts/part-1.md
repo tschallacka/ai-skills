@@ -211,12 +211,21 @@ A **work unit** is one independently reviewable change target:
   section, migration, fixture, or asset.
 - **Verification:** one named command or one bounded browser/API flow. It has
   no implementation file, but it is still its own work unit and step.
+- **Relocation:** one source path moved wholesale to one destination path,
+  contents unchanged by the move itself. This is the one kind whose `File` may
+  name a directory (ending in `/`) rather than a single file — record the
+  source there and the destination as `Scope`. Verify it narratively, the way
+  `generated` is verified: state in the step how you confirmed nothing but
+  location changed (for example, `git status` shows only renames, a pre-move
+  `diff -r` against the destination was empty, and the source path no longer
+  exists). Never use it for a move that also edits content — decompose the
+  edit as its own ordinary work unit instead.
 
 One implementation step owns exactly one work unit. It MUST NOT include a
 second source file, second symbol, second test target, or a catch-all such as
 "related callers." Make those separate, ordered steps even when the changes
 are mechanically small. Do not use globs, directory names, or "all affected
-files" as a target.
+files" as a target, except the one source directory a relocation unit names.
 
 An exception is allowed only for an inseparable generated-file update. Record
 the generator command and every generated file in the step, set its type to
@@ -227,10 +236,14 @@ exception for ordinary source, configuration, test, or documentation edits.
 
 A goal owns one coherent, independently demonstrable outcome and contains
 **2–10 work units** (MUST). A single-work-unit goal is allowed only for a
-genuinely standalone documentation, configuration, discovery, or verification
-outcome; state the reason in its `goal.md`. A goal with more than 10 work
-units is invalid and MUST be split at the next stable product, contract,
-deployability, or ownership boundary. Do not split merely by file type.
+genuinely standalone documentation, configuration, discovery, verification, or
+relocation outcome; state the reason in its `goal.md`. A goal with more than
+10 work units is invalid and MUST be split at the next stable product,
+contract, deployability, or ownership boundary. Do not split merely by file
+type.
+
+<!-- SKILL-LOAD-PROOF part=part-1 token=1d15f3f4e11748e1 -->
+
 
 Every goal needs its own definition of done that can be demonstrated without
 claiming completion of later goals. If it cannot be demonstrated independently,
@@ -280,9 +293,6 @@ executable plan:
 - User-visible behavior and required browser verification, if any
 - Backend behavior and required unit or integration verification, if any
 - Dependencies on other goals or external systems
-
-<!-- SKILL-LOAD-PROOF part=part-1 token=64647e1270fa28f0 -->
-
 
 Ask focused follow-up questions for material gaps. Do not ask for details that
 can be discovered safely from the repository or environment. If the user does

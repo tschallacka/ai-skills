@@ -55,6 +55,9 @@ check_scope "a workflow"               full .github/workflows/ci.yml
 check_scope "the selector itself"      full .github/ci-test-scope.sh
 check_scope "run-tests.sh"             full run-tests.sh
 check_scope "lib-test.sh"              full planning/tests/lib-test.sh
+# The selector must not exempt its OWN compiled source either -- matching
+# test-ci-scope.sh's own equivalent case for src/ci-scope/* (goal 21).
+check_scope "the compiled selector's own source" full src/ci-test-scope/src/main.rs
 
 echo "ci-test-scope: a push to an integration branch is exhaustive"
 for branch in master nextupdate; do
@@ -120,14 +123,55 @@ else
 fi
 
 echo "ci-test-scope: a directory-prefix COVERS entry matches anything under it"
-# test-chat.sh declares "chat ..."; a change under chat/ (not equal to it)
-# must still hit that entry.
-check_scope "a file under the chat directory" selective chat/SKILL.md
-if listed_has chat/tests/test-chat.sh; then
-    printf '  ok    a directory COVERS entry matches a file beneath it\n'
+# T145 goal 25 (AR-115/AR-117): a repo-wide grep for '^# COVERS' found exactly
+# two real, tracked files declaring a directory-prefix marker anywhere in the
+# repo -- chat/tests/test-chat.sh and interactive-shell/tests/test-interactive-shell.sh
+# -- and this goal retires both. Rather than depend on a real fixture that no
+# longer exists, this scenario now mirrors
+# src/ci-test-scope/tests/ci_test_scope_flow.rs's own already-passing unit
+# test a_directory_prefix_covers_entry_matches_a_file_beneath_it: a synthetic
+# scratch repo (a scratch chat/tests/test-chat.sh plus a stubbed
+# run-tests.sh), spawning the real COMPILED ci-test-scope binary directly
+# (bypassing this repo's own compiled-binary-preference wrapper, whose own
+# exec always sets PLANNING_SKILL_ROOT to the real repo root first) with
+# PLANNING_SKILL_ROOT pointed at the scratch dir instead. The bash fallback
+# has no PLANNING_SKILL_ROOT support at all (src/ci-test-scope/src/repo_root.rs
+# is compiled-binary-only), so this specific scenario -- like the Rust unit
+# test it mirrors -- only exercises the compiled path; a missing compiled
+# binary is a loud SKIP here, not a failure.
+prefix_bin=""
+if [ -x "$repo_root/bin/x86_64-unknown-linux-musl/ci-test-scope" ]; then
+    prefix_bin="$repo_root/bin/x86_64-unknown-linux-musl/ci-test-scope"
+elif [ -x "$repo_root/bin/aarch64-unknown-linux-musl/ci-test-scope" ]; then
+    prefix_bin="$repo_root/bin/aarch64-unknown-linux-musl/ci-test-scope"
+elif [ -x "$repo_root/bin/x86_64-apple-darwin/ci-test-scope" ]; then
+    prefix_bin="$repo_root/bin/x86_64-apple-darwin/ci-test-scope"
+elif [ -x "$repo_root/bin/aarch64-apple-darwin/ci-test-scope" ]; then
+    prefix_bin="$repo_root/bin/aarch64-apple-darwin/ci-test-scope"
+fi
+if [ -z "$prefix_bin" ]; then
+    printf '  SKIP  directory-prefix COVERS matching (no compiled ci-test-scope binary found; this scenario is compiled-binary-only)\n'
 else
-    printf '  FAIL  chat/SKILL.md should have hit the chat directory entry: %s\n' "$LISTED"
-    failures=$((failures + 1))
+    prefix_work="$(mktemp -d "${TMPDIR:-/tmp}/test-ci-test-scope-prefix.XXXXXX")"
+    mkdir -p "$prefix_work/chat/tests"
+    printf '#!/usr/bin/env bash\n# COVERS: chat\necho hi\n' > "$prefix_work/chat/tests/test-chat.sh"
+    cat > "$prefix_work/run-tests.sh" <<'RUNTESTSEOF'
+#!/usr/bin/env bash
+printf '%s\n' 'chat/tests/test-chat.sh'
+RUNTESTSEOF
+    printf 'chat/SKILL.md\n' > "$prefix_work/changed.txt"
+    prefix_out="$(PLANNING_SKILL_ROOT="$prefix_work" env -u GITHUB_OUTPUT "$prefix_bin" \
+        --files-from "$prefix_work/changed.txt")"
+    prefix_scope="$(printf '%s\n' "$prefix_out" | awk -F= '/^scope=/{print $2}')"
+    prefix_listed="$(printf '%s\n' "$prefix_out" | sed -n 's/^tests=//p')"
+    rm -rf "$prefix_work"
+    if [ "$prefix_scope" = selective ] && case " $prefix_listed " in *' chat/tests/test-chat.sh '*) true ;; *) false ;; esac; then
+        printf '  ok    a directory COVERS entry matches a file beneath it\n'
+    else
+        printf '  FAIL  a synthetic chat/SKILL.md change should have hit the chat directory entry: scope=%s tests=%s\n' \
+            "$prefix_scope" "$prefix_listed"
+        failures=$((failures + 1))
+    fi
 fi
 
 echo "ci-test-scope: an undeclared test always runs, whatever changed"
@@ -154,6 +198,25 @@ if "$scope_sh" --nonsense >/dev/null 2>&1; then
     failures=$((failures + 1))
 else
     printf '  ok    an unknown flag is rejected\n'
+fi
+
+echo "ci-test-scope: no compiled binary falls back to the scope=full safe default"
+# AR-100: never mutate the real, shared planning/scripts/plan-core-lib.sh in
+# place -- copy ci-test-scope.sh into this test's own scratch work dir, whose
+# planning/scripts/ has no plan-core-lib.sh, so the wiring's own
+# [ -f .../plan-core-lib.sh ] check is false there with zero shared mutable
+# state touched.
+missing_binary_root="$work/missing-binary"
+mkdir -p "$missing_binary_root/.github" "$missing_binary_root/planning/scripts"
+cp "$scope_sh" "$missing_binary_root/.github/ci-test-scope.sh"
+got="$(cd "$missing_binary_root" && ./.github/ci-test-scope.sh --files-from /dev/null)"
+if [ "$got" = "scope=full
+reason=ci-test-scope binary not found; run ./setup-dev-env.sh to build it
+tests=" ]; then
+    printf '  ok    a missing compiled binary falls back to scope=full\n'
+else
+    printf '  FAIL  a missing compiled binary should fall back to scope=full\n         got: %s\n' "$got"
+    failures=$((failures + 1))
 fi
 
 echo

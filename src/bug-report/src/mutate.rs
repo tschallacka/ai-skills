@@ -35,6 +35,11 @@ pub struct NewBug {
     /// (B205).
     pub fix: Option<String>,
     pub verification: Option<String>,
+    /// An initial note (e.g. "not locally reproduced yet") -- the same
+    /// field `update --append-note` appends to later. Filing this at
+    /// `add` time used to need a separate `update --append-note` call
+    /// afterward, undiscoverable from `add`'s own flag list.
+    pub notes: Option<String>,
 }
 
 /// Add one entry, returning the id it was given.
@@ -69,7 +74,7 @@ pub fn add(register: &mut Register, new: NewBug) -> Result<String, Vec<String>> 
         fix: new.fix,
         verification: new.verification,
         found_by: new.found_by,
-        notes: None,
+        notes: new.notes,
         created_at: now.clone(),
         updated_at: now,
     });
@@ -247,6 +252,7 @@ mod add_closure_tests {
             surfaces: vec!["s".into()],
             fix: None,
             verification: None,
+            notes: None,
         }
     }
 

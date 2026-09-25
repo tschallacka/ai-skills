@@ -76,6 +76,16 @@ jobs:
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-msvc
           components: rustfmt,clippy
 
+      # test-release-package.sh's build-release.sh cross-compiles the whole
+      # workspace for x86_64-unknown-linux-musl (chat-server-rs's own
+      # dependency on `ring` needs a real C compiler for that target, not
+      # just the Rust target's stdlib) -- the same musl-tools package the
+      # "builds and runs every subject in scope" jobs already install below,
+      # needed here too since this job never runs inside that one's shell.
+      - name: Install the musl C toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y -qq musl-tools
+
       - name: Refuse an unconfigured plan-overview crate leg
         env:
           REFUSE_UNCONFIGURED_CARGO: 1
@@ -118,12 +128,14 @@ jobs:
           fi
 
       - name: Install GNU nano, because macOS answers `nano` with Pico
-        # test-interactive-shell drives GNU nano's own bindings -- META-RIGHT,
-        # CTRL-E, CTRL-O -- to prove the PTY wrapper can operate a full-screen
-        # program. Stock macOS ships UW Pico under that name (the runner
-        # reported "UW PICO 5.09" in its title bar), which shares neither the
-        # title nor the keys, so the test skips itself there rather than
-        # asserting against a different program.
+        # cargo test -p interactive-shell --test pty_orchestration (T145 goal
+        # 25; formerly the bash test-interactive-shell.sh) drives GNU nano's
+        # own bindings -- META-RIGHT, CTRL-E, CTRL-O -- to prove the PTY
+        # wrapper can operate a full-screen program. Stock macOS ships UW Pico
+        # under that name (the runner reported "UW PICO 5.09" in its title
+        # bar), which shares neither the title nor the keys, so the test
+        # skips itself there rather than asserting against a different
+        # program.
         #
         # Installing it keeps the assertions strict instead of widening them to
         # cover two editors: the subject is the wrapper, so pinning the program
@@ -194,13 +206,14 @@ jobs:
 
       - name: Place the compiled chat rung
         run: |
-          # Build the chat crates natively and place the three binaries under
+          # Build the chat crates natively and place the four binaries under
           # the chat/bin/<triple>/ dir skill_files() resolves for this host, so
           # the manifest and shipped-binaries tests see them. The dedicated
           # chat-binary job builds the cross/static artifacts for release.
           cargo build --release --manifest-path src/chat-server-rs/Cargo.toml
           cargo build --release --manifest-path src/chat-client-rs/Cargo.toml
           cargo build --release --manifest-path src/chat-mcp/Cargo.toml
+          cargo build --release --manifest-path src/chat-spool-watch/Cargo.toml
           case "$(uname -s):$(uname -m)" in
             Linux:x86_64|Linux:amd64) dir=x86_64-unknown-linux-musl ;;
             Linux:aarch64|Linux:arm64) dir=aarch64-unknown-linux-musl ;;
@@ -213,6 +226,7 @@ jobs:
           cp "$GITHUB_WORKSPACE/target/release/chat-server-rs" "chat/bin/$dir/chat-server-rs"
           cp "$GITHUB_WORKSPACE/target/release/chat-client-rs" "chat/bin/$dir/chat-client-rs"
           cp "$GITHUB_WORKSPACE/target/release/chat-mcp" "chat/bin/$dir/chat-mcp"
+          cp "$GITHUB_WORKSPACE/target/release/chat-spool-watch" "chat/bin/$dir/chat-spool-watch"
 
       - name: Place the compiled register rungs
         run: |
@@ -253,48 +267,43 @@ jobs:
         # missing; building here keeps that off the suite's clock.
         run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
 
-      - name: Build and stage every migrated planning command (T116)
-        # T116: sharding a single job into several means a shell test needing
-        # one of these binaries can now land in a DIFFERENT job than whichever
-        # of its siblings happened to build it as a side effect of testing its
-        # own crate -- setup-dev-env.sh's own comment already calls this exact
-        # "degrades honestly" property what hides the compiled path never being
-        # exercised. Same data source and copy rule as setup-dev-env.sh and the
-        # native job's own "Build and execute every registered planning
-        # command" step: planning/rust-migration.tsv names the migrated
-        # crates, and a binary is staged into planning/scripts/ only where a
-        # `.sh` sibling still names it as this repository's own oracle.
+      - name: Build every compiled helper into bin/<triple> (T116)
+        # The shell suite drives compiled binaries, not bash bodies: every
+        # planning/scripts/*.sh execs its crate's binary through
+        # plan_exec_compiled_binary_if_present, which finds it only under
+        # bin/<host triple> (or AI_SKILLS_BIN_ROOT), and run-tests.sh itself
+        # is one of them. Two things used to be missing here and every shard
+        # died at the top of run-tests.sh with exit 69:
+        #
+        #   - planning/scripts/plan-core-lib.sh is generated (by
+        #     build-plan-libs.sh) and gitignored, so a fresh checkout has none
+        #     and the wiring cannot even be sourced;
+        #   - the only binary staged was run-tests, under a scratch
+        #     AI_SKILLS_BIN_ROOT, so every OTHER script the suite ran found no
+        #     binary either.
+        #
+        # setup-dev-env.sh is the one place that knows the crate list, the
+        # host triple, and the generated-library bootstrap, so this runs it
+        # rather than keeping a second list here that drifts.
+        # SETUP_DEV_ENV_IN_NIX=1 skips its nix entry: the toolchain is the
+        # rust-toolchain step above, pinned to the same version.
         run: |
-          set -euo pipefail
-          while IFS=$'\t' read -r path kind candidate note; do
-            [ -n "$candidate" ] || continue
-            case "$candidate" in
-              render-plans-board) continue ;; # owned by another migration
-              overview-state) crate=plan-overview ;;
-              *) crate="$candidate" ;;
-            esac
-            [ -f "planning/scripts/$candidate.sh" ] || continue
-            manifest="src/$crate/Cargo.toml"
-            [ -f "$manifest" ] || { echo "::error::missing crate for $candidate: $manifest"; exit 1; }
-            cargo build --manifest-path "$manifest" --release
-            binary="target/release/$crate"
-            [ -x "$binary" ] || { echo "::error::missing release artifact: $binary"; exit 1; }
-            cp "$binary" "planning/scripts/$candidate"
-            chmod +x "planning/scripts/$candidate"
-          done < <({
-            printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
-            awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
-          } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
-          # ~45 crates' worth of dependency objects (deps/, build/,
-          # .fingerprint/) is nearly the whole of target/release and was
-          # never needed past this point -- every final binary this job still
-          # reads directly (tony-the-pony) or copies elsewhere (chat,
-          # bug-report, todo) already happened before this step runs. Freeing
-          # it here is what a disk-tight runner needs: this step's own local
-          # repro of the failure it fixes showed 99% disk usage with 1.3G
-          # free before this reclaim existed.
-          du -sh target/release 2>/dev/null || true
+          SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
+          # Pin the suite to the directory just built (plan_bin_dir tier 1).
+          # Left to itself the lookup prefers ~/.config/tsch-ai-skills/bin
+          # whenever that directory exists, and the suite's own installer
+          # tests create it holding only bugs and todo -- after which every
+          # later wrapper finds no binary and exits 69.
+          triple="$(./setup-dev-env.sh --list | sed -n 's/^host target: //p')"
+          [ -n "$triple" ] || { echo "::error::setup-dev-env.sh --list named no host target"; exit 1; }
+          echo "AI_SKILLS_BIN_ROOT=$PWD/bin/$triple" >> "$GITHUB_ENV"
+          # Dependency objects (deps/, build/, .fingerprint/) are nearly the
+          # whole of target/ and were never needed past this point. Freeing
+          # them is what a disk-tight runner needs: an earlier version of this
+          # job hit 99% disk usage with 1.3G free before this reclaim existed.
+          du -sh target 2>/dev/null || true
           rm -rf target/release/deps target/release/build target/release/incremental target/release/.fingerprint
+          rm -rf target/*/release/deps target/*/release/build target/*/release/incremental target/*/release/.fingerprint
           df -h . 2>/dev/null || true
 
       - name: Write the selected test list (T116)
@@ -398,12 +407,14 @@ jobs:
           fi
 
       - name: Install GNU nano, because macOS answers `nano` with Pico
-        # test-interactive-shell drives GNU nano's own bindings -- META-RIGHT,
-        # CTRL-E, CTRL-O -- to prove the PTY wrapper can operate a full-screen
-        # program. Stock macOS ships UW Pico under that name (the runner
-        # reported "UW PICO 5.09" in its title bar), which shares neither the
-        # title nor the keys, so the test skips itself there rather than
-        # asserting against a different program.
+        # cargo test -p interactive-shell --test pty_orchestration (T145 goal
+        # 25; formerly the bash test-interactive-shell.sh) drives GNU nano's
+        # own bindings -- META-RIGHT, CTRL-E, CTRL-O -- to prove the PTY
+        # wrapper can operate a full-screen program. Stock macOS ships UW Pico
+        # under that name (the runner reported "UW PICO 5.09" in its title
+        # bar), which shares neither the title nor the keys, so the test
+        # skips itself there rather than asserting against a different
+        # program.
         #
         # Installing it keeps the assertions strict instead of widening them to
         # cover two editors: the subject is the wrapper, so pinning the program
@@ -489,41 +500,28 @@ jobs:
         # have one: a build in the other job does not reach this runner.
         run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
 
-      - name: Build and stage every migrated planning command (T116)
+      - name: Build every compiled helper into bin/<triple> (T116)
         # See the sibling step of the same name on the default-bash leg for
-        # why this is here at all now that a shard can land apart from
-        # whichever shard happens to test the crate that builds it.
+        # why the shell suite needs every compiled helper staged before it
+        # runs, and why the wiring cannot start without the generated
+        # plan-core-lib.sh (setup-dev-env.sh builds that too, through
+        # build-plan-libs.sh's own fresh-checkout bootstrap).
         run: |
-          set -euo pipefail
-          while IFS=$'\t' read -r path kind candidate note; do
-            [ -n "$candidate" ] || continue
-            case "$candidate" in
-              render-plans-board) continue ;; # owned by another migration
-              overview-state) crate=plan-overview ;;
-              *) crate="$candidate" ;;
-            esac
-            [ -f "planning/scripts/$candidate.sh" ] || continue
-            manifest="src/$crate/Cargo.toml"
-            [ -f "$manifest" ] || { echo "::error::missing crate for $candidate: $manifest"; exit 1; }
-            cargo build --manifest-path "$manifest" --release
-            binary="target/release/$crate"
-            [ -x "$binary" ] || { echo "::error::missing release artifact: $binary"; exit 1; }
-            cp "$binary" "planning/scripts/$candidate"
-            chmod +x "planning/scripts/$candidate"
-          done < <({
-            printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
-            awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
-          } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
-          # ~45 crates' worth of dependency objects (deps/, build/,
-          # .fingerprint/) is nearly the whole of target/release and was
-          # never needed past this point -- every final binary this job still
-          # reads directly (tony-the-pony) or copies elsewhere (chat,
-          # bug-report, todo) already happened before this step runs. Freeing
-          # it here is what a disk-tight runner needs: this step's own local
-          # repro of the failure it fixes showed 99% disk usage with 1.3G
-          # free before this reclaim existed.
-          du -sh target/release 2>/dev/null || true
+          SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
+          # Pin the suite to the directory just built (plan_bin_dir tier 1).
+          # Left to itself the lookup prefers ~/.config/tsch-ai-skills/bin
+          # whenever that directory exists, and the suite's own installer
+          # tests create it holding only bugs and todo -- after which every
+          # later wrapper finds no binary and exits 69.
+          triple="$(./setup-dev-env.sh --list | sed -n 's/^host target: //p')"
+          [ -n "$triple" ] || { echo "::error::setup-dev-env.sh --list named no host target"; exit 1; }
+          echo "AI_SKILLS_BIN_ROOT=$PWD/bin/$triple" >> "$GITHUB_ENV"
+          # Dependency objects are nearly all of target/ and were never
+          # needed past this point; freeing them is what a disk-tight runner
+          # needs.
+          du -sh target 2>/dev/null || true
           rm -rf target/release/deps target/release/build target/release/incremental target/release/.fingerprint
+          rm -rf target/*/release/deps target/*/release/build target/*/release/incremental target/*/release/.fingerprint
           df -h . 2>/dev/null || true
 
       - name: Write the selected test list (T116)
@@ -560,13 +558,99 @@ jobs:
   # by two consecutive green macOS runs (32474258670, 32476867183) -- so both
   # macOS legs above are now blocking.
 
+  test-windows:
+    # Proves: the deterministic shell suite passes on Windows under Git for
+    # Windows' bash. The `native` job's windows leg proves the Rust crates
+    # build and pass there; this proves the bash skills and their tests do too,
+    # which is the half of the product a cargo run never touches.
+    #
+    # Sharded like the other suite jobs, and it takes the same selective test
+    # list from the scope job.
+    name: Test suite passes on windows-latest (Git bash, shard ${{ matrix.shard }})
+    runs-on: windows-latest
+    needs: scope
+    timeout-minutes: 60
+    # SHARD_TOTAL must equal the length of the shard array below, for the
+    # reason spelled out on the `test` job.
+    env:
+      SHARD_TOTAL: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      # Before the checkout: the runner's git converts to CRLF by default, and
+      # a bash script with CRLF endings fails on its first line.
+      - name: Check out with LF endings
+        shell: bash
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          # benchmark/results holds paths past what Windows can check out.
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/benchmark/results/
+
+      - name: Pin the toolchain
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      # Without this, `bash` resolves to System32's WSL launcher, which is not
+      # the shell the scripts are written for; Git's coreutils come first for
+      # the same reason (find, sort and friends, not their Windows namesakes).
+      - name: Put Git for Windows' bash and coreutils first on PATH
+        shell: bash
+        run: |
+          {
+            echo 'C:\Program Files\Git\bin'
+            echo 'C:\Program Files\Git\usr\bin'
+          } >> "$GITHUB_PATH"
+
+      - name: Build every compiled helper into bin/<triple>
+        shell: bash
+        run: |
+          SETUP_DEV_ENV_IN_NIX=1 ./setup-dev-env.sh
+          triple="$(./setup-dev-env.sh --list | sed -n 's/^host target: //p')"
+          [ -n "$triple" ] || { echo "::error::setup-dev-env.sh --list named no host target"; exit 1; }
+          echo "AI_SKILLS_BIN_ROOT=$PWD/bin/$triple" >> "$GITHUB_ENV"
+
+      - name: Write the selected test list (T116)
+        if: needs.scope.outputs.tests_scope == 'selective'
+        shell: bash
+        run: printf '%s\n' '${{ needs.scope.outputs.tests }}' | tr ' ' '\n' > selected-tests.txt
+
+      - name: Run this shard of the deterministic test suite
+        shell: bash
+        run: |
+          set -o pipefail
+          select_flag=()
+          [ '${{ needs.scope.outputs.tests_scope }}' != 'selective' ] \
+              || select_flag=(--select-file selected-tests.txt)
+          ./run-tests.sh "${select_flag[@]}" --shard "${{ matrix.shard }}/$SHARD_TOTAL" 2>&1 \
+              | tee windows-shell-suite.log
+
+      - name: Keep the suite log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-shell-suite-log-shard-${{ matrix.shard }}
+          path: windows-shell-suite.log
+          if-no-files-found: ignore
+
   test-suite-ok:
-    # T116: `test` and `test-bash32` are each sharded (2 os * 4 shards, plus 4
-    # more for the bash-3.2 leg), so their own check names carry a shard
-    # number and change if SHARD_TOTAL ever does. Branch protection needs ONE
-    # stable name to require regardless of shard count, which is this job's
-    # only reason to exist -- it proves nothing itself, it only reports
-    # whether every shard of both jobs actually passed.
+    # T116: `test`, `test-bash32` and `test-windows` are each sharded (2 os * 4
+    # shards, plus 4 more for the bash-3.2 leg and 4 for Windows), so their own
+    # check names carry a shard number and change if SHARD_TOTAL ever does.
+    # Branch protection needs ONE stable name to require regardless of shard
+    # count, which is this job's only reason to exist -- it proves nothing
+    # itself, it only reports whether every shard of all three jobs actually
+    # passed.
     #
     # `if: always()` is required for a job whose own dependencies might fail:
     # GitHub skips a job's default `if` (`success()`) the moment any `needs`
@@ -574,21 +658,24 @@ jobs:
     # a FAILED one does -- exactly the silent-pass this job exists to prevent.
     name: Shell test suite (all shards) passes
     runs-on: ubuntu-latest
-    needs: [test, test-bash32]
+    needs: [test, test-bash32, test-windows]
     if: always()
     steps:
       - name: Check every shard succeeded
         run: |
           if [ '${{ needs.test.result }}' != 'success' ] \
-              || [ '${{ needs['test-bash32'].result }}' != 'success' ]; then
-            echo "::error::one or more test-suite shards did not succeed (test: ${{ needs.test.result }}, test-bash32: ${{ needs['test-bash32'].result }})"
+              || [ '${{ needs['test-bash32'].result }}' != 'success' ] \
+              || [ '${{ needs['test-windows'].result }}' != 'success' ]; then
+            echo "::error::one or more test-suite shards did not succeed (test: ${{ needs.test.result }}, test-bash32: ${{ needs['test-bash32'].result }}, test-windows: ${{ needs['test-windows'].result }})"
             exit 1
           fi
 
   scope:
-    # Proves: nothing. This job DECIDES, and the decision is what the native
-    # legs below obey. It is deliberately tiny and always runs, because every
-    # other crate job depends on its answer.
+    # Proves: nothing, except that the selector scripts below run compiled
+    # rather than bash (see the build step ahead of "Decide the scope"). This
+    # job DECIDES, and the decision is what the native legs below obey. It is
+    # otherwise deliberately tiny and always runs, because every other crate
+    # job depends on its answer.
     #
     # The default is always the widest scope. See .github/ci-scope.sh — every
     # error path returns full, including no merge base, a shallow clone and
@@ -605,6 +692,7 @@ jobs:
       plan_crypt: ${{ steps.subjects.outputs.plan_crypt }}
       planning_commands: ${{ steps.subjects.outputs.planning_commands }}
       editor: ${{ steps.subjects.outputs.editor }}
+      installer: ${{ steps.subjects.outputs.installer }}
       tests_scope: ${{ steps.decide_tests.outputs.scope }}
       tests: ${{ steps.decide_tests.outputs.tests }}
     steps:
@@ -619,6 +707,54 @@ jobs:
         # cargo metadata supplies the reverse-dependency graph, so the selector
         # needs cargo even though it builds nothing.
         uses: dtolnay/rust-toolchain@1.98
+
+      - name: Build and stage the compiled selector binaries
+        # ci-scope.sh, ci-subjects.sh and ci-test-scope.sh each prefer their
+        # own compiled binary over their bash body via
+        # plan_exec_compiled_binary_if_present (T145 goals 20-22), which finds
+        # it via plan_bin_dir's own upward walk for a bin/<triple> directory --
+        # anchored at plan-crypt-lib.sh's own location (planning/scripts/,
+        # BASH_SOURCE[0] inside a function resolves to where it was defined,
+        # not where it was called from), not at the caller's own directory, so
+        # the outermost bin/<triple> found walking up from there is what
+        # every caller in this repository shares: this checkout's own
+        # repo-root bin/<triple>. plan_crypt_target_triple's own answer for a
+        # Linux x86_64 runner is unconditionally x86_64-unknown-linux-musl
+        # (plan-crypt-lib.sh), not whatever the host toolchain happens to
+        # build for. Without this step
+        # no compiled binary exists yet this early in a real run, so all three
+        # scripts below would always fall through to bash -- the wiring these
+        # three goals added would be proven only by their own local test
+        # harnesses and dead code in every actual CI run.
+        shell: bash
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get install -y -qq musl-tools
+          cargo build --release --target x86_64-unknown-linux-musl \
+            -p ci-scope -p ci-subjects -p ci-test-scope
+          mkdir -p bin/x86_64-unknown-linux-musl
+          for bin in ci-scope ci-subjects ci-test-scope; do
+            cp "target/x86_64-unknown-linux-musl/release/$bin" "bin/x86_64-unknown-linux-musl/$bin"
+          done
+
+      - name: Generate plan-core-lib.sh so the compiled-binary wiring can activate
+        # plan_exec_compiled_binary_if_present (the wiring the step above
+        # exists to feed) is reached only through
+        # planning/scripts/plan-core-lib.sh, which is GENERATED (by
+        # build-plan-libs.sh) and gitignored -- it does not exist on a fresh
+        # checkout like this job's own, so without this step every one of
+        # ci-scope.sh/ci-subjects.sh/ci-test-scope.sh's own `if [ -f
+        # .../plan-core-lib.sh ]` guards is false and all three silently fall
+        # all the way through to their bash bodies, staged binaries above or
+        # not. Bash's own body then needs `rjq` on PATH (only the bash
+        # implementation parses `cargo metadata` output that way; the
+        # compiled binaries use serde_json natively and never call rjq at
+        # all) -- and nothing in this job builds or stages rjq either, so
+        # that fallback fails too. Running this now is what makes the step
+        # above actually reachable, instead of the compiled binaries sitting
+        # in bin/x86_64-unknown-linux-musl unused.
+        shell: bash
+        run: ./planning/scripts/build-plan-libs.sh
 
       - name: Decide the scope
         id: decide
@@ -677,6 +813,7 @@ jobs:
             printf '| plan-crypt | %s |\n' '${{ steps.subjects.outputs.plan_crypt }}'
             printf '| planning commands | %s |\n' '${{ steps.subjects.outputs.planning_commands }}'
             printf '| ai-text-editor | %s |\n' '${{ steps.subjects.outputs.editor }}'
+            printf '| installer | %s |\n' '${{ steps.subjects.outputs.installer }}'
             crates='${{ steps.decide.outputs.crates }}'
             if [ -n "$crates" ]; then
               printf '\nCrates in scope, with their dependents:\n\n'
@@ -724,21 +861,44 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
+      # Windows only, and before checkout so it applies to it: Git for
+      # Windows otherwise writes CRLF into every shell script it checks out.
+      # .gitattributes pins the same thing for a developer's own clone.
+      - name: Check out with LF endings
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
-          # A full checkout, where the four predecessors each sparse-checked out
-          # their own overlapping subset. One job needs the union, and the union
-          # of those four subsets was most of the tree anyway.
+          # Everything EXCEPT benchmark/results. The union of what the
+          # workspace's tests read from the tree keeps growing: the real-tree
+          # parity tests (blast-radius, verify-both-shells,
+          # generate-portability, ci-scope, ci-subjects, ci-test-scope) run
+          # the real .github/*.sh and planning/scripts, and
+          # test-mermaid-accuracy checks the tracked documents and every
+          # script and artifact their diagrams name. A hand-kept include list
+          # had to equal that union and failed the mermaid test without
+          # anything pointing at the list, so this excludes the one directory
+          # nothing reads instead: its archived runs hold paths longer than
+          # Windows allows, and checking them out failed the Windows leg.
+          sparse-checkout-cone-mode: false
           sparse-checkout: |
-            planning/rust-migration.tsv
-            planning/binaries.tsv
-            ai-text-editor/ai-text-editor.1
-            ai-text-editor/schemas
-            src
-            Cargo.toml
-            Cargo.lock
-            rust-toolchain.toml
+            /*
+            !/benchmark/results/
+
+      # `bash` on a windows-latest PATH can resolve to C:\Windows\System32\
+      # bash.exe, the WSL launcher, which fails when no distro is installed.
+      # Git for Windows' own bash goes first, with the GNU tools beside it.
+      - name: Put Git for Windows' bash and coreutils first on PATH
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          {
+            echo 'C:\Program Files\Git\bin'
+            echo 'C:\Program Files\Git\usr\bin'
+          } >> "$GITHUB_PATH"
 
       - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.98
@@ -754,6 +914,33 @@ jobs:
         if: contains(matrix.target, 'linux-musl')
         run: sudo apt-get install -y -qq musl-tools
 
+      - name: Build rjq and put it on PATH for the workspace test step below
+        # At least one confirmed, still-live consumer needs this: generate-portability's
+        # own real-tree-parity test (src/generate-portability/tests/generate_portability_flow.rs,
+        # matches_the_real_bash_original_against_the_real_repository_tree) genuinely
+        # shells out to the real generate-portability.sh, which itself
+        # unconditionally requires rjq on PATH (`command -v rjq >/dev/null 2>&1
+        # || exit 69`) before doing anything else -- independent of ci-scope.sh,
+        # whose own bash body (rjq's original, only-known reason here) is gone
+        # as of goal 24. Not claimed exhaustive: two prior attempts to
+        # enumerate every consumer of this step were each found wrong by a
+        # fresh review, so this cites one confirmed reason rather than
+        # asserting there are no others. `cargo test --workspace` DOES compile
+        # rjq's own binary as a side effect (every workspace member's [[bin]]
+        # targets are built), but never onto PATH, so a nested
+        # `Command::new("bash")` subprocess inside a test cannot find it --
+        # observed as a deterministic, real-CI-only failure on every
+        # non-Windows leg before this step existed. The later "Build rjq and
+        # prove it answers a query" step below only runs when rjq itself is in
+        # this run's scope, which is not the same condition: the
+        # workspace-wide test step runs on every leg regardless of scope, so
+        # rjq needs to be ready before it, unconditionally.
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p rjq --target "${{ matrix.target }}"
+          echo "$GITHUB_WORKSPACE/target/${{ matrix.target }}/debug" >> "$GITHUB_PATH"
+
       # ---- one workspace-wide gate, not one per subject -------------------
       # fmt, clippy and test cover every member of the workspace in a single
       # pass. The per-subject steps below therefore only BUILD and EXECUTE;
@@ -763,49 +950,33 @@ jobs:
       # considered and rejected: clippy and test are cheap next to the release
       # builds, and a workspace-wide pass is what catches a library change
       # breaking a consumer that selection failed to name.
-      # interactive-shell is the workspace's first POSIX-only member, so
-      # --workspace cannot mean "every member" on the Windows leg any more.
       #
-      # THE UNIX SOCKET IS NOT THE REASON. A loopback port would replace it
-      # without difficulty -- the chat skill already offers exactly that choice
-      # -- so naming the transport here would be naming the one part that does
-      # port cleanly. What does not port is the terminal core:
-      #
-      #   lib.rs:1415  libc::openpty                 no Windows equivalent;
-      #                                              ConPTY (CreatePseudoConsole)
-      #                                              is a different API, not a flag
-      #   lib.rs:1437  ioctl(slave, TIOCSCTTY, 0)    Windows has no controlling
-      #                                              terminal to assign
-      #   lib.rs:1897  ioctl(fd, TIOCSWINSZ)         resize is a ConPTY call
-      #   lib.rs:1436  setsid()                      no sessions
-      #   lib.rs:1443  setpgid(0, 0)                 no process groups, so
-      #   lib.rs:1463  kill(-pid, SIGKILL)           signalling a whole group by
-      #   lib.rs:1473  kill(-pid, SIGTERM)           negative pid has no analogue
-      #                                              (Job Objects are the nearest)
-      #
-      # plus twelve raw-fd sites (AsRawFd/FromRawFd/dup2/fcntl) against a
-      # platform whose equivalent is a HANDLE. Porting means rewriting the PTY
-      # and process-lifecycle layer, not swapping a transport.
-      # interactive-shell/binaries.tsv declares no Windows row for the same
-      # reason, so the exclusion and the shipped set agree.
-      #
-      # An --exclude rather than cfg-gating the crate into an inert Windows
-      # stub: a binary that builds on Windows and refuses to run is a worse
-      # answer than one that is honestly absent, and it would put a
-      # do-nothing artifact next to the four real ones.
+      # interactive-shell now builds and tests on every leg, Windows included
+      # (T84): windows.rs implements the same Backend/Transport/Listener
+      # traits goal 1 extracted, using ConPTY/Job Objects and a loopback TCP
+      # transport (mirroring ai-text-editor's own pattern) in place of
+      # openpty/ioctl/setsid/kill and the Unix socket. tests/protocol.rs is
+      # cfg(unix)-gated (its own transport is Unix-socket-specific), so
+      # --workspace's test run is meaningful on every target unmodified.
+      - name: Generate plan-core-lib.sh for the real-tree parity tests
+        # ci-scope, ci-subjects, ci-test-scope and generate-postmortem each run
+        # their real .github/*.sh or planning/scripts/*.sh wrapper and compare
+        # it with the compiled binary. A wrapper reaches the binary through
+        # planning/scripts/plan-core-lib.sh, which is generated and gitignored,
+        # so on a fresh checkout it answers "binary not found" and the
+        # comparison fails for a reason that has nothing to do with the crate.
+        shell: bash
+        run: ./planning/scripts/build-plan-libs.sh
+
       - name: Format, lint and test the whole workspace
         shell: bash
         run: |
           set -euo pipefail
-          exclude=''
-          case "${{ matrix.target }}" in
-            *windows*) exclude='--exclude interactive-shell' ;;
-          esac
           cargo fmt --all --check
-          # shellcheck disable=SC2086
-          cargo clippy --workspace $exclude --all-targets --target "${{ matrix.target }}" -- -D warnings
-          # shellcheck disable=SC2086
-          cargo test --workspace $exclude --all-targets --target "${{ matrix.target }}"
+          cargo clippy --workspace --all-targets --target "${{ matrix.target }}" -- -D warnings
+          # --no-fail-fast: one failing test binary used to hide every crate
+          # after it, so a leg needed one run per failure to list them all.
+          cargo test --workspace --all-targets --no-fail-fast --target "${{ matrix.target }}"
 
       # ---- rjq -------------------------------------------------------------
       - name: Build rjq and prove it answers a query
@@ -868,12 +1039,12 @@ jobs:
           if-no-files-found: warn
 
       # ---- chat ------------------------------------------------------------
-      - name: Build the chat server, client and MCP adapter
+      - name: Build the chat server, client, MCP adapter and spool watcher
         if: needs.scope.outputs.chat == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          for crate in src/chat-server-rs src/chat-client-rs src/chat-mcp; do
+          for crate in src/chat-server-rs src/chat-client-rs src/chat-mcp src/chat-spool-watch; do
             printf '==> %s\n' "$crate"
             cargo build --manifest-path "$crate/Cargo.toml" --release --target "${{ matrix.target }}"
           done
@@ -890,6 +1061,8 @@ jobs:
             target/${{ matrix.target }}/release/chat-client-rs.exe
             target/${{ matrix.target }}/release/chat-mcp
             target/${{ matrix.target }}/release/chat-mcp.exe
+            target/${{ matrix.target }}/release/chat-spool-watch
+            target/${{ matrix.target }}/release/chat-spool-watch.exe
           if-no-files-found: error
 
       # ---- interactive-shell -----------------------------------------------
@@ -907,10 +1080,8 @@ jobs:
       # `scope != 'none'` condition is the gate.
       #
       # The fixture binary is deliberately not built: it is maintainer-only and
-      # has no binaries.tsv row. Windows is excluded for the same reason the
-      # workspace gate excludes the crate there.
+      # has no binaries.tsv row.
       - name: Build the interactive-shell binaries and prove they launch
-        if: "!contains(matrix.target, 'windows')"
         shell: bash
         run: |
           set -euo pipefail
@@ -918,9 +1089,11 @@ jobs:
             --bin interactive-shell --bin interactive-shell-input
           release="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release"
           for binary in interactive-shell interactive-shell-input; do
+            bin="$release/$binary"
+            [ -x "$bin" ] || bin="$bin.exe"
             # Executed, not just built: these are shipped as prebuilt artifacts,
             # so "it linked" is not the claim being made about them.
-            "$release/$binary" --help >/dev/null
+            "$bin" --help >/dev/null
             printf '%s launches on %s\n' "$binary" '${{ matrix.target }}'
           done
 
@@ -938,14 +1111,74 @@ jobs:
             esac
           done
 
+      - name: Stage the interactive-shell artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "interactive-shell-artifacts/${{ matrix.target }}"
+          release="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release"
+          for binary in interactive-shell interactive-shell-input; do
+            bin="$release/$binary"
+            [ -x "$bin" ] || bin="$bin.exe"
+            cp "$bin" "interactive-shell-artifacts/${{ matrix.target }}/$(basename "$bin")"
+          done
+
       - name: Upload the interactive-shell artifacts
-        if: "!contains(matrix.target, 'windows')"
         uses: actions/upload-artifact@v7.0.1
         with:
           name: interactive-shell-${{ matrix.target }}
+          path: interactive-shell-artifacts
+          if-no-files-found: error
+
+      # ---- installer ---------------------------------------------------------
+      # The installer BINARY has no POSIX-only dependency of its own -- it is
+      # cfg-gated on Unix only where that already has a working non-Unix
+      # branch (install.rs/permissions.rs's executable-bit handling), and
+      # installer_platform already resolves x86_64-pc-windows-msvc as a real
+      # target. installer/bootstrap.sh, the curl-piped bash LAUNCHER around
+      # this binary, is the actually POSIX-only piece -- but that is a
+      # statement about bootstrap.sh, not about whether this binary builds,
+      # runs, and answers --platform/--help correctly on Windows, which is
+      # what this leg checks.
+      # Verified by running it, not just linking it: --platform must answer
+      # with this leg's own target, and a musl leg must actually BE static --
+      # installer/build-installer-release.sh itself carries the comment for
+      # why that check exists (a prior version of that script silently linked
+      # glibc on a "matches the host" shortcut and labelled the result musl
+      # regardless).
+      - name: Build the installer binary and prove it launches
+        if: needs.scope.outputs.installer == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release -p installer --target "${{ matrix.target }}"
+          suffix=''
+          case "${{ matrix.target }}" in *windows-msvc) suffix=.exe ;; esac
+          bin="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/installer$suffix"
+          reported="$("$bin" --platform)"
+          [ "$reported" = "${{ matrix.target }}" ] \
+            || { echo "::error::installer --platform said $reported, want ${{ matrix.target }}"; exit 1; }
+          "$bin" --help >/dev/null
+
+      - name: The musl installer build must actually be static
+        if: needs.scope.outputs.installer == 'true' && contains(matrix.target, 'musl')
+        shell: bash
+        run: |
+          out="$(ldd "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/installer" 2>&1 || true)"
+          printf '%s\n' "$out"
+          case "$out" in
+            *"not a dynamic executable"*|*"statically linked"*) ;;
+            *) echo "::error::the musl build links against a shared library"; exit 1 ;;
+          esac
+
+      - name: Upload the installer artifact
+        if: needs.scope.outputs.installer == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: installer-${{ matrix.target }}
           path: |
-            target/${{ matrix.target }}/release/interactive-shell
-            target/${{ matrix.target }}/release/interactive-shell-input
+            target/${{ matrix.target }}/release/installer
+            target/${{ matrix.target }}/release/installer.exe
           if-no-files-found: error
 
       # ---- plan-crypt ------------------------------------------------------
@@ -1065,6 +1298,7 @@ jobs:
             "$output" --help >/dev/null
           done < <({
             printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
+            printf 'planning\truntime-binary\tregister-rebuild\tdeclared in planning/PACKAGE-MAP.tsv\n'
             awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
           } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
 
@@ -1202,6 +1436,172 @@ jobs:
             target/${{ matrix.target }}/release/todo.exe
           if-no-files-found: error
 
+  cygwin:
+    # T84a: x86_64-pc-cygwin is tier 3 (no prebuilt std), so this is its own
+    # job rather than a sixth `native` matrix leg -- it needs a nightly
+    # toolchain with -Z build-std and a Cygwin install the other four
+    # platforms have no use for, not just a different os/target pair.
+    #
+    # Gated the same way `native` is gated (needs.scope.outputs.scope !=
+    # 'none'), rather than a parallel selective-compilation mechanism of its
+    # own: interactive-shell's other per-target builds already ride on that
+    # same job-level condition with no scope flag of their own (see the
+    # `native` job's own comment), and this is one more per-target build of
+    # the same crate.
+    #
+    # Cygwin's own libc bindings for openpty/setsid/ioctl/setpgid/kill are an
+    # UNVERIFIED assumption T84a's own ticket does not independently audit;
+    # this leg is what would surface an incompatibility, by actually
+    # spawning and driving a real Cygwin bash, not just linking one.
+    name: x86_64-pc-cygwin builds and drives a real Cygwin bash
+    runs-on: windows-latest
+    needs: scope
+    if: needs.scope.outputs.scope != 'none'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          # Same MAX_PATH concern as the native job's own windows-latest leg.
+          sparse-checkout: |
+            src
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+            .github/cygwin-drive-bash-check.sh
+
+      - name: Install Cygwin (gcc-core, gcc-g++)
+        uses: cygwin/cygwin-install-action@v6
+        with:
+          install-dir: 'D:\cygwin'
+          packages: |
+            gcc-core
+            gcc-g++
+
+      # pwsh, not bash: cygwin-install-action prepends Cygwin's own bin dir
+      # to PATH, so `shell: bash` resolves to Cygwin's bash rather than
+      # Git-Bash from this point on. Invoking rustup/cargo (native Windows
+      # executables) through it corrupted an argument in W19's own scratch
+      # run (a literal embedded newline landed inside a flag), and even
+      # GitHub Actions' own auto-generated `shell: bash` wrapper script
+      # (its "set -eo pipefail" startup line) hit the identical corruption
+      # when Cygwin's bash ran it. pwsh avoids that translation layer for
+      # the rustup/cargo steps; driving the Cygwin-linked binary itself
+      # uses Cygwin's bash directly against a real, committed script file
+      # (plain LF line endings, never auto-generated), which does not hit
+      # whatever GitHub Actions' own script-file generation does
+      # differently.
+      - name: Install nightly Rust with rust-src
+        shell: pwsh
+        run: rustup toolchain install nightly --component rust-src
+
+      - name: Build interactive-shell for x86_64-pc-cygwin
+        shell: pwsh
+        env:
+          # Cygwin's own gcc (plain `gcc`, not an x86_64-pc-cygwin-gcc-
+          # prefixed binary -- confirmed in W19's own scratch run) is a
+          # sufficient linker; no cross-compiler package is installed.
+          CARGO_TARGET_X86_64_PC_CYGWIN_LINKER: gcc
+        run: |
+          cargo +nightly build -Z build-std=std,panic_abort --release `
+            --target x86_64-pc-cygwin `
+            -p interactive-shell --bin interactive-shell --bin interactive-shell-input
+
+      - name: Drive a real Cygwin bash through the built wrapper
+        shell: pwsh
+        run: |
+          # A CRLF checkout makes Cygwin's bash read "set -euo pipefail\r" as an
+          # option named "pipefail<CR>" and fail as an invalid option name, so
+          # strip the CRs before handing the file to bash.
+          $winPath = "$env:GITHUB_WORKSPACE/.github/cygwin-drive-bash-check.sh"
+          (Get-Content -Raw $winPath) -replace "`r`n", "`n" | Set-Content -NoNewline -Path $winPath
+
+          # Cygwin's bash rejects a native Windows path outright ("No such
+          # file or directory") -- cygpath converts it to the /cygdrive/...
+          # form bash actually resolves.
+          $script = & D:\cygwin\bin\cygpath.exe -u $winPath
+          D:\cygwin\bin\bash.exe --login $script
+
+  msys2:
+    # T84c: MSYS2's own research (05-msys2-research, W23) found MSYS2 needs
+    # no distinct Rust target at all -- MSYS2 itself builds its official
+    # `rust` package by reusing x86_64-pc-cygwin unchanged, linking with its
+    # own gcc (msys-2.0.dll) instead of Cygwin's (cygwin1.dll). Same job
+    # shape as the cygwin job above, for the same reason (tier 3, needs
+    # nightly + -Z build-std, a toolchain install the other platforms have
+    # no use for).
+    name: x86_64-pc-cygwin (MSYS2-linked) builds and drives a real MSYS2 bash
+    runs-on: windows-latest
+    needs: scope
+    if: needs.scope.outputs.scope != 'none'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          sparse-checkout: |
+            src
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+            .github/cygwin-drive-bash-check.sh
+
+      - name: Install MSYS2 (native MSYS gcc, not mingw-w64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          install: gcc
+
+      # interactive-shell's own session-socket directory check (unmodified
+      # POSIX code, the cygwin job above already proves it unchanged) needs
+      # its parent directory's permission bits to read exactly 0700 --
+      # MSYS2 defaults to `noacl` mounts (Cygwin defaults to `acl` on), so
+      # chmod bits are not actually enforced or reported there, and that
+      # check fails ("socket parent must be a private directory owned by
+      # the current user"). Enabling acl for MSYS2's own root mount
+      # (NTFS-only, which this runner is) matches Cygwin's default.
+      - name: Enable ACL on MSYS2's root mount (matches Cygwin's default)
+        shell: pwsh
+        run: |
+          $msysRoot = "$env:RUNNER_TEMP\msys64"
+          Add-Content -Path "$msysRoot\etc\fstab" -Value "$msysRoot / ntfs override,acl,binary,posix=1 0 0"
+
+      - name: Install nightly Rust with rust-src
+        shell: pwsh
+        run: rustup toolchain install nightly --component rust-src
+
+      - name: Build interactive-shell for x86_64-pc-cygwin, linked via MSYS2's gcc
+        shell: pwsh
+        run: |
+          # setup-msys2 installs to $RUNNER_TEMP\msys64 (D:\a\_temp\msys64
+          # on this runner type), not C:\msys64 -- not a documented stable
+          # contract, confirmed empirically.
+          #
+          # Invoking gcc.exe by its full path is not enough on its own: gcc
+          # still resolves its OWN internal ld/plugins via PATH, and this
+          # runner already has at least one other x86_64-pc-cygwin-capable
+          # gcc on PATH (Git for Windows bundles its own under
+          # C:\Program Files\Git\usr\lib\gcc\x86_64-pc-cygwin), plus a
+          # generic C:\mingw64 toolchain -- linking failed cross-wired
+          # between them ("ld.exe: ...msys-lto_plugin.dll: error loading
+          # plugin") until MSYS2's own usr\bin was put first on PATH, so
+          # gcc finds its own matching ld/plugins ahead of either.
+          $env:PATH = "$env:RUNNER_TEMP\msys64\usr\bin;$env:PATH"
+          $env:CARGO_TARGET_X86_64_PC_CYGWIN_LINKER = "$env:RUNNER_TEMP\msys64\usr\bin\gcc.exe"
+          cargo +nightly build -Z build-std=std,panic_abort --release `
+            --target x86_64-pc-cygwin `
+            -p interactive-shell --bin interactive-shell --bin interactive-shell-input
+
+      # Reuses the cygwin job's own script verbatim: the built binary lands
+      # at the same target/x86_64-pc-cygwin/release path regardless of
+      # which gcc linked it, and the test itself (spawn bash, type an echo
+      # command, confirm the output appears on screen) is identical either
+      # way. setup-msys2's own registered `msys2 {0}` shell handles script
+      # invocation correctly on its own -- no CRLF-stripping or cygpath
+      # dance needed here, unlike the cygwin job (which has no equivalent
+      # first-party GitHub Action for that part).
+      - name: Drive a real MSYS2 bash through the built wrapper
+        shell: msys2 {0}
+        run: .github/cygwin-drive-bash-check.sh
+
   rust-artifact-manifest:
     name: publish Rust artifact hashes
     runs-on: ubuntu-latest
@@ -1307,22 +1707,6 @@ jobs:
 
       - name: Fail on warning-severity findings
         run: xargs shellcheck -s bash --severity=warning < /tmp/sh-files.txt
-
-  installer-build:
-    # Proves: the committed install.sh is exactly what installer/build.sh
-    # assembles from installer/src/ plus the generated dependency tables, so the
-    # shipped artifact cannot drift from its parts through a hand edit.
-    name: install.sh matches installer/build.sh output
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.1
-
-      - name: Rebuild and compare
-        run: ./installer/build.sh --check
-
-      - name: Parse every part and the artifact
-        run: bash -n install.sh installer/build.sh installer/src/*.sh
 
   mermaid-render:
     # Proves: every fenced mermaid block in the repo's markdown is SYNTACTICALLY

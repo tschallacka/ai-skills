@@ -141,12 +141,16 @@ finding names the rebuild helper).
 
 | artifact | built by | checked by |
 |---|---|---|
-| `install.sh` | `installer/build.sh` | `test-installer-build.sh` |
 | `PORTABILITY.md` | `generate-portability.sh` | `test-portability-contract.sh` |
 | `planning/REVIEWER.md` | `planning/scripts/generate-reviewer.sh` (pins `SKILL.md`'s SHA-256) | `test-reviewer-projection.sh` |
+| the five `planning/scripts/plan-*-lib.sh` | `planning/scripts/build-plan-libs.sh` | nothing but their users: a missing one cannot be sourced |
 
-Regenerate `PORTABILITY.md` **last** in any batch touching `*.sh`: its staleness
-signal is commit ordering.
+None of these is committed: each is untracked and gitignored, and is built on
+demand (`setup-dev-env.sh`, or the pre-push gate for `PORTABILITY.md`). The
+files, their generators and what fails when one is stale are in
+`.agents/MAINTAINER.md` section 1.10. Never edit one by hand, and never track
+one: a generated file in git is what produces the merge conflicts and the
+per-clone staleness described below.
 
 A generator's inputs must be **tracked sources only**. When it walks the
 filesystem, prune everything that is not the repo's own source — `.git`,
@@ -164,7 +168,7 @@ fresh on the machine that generated it and stale in every clone —
 `test-portability-contract` passed for one person and failed for everyone else.
 Verifying in a clean clone is what surfaced it; the working tree cannot.
 
-**Enforced** by the three tests above — but only when they run somewhere that
+**Enforced** by the tests above — but only when they run somewhere that
 does not carry the local state. Run the suite in a clean clone before trusting a
 generated artifact's freshness check.
 
@@ -252,9 +256,9 @@ that skips the check is a documented violation rather than an unknown unknown.
 
 ## 10. A new file under `planning/` ships only if it is registered
 
-Three rows plus a rebuild: `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv`,
-`installer/src/50-manifest.sh`, then `installer/build.sh`. The manifest arm to use
-is the one matching the file's declared mode (contract 10a): the prod arm if it
+Three rows: `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv`, and
+`installer/src/50-manifest.sh`'s `skill_files()`. The manifest arm to use is
+the one matching the file's declared mode (contract 10a): the prod arm if it
 ships, the dev arm if only a maintainer needs it.
 
 A registry that is not registered makes the gate that reads it die looking for a
@@ -275,16 +279,17 @@ wrongly later. Two markers, two questions:
 | `PACKAGE: PROD` | a compiler reads this file and compiles it into the end-user artifact |
 | `PACKAGE: DEV` | a compiler reads it for the dev build only, which carries the dev and prod inputs together |
 
-`PACKAGE` appears **only** on what a compiler reads — `planning/scripts/lib/*/*.sh`
-and `installer/src/[0-9][0-9]-*.sh`. A compiled artifact carries `MODE` alone,
-because that axis belongs to inputs, and a marker copied out of a source would
-describe the wrong file: every generator strips the markers it reads and emits its
-own.
+`PACKAGE` appears **only** on what a compiler reads — `planning/scripts/lib/*/*.sh`.
+A compiled artifact carries `MODE` alone, because that axis belongs to inputs,
+and a marker copied out of a source would describe the wrong file: every
+generator strips the markers it reads and emits its own.
 
-The pairs that look contradictory are the ones worth reading. A function file
+The pair that looks contradictory is the one worth reading. A function file
 under `scripts/lib/` is `MODE: DEV` with `PACKAGE: PROD` — a maintainer's file
-whose content reaches the user inside the compiled library. `install.sh` is
-`MODE: PROD` although every part it is assembled from is `MODE: DEV`.
+whose content reaches the user inside the compiled library.
+`installer/src/05-config.sh` and `installer/src/50-manifest.sh` declare no
+`PACKAGE` at all: nothing compiles them any more, `installer/build-release.sh`
+just sources them directly for the skill list and file manifest.
 
 Syntax follows the format, and the marker keyword is what stays constant:
 `# MODE: X` in shell and hash-commented data, `<!-- MODE: X -->` in Markdown

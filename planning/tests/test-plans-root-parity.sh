@@ -41,6 +41,19 @@ canonical_root() {
         ' _ "$scripts" 2>/dev/null
 }
 
+# One spelling for one directory. On Windows the compiled plan-root prints
+# native paths (C:/Users/...\...), while bash knows the very same directories
+# as /tmp/...; comparing the two spellings as strings says "different" for a
+# directory that is identical. cygpath -m gives both the mixed form
+# (C:/Users/...). Elsewhere there is no second spelling and no cygpath.
+norm() {
+    if [ -n "${1:-}" ] && command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$1"
+    else
+        printf '%s\n' "${1:-}"
+    fi
+}
+
 # What plan-root.sh believes the global base is, observed through resolve.
 # A scoped root is only returned when the directory already exists, so the
 # fixture creates the one the documented format names.
@@ -62,7 +75,7 @@ observed_root() {
             ${xdg:+XDG_CONFIG_HOME="$xdg"} HOME="${home:-$temporary_root/nohome}" \
             "$BASH" "$scripts/plan-root.sh" resolve "$project" 2>/dev/null
     )"
-    printf '%s\t%s\n' "$expected" "$got"
+    printf '%s\t%s\n' "$(norm "$expected")" "$(norm "$got")"
 }
 
 # ---- case 1: XDG_CONFIG_HOME set -------------------------------------------
@@ -75,7 +88,7 @@ t_assert_eq 'plan_default_root honours XDG_CONFIG_HOME' \
 IFS=$'\t' read -r want got <<<"$(observed_root "$xdg_home" "$temporary_root/h1")"
 t_assert_eq 'plan-root.sh recognises a scoped root under XDG_CONFIG_HOME' "$got" "$want"
 case "$got" in
-    "$canonical"/*) : ;;
+    "$(norm "$canonical")"/*) : ;;
     *) t_fail "plan-root.sh root [$got] is not under plan_default_root [$canonical]" ;;
 esac
 
@@ -89,7 +102,7 @@ t_assert_eq 'plan_default_root falls back to HOME/.config' \
 IFS=$'\t' read -r want got <<<"$(observed_root "" "$fallback_home")"
 t_assert_eq 'plan-root.sh recognises a scoped root under HOME/.config' "$got" "$want"
 case "$got" in
-    "$canonical_fallback"/*) : ;;
+    "$(norm "$canonical_fallback")"/*) : ;;
     *) t_fail "plan-root.sh root [$got] is not under plan_default_root [$canonical_fallback]" ;;
 esac
 

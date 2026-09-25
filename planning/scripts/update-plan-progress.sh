@@ -17,82 +17,19 @@
 # 66 the plan has no progress.md.
 
 set -euo pipefail
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=planning/scripts/plan-document-lib.sh
-source "$script_dir/plan-document-lib.sh"
-# Accept --plan-dir as a synonym for the positional plan directory: the
-# bounded reader takes the flag, so a reader who learned it there is not
-# refused here.
-eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 
-export LC_ALL=C
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed before this script's own
+# plan_hoist_plan_dir call below: that call rewrites a --plan-dir flag into a
+# positional argument, and the compiled binary must receive the caller's true
+# original argv, not the already-hoisted form.
+upp_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$upp_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present update-plan-progress "$upp_script_dir" "$@"
+unset upp_script_dir
 
-
-usage() {
-    local rc="${1:-64}"
-    cat <<USAGE
-Usage: ${0##*/} [--plan-dir] <plan-directory> <goal-name> <incomplete|in-progress|completed>
-       ${0##*/} --help
-USAGE
-    exit "$rc"
-}
-
-case "${1:-}" in
-    -h|--help) usage 0 ;;
-esac
-[ "$#" -eq 3 ] || usage
-
-plan_dir="$1"
-goal_name="$2"
-requested_status="$3"
-progress_file="$plan_dir/progress.md"
-
-status="$(plan_status_label "$requested_status")" || {
-    printf 'Unknown status: %s\n' "$requested_status" >&2
-    printf 'Use: incomplete, in-progress, or completed\n' >&2
-    exit 64
-}
-
-[ -f "$progress_file" ] || plan_die "Progress file not found: $progress_file" 66
-plan_git_snapshot "$plan_dir"
-
-# One trap covers both temps. No `trap - EXIT` release: it discards the
-# library's cleanup handler (§8), and dropping it after the first mv is what
-# left the second write untrapped.
-temporary_file="${progress_file}.tmp.$$"
-trap 'rm -f "$temporary_file"' EXIT
-
-awk -v wanted_goal="$goal_name" -v replacement="$status" '
-    BEGIN { found = 0 }
-    /^\|/ {
-        goal = $2
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", goal)
-        if (goal == wanted_goal) {
-            sub(/\|[[:space:]]*[^|]*[[:space:]]*\|[[:space:]]*$/, "| " replacement " |")
-            found++
-        }
-    }
-    { print }
-    END { if (found != 1) exit 1 }
-' "$progress_file" > "$temporary_file" || {
-    printf 'Goal row not found exactly once: %s\n' "$goal_name" >&2
-    exit 1
-}
-mv "$temporary_file" "$progress_file"
-
-read -r completed total < <(plan_count_progress_rows "$progress_file" 4)
-
-width=20
-percent=0
-if [ "$total" -gt 0 ]; then
-    percent=$(( (completed * 100 + total / 2) / total ))
-fi
-filled=$(( percent * width / 100 )); empty=$(( width - filled ))
-bar="$(printf '%*s' "$filled" '' | tr ' ' '#')$(printf '%*s' "$empty" '' | tr ' ' '-')"
-icon='💤'; [ "$completed" -gt 0 ] && icon='⏳'; [ "$percent" -eq 100 ] && icon='✅'
-
-sed "s|^\*\*Overall progress:\*\*.*$|**Overall progress:** \`${percent}%  ${bar}  100%\` ${icon}|" \
-    "$progress_file" > "$temporary_file"
-mv "$temporary_file" "$progress_file"
-
-printf 'Updated %s (%s/%s goals, %s%%)\n' "$progress_file" "$completed" "$total" "$percent"
+plan_die "update-plan-progress: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it" 69

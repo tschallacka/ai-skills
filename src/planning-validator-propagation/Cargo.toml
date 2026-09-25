@@ -12,5 +12,7 @@ name = "planning_validator_propagation"
 path = "src/lib.rs"
 
 [dependencies]
+planning-table = { path = "../planning-table" }
 planning-validator-common = { path = "../planning-validator-common" }
 planning-validator-inventory = { path = "../planning-validator-inventory" }
+planning-validator-stale = { path = "../planning-validator-stale" }

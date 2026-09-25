@@ -14,6 +14,7 @@
 #   plan_crypt=true|false
 #   planning_commands=true|false
 #   editor=true|false
+#   installer=true|false
 #
 # Usage:
 #   ci-subjects.sh --scope full|selective|none [--crates "a b c"]
@@ -37,6 +38,34 @@
 set -uo pipefail
 export LC_ALL=C
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed immediately after export LC_ALL=C and
+# BEFORE the argument-parsing loop -- as early as structurally possible.
+# UNLIKE every prior goal's script, this one lives under .github/, one level
+# BELOW the repository root, and has no repo_root of its own; computed here
+# solely for the wiring call, going UP one level (the opposite relative
+# direction from every prior repo-root script). This script already declares
+# set -uo pipefail above (deliberately WITHOUT -e), so it is forced back off
+# immediately below, matching this plan's own established fix for that class
+# of caller.
+cs_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# plan-core-lib.sh is generated (gitignored) by build-plan-libs.sh, so it does
+# not exist on a genuinely fresh checkout -- guard the source+exec on it
+# already being present, unconditionally falling through to this script's own
+# bash implementation when it is not, matching B346's fix for
+# build-plan-libs.sh's own self-referential case.
+if [ -f "$cs_repo_root/planning/scripts/plan-core-lib.sh" ]; then
+    source "$cs_repo_root/planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present ci-subjects "$cs_repo_root" "$@"
+fi
+unset cs_repo_root
+set +e
+set -uo pipefail
+
 scope=""
 crates=""
 
@@ -59,32 +88,21 @@ chat=false
 plan_crypt=false
 planning_commands=false
 editor=false
+installer=false
 
-case "$scope" in
-    none)
-        : # every subject stays false
-        ;;
-    selective)
-        for crate in $crates; do
-            case "$crate" in
-                rjq)              rjq=true ;;
-                plan-crypt)       plan_crypt=true ;;
-                chat-*)           chat=true ;;
-                ai-text-editor*)  editor=true ;;
-                # Anything else belongs to the planning command registry.
-                ?*)               planning_commands=true ;;
-            esac
-        done
-        ;;
-    *)
-        # full, empty, or anything unrecognised: build everything.
-        rjq=true
-        chat=true
-        plan_crypt=true
-        planning_commands=true
-        editor=true
-        ;;
-esac
+# Reached only once the wiring block above has already fallen through (no
+# compiled ci-subjects binary found) -- no decision logic is left to compute
+# one, so this degrades into the same "build everything" case the compiled
+# binary itself uses for full, empty, or anything unrecognised. Diagnosed on
+# stderr only: this script's own output contract is exactly six subject=bool
+# lines with no reason field to extend.
+printf 'ci-subjects binary not found; run ./setup-dev-env.sh to build it\n' >&2
+rjq=true
+chat=true
+plan_crypt=true
+planning_commands=true
+editor=true
+installer=true
 
 emit() {
     printf 'rjq=%s\n' "$rjq"
@@ -92,6 +110,7 @@ emit() {
     printf 'plan_crypt=%s\n' "$plan_crypt"
     printf 'planning_commands=%s\n' "$planning_commands"
     printf 'editor=%s\n' "$editor"
+    printf 'installer=%s\n' "$installer"
 }
 
 emit

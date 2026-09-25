@@ -47,6 +47,8 @@ pub struct Step {
     pub kind: String,
     pub target: String,
     pub companion: Option<String>,
+    #[serde(default)]
+    pub testing_procedure: Option<String>,
     pub status: String,
     pub instructions: String,
     pub criteria: String,

@@ -10,7 +10,6 @@
 // Cross-platform on purpose: on Unix these flows ride the socket
 // transport; on Windows the same `open` autostarts onto the loopback TCP
 // fallback, so every assertion below doubles as the fallback's test.
-// tcp_flow.rs pins the port transport explicitly on top of that.
 //
 // UPDATE after the first Windows run: the six socket-flow regressions
 // cannot be honestly claimed against a transport they do not drive, and
@@ -18,8 +17,7 @@
 // short-lived client calls (endpoint record gone, port dead, registry
 // unreachable) — unreproduced on Unix and worth its own focused
 // investigation rather than a widened net of asserts. Unix only until
-// that is understood; the Windows port fallback is proven by
-// tcp_flow.rs, which compiles and runs everywhere.
+// that is understood.
 #![cfg(unix)]
 
 use serde_json::{json, Value};
@@ -2784,6 +2782,25 @@ fn tab_id_of(output: &Output) -> String {
         .to_owned()
 }
 
+/// T118: with exactly one tab open in a fresh, isolated registry, nothing
+/// else is registered to disambiguate against -- the shortest unambiguous
+/// prefix is the ticket's own literal example, a single character.
+#[test]
+fn a_lone_tab_is_addressed_by_a_single_character() {
+    let harness = Harness::new("tabid-lone");
+    let alpha = harness.write("alpha.txt", "in alpha\n");
+    let opened = harness.open_verbose(&alpha);
+    let id = tab_id_of(&opened);
+    assert_eq!(
+        id.len(),
+        1,
+        "a lone tab has nothing to disambiguate against: {id}"
+    );
+    let read = harness.client(&["read", "--tab-id", &id, "-p", "text"]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "in alpha\n");
+}
+
 /// T96: a tab id is addressing enough on its own, for every verb.
 ///
 /// Verbs routed by file, endpoint or session token; the tab uuid came back in
@@ -3246,10 +3263,9 @@ fn an_index_naming_action_is_refused_and_the_scan_still_works() {
 
 /// T99: the verbosity ladder, on the wire.
 ///
-/// Michael measured the problem: `open` on a two-line file was 1199 bytes over
-/// 47 lines and a one-word `insert` 378 bytes whose entire actionable content
-/// was `revision` and `dirty`. The cost lands hardest on the MCP surface,
-/// where every response is context an agent pays for on every edit.
+/// An unbounded response spends tokens on fields the caller didn't need for
+/// this step. The cost lands hardest on the MCP surface, where every
+/// response is context an agent pays for on every edit.
 ///
 /// What this pins is the four properties the ladder has to have, because each
 /// one is a way the change could be wrong rather than merely verbose:
@@ -3449,5 +3465,1365 @@ fn the_verbosity_ladder_shortens_the_answer_without_dropping_the_guard() {
     assert!(
         caps.get("protocol_version").is_some() && caps.get("document_modes").is_some(),
         "capabilities must answer in full at every level: {caps}"
+    );
+}
+
+/// T119: a single, non-streamed, non-paged answer needs no second frame to
+/// say it is done -- that frame's only content (request_id, sequence,
+/// result_generation, version) is pure repetition of what the first frame
+/// already carried. This holds at every verbosity level, not only 0: the
+/// lever is about frame COUNT, not payload richness.
+#[test]
+fn a_single_unpaged_answer_gets_no_completion_frame_at_any_level() {
+    let harness = Harness::new("no-complete-frame");
+    let file = harness.write("solo.txt", "alpha\nbeta\n");
+    harness.open(&file);
+    for level in ["0", "1", "2", "3"] {
+        let read = harness.client(&[
+            "read",
+            "-f",
+            file.to_str().unwrap(),
+            "-p",
+            "structured",
+            "--verbosity",
+            level,
+        ]);
+        let frames = stdout_json(&read);
+        assert_eq!(
+            frames.len(),
+            1,
+            "a single-frame read at level {level} must get exactly one frame back, not a trailing completion frame: {frames:?}"
+        );
+        assert_eq!(frames[0]["type"], json!("data"));
+    }
+}
+
+/// The completion frame is not gone everywhere: a paged search result still
+/// needs it, since `pager_key` means there may be more to page and the
+/// client still needs to know this particular exchange has ended.
+#[test]
+fn a_paged_search_result_still_gets_a_completion_frame() {
+    let harness = Harness::new("paged-complete-frame");
+    let file = harness.write("hay.txt", "alpha needle beta needle gamma\n");
+    harness.open(&file);
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "needle",
+        "-p",
+        "structured",
+    ]);
+    let frames = stdout_json(&found);
+    assert!(
+        first_payload(&found).get("pager_key").is_some(),
+        "this search must actually be a paged result for the test to mean anything: {frames:?}"
+    );
+    assert!(
+        frames
+            .iter()
+            .any(|frame| frame.get("type").and_then(Value::as_str) == Some("complete")),
+        "a paged result must still get a completion frame: {frames:?}"
+    );
+}
+
+/// T119: byte_count is pure transport bookkeeping the client never asked
+/// for at level 0 -- the transport already frames the message, so a second
+/// count of the same bytes is exactly the kind of repetition level 0 exists
+/// to drop. Levels above 0 are unaffected.
+#[test]
+fn verbosity_0_drops_byte_count_but_higher_levels_keep_it() {
+    let harness = Harness::new("byte-count-ladder");
+    let file = harness.write("counted.txt", "alpha\nbeta\n");
+    harness.open(&file);
+    let bare = harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]);
+    let bare_frame = stdout_json(&bare)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
+        .expect("a data frame");
+    assert!(
+        bare_frame.get("byte_count").is_none(),
+        "level 0 must not carry byte_count: {bare_frame}"
+    );
+    let default_level = harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "1",
+    ]);
+    let default_frame = stdout_json(&default_level)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
+        .expect("a data frame");
+    assert!(
+        default_frame.get("byte_count").is_some(),
+        "level 1 must still carry byte_count: {default_frame}"
+    );
+}
+
+/// T119's "sharper rule": level 0 must not repeat what the caller already
+/// sent. A `--tab-id` addressed request has the id already -- echoing it
+/// back is pure repetition -- but a `-f`/file-addressed or unmarked
+/// (focused-tab) request has no id yet, so it is new information and must
+/// still come back, exactly as T98 already guarantees at every other level.
+#[test]
+fn verbosity_0_omits_tab_id_only_when_the_caller_already_supplied_it() {
+    let harness = Harness::new("redundant-tab-id");
+    let file = harness.write("named.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let opened_payload = first_payload(&opened);
+    let tab_id = opened_payload["tab_id"].as_str().unwrap();
+
+    let by_id = first_payload(&harness.client(&[
+        "read",
+        "--tab-id",
+        tab_id,
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]));
+    assert!(
+        by_id.get("tab_id").is_none(),
+        "a --tab-id addressed request already has the id; level 0 must not echo it back: {by_id}"
+    );
+
+    let by_file = first_payload(&harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]));
+    assert!(
+        by_file.get("tab_id").is_some(),
+        "a file-addressed request has no id yet; level 0 must still return it: {by_file}"
+    );
+
+    let unmarked =
+        first_payload(&harness.client(&["read", "-p", "structured", "--verbosity", "0"]));
+    assert!(
+        unmarked.get("tab_id").is_some(),
+        "an unmarked (focused-tab) request has no id yet either; level 0 must still return it: {unmarked}"
+    );
+}
+
+/// T100: `jump-points` reads CodeGraph's own SQLite index directly rather
+/// than shelling out per symbol. Seeds a fixture `.codegraph/codegraph.db`
+/// with the real schema (no dependency on the `codegraph` binary being
+/// installed -- `refresh_jump_points` swallows a missing `codegraph sync`
+/// the same way it swallows every other soft "unavailable" outcome) and
+/// drives the whole open -> jump-points -> edit -> save -> jump-points path
+/// an agent would.
+#[test]
+fn jump_points_reports_the_outbound_reference_and_tracks_staleness_across_save() {
+    let harness = Harness::new("jump-points");
+    std::fs::create_dir_all(harness.path(".codegraph")).unwrap();
+    {
+        let conn =
+            rusqlite::Connection::open(harness.path(".codegraph").join("codegraph.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE nodes (
+                id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+                qualified_name TEXT NOT NULL, file_path TEXT NOT NULL,
+                language TEXT NOT NULL, start_line INTEGER NOT NULL,
+                end_line INTEGER NOT NULL, start_column INTEGER NOT NULL,
+                end_column INTEGER NOT NULL, updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE edges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL,
+                target TEXT NOT NULL, kind TEXT NOT NULL, metadata TEXT,
+                line INTEGER, col INTEGER, provenance TEXT DEFAULT NULL
+            );
+            INSERT INTO nodes VALUES ('sym:foo','function','foo','a::foo','a.rs','rust',1,3,0,0,0);
+            INSERT INTO nodes VALUES ('sym:bar','function','bar','b::bar','b.rs','rust',5,7,0,0,0);
+            INSERT INTO edges (source,target,kind,line,col) VALUES ('sym:foo','sym:bar','calls',2,4);",
+        )
+        .unwrap();
+    }
+    let file = harness.write("a.rs", "fn foo() {}\n");
+
+    let opened = harness.open(&file);
+    let jump_points = first_payload(&harness.client(&[
+        "jump-points",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]));
+    assert_eq!(jump_points["stale"], json!(false));
+    let points = jump_points["jump_points"]
+        .as_array()
+        .expect("jump_points must be an array once codegraph is enabled");
+    assert_eq!(points.len(), 1, "{jump_points}");
+    assert_eq!(points[0]["target_file"], json!("b.rs"));
+    assert_eq!(points[0]["target_line"], json!(5));
+    assert_eq!(points[0]["target_name"], json!("bar"));
+    assert_eq!(points[0]["edge_kind"], json!("calls"));
+
+    // An edit with no intervening save bumps the tab's own revision past
+    // what jump_points was computed at -- reported stale rather than
+    // silently kept.
+    let revision = revision_of(&opened).to_string();
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "fn foo() { bar(); }\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", stderr_text(&replaced));
+    let jump_points = first_payload(&harness.client(&[
+        "jump-points",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]));
+    assert_eq!(
+        jump_points["stale"],
+        json!(true),
+        "a dirty tab must report its jump points stale rather than pass them off as current"
+    );
+
+    let replaced_revision = revision_of(&replaced).to_string();
+    let saved = harness.client(&[
+        "save",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &replaced_revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    let jump_points = first_payload(&harness.client(&[
+        "jump-points",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]));
+    assert_eq!(
+        jump_points["stale"],
+        json!(false),
+        "save must recompute jump points, not just report them stale forever: {jump_points}"
+    );
+}
+
+/// The soft path: no `.codegraph/` directory at all is CodeGraph not being
+/// enabled for this project, not a hard failure of `open` or `jump-points`.
+#[test]
+fn jump_points_answers_null_when_codegraph_is_not_enabled_for_the_project() {
+    let harness = Harness::new("jump-points-no-index");
+    let file = harness.write("a.rs", "fn foo() {}\n");
+    harness.open(&file);
+    let jump_points = first_payload(&harness.client(&[
+        "jump-points",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]));
+    assert!(jump_points["jump_points"].is_null());
+    assert_eq!(jump_points["stale"], json!(false));
+    assert!(jump_points["note"].is_string());
+}
+
+// ---- T113: move/copy ------------------------------------------------------
+//
+// A rearrangement no longer pays output tokens for content the server
+// already holds: the source is a span (addressed exactly like `replace`'s
+// own), the destination a point, and the whole relocation is one atomic
+// splice-pair -- one revision, one journal record, one undo step -- computed
+// once in memory from `before`, never two separately applied edits the way
+// composing it from `replace` twice would be.
+
+#[test]
+fn a_move_earlier_in_the_buffer_lands_correctly_and_closes_the_gap_it_left() {
+    let harness = Harness::new("move-earlier");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\ndelta\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // Move line 3 ("gamma\n") to before line 1.
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "3",
+        "--range-end-line",
+        "3",
+        "--dest-line",
+        "1",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(moved.status.success(), "{}", refusal_text(&moved));
+    let payload = first_payload(&moved);
+    assert_eq!(payload["source_offset"], json!(11), "{payload}"); // "alpha\nbeta\n" = 11 bytes
+    assert_eq!(payload["source_len"], json!(6), "{payload}"); // "gamma\n"
+    assert_eq!(payload["dest_offset"], json!(0), "{payload}");
+    assert!(
+        payload.get("text").is_none() && payload.get("bytes_base64").is_none(),
+        "the moved content must never be echoed back: {payload}"
+    );
+
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "gamma\nalpha\nbeta\ndelta\n",
+        "the gap the source left must close, with no blank line behind it"
+    );
+}
+
+#[test]
+fn a_move_later_in_the_buffer_uses_the_shift_adjusted_destination() {
+    // The case most likely to have an off-by-source_len bug: the destination
+    // is given in the ORIGINAL document's coordinates, but by the time the
+    // moved bytes are re-inserted the source has already been removed, so
+    // everything from the old source's end onward shifted back by
+    // source_len. The server does that arithmetic, not the caller.
+    let harness = Harness::new("move-later");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\ndelta\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // Move line 1 ("alpha\n") to before line 4 ("delta\n").
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "4",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(moved.status.success(), "{}", refusal_text(&moved));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "beta\ngamma\nalpha\ndelta\n",
+        "a move later in the buffer must land at the shift-adjusted destination"
+    );
+}
+
+#[test]
+fn a_move_to_its_own_boundary_is_a_trivial_no_op_move() {
+    let harness = Harness::new("move-trivial");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // Line 2 ("beta\n") moved to its own start (line 2) changes nothing.
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "--dest-line",
+        "2",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        moved.status.success(),
+        "moving a span to its own boundary must succeed: {}",
+        refusal_text(&moved)
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nbeta\ngamma\n",
+        "a move to its own boundary must be a no-op on content"
+    );
+}
+
+#[test]
+fn a_move_to_a_point_strictly_inside_its_own_source_is_refused() {
+    let harness = Harness::new("move-inside-source");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // Source is line 1 ("alpha\n", bytes 0..6). dest_offset 3 is strictly
+    // inside it.
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-offset",
+        "3",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!moved.status.success());
+    let refusal = refusal_text(&moved);
+    assert!(
+        refusal.contains("move_destination_inside_source"),
+        "{refusal}"
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nbeta\ngamma\n",
+        "a refused move must not have touched the document"
+    );
+}
+
+#[test]
+fn copy_leaves_the_source_intact_and_duplicates_it_at_the_destination() {
+    let harness = Harness::new("copy-basic");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let original_len = "alpha\nbeta\ngamma\n".len();
+
+    let copied = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "4", // one past the last line: append at end of file
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(copied.status.success(), "{}", refusal_text(&copied));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    let text = String::from_utf8_lossy(&read.stdout).into_owned();
+    assert_eq!(
+        text, "alpha\nbeta\ngamma\nalpha\n",
+        "the source must remain, and an exact duplicate must land at the destination"
+    );
+    assert_eq!(
+        text.len(),
+        original_len + "alpha\n".len(),
+        "copy must grow the document by exactly the source's length"
+    );
+}
+
+#[test]
+fn expected_text_refuses_a_move_on_a_stale_source() {
+    let harness = Harness::new("move-expected-text");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "--expected-text",
+        "not-beta\n",
+        "--dest-line",
+        "1",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!moved.status.success());
+    assert!(
+        refusal_text(&moved).contains("expected_text_mismatch"),
+        "{}",
+        refusal_text(&moved)
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nbeta\ngamma\n",
+        "a refused move must not have touched the document"
+    );
+}
+
+#[test]
+fn a_bare_offset_naming_the_source_is_refused_rather_than_silently_ignored() {
+    let harness = Harness::new("move-bare-offset");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "5",
+        "--dest-line",
+        "2",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!moved.status.success());
+    assert!(
+        refusal_text(&moved).contains("move_source_required"),
+        "{}",
+        refusal_text(&moved)
+    );
+}
+
+#[test]
+fn exactly_one_of_dest_offset_and_dest_line_is_required() {
+    let harness = Harness::new("move-dest-conflict");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // Neither.
+    let neither = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!neither.status.success());
+    assert!(
+        refusal_text(&neither).contains("move_destination_required"),
+        "{}",
+        refusal_text(&neither)
+    );
+
+    // Both.
+    let both = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-offset",
+        "0",
+        "--dest-line",
+        "2",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!both.status.success());
+    assert!(
+        refusal_text(&both).contains("move_destination_conflict"),
+        "{}",
+        refusal_text(&both)
+    );
+}
+
+#[test]
+fn dest_line_addresses_before_the_first_line_before_the_last_and_past_the_end() {
+    let harness = Harness::new("move-dest-line");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let mut revision = revision_of(&opened);
+
+    // Copy "gamma" to before line 1.
+    let copied = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "3",
+        "--range-end-line",
+        "3",
+        "--dest-line",
+        "1",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(copied.status.success(), "{}", refusal_text(&copied));
+    revision = first_payload(&copied)["revision"].as_u64().unwrap();
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "gamma\nalpha\nbeta\ngamma\n"
+    );
+
+    // dest_line one past the last line (5, since the file now has 4 lines)
+    // appends at end of file.
+    let appended = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "5",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(appended.status.success(), "{}", refusal_text(&appended));
+    revision = first_payload(&appended)["revision"].as_u64().unwrap();
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "gamma\nalpha\nbeta\ngamma\ngamma\n",
+        "dest_line one past the last line must append at end of file"
+    );
+
+    // dest_line past count + 1 is genuinely invalid.
+    let invalid = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "50",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(!invalid.status.success());
+    assert!(
+        refusal_text(&invalid).contains("edit_range_invalid"),
+        "{}",
+        refusal_text(&invalid)
+    );
+}
+
+#[test]
+fn undo_after_a_move_restores_the_document_in_exactly_one_step() {
+    let harness = Harness::new("move-undo");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let before_depth = first_payload(&harness.client(&[
+        "history",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "2",
+    ]))["undo_depth"]
+        .as_u64()
+        .unwrap();
+
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "3",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(moved.status.success(), "{}", refusal_text(&moved));
+    let moved_revision = first_payload(&moved)["revision"].as_u64().unwrap();
+
+    let after_move_depth = first_payload(&harness.client(&[
+        "history",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "2",
+    ]))["undo_depth"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(
+        after_move_depth,
+        before_depth + 1,
+        "one move must add exactly one undo step, not two"
+    );
+
+    let undone = harness.client(&[
+        "undo",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &moved_revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(undone.status.success(), "{}", refusal_text(&undone));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nbeta\ngamma\n",
+        "undo must restore the pre-move document in one step"
+    );
+}
+
+// ---- T114: anchor and symbol addressing ------------------------------------
+//
+// A replace/move/copy span addressed by the TEXT at its boundaries or by a
+// CodeGraph symbol name, instead of a caller-computed line or byte range --
+// so an endpoint that used to be inferred ("up to where the next function
+// starts") is instead resolved server-side, and refused rather than guessed
+// when it is absent or ambiguous.
+
+fn seed_codegraph_symbol(
+    harness: &Harness,
+    file_relative: &str,
+    symbol_name: &str,
+    start_line: u32,
+    end_line: u32,
+) {
+    std::fs::create_dir_all(harness.path(".codegraph")).unwrap();
+    let conn = rusqlite::Connection::open(harness.path(".codegraph").join("codegraph.db")).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS nodes (
+            id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+            qualified_name TEXT NOT NULL, file_path TEXT NOT NULL,
+            language TEXT NOT NULL, start_line INTEGER NOT NULL,
+            end_line INTEGER NOT NULL, start_column INTEGER NOT NULL,
+            end_column INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL,
+            target TEXT NOT NULL, kind TEXT NOT NULL, metadata TEXT,
+            line INTEGER, col INTEGER, provenance TEXT DEFAULT NULL
+        );",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO nodes VALUES (?1, 'function', ?2, ?2, ?3, 'rust', ?4, ?5, 0, 0, 0)",
+        rusqlite::params![
+            format!("sym:{symbol_name}:{start_line}"),
+            symbol_name,
+            file_relative,
+            start_line,
+            end_line
+        ],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_replace_addresses_a_span_by_start_and_end_anchor_text() {
+    let harness = Harness::new("anchor-replace");
+    let file = harness.write(
+        "doc.rs",
+        "fn foo() {\n    old_body();\n}\n\nfn bar() {\n    unrelated();\n}\n",
+    );
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "fn foo() {",
+        "--range-end-before-match",
+        "fn bar() {",
+        "-t",
+        "fn foo() {\n    new_body();\n}\n\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", refusal_text(&replaced));
+    let payload = first_payload(&replaced);
+    assert_eq!(payload["offset"], json!(0));
+    assert_eq!(
+        payload["deleted"]["text"],
+        json!("fn foo() {\n    old_body();\n}\n\n")
+    );
+
+    let saved_revision = payload["revision"].as_u64().unwrap().to_string();
+    let saved = harness.client(&[
+        "save",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &saved_revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn foo() {\n    new_body();\n}\n\nfn bar() {\n    unrelated();\n}\n"
+    );
+}
+
+#[test]
+fn an_anchor_matching_nowhere_is_refused_by_name() {
+    let harness = Harness::new("anchor-not-found");
+    let file = harness.write("doc.txt", "alpha beta gamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let missing_start = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "nowhere",
+        "--range-end-before-match",
+        "gamma",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!missing_start.status.success());
+    assert!(refusal_text(&missing_start).contains("range_start_match_not_found"));
+
+    let missing_end = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "alpha",
+        "--range-end-before-match",
+        "nowhere",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!missing_end.status.success());
+    assert!(refusal_text(&missing_end).contains("range_end_before_match_not_found"));
+}
+
+#[test]
+fn an_anchor_matching_more_than_once_is_refused_as_ambiguous_never_the_first_occurrence() {
+    let harness = Harness::new("anchor-ambiguous");
+    let file = harness.write("doc.txt", "alpha needle beta needle gamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let ambiguous_start = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "needle",
+        "--range-end-before-match",
+        "gamma",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!ambiguous_start.status.success());
+    assert!(refusal_text(&ambiguous_start).contains("range_start_match_ambiguous"));
+
+    let ambiguous_end = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "alpha",
+        "--range-end-before-match",
+        "needle",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!ambiguous_end.status.success());
+    assert!(refusal_text(&ambiguous_end).contains("range_end_before_match_ambiguous"));
+
+    // Never silently the file unchanged, either -- both refusals above must
+    // have left it exactly as it was.
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha needle beta needle gamma\n"
+    );
+}
+
+#[test]
+fn range_match_regex_reads_anchors_as_rust_regexes() {
+    let harness = Harness::new("anchor-regex");
+    let file = harness.write("doc.txt", "id=42 mid id=99 end\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        r"id=\d+ mid",
+        "--range-end-before-match",
+        r"id=\d+ end",
+        "--range-match-regex",
+        "-t",
+        "REPLACED ",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", refusal_text(&replaced));
+    assert_eq!(
+        first_payload(&replaced)["deleted"]["text"],
+        json!("id=42 mid ")
+    );
+    let revision = first_payload(&replaced)["revision"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+
+    let invalid_pattern = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "(unclosed",
+        "--range-end-before-match",
+        "end",
+        "--range-match-regex",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!invalid_pattern.status.success());
+    assert!(refusal_text(&invalid_pattern).contains("range_match_invalid"));
+}
+
+#[test]
+fn an_incomplete_anchor_pair_is_refused_naming_what_is_missing() {
+    let harness = Harness::new("anchor-incomplete");
+    let file = harness.write("doc.txt", "alpha beta gamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let only_start = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "alpha",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!only_start.status.success());
+    assert!(refusal_text(&only_start).contains("edit_range_incomplete"));
+}
+
+#[test]
+fn an_anchor_and_a_range_addressing_the_same_edit_are_refused() {
+    let harness = Harness::new("anchor-range-conflict");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let conflict = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "alpha",
+        "--range-end-before-match",
+        "gamma",
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!conflict.status.success());
+    assert!(refusal_text(&conflict).contains("edit_range_conflict"));
+}
+
+#[test]
+fn a_replace_addresses_a_span_by_symbol_name() {
+    let harness = Harness::new("symbol-replace");
+    let file = harness.write(
+        "doc.rs",
+        "fn foo() {\n    old_body();\n}\n\nfn bar() {\n    unrelated();\n}\n",
+    );
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 5, 7);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "bar",
+        "-t",
+        "fn bar() {\n    new_bar();\n}\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", refusal_text(&replaced));
+    assert_eq!(
+        first_payload(&replaced)["deleted"]["text"],
+        json!("fn bar() {\n    unrelated();\n}\n")
+    );
+
+    let saved_revision = first_payload(&replaced)["revision"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let saved = harness.client(&[
+        "save",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &saved_revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn foo() {\n    old_body();\n}\n\nfn bar() {\n    new_bar();\n}\n"
+    );
+}
+
+#[test]
+fn a_symbol_shared_by_two_nodes_in_one_file_is_refused_as_ambiguous() {
+    let harness = Harness::new("symbol-ambiguous");
+    let file = harness.write(
+        "doc.rs",
+        "fn bar() {\n    one();\n}\n\nfn bar() {\n    two();\n}\n",
+    );
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 1, 3);
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 5, 7);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "bar",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused.status.success());
+    assert!(refusal_text(&refused).contains("symbol_ambiguous"));
+}
+
+#[test]
+fn an_unknown_symbol_name_is_refused_as_not_found() {
+    let harness = Harness::new("symbol-not-found");
+    let file = harness.write("doc.rs", "fn foo() {}\n");
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 1, 1);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "nonexistent",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused.status.success());
+    assert!(refusal_text(&refused).contains("symbol_not_found"));
+}
+
+#[test]
+fn symbol_addressing_without_codegraph_enabled_is_refused_as_unavailable() {
+    let harness = Harness::new("symbol-no-index");
+    let file = harness.write("doc.rs", "fn foo() {}\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "foo",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused.status.success());
+    assert!(refusal_text(&refused).contains("symbol_unavailable"));
+}
+
+#[test]
+fn a_symbol_and_a_match_id_addressing_the_same_edit_are_refused() {
+    let harness = Harness::new("symbol-match-id-conflict");
+    let file = harness.write("doc.rs", "fn bar() {\n    body();\n}\n");
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 1, 3);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "body",
+        "-p",
+        "structured",
+    ]);
+    let match_id = first_payload(&found)["matches"][0]["match_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "bar",
+        "--match-id",
+        &match_id,
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused.status.success());
+    assert!(refusal_text(&refused).contains("edit_range_conflict"));
+}
+
+#[test]
+fn insert_refuses_anchor_and_symbol_addressing_by_name() {
+    let harness = Harness::new("insert-refuses-anchor-symbol");
+    let file = harness.write("doc.txt", "alpha beta gamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let refused_anchor = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "alpha",
+        "--range-end-before-match",
+        "gamma",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused_anchor.status.success());
+    assert!(refusal_text(&refused_anchor).contains("edit_range_unsupported"));
+
+    let refused_symbol = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "anything",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused_symbol.status.success());
+    assert!(refusal_text(&refused_symbol).contains("edit_range_unsupported"));
+}
+
+#[test]
+fn move_addresses_its_source_by_anchor_pair() {
+    let harness = Harness::new("move-anchor");
+    let file = harness.write(
+        "doc.rs",
+        "fn foo() {\n    body();\n}\n\nfn bar() {\n    other();\n}\n",
+    );
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // foo's whole block, one past the last line, ends up after bar's.
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-match",
+        "fn foo() {",
+        "--range-end-before-match",
+        "fn bar() {",
+        "--dest-line",
+        "8",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(moved.status.success(), "{}", refusal_text(&moved));
+    let saved_revision = first_payload(&moved)["revision"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let saved = harness.client(&[
+        "save",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &saved_revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn bar() {\n    other();\n}\nfn foo() {\n    body();\n}\n\n"
+    );
+}
+
+#[test]
+fn copy_addresses_its_source_by_symbol_name() {
+    let harness = Harness::new("copy-symbol");
+    let file = harness.write(
+        "doc.rs",
+        "fn foo() {\n    body();\n}\n\nfn bar() {\n    other();\n}\n",
+    );
+    seed_codegraph_symbol(&harness, "doc.rs", "bar", 5, 7);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let copied = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--symbol",
+        "bar",
+        "--dest-offset",
+        "0",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(copied.status.success(), "{}", refusal_text(&copied));
+    let saved_revision = first_payload(&copied)["revision"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let saved = harness.client(&[
+        "save",
+        "-f",
+        file.to_str().unwrap(),
+        "-r",
+        &saved_revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn bar() {\n    other();\n}\nfn foo() {\n    body();\n}\n\nfn bar() {\n    other();\n}\n"
     );
 }

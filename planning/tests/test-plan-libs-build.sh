@@ -5,7 +5,7 @@
 # planning/scripts/lib/<group>/*.sh is the maintained form, one function per
 # file; the five plan-*-lib.sh files are compiled from it and are what ships.
 # That makes them generated artifacts under CODE-CONTRACTS.md contract 7 and
-# MAINTAINER.md section 2.15: regenerated, never hand-edited, never committed,
+# .agents/MAINTAINER.md 1.10: regenerated, never hand-edited, never committed,
 # and a stale one has to fail rather than drift.
 #
 # Also pins the properties that make the split worth having: every function file
@@ -36,7 +36,7 @@ trap 'rm -rf "$work"' EXIT
 libraries='plan-core-lib.sh plan-document-lib.sh plan-table-lib.sh plan-progress-lib.sh plan-crypt-lib.sh'
 
 # ---- the libraries are what the sources compile to, with no committed copy --
-# The libraries are generated and never tracked (MAINTAINER.md section 2.15), so
+# The libraries are generated and never tracked (.agents/MAINTAINER.md 1.10), so
 # this test builds them when missing and then lets --check prove determinism:
 # --check rebuilds prod to a temp path and compares, so two builds agreeing is
 # the freshness contract, not a comparison against a committed file.
@@ -87,19 +87,26 @@ done
 # a stale committed library with the very run that is supposed to report it,
 # so a genuine staleness would fail once and then pass on every later run --
 # the reproducible defect reading as a flake instead.
+#
+# The compiled builder does not build the tree its wrapper sits in: it builds
+# <root>/planning/scripts, with the root taken from PLANNING_SKILL_ROOT before
+# the running binary's own location. So a copy has to be a whole `planning/`
+# layout, and the copy's root has to be named, or the build lands in the real
+# tree (which is exactly what running a `--target dev` build here used to do).
 probe_copy="$work/probe-tree"
-mkdir -p "$probe_copy"
-cp -R "$scripts_dir" "$probe_copy/scripts"
-probe_builder="$probe_copy/scripts/build-plan-libs.sh"
-probe_function="$probe_copy/scripts/lib/progress/plan_zz_build_probe.sh"
+mkdir -p "$probe_copy/planning"
+cp -R "$scripts_dir" "$probe_copy/planning/scripts"
+probe_builder="$probe_copy/planning/scripts/build-plan-libs.sh"
+probe_function="$probe_copy/planning/scripts/lib/progress/plan_zz_build_probe.sh"
+export PLANNING_SKILL_ROOT="$probe_copy"
 printf '#!/usr/bin/env bash\nplan_zz_build_probe() { printf probe; }\n' > "$probe_function"
 "$probe_builder" >/dev/null 2>&1 || t_fail 'the build failed with a new function file present'
-if grep -Fq 'plan_zz_build_probe()' "$probe_copy/scripts/plan-progress-lib.sh"; then :; else
+if grep -Fq 'plan_zz_build_probe()' "$probe_copy/planning/scripts/plan-progress-lib.sh"; then :; else
     t_fail 'a new function file did not reach its compiled library'
 fi
 rm -f "$probe_function"
 "$probe_builder" >/dev/null 2>&1 || t_fail 'the build failed after removing the probe'
-if grep -Fq 'plan_zz_build_probe' "$probe_copy/scripts/plan-progress-lib.sh"; then
+if grep -Fq 'plan_zz_build_probe' "$probe_copy/planning/scripts/plan-progress-lib.sh"; then
     t_fail 'removing a function file left it in the compiled library'
 fi
 
@@ -114,13 +121,14 @@ symbol_count="$("$BASH" -c "source '$scripts_dir/plan-document-lib.sh'; declare 
 # On a copy, because these cases plant a function file: doing that in the real
 # tree would change the committed libraries if the test were interrupted.
 copy="$work/tree"
-mkdir -p "$copy"
-cp -R "$scripts_dir" "$copy/scripts"
-copied_builder="$copy/scripts/build-plan-libs.sh"
+mkdir -p "$copy/planning"
+cp -R "$scripts_dir" "$copy/planning/scripts"
+copied_builder="$copy/planning/scripts/build-plan-libs.sh"
+export PLANNING_SKILL_ROOT="$copy"
 
 # MODE: DEV is what marks a dev-only helper. PACKAGE: DEV is true of every file
 # in this directory -- none of them ships -- so it cannot be the discriminator.
-cat > "$copy/scripts/lib/core/plan_probe_dev_only.sh" <<'PROBE'
+cat > "$copy/planning/scripts/lib/core/plan_probe_dev_only.sh" <<'PROBE'
 #!/usr/bin/env bash
 # MODE: DEV
 # PACKAGE: DEV
@@ -132,7 +140,7 @@ PROBE
 # which is how a target that stopped stripping markers read as passing here.
 "$copied_builder" --target dev >/dev/null 2>&1
 dev_core="$work/dev-core-lib.sh"
-cp "$copy/scripts/plan-core-lib.sh" "$dev_core"
+cp "$copy/planning/scripts/plan-core-lib.sh" "$dev_core"
 t_assert_eq 'the dev target keeps a function file marked MODE: DEV' \
     "$(grep -c '^plan_probe_dev_only()' "$dev_core")" '1'
 t_assert_eq 'the dev target says which target built it' \
@@ -141,10 +149,10 @@ t_assert_eq 'the dev target says which target built it' \
 # names the file to edit rather than a line number in a generated file.
 t_assert_eq 'the dev target carries provenance for every source file' \
     "$(grep -c '^# from scripts/lib/core/' "$dev_core")" \
-    "$(ls "$copy/scripts/lib/core"/*.sh | wc -l | tr -d ' ')"
+    "$(ls "$copy/planning/scripts/lib/core"/*.sh | wc -l | tr -d ' ')"
 
 "$copied_builder" --target prod >/dev/null 2>&1
-prod_core="$copy/scripts/plan-core-lib.sh"
+prod_core="$copy/planning/scripts/plan-core-lib.sh"
 t_assert_eq 'the prod target drops the dev-only function' \
     "$(grep -c '^plan_probe_dev_only()' "$prod_core" || true)" '0'
 t_assert_eq 'the prod target carries no provenance' \

@@ -2,9 +2,13 @@
 # ai-text-editor protocol reference
 
 The authoritative transport is versioned NDJSON: one request per short-lived
-connection and zero or more ordered response frames ending in `complete`.
-Structured output is the default; text, paging, and streaming are explicit
-client presentation choices.
+connection and one or more ordered response frames. An error frame is
+always the last frame, on its own. A data response that is a single frame —
+not streamed, not paged — ends there too: only a stream or a paged result
+leaves a caller with a real question ("is the sequence I've been reading
+now over?"), so only those get a trailing `complete` frame. Structured
+output is the default; text, paging, and streaming are explicit client
+presentation choices.
 
 `server start --file PATH` creates the initial tab and shared endpoint.
 `open --endpoint ENDPOINT --file PATH` selects an existing tab by canonical
@@ -24,6 +28,15 @@ this order:
    names no tab is refused with `tab_unknown` and the open tabs listed; it
    never falls through to whichever tab discovery would have found instead,
    because a caller that named a tab did not ask for a different one.
+   The value reported is the shortest prefix unambiguous among the tabs
+   registered when THIS one first was, git-style — one tab alone gets a
+   single character, assigned once and fixed for its whole life; a later tab
+   whose real id would collide with one already claimed is simply given a
+   longer one instead, so an id already handed to a caller is never
+   invalidated by anything that registers afterward. A query too short to
+   name just one tab is refused with `tab_ambiguous`, naming each real
+   candidate by its own assigned form, the same as `tab_path`'s own ambiguity
+   refusal below; a full id, if held, still resolves exactly as always.
 2. **`tab_path`** — a filename, or a trailing run of path components, naming an
    open tab. The recovery for a caller that has lost the id. Matched on
    component boundaries, not as a substring, so `port.txt` does not name
@@ -106,9 +119,11 @@ clients must update their saved session token. On Unix, group/world-readable
 credential files are refused.
 
 Every response frame carries a zero-based `sequence`. Data frames also carry
-`byte_count`, the UTF-8 byte length of their canonical JSON `payload`. A
-consumer can therefore detect skipped frames and account for output without
-parsing presentation text.
+`byte_count`, the UTF-8 byte length of their canonical JSON `payload` — except
+at verbosity 0, where it is dropped along with everything else level 0 does
+not carry (see "Response verbosity" below). A consumer that wants it can
+always ask at level 1 or above; a consumer can otherwise detect skipped
+frames and account for output without parsing presentation text.
 
 The protocol frame ceiling is 8 MiB. Large raw reads default to and are capped
 at 4 MiB before base64/JSON framing; oversized result or index windows return
@@ -120,17 +135,23 @@ Every method takes `verbosity` 0-3, and **1 is the default**:
 
 | level | what the payload carries |
 |---|---|
-| 0 | the method's own result and the `tab_id` that produced it, and nothing else |
+| 0 | the method's own result, and nothing else — plus the `tab_id` that produced it, unless the request already addressed this exact tab by `tab_id` (see rule 1 below) |
 | 1 | level 0 plus what verification and the next step need: `revision`, `dirty`, `disk_diverged`, `external_change_pending`, the tab's `mode`, the resolved edit span (`offset`, `delete_len`, `bytes_written`, `deleted`), `complete`/`eof`, `start_line`/`end_line`, `returned_bytes`, a search's `pager_key` and `count`, and a zero-result search's `note` |
 | 2 | level 1 plus navigation: `cursors`, `total_bytes`, `start_byte`/`end_byte`, `result_id`, `limit`, index block paging, undo/redo depths |
 | 3 | everything, exactly the payload before the ladder existed |
 
 Three rules the levels do not bend:
 
-1. **Every level carries the method's own result and names its tab.** A `read`
-   returns its text at level 0; a search returns its matches. The ladder
-   governs *metadata*. `tab_id` is level 0 because addressing the wrong tab
-   silently is the failure the addressing design exists to prevent.
+1. **Every level carries the method's own result and names its tab — unless
+   the caller already named it.** A `read` returns its text at level 0; a
+   search returns its matches. The ladder governs *metadata*. `tab_id` is
+   level 0 because addressing the wrong tab silently is the failure the
+   addressing design exists to prevent — but at level 0, and only there, a
+   request that already addressed this exact tab by `--tab-id` gets no
+   `tab_id` echoed back, since repeating an id the caller just sent is not
+   new information. A request that named a `tab_path`, a file, or nothing
+   at all (the focused tab) still gets it back at every level, level 0
+   included: none of those forms is the id itself.
 2. **A refusal is never trimmed.** An error frame keeps its `code`, `message`
    and recovery `choices` at every level, because for a refused request those
    *are* the answer.
@@ -228,8 +249,8 @@ active large-file threshold. `open` includes the same report.
 `begin_transaction` and `end_transaction` explicitly group ordinary edits into
 one undo step; each individual edit is still journaled for crash recovery.
 
-Mutating methods `insert`, `replace`, `large_edit`, `restore`, `undo`, `redo`,
-and `save` require the envelope's `revision` field. The server refuses a
+Mutating methods `insert`, `replace`, `move`, `copy`, `large_edit`, `restore`,
+`undo`, `redo`, and `save` require the envelope's `revision` field. The server refuses a
 missing field with `revision_required` and refuses a value other than the
 current revision with `stale_revision`; it never silently treats an omitted
 revision as last-write-wins. Read `open` or `history` again after either error.
@@ -283,6 +304,76 @@ already carries the guard `expected_text` would add. An `insert` refuses
 `match_id` the same way it refuses a range: `edit_range_unsupported`, because
 a match is a span and `insert` places bytes at a point. An id shaped wrong, or
 naming an index past the result set, is `match_id_invalid`.
+
+`replace` also takes two more addressing schemes (T114), for a span the
+caller has not necessarily read yet and would otherwise have to infer an
+endpoint for — "up to where the next function starts" computed by hand is
+both a correctness risk and unreadable in review:
+
+- `range_start_match` and `range_end_before_match`: text (or, with
+  `range_match_regex: true`, a Rust regex) whose own match marks the start
+  and the end of the span. The span runs from the start match's own
+  beginning (inclusive — the matched text is itself the beginning of what is
+  addressed) up to, but not including, the end match's own beginning. Both
+  are required together, refused as `edit_range_incomplete` if only one is
+  named. Either matching nowhere is `range_start_match_not_found` /
+  `range_end_before_match_not_found`; either matching more than once is
+  `range_start_match_ambiguous` / `range_end_before_match_ambiguous` —
+  refused by name for the anchor that is ambiguous, never silently resolved
+  to the first occurrence, the same stance the grep gate takes on an
+  ambiguous sweep. A pattern that does not parse as a regex under
+  `range_match_regex` is `range_match_invalid`.
+- `symbol`: a name CodeGraph's index (`.codegraph/codegraph.db`) has for
+  this file, resolved to that symbol's own defining line extent — the
+  caller says *what* to edit, the server computes *where* it starts and
+  ends. No `.codegraph` index for this project is `symbol_unavailable`; no
+  node by that name in the file is `symbol_not_found`; more than one node
+  sharing the name is `symbol_ambiguous` — never silently the first node
+  found.
+
+Both take no other addressing key alongside them (`edit_range_conflict`
+against any of `offset`/`delete_len`/`cursor_id`/a range/`match_id`/each
+other), and both are refused on `insert` the same way `match_id` is —
+`edit_range_unsupported`, since a match or a symbol names a span and
+`insert` places bytes at a point.
+
+### move and copy
+
+`move` and `copy` relocate or duplicate a span within one tab **server-side,
+with no content in the request or response** — the server already holds the
+bytes, so a pure rearrangement no longer pays output tokens for text that
+never actually changed.
+
+The source span is addressed exactly like `replace`'s own — `range_start_line`/
+`range_end_line`, `range_start_byte`/`range_end_byte`, `match_id`,
+`range_start_match`/`range_end_before_match`, or `symbol` — and
+`expected_text`/`expected_bytes_base64` verify it first, the same B230 guard
+`replace` already has. A bare `offset`, `delete_len`, or `cursor_id` naming the
+source is refused as `move_source_required`: a point has no length to
+relocate, so these are refused by name rather than silently ignored.
+
+The destination is a **point**, not a range: `dest_offset` (a byte position)
+or `dest_line` (one-based, "insert immediately before this line", text tabs
+only — one past the last line appends at end of file). Exactly one of the two
+is required; naming both is `move_destination_conflict`, naming neither is
+`move_destination_required`. A destination strictly inside the source span
+has no sensible meaning and is refused as `move_destination_inside_source`;
+equal to either boundary is a legal (trivial) move.
+
+Both are **one atomic operation** — one revision, one journal record, one
+undo step — computed once in memory from the tab's current document, even
+though `move` performs two splices internally (removing the source, then
+inserting it at the shift-adjusted destination). This is deliberately *not*
+the same guarantee `begin_transaction`/`end_transaction` gives: that pair
+only groups already-applied edits into one undo step, and does not stop a
+crash between two separately applied edits from leaving a real, journaled,
+half-relocated document. `move`/`copy` never apply two edits in the first
+place, so there is nothing for a crash to catch mid-way.
+
+The response reports `source_offset`, `source_len`, and `dest_offset` (the
+destination the moved bytes actually landed at, after any shift) — enough to
+verify what happened without having sent or received the content, the same
+contract `replace`'s own resolved-span answer already gives.
 
 `search` takes `preview_lines` (an integer, `0` — the default — meaning
 unshrunk): when a match's `contents`/`contents_base64` spans more than

@@ -9,6 +9,10 @@
 #   t_unique_suffix                 a unique token, no `date +%N`
 #   t_copy_tree <src> <dst>         contents incl. dotfiles, no `cp -R src/.`
 #   t_sha256 <file>                 sha256 hex digest, GNU or BSD or openssl
+#   t_is_windows                    true under Git for Windows / MSYS / Cygwin
+#   t_native_path <path>            the path as a native tool prints it (C:/...)
+#   t_slashes                       filter: backslashes to slashes
+#   t_enable_symlinks               true when `ln -s` makes a real link here
 #
 # Assertion support. Two modes, and they are mutually exclusive by design:
 #
@@ -68,12 +72,11 @@
 #   than emitting a tree nobody will read.
 #
 #   BREAKPOINTS are for a local run, and are inert anywhere else. They exist so
-#   `bash -x` on a whole 400-line test is not the only option: it drowns the
-#   thing you are looking for in the 380 lines you are not.
+#   `bash -x` on a whole test file is not the only option: it drowns the
+#   thing you are looking for in everything else the test does.
 #
 # Everything here is opt-in through the environment, so a test file needs no
-# changes to benefit and CI behaviour cannot be altered by accident. The flags,
-# their defaults and the measurements behind them: docs/DEBUGGING-TESTS.md.
+# changes to benefit and CI behaviour cannot be altered by accident.
 t_evidence_files="${AI_SKILLS_TEST_EVIDENCE_FILES:-40}"
 t_evidence_bytes="${AI_SKILLS_TEST_EVIDENCE_BYTES:-16384}"
 
@@ -102,14 +105,13 @@ t_keep_test_root() {
 # Printable? A core dump or a build artifact in the root would otherwise spray
 # the log with control bytes and bury the text files that matter.
 #
-# NUL bytes, not ASCII-printability: install.sh's own diagnostics use real
-# UTF-8 punctuation (an em dash in a soft-requirement warning, for one), which
+# NUL bytes, not ASCII-printability: some diagnostics use real UTF-8
+# punctuation (an em dash in a soft-requirement warning, for one), which
 # `tr -d '[:print:][:space:]'` under LC_ALL=C treats as junk because every
-# multi-byte UTF-8 byte has its high bit set -- so a perfectly readable
-# install.sh log was misfiled as "(binary, not shown)" on exactly the runs
-# that most needed to be read. A core dump or compiled binary reliably carries
-# a NUL within its first few bytes; legitimate text, UTF-8 included, never
-# does.
+# multi-byte UTF-8 byte has its high bit set -- so a perfectly readable log
+# was misfiled as "(binary, not shown)" on exactly the runs that most needed
+# to be read. A core dump or compiled binary reliably carries a NUL within
+# its first few bytes; legitimate text, UTF-8 included, never does.
 t_evidence_is_text() { # <path>
     local total stripped
     total="$(LC_ALL=C head -c 4096 "$1" 2>/dev/null | LC_ALL=C wc -c | tr -d ' ')"
@@ -283,13 +285,11 @@ t_trace_off() {
 }
 
 if [ -z "${T_TMPDIR:-}" ]; then
-    # Directly under /tmp, and short. A unix socket path is capped near 104 bytes
-    # and chromium (via mmdc) appends about 50 for its profile and singleton
-    # socket, so the room a test may use is small. Nesting inside nix develop's
-    # TMPDIR *and* run-tests.sh's own scratch reached 75 characters and crossed
-    # the limit: test-mermaid-accuracy failed with "Socket path too long" on the
-    # bash 3.2 leg only. Measured -- 75 failed, 62 passed -- so this stays far
-    # under rather than close to it: /tmp/t.XXXXX is 12 characters.
+    # Directly under /tmp, and short. A unix socket path is capped near 104
+    # bytes, and chromium (via mmdc) appends its own profile and singleton
+    # socket path on top, so the room a test may use is small -- nesting
+    # inside a deep TMPDIR has crossed that limit before. This stays far
+    # under it instead: /tmp/t.XXXXX is short and directly under /tmp.
     #
     # The `t.` prefix is kept so a leaked root is still attributable; the CI leak
     # scan looks for it.
@@ -309,10 +309,7 @@ if [ -z "${T_TMPDIR:-}" ]; then
     # such problem, and its own TMPDIR is actively hostile: it points at
     # /var/folders/<...>, and /var is a symlink to /private/var, so a fixture git
     # repo created there has two names and anything comparing paths disagrees
-    # with itself. test-atomicity-flow failed on BOTH macOS legs the moment this
-    # honoured TMPDIR, while every Linux leg stayed green - a fixture repo whose
-    # uncommitted edit git reported under one path and the flow looked for under
-    # the other.
+    # with itself.
     case "$(uname -s)" in
         Darwin) T_TMPDIR="$(mktemp -d /tmp/t.XXXXX)" ;;
         *)      T_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/t.XXXXX")" ;;
@@ -322,14 +319,12 @@ if [ -z "${T_TMPDIR:-}" ]; then
     fi
 
     # Sockets only, and deliberately NOT under TMPDIR. A unix socket path is
-    # capped near 104 bytes and chromium (via mmdc) appends about 50 for its
-    # profile and singleton socket, so the room a caller has is small: nesting
-    # inside nix develop's TMPDIR *and* run-tests.sh's own scratch reached 75
-    # characters and crossed the limit, and test-mermaid-accuracy failed with
-    # "Socket path too long" on the bash 3.2 leg only. Measured -- 75 failed,
-    # 62 passed -- so /tmp/s.XXXXX at 12 characters stays far under rather than
-    # close to it. Nothing but a socket or a socket-bearing profile belongs
-    # here; it is tmpfs on a developer workstation.
+    # capped near 104 bytes, and chromium (via mmdc) appends its own profile
+    # and singleton socket path on top, so the room a caller has is small --
+    # nesting inside a deep TMPDIR has crossed that limit before. /tmp/s.XXXXX
+    # stays short and far under it instead. Nothing but a socket or a
+    # socket-bearing profile belongs here; it is tmpfs on a developer
+    # workstation.
     if [ -d /tmp ] && [ -w /tmp ]; then
         T_SOCKET_TMPDIR="$(mktemp -d /tmp/s.XXXXX)"
     else
@@ -405,6 +400,53 @@ else
     t_stat_mode() { stat -f '%Lp' "$1"; }
 fi
 
+# Windows: Git for Windows' bash (MSYS2) runs the tests, but the
+# compiled tools they drive are native Windows programs. Two consequences the
+# tests have to know about. First, the two sides disagree on what a path looks
+# like: bash says /tmp/x or /d/a/x, a native tool says C:/Users/x (or
+# C:\Users\x, or a mix of both after a Rust `join`). Second, NTFS has no unix
+# permission bits: chmod is a no-op and stat reports 644/755 whatever was set,
+# and a symlink is a copy unless MSYS=winsymlinks:nativestrict is exported.
+t_is_windows() {
+    case "$(uname -s 2>/dev/null)" in
+        MINGW* | MSYS* | CYGWIN*) return 0 ;;
+    esac
+    return 1
+}
+
+# The path as a native (non-MSYS) program spells it: C:/... on Windows,
+# unchanged everywhere else. Compare a tool's output against this, not against
+# the bash-side path.
+t_native_path() { # <path>
+    if t_is_windows && command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+# Succeeds when `ln -s` makes a real symbolic link here. On Git for Windows it
+# copies the target unless MSYS=winsymlinks:nativestrict is set, and a native
+# link then needs the privilege to create one (an elevated shell or Developer
+# Mode) -- so this asks the filesystem instead of assuming. A test whose
+# subject is symlink handling calls it and skips that part when it fails.
+t_enable_symlinks() {
+    local probe status=1
+    t_is_windows && export MSYS=winsymlinks:nativestrict
+    probe="$(mktemp -d "${TMPDIR:-/tmp}/t-symlink-probe.XXXXXX")" || return 1
+    if printf 'x' > "$probe/target" && ln -s target "$probe/link" 2>/dev/null && [ -L "$probe/link" ]; then
+        status=0
+    fi
+    rm -rf "$probe"
+    return "$status"
+}
+
+# Stdin with backslashes turned into slashes, so output that a native tool
+# built with a Windows separator compares against a t_native_path.
+t_slashes() {
+    tr '\\' '/'
+}
+
 # PORTABILITY(date-nanoseconds): BSD date has no %N and emits a literal "N".
 t_unique_suffix() {
     printf '%s_%s%s' "$$" "${RANDOM}" "${RANDOM}"
@@ -441,11 +483,46 @@ t_trap_assertions() {
     trap 't_assertion_failed "$LINENO" "$BASH_COMMAND"' ERR
 }
 
+# B156: setup-dev-env.sh leaves .setup-dev-env.started at the moment it begins
+# building and .setup-dev-env.finished, carrying the same run token, only once
+# every crate built. A run killed partway (OOM, ^C, a crash) leaves .started
+# with no matching .finished -- a partial, unlabelled build state that used to
+# be indistinguishable from a complete one, and is the leading suspect for why
+# this same gate once failed then passed on an identical tree. Refuse rather
+# than run against it. lib-test.sh's own location is fixed (planning/tests/),
+# so this does not need the caller to have set repo_root.
+_t_dev_env_dirty_reason() {
+    local repo_root started finished started_token finished_token
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    started="$repo_root/.setup-dev-env.started"
+    finished="$repo_root/.setup-dev-env.finished"
+    [ -f "$started" ] || return 0
+    started_token="$(cat "$started" 2>/dev/null)"
+    finished_token=""
+    [ -f "$finished" ] && finished_token="$(cat "$finished" 2>/dev/null)"
+    [ -n "$started_token" ] && [ "$started_token" = "$finished_token" ] && return 0
+    printf 'a setup-dev-env.sh run started and never finished (or finished a different run) -- the build tree is in an unknown, possibly partial state. Finish it, then re-run: ./setup-dev-env.sh\n'
+    return 1
+}
+
 # Findings live in a file because a helper called inside a command substitution
 # runs in a subshell, where an incremented counter is discarded. That is not
 # hypothetical: it made a test's exit-code assertions inert until a mutation
 # exposed it.
 t_begin() {
+    local dirty_reason
+    if ! dirty_reason="$(_t_dev_env_dirty_reason)"; then
+        printf '%s: %s\n' "${0##*/}" "$dirty_reason" >&2
+        exit 70
+    fi
+    # A test started by hand (not through run-tests, which already exports it
+    # this way) may carry PLANNING_AGENT_TMPDIR as C:\Users\...\planning-agent.
+    # Scripts splice it into JSON and sha256sum arguments, where the backslashes
+    # are invalid escapes / a line prefix; C:/Users/... works everywhere.
+    if t_is_windows && [ -n "${PLANNING_AGENT_TMPDIR:-}" ] && command -v cygpath >/dev/null 2>&1; then
+        PLANNING_AGENT_TMPDIR="$(cygpath -m "$PLANNING_AGENT_TMPDIR")"
+        export PLANNING_AGENT_TMPDIR
+    fi
     T_FINDINGS="$(mktemp "${TMPDIR:-/tmp}/t-findings.XXXXXX")"
     export T_FINDINGS
     # A setup command dying under set -e used to end a test in silence: the
