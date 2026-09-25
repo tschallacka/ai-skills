@@ -86,18 +86,21 @@ pub fn claude_planning_permissions(
 /// rule keyed on the Write tool and does not fall back to a matching
 /// `Edit(...)` rule either -- `Edit(path)` is the umbrella that already
 /// covers every file-editing tool, Write included.
+fn worktrees_entries(worktrees: &str) -> Vec<String> {
+    let worktrees = strip_trailing_slashes(worktrees);
+    vec![
+        format!("Read({worktrees}/**)"),
+        format!("Edit({worktrees}/**)"),
+        format!("Bash({worktrees}/:*)"),
+    ]
+}
+
 pub fn claude_worktrees_permissions(worktrees: &str, home: &Path) -> io::Result<PermissionOutcome> {
     let cfg = claude_settings_path(home);
     if !cfg.is_file() {
         return Ok(PermissionOutcome::NoConfigFile);
     }
-    let worktrees = strip_trailing_slashes(worktrees);
-    let entries = vec![
-        format!("Read({worktrees}/**)"),
-        format!("Edit({worktrees}/**)"),
-        format!("Bash({worktrees}/:*)"),
-    ];
-    merge_allow_entries(&cfg, &entries)
+    merge_allow_entries(&cfg, &worktrees_entries(worktrees))
 }
 
 /// interactive-shell's own two shipped binaries (never
@@ -270,13 +273,7 @@ pub fn claude_worktrees_permissions_remove(
     home: &Path,
 ) -> io::Result<PermissionRemovalOutcome> {
     let cfg = claude_settings_path(home);
-    let worktrees = strip_trailing_slashes(worktrees);
-    let entries = vec![
-        format!("Read({worktrees}/**)"),
-        format!("Edit({worktrees}/**)"),
-        format!("Bash({worktrees}/:*)"),
-    ];
-    remove_allow_entries(&cfg, &entries)
+    remove_allow_entries(&cfg, &worktrees_entries(worktrees))
 }
 
 fn project_specifics_entries(root: &str) -> Vec<String> {
@@ -873,6 +870,52 @@ mod tests {
         let path = dir.join("settings.json");
         fs::write(&path, content).unwrap();
         path
+    }
+
+    /// Claude Code's own settings-lint output names the exact rule this
+    /// checks for: "mixes * with the trailing :* prefix syntax, so it is
+    /// matched as a literal prefix (the * is not expanded) and matches only
+    /// commands containing a literal * at that position." A `Bash(<prefix>:*)`
+    /// rule takes everything before the trailing `:*` as one literal string
+    /// -- never expanded as a glob -- so any `*` inside that prefix (e.g. a
+    /// stray `**` meant to glob a directory) makes the rule match almost
+    /// nothing. This bug shipped silently for every planning/worktrees/
+    /// project-specifics Bash grant until a real settings.json surfaced the
+    /// warning at Claude Code startup.
+    ///
+    /// Scans every Bash(...) entry every Claude-facing builder in this module
+    /// produces, for representative paths that themselves contain no `*` (so
+    /// any `*` found in the output came from the builder, not the input) --
+    /// rather than trusting each builder's own hand-written literal-string
+    /// test to catch a regression here by accident.
+    #[test]
+    fn no_bash_permission_rule_mixes_a_glob_into_its_literal_prefix() {
+        let mut entries = Vec::new();
+        entries.extend(planning_entries("/scripts", "/plans", "/tmp"));
+        entries.extend(worktrees_entries("/worktrees"));
+        entries.extend(project_specifics_entries("/project-root"));
+        entries.extend(interactive_shell_entries("/bins"));
+
+        let mut offenders = Vec::new();
+        for entry in &entries {
+            let Some(rest) = entry.strip_prefix("Bash(") else {
+                continue;
+            };
+            let Some(rest) = rest.strip_suffix(')') else {
+                continue;
+            };
+            let Some(prefix) = rest.strip_suffix(":*") else {
+                continue;
+            };
+            if prefix.contains('*') {
+                offenders.push(entry.clone());
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "Bash rule(s) mix a glob into their literal :* prefix, so Claude \
+             Code will match almost nothing: {offenders:?}"
+        );
     }
 
     #[test]
