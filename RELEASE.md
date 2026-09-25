@@ -85,8 +85,23 @@ cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
    otherwise publish the maintainer's files. `npm pack --dry-run` lists what would
    go; it should match `--list`.
 
-7. **Tag and push**, then attach the tarball to the GitHub release. The tag is
-   what the installer resolves, so it must exist before the asset is useful.
+7. **Tag and push, then create the release as a DRAFT** with the universal
+   tarball attached, and run `release-installer.yml` to attach the five
+   per-platform installer assets and publish it:
+
+   ```sh
+   gh release create <tag> dist/ai-skills-<version>.tar.gz --draft --title <tag> --notes <notes>
+   gh workflow run release-installer.yml --ref <branch the workflow lives on> -f tag=<tag>
+   ```
+
+   Draft, not published: a real end-to-end rehearsal (T70/W06) found that
+   GitHub's immutable-releases protection locks a published release against
+   new asset uploads within roughly 5-6 minutes, shorter than
+   `release-installer.yml`'s own multi-platform build takes. A draft has no
+   such window — `release-installer.yml`'s own last step is what publishes
+   it, once every asset has landed, so nothing is ever uploaded to it after
+   it goes public. The tag is what the installer resolves, so it must exist
+   (via the draft) before the workflow has anywhere to attach assets to.
 
 8. **Verify the published article, not the local one.** Install from the tag into a
    scratch directory and confirm no maintainer file arrived:

@@ -763,7 +763,8 @@ cancelled (1.11). `test-suite-ok` is the single stable check name to require.
 | `windows.yml` | the quick Windows loop (1.16) | push to `windows`, manual | — |
 | `registers.yml` | a push to `registers` passes `.github/registers-guard.sh` and fast-forwards onto `master` | push to `registers` | 1.14 |
 | `registers-sync.yml` | keeps `registers` level with `master` | push to `master` | — |
-| `release-installer.yml` | attaches the per-platform installer assets to a GitHub Release | release published, or manual | `RELEASE.md` |
+| `release-installer.yml` | attaches the per-platform installer assets to a GitHub Release (draft), then publishes it | manual (`workflow_dispatch` only, against an existing draft release; T70/W06: no longer `release: published` -- that trigger raced GitHub's immutable-releases window) | `RELEASE.md` |
+| `release-npm.yml` | builds every shipping skill's binaries for all five targets and publishes the npm package | `release: published`, or manual (manual reaches only the build+dry-run-pack jobs; the real publish job is gated on the `release` trigger plus the `npm-publish` environment's required-reviewer protection) | `RELEASE.md` |
 
 What the table cannot say:
 - **Which checks gate a merge.** Branch protection lives in GitHub, not the
