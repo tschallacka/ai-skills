@@ -44,6 +44,7 @@ contains, it does not belong here.
 | [claude-code-channels.md](claude-code-channels.md) | Can an MCP server push into a running Claude Code session — idle or busy — what does that need, and where does it silently do nothing? |
 | [pty-sessions-on-macos.md](pty-sessions-on-macos.md) | Why does a PTY session pass by hand and hang or draw nothing under `cargo test` on macOS? |
 | [windows-under-git-bash.md](windows-under-git-bash.md) | Why does correct code fail on Windows under Git for Windows' bash — line endings, paths, `.exe`, sockets, error kinds — and what does the repo do about each? |
+| [npm-files-array-overrides-npmignore.md](npm-files-array-overrides-npmignore.md) | Why does a path `.npmignore` explicitly excludes still show up in `npm pack`, and is that a packaging bug? |
 ## Format
 
 One file per question, named for the subject rather than the occasion. Open
