@@ -55,12 +55,12 @@ fn planning_entries(scripts: &str, plans: &str, tmp: &str) -> Vec<String> {
     vec![
         format!("Read({plans}/**)"),
         format!("Edit({plans}/**)"),
-        format!("Bash({scripts}/**:*)"),
+        format!("Bash({scripts}/:*)"),
         format!("Read({scripts}/**)"),
-        format!("Bash(bash {scripts}/**:*)"),
+        format!("Bash(bash {scripts}/:*)"),
         format!("Read({tmp}/**)"),
         format!("Edit({tmp}/**)"),
-        format!("Bash({tmp}/**:*)"),
+        format!("Bash({tmp}/:*)"),
     ]
 }
 
@@ -95,7 +95,7 @@ pub fn claude_worktrees_permissions(worktrees: &str, home: &Path) -> io::Result<
     let entries = vec![
         format!("Read({worktrees}/**)"),
         format!("Edit({worktrees}/**)"),
-        format!("Bash({worktrees}/**:*)"),
+        format!("Bash({worktrees}/:*)"),
     ];
     merge_allow_entries(&cfg, &entries)
 }
@@ -274,7 +274,7 @@ pub fn claude_worktrees_permissions_remove(
     let entries = vec![
         format!("Read({worktrees}/**)"),
         format!("Edit({worktrees}/**)"),
-        format!("Bash({worktrees}/**:*)"),
+        format!("Bash({worktrees}/:*)"),
     ];
     remove_allow_entries(&cfg, &entries)
 }
@@ -284,7 +284,7 @@ fn project_specifics_entries(root: &str) -> Vec<String> {
     vec![
         format!("Read({root}/**)"),
         format!("Edit({root}/**)"),
-        format!("Bash({root}/**:*)"),
+        format!("Bash({root}/:*)"),
     ]
 }
 
@@ -895,7 +895,7 @@ mod tests {
         };
         assert_eq!(added.len(), 8);
         assert!(added.contains(&"Read(/plans/**)".to_string()));
-        assert!(added.contains(&"Bash(bash /scripts/**:*)".to_string()));
+        assert!(added.contains(&"Bash(bash /scripts/:*)".to_string()));
 
         let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
         let allow = doc["permissions"]["allow"].as_array().unwrap();
@@ -1088,7 +1088,7 @@ mod tests {
         assert_eq!(added.len(), 3);
         let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
         let allow = doc["permissions"]["allow"].as_array().unwrap();
-        assert!(allow.iter().any(|v| v == "Bash(/wt/**:*)"));
+        assert!(allow.iter().any(|v| v == "Bash(/wt/:*)"));
         assert!(!allow
             .iter()
             .any(|v| v.as_str().unwrap().starts_with("Write(")));
