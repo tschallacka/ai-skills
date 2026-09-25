@@ -6,7 +6,7 @@
     {
       "id": "T70",
       "title": "Ship the 2.0.0-alpha binaries as release assets, not committed blobs",
-      "status": "open",
+      "status": "done",
       "priority": "urgent",
       "parent": null,
       "detail": "Binaries for the five targets (x86_64/aarch64-unknown-linux-musl, x86_64/aarch64-apple-darwin, x86_64-pc-windows-msvc) ship with the 2.0.0-alpha release as CI artifacts, not as files in git. The rust matrix jobs already build and upload per-target artifacts; what remains is release attachment plus the installer/packaging reconciliation. rust-development-guidelines.md section 6 still governs: binaries.tsv is MODE: PROD, declared-but-unbuilt rows are legal, built-but-undeclared is not, so declare before building. tests/test-shipped-binaries.sh validates the registry against disk and is the gate that proves this landed.",
@@ -18,9 +18,9 @@
         "tests/test-shipped-binaries.sh",
         ".github/workflows/ci.yml"
       ],
-      "note": "Decision 2026-08-31 (Tschallacka): no binary blobs in the repo; the original commit-them wording is dropped. The planning/bin blob itself left the index in the T73 execution (goal 01, commit ad21749 then rebased). Re-applied onto master register twice: after 4cfab47 and after c7bb034.",
+      "note": "T72 and release-installer.yml already closed most of T70's originally-stated scope before this plan started (no committed binary blobs, existing per-target release-tarball attachment); this plan (release-asset-shipping) added a CI-driven npm-publish workflow (release-npm.yml, verified via a real workflow_dispatch dry run per W05), a real end-to-end rehearsal of the release-asset attachment and bootstrap install path (W06/W07, using a throwaway prerelease, deleted afterward), and a binaries.tsv-vs-skill_files() drift check (W08/W09).",
       "created_at": "2026-08-28T17:15:01Z",
-      "updated_at": "2026-08-31T14:59:45Z"
+      "updated_at": "2026-09-25T06:15:55Z"
     },
     {
       "id": "T56",
