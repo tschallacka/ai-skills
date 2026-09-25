@@ -159,20 +159,22 @@ git tag -a v<version> -m "Release <version>"
 git push origin master --follow-tags
 ```
 
-Then publish the exact package version and create the corresponding GitHub
-release:
+Then cut the GitHub release; `RELEASE.md`'s own protocol (tag and push, create
+the release as a draft with the universal tarball, run `release-installer.yml`
+to attach the per-platform assets and publish it) is the one to follow, not a
+shortened version here -- it exists specifically because a published-then-
+attach ordering hits GitHub's immutable-releases protection (T70/W06).
 
-Review the dry-run package contents, then publish from a clean checkout with
-the appropriate npm credentials:
-
-```bash
-npm_config_cache="$(mktemp -d)" npm pack --dry-run
-npm publish --access public
-gh release create v<version> --title "<version>" --generate-notes
-```
-
-Publishing is an external release action. Confirm the version, package name,
-and included files before running `npm publish`.
+Publishing to npm is no longer a local step run by hand. The moment the
+release goes public, `.github/workflows/release-npm.yml` reacts to that same
+`release: published` event on its own: it builds every shipping skill for all
+five targets, assembles and dry-run verifies the npm package, then runs `npm
+publish` -- gated behind the `npm-publish` environment's required-reviewer
+approval. Review the dry-run package contents beforehand with
+`npm_config_cache="$(mktemp -d)" npm pack --dry-run`, or trigger
+`release-npm.yml` via `workflow_dispatch` for the same dry run without cutting
+a release at all; running `npm publish` locally is only for reproducing a
+packaging problem, never the release path.
 
 ## Commits and review
 

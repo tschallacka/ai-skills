@@ -103,6 +103,15 @@ cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
    it goes public. The tag is what the installer resolves, so it must exist
    (via the draft) before the workflow has anywhere to attach assets to.
 
+   The moment the release goes public, `.github/workflows/release-npm.yml`
+   reacts to that same `release: published` event on its own: its `build` job
+   cross/natively builds every shipping skill for all five targets, `assemble`
+   gathers them into one npm package and dry-run verifies it, and `publish`
+   actually runs `npm publish` -- gated behind the `npm-publish` environment's
+   required-reviewer approval (someone with access must approve the pending
+   deployment before it runs). There is no separate manual `npm publish` step
+   in this checklist: approving that deployment is the release.
+
 8. **Verify the published article, not the local one.** Install from the tag into a
    scratch directory and confirm no maintainer file arrived:
 

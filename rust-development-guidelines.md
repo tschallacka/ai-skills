@@ -203,8 +203,13 @@ the host's platform. The rules:
 - `tests/test-shipped-binaries.sh` validates the registry and cross-checks it
   against what is actually on disk. A declared-but-unbuilt row is legal; a
   built-but-undeclared binary is not.
-- Every target's binary ships in the npm package, because we do not know who or
-  what pulls it.
+- Every target's binary ships in the npm package: `.github/workflows/
+  release-npm.yml`'s `build` job cross/natively builds every shipping skill for
+  all five targets, its `assemble` job gathers them into one npm package and
+  dry-run verifies it, and its `publish` job actually runs `npm publish` --
+  gated behind the `npm-publish` environment's required-reviewer approval, and
+  reachable only from a real `release: published` trigger, never a maintainer
+  running `npm publish` locally.
 - `<skill>/bin/<target triple>/<binary>` names where the artifact ships FROM
   (the source tree, a release tarball, the npm package) -- not where the
   installer puts it. T72 retired the per-skill install destination: every
