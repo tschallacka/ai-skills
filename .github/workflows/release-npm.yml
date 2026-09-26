@@ -306,5 +306,26 @@ jobs:
       # so `npm publish` exchanges this job's own id-token (above) for a
       # short-lived publish token automatically -- nothing stored, nothing
       # to rotate.
+      #
+      # Measured on the real v2.0.0-alpha.2 release: npm refuses to publish
+      # a prerelease version (anything with a semver "-identifier" suffix)
+      # with no --tag, since with none it would have to move the `latest`
+      # dist-tag onto a prerelease, which it will not do implicitly. A
+      # stable version (no "-" in it) has no such suffix and publishes
+      # exactly as before, defaulting to `latest`.
       - name: Publish to npm
-        run: npm publish --access public
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -1)"
+          case "$version" in
+              *-*)
+                  tag="${version#*-}"
+                  tag="${tag%%.*}"
+                  echo "Prerelease version $version -> npm dist-tag '$tag'"
+                  npm publish --access public --tag "$tag"
+                  ;;
+              *)
+                  npm publish --access public
+                  ;;
+          esac
