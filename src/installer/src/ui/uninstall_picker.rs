@@ -13,6 +13,7 @@
 
 use super::input::Key;
 use super::terminal;
+use super::text::{overflow, pad, wrap};
 use crate::uninstall::{self, UninstallPreview, UninstallReport};
 use std::path::{Path, PathBuf};
 
@@ -121,21 +122,52 @@ pub fn handle_key(
     }
 }
 
+const LIST_TITLE: &str = "UNINSTALL -- choose an installed skill";
 const LIST_HINT: &str = " Up/Dn move  Enter preview  q back";
+const PREVIEW_TITLE: &str = "UNINSTALL -- preview";
 const PREVIEW_HINT: &str = " Enter/y confirm removal  q/Esc cancel";
+const DONE_TITLE: &str = "UNINSTALL -- done";
+const DONE_HINT: &str = " press any key to return";
+
+/// Chrome, not critical content -- same reasoning as the main picker's
+/// title/hint bars (`render::BAR_MAX_LINES`): wrap onto extra lines first,
+/// and truncate (`pad`'s `...`) only the last of them if it still doesn't
+/// fit.
+const BAR_MAX_LINES: usize = 3;
 
 pub fn render_frame(state: &UninstallPickerState, cols: usize, rows: usize) -> Vec<String> {
-    let body_rows = rows.saturating_sub(3).max(1);
+    let base_body_rows = rows.saturating_sub(3).max(1);
     match &state.screen {
-        Screen::List => render_list(state, cols, body_rows),
-        Screen::Preview(preview) => render_preview(state, preview, cols, body_rows),
-        Screen::Done(report) => render_done(report, cols, body_rows),
+        Screen::List => {
+            let body_rows = usable_body_rows(LIST_TITLE, LIST_HINT, cols, base_body_rows);
+            render_list(state, cols, body_rows)
+        }
+        Screen::Preview(preview) => {
+            let body_rows = usable_body_rows(PREVIEW_TITLE, PREVIEW_HINT, cols, base_body_rows);
+            render_preview(state, preview, cols, body_rows)
+        }
+        Screen::Done(report) => {
+            let body_rows = usable_body_rows(DONE_TITLE, DONE_HINT, cols, base_body_rows);
+            render_done(report, cols, body_rows)
+        }
     }
+}
+
+/// However many extra lines the title or hint bar needs beyond one each
+/// (rare -- both are short fixed strings -- but possible at an extreme
+/// width) comes out of the body, computed once here so the scroll-clamping
+/// that runs before `frame` is built agrees with what `frame` actually has
+/// room to draw.
+fn usable_body_rows(title: &str, hint: &str, cols: usize, base_body_rows: usize) -> usize {
+    let title_rows = overflow(title, cols, BAR_MAX_LINES).len();
+    let hint_rows = overflow(hint, cols, BAR_MAX_LINES).len();
+    let extra = (title_rows - 1) + (hint_rows - 1);
+    base_body_rows.saturating_sub(extra).max(1)
 }
 
 fn frame(title: &str, hint: &str, body: Vec<String>, cols: usize, body_rows: usize) -> Vec<String> {
     let mut out = Vec::with_capacity(body_rows + 3);
-    out.push(super::render::pad(title, cols));
+    out.extend(overflow(title, cols, BAR_MAX_LINES));
     out.push("-".repeat(cols));
     let mut body = body;
     body.truncate(body_rows);
@@ -143,9 +175,9 @@ fn frame(title: &str, hint: &str, body: Vec<String>, cols: usize, body_rows: usi
         body.push(String::new());
     }
     for line in body {
-        out.push(super::render::pad(&line, cols));
+        out.push(pad(&line, cols));
     }
-    out.push(super::render::pad(hint, cols));
+    out.extend(overflow(hint, cols, BAR_MAX_LINES));
     out
 }
 
@@ -168,22 +200,38 @@ fn render_list(state: &UninstallPickerState, cols: usize, body_rows: usize) -> V
         .skip(scroll)
         .map(|(i, e)| {
             let cursor = if i == state.cursor { '>' } else { ' ' };
-            format!(
-                "{cursor} {} ({})",
-                e.skill,
-                e.target_root.join(&e.skill).display()
+            list_row(
+                cursor,
+                &e.skill,
+                &e.target_root.join(&e.skill).display().to_string(),
+                cols,
             )
         })
         .collect();
-    frame(
-        "UNINSTALL -- choose an installed skill",
-        LIST_HINT,
-        lines,
-        cols,
-        body_rows,
-    )
+    frame(LIST_TITLE, LIST_HINT, lines, cols, body_rows)
 }
 
+/// The skill name is what tells two entries apart; the path after it is
+/// useful but secondary, and the one place a real path truncated to
+/// illegibility in review (B<pending>). So when the whole row doesn't fit,
+/// only the parenthesized path is ellipsized -- the name is never cut.
+fn list_row(cursor: char, skill: &str, path: &str, cols: usize) -> String {
+    let fixed = 5 + skill.len(); // "C SKILL (" + ")" -- C=cursor+space(2), " ("=2, ")"=1
+    let available = cols.saturating_sub(fixed).max(4);
+    let path_display = if path.len() > available {
+        pad(path, available)
+    } else {
+        path.to_string()
+    };
+    format!("{cursor} {skill} ({path_display})")
+}
+
+/// Everything on this screen names exactly what an irreversible removal is
+/// about to do -- critical content, never truncated. Each logical message
+/// is word-wrapped (uncapped: `wrap`, not `overflow`) rather than cut with
+/// `pad`'s `...`, so the full skill name and the full target path are
+/// always visible before the user confirms, however many physical lines
+/// that takes.
 fn render_preview(
     state: &UninstallPickerState,
     preview: &UninstallPreview,
@@ -191,68 +239,67 @@ fn render_preview(
     body_rows: usize,
 ) -> Vec<String> {
     let entry = &state.entries[state.cursor];
-    let mut lines = vec![format!(
+    let mut messages = vec![format!(
         "Remove {} from {}?",
         entry.skill,
         entry.target_root.join(&entry.skill).display()
     )];
     if !preview.would_remove_shared_binaries.is_empty() {
-        lines.push(format!(
+        messages.push(format!(
             "  shared binaries removed: {}",
             preview.would_remove_shared_binaries.join(", ")
         ));
     }
     if !preview.would_keep_shared_binaries.is_empty() {
-        lines.push(format!(
+        messages.push(format!(
             "  shared binaries kept (needed elsewhere): {}",
             preview.would_keep_shared_binaries.join(", ")
         ));
     }
     if !preview.would_remove_plugins.is_empty() {
-        lines.push(format!(
+        messages.push(format!(
             "  companion plugins removed: {}",
             preview.would_remove_plugins.join(", ")
         ));
     }
     if preview.has_mcp_entry {
-        lines.push("  MCP registration will be removed".to_string());
+        messages.push("  MCP registration will be removed".to_string());
     }
     if !preview.modified_files.is_empty() {
-        lines.push(format!(
+        messages.push(format!(
             "  NOTE: edited since install, removed anyway: {}",
             preview.modified_files.join(", ")
         ));
     }
-    frame("UNINSTALL -- preview", PREVIEW_HINT, lines, cols, body_rows)
+    let lines: Vec<String> = messages.iter().flat_map(|m| wrap(m, cols)).collect();
+    frame(PREVIEW_TITLE, PREVIEW_HINT, lines, cols, body_rows)
 }
 
+/// Reports what an already-irreversible removal actually did -- same
+/// never-truncate treatment as the preview above, and for the same reason:
+/// this is the one place left to see exactly what was removed.
 fn render_done(report: &UninstallReport, cols: usize, body_rows: usize) -> Vec<String> {
     if !report.was_installed {
         return frame(
-            "UNINSTALL -- done",
-            " press any key to return",
-            vec!["Not installed there; nothing to remove.".to_string()],
+            DONE_TITLE,
+            DONE_HINT,
+            wrap("Not installed there; nothing to remove.", cols),
             cols,
             body_rows,
         );
     }
-    let mut lines = vec!["Removed.".to_string()];
+    let mut messages = vec!["Removed.".to_string()];
     for binary in &report.removed_shared_binaries {
-        lines.push(format!("  removed shared binary: {binary}"));
+        messages.push(format!("  removed shared binary: {binary}"));
     }
     for plugin in &report.removed_plugins {
-        lines.push(format!("  removed companion plugin: {plugin}"));
+        messages.push(format!("  removed companion plugin: {plugin}"));
     }
     for grant in &report.permissions_removed {
-        lines.push(format!("  revoked permission grant: {grant}"));
+        messages.push(format!("  revoked permission grant: {grant}"));
     }
-    frame(
-        "UNINSTALL -- done",
-        " press any key to return",
-        lines,
-        cols,
-        body_rows,
-    )
+    let lines: Vec<String> = messages.iter().flat_map(|m| wrap(m, cols)).collect();
+    frame(DONE_TITLE, DONE_HINT, lines, cols, body_rows)
 }
 
 /// Runs the uninstall screen until the user backs out or completes a
@@ -380,5 +427,78 @@ mod tests {
 
         assert!(state.confirmed);
         assert!(matches!(state.screen, Screen::Done(_)));
+    }
+
+    #[test]
+    fn list_row_ellipsizes_the_path_but_never_the_skill_name() {
+        let row = list_row(
+            '>',
+            "ai-text-editor",
+            "/tmp/tmp.Bpsv1ejDt0/installed3/ai-text-editor",
+            40,
+        );
+        assert!(row.contains("ai-text-editor"), "name was cut: {row:?}");
+        assert!(row.contains("..."), "path was not truncated: {row:?}");
+        assert!(!row.contains('~'));
+    }
+
+    #[test]
+    fn list_row_leaves_a_short_path_untouched() {
+        let row = list_row('>', "todo", "/tmp/x", 40);
+        assert_eq!(row, "> todo (/tmp/x)");
+    }
+
+    #[test]
+    fn the_confirm_question_is_never_truncated_however_narrow() {
+        let entries = vec![Entry {
+            skill: "ai-text-editor".to_string(),
+            target_root: PathBuf::from("/tmp/tmp.Bpsv1ejDt0/installed3"),
+        }];
+        let mut state = UninstallPickerState::new(entries);
+        state.screen = Screen::Preview(UninstallPreview {
+            would_remove_shared_binaries: Vec::new(),
+            would_keep_shared_binaries: Vec::new(),
+            would_remove_plugins: Vec::new(),
+            has_mcp_entry: false,
+            modified_files: Vec::new(),
+        });
+        let frame = render_frame(&state, 40, 24);
+        // The path has no spaces to break on, so `wrap` legitimately
+        // hyphenates it across lines (same as any unbreakable token --
+        // `wrap_never_drops_a_byte_no_matter_how_long_the_text` already
+        // covers that it loses no content). What must never happen here is
+        // `pad`'s truncation marker.
+        assert!(
+            frame.iter().any(|l| l.contains("Remove ai-text-editor")),
+            "confirmation question missing entirely: {frame:?}"
+        );
+        assert!(
+            !frame.iter().any(|l| l.contains("...")),
+            "the confirmation screen must never show a truncation marker: {frame:?}"
+        );
+    }
+
+    #[test]
+    fn the_done_report_is_never_truncated_however_narrow() {
+        let long_binary = "a-very-long-shared-binary-name-that-does-not-fit-in-forty-columns";
+        let report = UninstallReport {
+            was_installed: true,
+            removed_shared_binaries: vec![long_binary.to_string()],
+            kept_shared_binaries: Vec::new(),
+            removed_plugins: Vec::new(),
+            mcp_entry_removed: false,
+            modified_files: Vec::new(),
+            permissions_removed: Vec::new(),
+            opencode_tui_hint_plugin_removed: false,
+        };
+        let lines = render_done(&report, 40, 20);
+        assert!(
+            lines.iter().any(|l| l.contains("removed shared binary")),
+            "lines were: {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|l| l.contains("...")),
+            "lines were: {lines:?}"
+        );
     }
 }

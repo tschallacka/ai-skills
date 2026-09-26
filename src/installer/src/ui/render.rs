@@ -15,64 +15,35 @@
 
 use super::layout::Layout;
 use super::model::{Focus, PickerState};
+use super::text::{overflow, pad, wrap};
 use crate::requirements::SkillState;
 
-pub(crate) fn pad(text: &str, width: usize) -> String {
-    if text.len() > width {
-        return if width == 0 {
-            String::new()
-        } else if width == 1 {
-            "~".to_string()
-        } else {
-            format!("{}~", &text[..width - 1])
-        };
-    }
-    format!("{text:<width$}")
-}
+/// Both bars are chrome, not critical content: at a width where they don't
+/// fit on one line, wrapping onto a second line is the graceful fallback,
+/// and only a THIRD line -- content wrapping alone still couldn't fit --
+/// gets `pad`'s `...` truncation. `layout::compute` needs the resulting
+/// line count (at this same `cols`) to reserve the right number of body
+/// rows before this ever renders; see its own doc comment.
+const BAR_MAX_LINES: usize = 3;
 
-/// Word-wraps to `width`, hyphenating a token wider than the pane.
-fn wrap(text: &str, width: usize) -> Vec<String> {
-    let width = width.max(8);
-    let mut lines = Vec::new();
-    let mut remaining = text;
-    while !remaining.is_empty() {
-        if remaining.len() <= width {
-            lines.push(remaining.to_string());
-            break;
-        }
-        let candidate = &remaining[..width];
-        match candidate.rfind(' ') {
-            Some(split) if split > 0 => {
-                lines.push(candidate[..split].to_string());
-                remaining = remaining[split..].trim_start_matches(' ');
-            }
-            _ => {
-                lines.push(format!("{}-", &remaining[..width - 1]));
-                remaining = &remaining[width - 1..];
-            }
-        }
-    }
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-    lines
-}
-
-fn title_bar(state: &PickerState, cols: usize) -> String {
-    let text = format!(
+pub(crate) fn title_bar_text(state: &PickerState) -> String {
+    format!(
         " AI-SKILLS INSTALLER  {}/{} installed  {} selected ",
         state.installed_count(),
         state.skills.len(),
         state.selected_count()
-    );
-    pad(&text, cols)
+    )
 }
 
-fn hint_bar(cols: usize) -> String {
-    pad(
-        " Up/Dn move  Enter/Space toggle  Tab focus  a all  n none  i install  q quit",
-        cols,
-    )
+pub(crate) const HINT_TEXT: &str =
+    " Up/Dn move  Enter/Space toggle  Tab focus  a all  n none  i install  q quit";
+
+pub(crate) fn title_bar_lines(state: &PickerState, cols: usize) -> Vec<String> {
+    overflow(&title_bar_text(state), cols, BAR_MAX_LINES)
+}
+
+pub(crate) fn hint_bar_lines(cols: usize) -> Vec<String> {
+    overflow(HINT_TEXT, cols, BAR_MAX_LINES)
 }
 
 /// The state suffix is appended after the name rather than inserted before
@@ -206,14 +177,14 @@ fn bottom_border(layout: &Layout) -> String {
 
 pub fn render_frame(state: &PickerState, layout: &Layout) -> Vec<String> {
     let mut out = Vec::with_capacity(layout.rows);
-    out.push(title_bar(state, layout.cols));
+    out.extend(title_bar_lines(state, layout.cols));
 
     if layout.narrow {
         render_narrow(state, layout, &mut out);
     } else {
         render_wide(state, layout, &mut out);
     }
-    out.push(hint_bar(layout.cols));
+    out.extend(hint_bar_lines(layout.cols));
     out
 }
 
@@ -301,11 +272,22 @@ mod tests {
             .collect()
     }
 
+    /// `layout::compute` needs the ACTUAL number of lines the title/hint
+    /// bars will take at this `cols` (they vary with both the width and,
+    /// for the title, the state's own counts) -- derived here exactly the
+    /// way `render_frame` derives them, so a test's `Layout` always agrees
+    /// with what `render_frame` actually produces at the same inputs.
+    fn layout_for(cols: usize, rows: usize, state: &PickerState, color_capable: bool) -> Layout {
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let title_rows = title_bar_lines(state, cols).len();
+        let hint_rows = hint_bar_lines(cols).len();
+        layout::compute(cols, rows, &names, color_capable, title_rows, hint_rows)
+    }
+
     #[test]
     fn every_line_is_exactly_the_terminal_width() {
         let state = PickerState::new(skills(&["todo", "bug-report"]));
-        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(80, 24, &names, true);
+        let layout = layout_for(80, 24, &state, true);
         let frame = render_frame(&state, &layout);
         assert_eq!(frame.len(), layout.rows);
         for line in &frame {
@@ -317,10 +299,11 @@ mod tests {
     fn the_cursor_row_carries_the_marker() {
         let mut state = PickerState::new(skills(&["todo", "bug-report"]));
         state.cursor = 1;
-        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(80, 24, &names, true);
+        let layout = layout_for(80, 24, &state, true);
+        let title_rows = title_bar_lines(&state, layout.cols).len();
         let frame = render_frame(&state, &layout);
-        let body_line = &frame[3];
+        // title bar(s), then the top border, then the second skill row.
+        let body_line = &frame[title_rows + 1 + 1];
         assert!(body_line.contains(">[x] bug-report"));
     }
 
@@ -328,19 +311,24 @@ mod tests {
     fn a_deselected_skill_shows_an_empty_checkbox() {
         let mut state = PickerState::new(skills(&["todo"]));
         state.toggle(0);
-        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(80, 24, &names, true);
+        let layout = layout_for(80, 24, &state, true);
+        let title_rows = title_bar_lines(&state, layout.cols).len();
         let frame = render_frame(&state, &layout);
-        assert!(frame[2].contains("[ ] todo"));
+        assert!(frame[title_rows + 1].contains("[ ] todo"));
     }
 
     #[test]
     fn a_narrow_terminal_renders_one_pane_with_no_pipe_divider() {
         let state = PickerState::new(skills(&["todo"]));
-        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(40, 24, &names, true);
+        let layout = layout_for(40, 24, &state, true);
+        let title_rows = title_bar_lines(&state, layout.cols).len();
+        let hint_rows = hint_bar_lines(layout.cols).len();
         let frame = render_frame(&state, &layout);
-        for line in &frame[2..frame.len() - 2] {
+        // Everything between the title bar's own line(s) + its top border,
+        // and the hint bar's own line(s) + its bottom border, is body.
+        let start = title_rows + 1;
+        let end = frame.len() - hint_rows - 1;
+        for line in &frame[start..end] {
             assert_eq!(line.matches('|').count(), 2, "line was: {line:?}");
         }
     }
@@ -350,8 +338,7 @@ mod tests {
         let mut state = PickerState::new(skills(&["a", "b", "c"]));
         state.toggle(0);
         state.skills[1].installed = true;
-        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(80, 24, &names, true);
+        let layout = layout_for(80, 24, &state, true);
         let frame = render_frame(&state, &layout);
         assert!(frame[0].contains("1/3 installed"));
         assert!(frame[0].contains("2 selected"));
@@ -376,17 +363,47 @@ mod tests {
     #[test]
     fn a_tall_terminal_reserves_blank_rows_for_the_mascot() {
         let state = PickerState::new(skills(&["todo"]));
-        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(80, 30, &names, true);
+        let layout = layout_for(80, 30, &state, true);
         assert!(layout.mascot_on);
+        let title_rows = title_bar_lines(&state, layout.cols).len();
         let frame = render_frame(&state, &layout);
         // Every line still comes out exactly `cols` wide even with the
         // mascot's rows reserved -- the invariant every other test checks.
         for line in &frame {
             assert_eq!(line.len(), layout.cols);
         }
-        let separator_row = 2 + layout.list_rows;
+        let separator_row = title_rows + 1 + layout.list_rows;
         assert!(frame[separator_row].contains("-------"));
+    }
+
+    #[test]
+    fn a_bar_that_does_not_fit_one_line_wraps_instead_of_truncating() {
+        // At 20 columns neither bar fits on one line; both must wrap
+        // rather than cut, and neither may show the truncation marker
+        // unless even wrapped they still overrun BAR_MAX_LINES lines.
+        let state = PickerState::new(skills(&["todo"]));
+        let title_lines = title_bar_lines(&state, 20);
+        let hint_lines = hint_bar_lines(20);
+        assert!(title_lines.len() > 1, "title did not wrap: {title_lines:?}");
+        assert!(hint_lines.len() > 1, "hint did not wrap: {hint_lines:?}");
+        for line in &title_lines {
+            assert_eq!(line.len(), 20);
+        }
+        for line in &hint_lines {
+            assert_eq!(line.len(), 20);
+        }
+    }
+
+    #[test]
+    fn a_bar_truncation_marker_if_any_lands_only_on_the_last_line() {
+        // An extreme width where even BAR_MAX_LINES of wrapping cannot fit
+        // the hint text: the cut, if it happens, must be confined to the
+        // final line.
+        let hint_lines = hint_bar_lines(6);
+        assert_eq!(hint_lines.len(), BAR_MAX_LINES);
+        for line in &hint_lines[..hint_lines.len() - 1] {
+            assert!(!line.contains("..."), "cut too early: {line:?}");
+        }
     }
 
     #[test]

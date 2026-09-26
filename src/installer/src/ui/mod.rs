@@ -11,6 +11,7 @@ pub mod mascot;
 pub mod model;
 pub mod render;
 pub mod terminal;
+pub mod text;
 pub mod uninstall_picker;
 
 use input::Key;
@@ -39,7 +40,16 @@ pub fn run_picker(skills: Vec<SkillEntry>, source_root: &Path) -> Option<Vec<(St
     loop {
         let (cols, rows) = terminal::size();
         let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
-        let layout = layout::compute(cols, rows, &names, color_mode != ColorMode::None);
+        let title_rows = render::title_bar_lines(&state, cols).len();
+        let hint_rows = render::hint_bar_lines(cols).len();
+        let layout = layout::compute(
+            cols,
+            rows,
+            &names,
+            color_mode != ColorMode::None,
+            title_rows,
+            hint_rows,
+        );
         state.clamp_scroll(layout.body_rows);
         clamp_info_scroll(&mut state, &layout);
         terminal::draw(&render::render_frame(&state, &layout));
@@ -122,10 +132,22 @@ fn handle_key(state: &mut PickerState, key: Key, layout: &layout::Layout, source
         Key::Char('n') => state.select_none(),
         // d/r/m are focus-gated: the ACTIONS lines are only usable when the
         // info pane holds focus ('i' already means "install", so cycling
-        // the mode could not reuse it).
+        // the mode could not reuse it). Pressed from the list pane instead,
+        // they used to do nothing at all with no feedback; now they say why,
+        // the same way `toggle`'s Blocked refusal already does.
         Key::Char('d') if state.focus == Focus::Info => state.dep_hint(),
         Key::Char('r') if state.focus == Focus::Info => state.reverify(source_root),
         Key::Char('m') if state.focus == Focus::Info => state.cycle_integration_mode(),
+        Key::Char(c @ ('d' | 'r' | 'm')) if state.focus == Focus::List => {
+            let action = match c {
+                'd' => "help me install dependencies",
+                'r' => "reverify dependencies",
+                _ => "cycle integration mode",
+            };
+            state.message = vec![format!(
+                "'{c}' ({action}) needs the DETAILS pane focused -- press Tab first"
+            )];
+        }
         Key::Char('i') => {
             state.done = true;
             state.confirmed = true;

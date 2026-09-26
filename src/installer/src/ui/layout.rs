@@ -42,10 +42,26 @@ fn list_width(cols: usize, skill_names: &[&str]) -> usize {
     width.max(8)
 }
 
-/// Rows: 1 title, 1 top border, body rows, 1 bottom border, 1 hint.
+/// Rows: `title_rows` title, 1 top border, body rows, 1 bottom border,
+/// `hint_rows` hint. Both are usually 1 -- the title/hint text fits one
+/// line at most terminal widths -- but at a narrow enough width either bar
+/// wraps onto more (via `text::overflow`), and the body must shrink to make
+/// room rather than let the frame grow past `rows`. Callers compute the
+/// actual wrapped line count for the title text they are about to show (it
+/// varies with the installed/selected counts) and the fixed hint text, at
+/// this same `cols`, and pass them in -- `layout` itself does not lay out
+/// text, only reserves the rows it will need.
 /// Columns: 1 vertical + left + 1 divider + right + 1 vertical.
-pub fn compute(cols: usize, rows: usize, skill_names: &[&str], color_capable: bool) -> Layout {
-    let body_rows = rows.saturating_sub(4).max(1);
+pub fn compute(
+    cols: usize,
+    rows: usize,
+    skill_names: &[&str],
+    color_capable: bool,
+    title_rows: usize,
+    hint_rows: usize,
+) -> Layout {
+    let reserved = 2 + title_rows.max(1) + hint_rows.max(1);
+    let body_rows = rows.saturating_sub(reserved).max(1);
     if cols < 56 {
         let left_w = (cols.saturating_sub(2)).max(8);
         return Layout {
@@ -85,55 +101,78 @@ mod tests {
 
     #[test]
     fn a_narrow_terminal_uses_one_pane() {
-        let layout = compute(40, 24, &["todo"], true);
+        let layout = compute(40, 24, &["todo"], true, 1, 1);
         assert!(layout.narrow);
         assert_eq!(layout.left_w, layout.right_w);
     }
 
     #[test]
     fn the_list_pane_widens_for_a_long_name() {
-        let layout = compute(120, 24, &["post-implementation-review"], true);
+        let layout = compute(120, 24, &["post-implementation-review"], true, 1, 1);
         assert!(!layout.narrow);
         assert!(layout.left_w >= "post-implementation-review".len());
     }
 
     #[test]
     fn the_list_pane_never_starves_the_detail_pane() {
-        let layout = compute(60, 24, &["post-implementation-review"], true);
+        let layout = compute(60, 24, &["post-implementation-review"], true, 1, 1);
         assert!(layout.right_w >= DETAIL_MIN_W);
         assert_eq!(layout.left_w + layout.right_w + 3, 60);
     }
 
     #[test]
     fn body_rows_is_always_at_least_one() {
-        let layout = compute(80, 5, &["a"], true);
+        let layout = compute(80, 5, &["a"], true, 1, 1);
         assert!(layout.body_rows >= 1);
     }
 
     #[test]
     fn a_tall_color_capable_terminal_gets_the_mascot() {
-        let layout = compute(80, 30, &["a"], true);
+        let layout = compute(80, 30, &["a"], true, 1, 1);
         assert!(layout.mascot_on);
         assert_eq!(layout.list_rows, layout.body_rows - MASCOT_RESERVED_ROWS);
     }
 
     #[test]
     fn a_terminal_with_no_color_never_gets_the_mascot() {
-        let layout = compute(80, 30, &["a"], false);
+        let layout = compute(80, 30, &["a"], false, 1, 1);
         assert!(!layout.mascot_on);
         assert_eq!(layout.list_rows, layout.body_rows);
     }
 
     #[test]
     fn a_short_terminal_drops_the_mascot_rather_than_starve_the_list() {
-        let layout = compute(80, 20, &["a"], true);
+        let layout = compute(80, 20, &["a"], true, 1, 1);
         assert!(!layout.mascot_on);
         assert_eq!(layout.list_rows, layout.body_rows);
     }
 
     #[test]
     fn narrow_layouts_never_show_the_mascot_even_with_color() {
-        let layout = compute(40, 40, &["a"], true);
+        let layout = compute(40, 40, &["a"], true, 1, 1);
         assert!(!layout.mascot_on);
+    }
+
+    #[test]
+    fn a_wrapped_title_or_hint_bar_shrinks_the_body_to_make_room() {
+        let base = compute(80, 24, &["a"], true, 1, 1);
+        let wrapped_title = compute(80, 24, &["a"], true, 2, 1);
+        let wrapped_hint = compute(80, 24, &["a"], true, 1, 3);
+        assert_eq!(wrapped_title.body_rows, base.body_rows - 1);
+        assert_eq!(wrapped_hint.body_rows, base.body_rows - 2);
+        // The frame's total row budget is otherwise unchanged: whatever a
+        // wrapped bar costs the body, it does not cost the overall `rows`.
+        assert_eq!(wrapped_title.rows, base.rows);
+    }
+
+    #[test]
+    fn a_zero_title_or_hint_row_count_is_treated_as_at_least_one() {
+        // Callers should never pass 0 (both bars always render at least one
+        // line), but `compute` does not trust that and reserves a floor of
+        // 1 each rather than let a caller's bug hand back extra body rows
+        // that a real render would then overflow past.
+        let with_zero = compute(80, 24, &["a"], true, 0, 0);
+        let with_one = compute(80, 24, &["a"], true, 1, 1);
+        assert_eq!(with_zero.body_rows, with_one.body_rows);
     }
 }
