@@ -44,6 +44,13 @@
 # already exists (the tag must already exist as a release for gh release
 # upload to have somewhere to attach to), and it is also how a maintainer
 # re-runs after fixing a build failure without re-cutting the release.
+#
+# B378: publishing the draft (this workflow's own last step, above) does
+# not reliably fire the `release: published` event release-npm.yml listens
+# for -- measured directly, twice, on real releases. So jobs.attach's own
+# final step dispatches release-npm.yml directly instead of depending on
+# that webhook alone; see release-npm.yml's own header for the safety
+# reasoning (the required-reviewer gate on its publish job is unaffected).
 
 name: release-installer
 
@@ -156,8 +163,11 @@ jobs:
     name: attach every asset and publish the release
     needs: build
     runs-on: ubuntu-latest
+    # contents: write publishes the release; actions: write is what lets the
+    # final step below dispatch release-npm.yml directly (B378).
     permissions:
       contents: write
+      actions: write
     steps:
       # Every leg's own release-installer-asset-<target> artifact holds one
       # file; merging all five into one directory is what actually gathers a
@@ -192,3 +202,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit '${{ inputs.tag }}' --repo '${{ github.repository }}' --draft=false
+
+      # B378: publishing the line above does NOT reliably fire the
+      # `release: published` event release-npm.yml listens for -- measured
+      # directly, twice, on real releases. This step is what actually starts
+      # it: it already knows for certain a real publish just happened, which
+      # is the whole thing the webhook was supposed to signal. `real_publish`
+      # is what gates release-npm.yml's own publish job open; see that
+      # workflow's own header for why this does not weaken the
+      # required-reviewer approval it is still gated behind.
+      - name: Trigger the real npm publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release-npm.yml --repo '${{ github.repository }}' \
+            --ref master -f tag='${{ inputs.tag }}' -f real_publish=true

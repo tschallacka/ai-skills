@@ -17,11 +17,24 @@
 #              no native runner can produce alone), then always runs an
 #              npm pack --dry-run. This is the job an unattended
 #              workflow_dispatch run needs to reach and complete.
-#   publish -- gated on a genuine `release: published` trigger and the
-#              npm-publish environment's required-reviewer protection
-#              (provisioned separately, via the GitHub API -- naming an
-#              environment here does not by itself create that protection).
-#              Never reachable from workflow_dispatch.
+#   publish -- gated on the npm-publish environment's required-reviewer
+#              protection (provisioned separately, via the GitHub API --
+#              naming an environment here does not by itself create that
+#              protection), and reachable only two ways: a genuine
+#              `release: published` event, or an explicit `real_publish`
+#              dispatch (see below). A plain workflow_dispatch dry run
+#              (real_publish left false, the default) never reaches it.
+#
+# B378: `release: published` does not reliably fire from
+# release-installer.yml's own draft-then-publish step (`gh release edit
+# --draft=false`) -- measured on a real release, twice. So that workflow's
+# own last step also dispatches this one directly, with `real_publish: true`
+# and the tag it just published, rather than depending on the webhook alone.
+# `real_publish` is a plain workflow_dispatch input, so it does not bypass
+# the required-reviewer gate above -- anyone could tick it from the Actions
+# UI, but doing so only lets a run REACH the gate sooner, exactly like the
+# genuine dispatch this comment describes; the environment's own approval
+# is still the actual guard, same as it always was.
 #
 # planning/scripts/<cmd> (~30 Rust-migrated planning commands) is staged at
 # a single canonical path with no per-target subdirectory, unlike every
@@ -36,7 +49,15 @@ name: release-npm
 on:
   release:
     types: [published]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and (if real_publish) publish. Unused for a plain dry run.
+        required: false
+      real_publish:
+        description: Set only by release-installer.yml's own dispatch, right after it publishes a release for real. Never set this by hand.
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -67,7 +88,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.release.tag_name || github.ref }}
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
           # Everything except benchmark/results/: its archived runs hold
           # paths longer than Windows allows, and checking them out fails
           # the windows-latest leg (ci.yml's own native job carries the
@@ -160,7 +181,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.release.tag_name || github.ref }}
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
 
       - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.98
@@ -216,14 +237,21 @@ jobs:
   publish:
     name: publish to npm (gated)
     needs: assemble
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.real_publish == true)
     environment: npm-publish
     runs-on: ubuntu-latest
+    # id-token: write is what lets npm's Trusted Publisher (OIDC) exchange
+    # this job's own identity for a short-lived publish token -- no
+    # NPM_TOKEN secret needed, and nothing to rotate as npm phases out
+    # non-2FA-backed classic tokens.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.98
@@ -256,6 +284,13 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
+      # npm's OIDC Trusted Publishing needs a recent-enough CLI; not
+      # trusting whatever version Node 22 happens to bundle, matching this
+      # workflow's own existing convention of never trusting a pin alone
+      # (see the target's std library steps above).
+      - name: Ensure npm itself is new enough for OIDC trusted publishing
+        run: npm install -g npm@latest
+
       - name: Regenerate .npmignore
         run: ./installer/build-release.sh --npmignore > .npmignore
 
@@ -266,7 +301,10 @@ jobs:
           echo 'Staging planning/scripts/<cmd> for x86_64-unknown-linux-musl (this job'"'"'s own runner) -- a known, deliberate single-platform limitation of the pre-existing planning/scripts/<cmd> convention, not something this workflow redesigns.'
           ./installer/build-release.sh --prepare
 
+      # No NODE_AUTH_TOKEN/NPM_TOKEN: this package is registered with npm
+      # as a Trusted Publisher for this exact repo + workflow + environment,
+      # so `npm publish` exchanges this job's own id-token (above) for a
+      # short-lived publish token automatically -- nothing stored, nothing
+      # to rotate.
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
