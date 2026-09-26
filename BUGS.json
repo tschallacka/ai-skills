@@ -5127,6 +5127,25 @@
       "updated_at": "2026-09-24T11:34:36Z"
     },
     {
+      "id": "B379",
+      "title": "Installer interactive TUI: narrow-width truncation hides the uninstall confirmation path and silently no-ops d/r/m from the wrong pane",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Drive 'installer interactive --target DIR' via a real PTY (interactive-shell skill) at 40 columns: open the uninstall picker, select an installed skill, press Enter for the removal confirmation; separately, from the SKILLS list focus (not DETAILS), press d, r, or m.",
+      "observed": "The confirmation screen's 'Remove <skill> from <path>?' line hard-truncated the destination path with a single ambiguous '~' marker, so the exact path about to be irreversibly deleted was not fully visible before confirming. The uninstall list row similarly truncated the skill name itself. The main picker's title/hint bars had zero test coverage for narrow-width content and used the same bare '~' marker, which visually collides with the unrelated SkillState::Degraded ' ~' suffix. Separately, pressing d/r/m while the SKILLS list pane (not DETAILS) had focus did nothing at all, with no error or hint explaining why.",
+      "expected": "A destructive-action confirmation must never truncate the path it names. Chrome (title/hint bars, list rows) may wrap or truncate gracefully but with an unambiguous marker, and truncation should not remove the piece of text that uniquely identifies an entry (the skill name). A key press that is refused for a reason (wrong pane focused) should say so.",
+      "mechanism": "pad() (src/installer/src/ui/render.rs) hard-truncated any text wider than its column budget to a single line ending in '~', with no line-wrapping fallback and no cap-aware truncation; uninstall_picker.rs's render_preview/render_done piped every line straight through pad() with no wrapping at all, so the safety-critical confirmation text was just as truncatable as decorative chrome. ui/mod.rs's handle_key guarded d/r/m on Focus::Info with a bare '_ => {}' fallthrough when focus was List, producing no feedback.",
+      "surfaces": [],
+      "fix": "New shared src/installer/src/ui/text.rs: pad() now ends a hard truncation in '...' instead of the ambiguous, collision-prone '~'; a new overflow(text, width, max_lines) wraps first and truncates only the final line if wrapping alone still doesn't fit. layout::compute now takes real title/hint row counts so the frame's total row budget stays exact even when a bar wraps onto extra lines. Applied per content criticality: uninstall_picker.rs's preview/done screens (the destructive-action confirmation and its report) now use uncapped wrap() and are never truncated at all; the main picker's title/hint bars and uninstall_picker's own title/hint bars use overflow(..., 3) (up to 2 clean wrapped lines, truncate only the 3rd); the uninstall list row now ellipsizes only the parenthesized path, never the skill name. ui/mod.rs's handle_key now sets a state.message explaining the focus requirement when d/r/m is pressed from the List pane.",
+      "verification": "251 unit tests pass (11 new, including a dedicated no-truncation-marker test for the confirmation/done screens and a body-row-shrinks-correctly test for wrapped title/hint bars); cargo fmt and clippy -D warnings clean on the crate and the whole workspace; re-verified live against the real release binary via the interactive-shell skill at 40 columns -- confirmation path now shows in full across two wrapped lines, list row ellipsizes only the path, and the d/r/m focus message renders correctly.",
+      "found_by": "live TUI visual/UX review via the interactive-shell skill, user-requested",
+      "notes": null,
+      "created_at": "2026-09-26T14:27:06Z",
+      "updated_at": "2026-09-26T14:27:16Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
