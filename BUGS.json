@@ -1,6 +1,6 @@
 {
   "skill": "bug-report",
-  "skill_version": "2.0.0-alpha.1",
+  "skill_version": "2.0.0-alpha.2",
   "comment": "Defects found in this repository's own skills and installer.",
   "bugs": [
     {
