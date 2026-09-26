@@ -3434,7 +3434,7 @@
     {
       "id": "B378",
       "title": "release-installer.yml's draft-publish step does not reliably fire release: published",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3443,12 +3443,12 @@
       "expected": "release-npm.yml's build/assemble/publish pipeline runs automatically once the release is genuinely public, the same as it does for a release created directly as non-draft (confirmed reliable on earlier throwaway prereleases before T70/W06's draft-first redesign).",
       "mechanism": "release-installer.yml's final step publishes via 'gh release edit <tag> --draft=false' (the draft-first redesign that avoids GitHub's immutable-releases race). That API call apparently does not reliably fire the release: published webhook GitHub Actions listens for, so nothing ever creates the pending deployment review a maintainer would approve for the real npm publish. Separately, no NPM_TOKEN repository secret exists yet either (gh secret list: only REGISTERS_PUSH_TOKEN), which would also block a correctly-triggered publish job -- a second, independent blocker on the same path.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "release-installer.yml's own final step now dispatches release-npm.yml directly (gh workflow run release-npm.yml -f tag=<tag> -f real_publish=true) right after confirming the release is public, instead of depending on the release: published webhook alone. release-npm.yml's publish job gates on 'github.event_name == release || (workflow_dispatch && inputs.real_publish == true)', which does not weaken the npm-publish environment's required-reviewer approval -- a plain dry-run dispatch still leaves real_publish false by default, and a deliberately-set flag only lets a run reach that same approval gate sooner. Also switched the actual npm publish from a stored NPM_TOKEN secret (which never existed) to npm's Trusted Publisher / OIDC mechanism: the publish job requests id-token: write and npm publish exchanges that for a short-lived token automatically, now that npm's own package settings name this repo + release-npm.yml + the npm-publish environment as a trusted publisher (user-side setup, confirmed done).",
+      "verification": "NOT yet verified against a real release -- that would require cutting another real release, out of scope right now. Verified only mechanically: YAML/actionlint clean on both files, full pre-push-check.sh --full green (249/249). Deferred until the next real release naturally exercises it, or an explicit rehearsal is requested.",
       "found_by": "",
       "notes": "Found and left open at the user's own direction (2026-09-25): they will handle the actual npm publish and/or the trigger fix themselves.",
       "created_at": "2026-09-25T13:56:30Z",
-      "updated_at": "2026-09-25T13:56:30Z"
+      "updated_at": "2026-09-26T11:49:31Z"
     },
     {
       "id": "B14",
