@@ -516,7 +516,7 @@ EOF
             ;;
         todo)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
-                schema.1.4.2.json schema.2.0.0-alpha.1.json
+                schema.1.4.2.json schema.2.0.0-alpha.1.json schema.2.0.0-alpha.2.json
             # The queue's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its queue instead of being told
             # to hand-edit JSON. Only the host's row is emitted, existence-gated
@@ -543,7 +543,7 @@ EOF
             ;;
         bug-report)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
-                schema.1.4.2.json schema.2.0.0-alpha.1.json
+                schema.1.4.2.json schema.2.0.0-alpha.1.json schema.2.0.0-alpha.2.json
             # The register's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its register instead of being
             # told to hand-edit JSON. Only the host's row is emitted,

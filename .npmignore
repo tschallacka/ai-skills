@@ -10,6 +10,7 @@
 .agents/knowledge/claude-code-grep-shim.md
 .agents/knowledge/compiled-binary-preference-fresh-checkout.md
 .agents/knowledge/github-ci-runners.md
+.agents/knowledge/npm-files-array-overrides-npmignore.md
 .agents/knowledge/opencode-plugin-loading-and-advisory-injection.md
 .agents/knowledge/pty-sessions-on-macos.md
 .agents/knowledge/shared-machine-resources-in-tests.md
@@ -3144,6 +3145,7 @@ src/installer/src/ui/mod.rs
 src/installer/src/ui/model.rs
 src/installer/src/ui/render.rs
 src/installer/src/ui/terminal.rs
+src/installer/src/ui/text.rs
 src/installer/src/ui/uninstall_picker.rs
 src/installer/src/uninstall.rs
 src/interactive-shell-mcp/Cargo.toml

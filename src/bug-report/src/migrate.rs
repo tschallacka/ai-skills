@@ -23,7 +23,7 @@
 use crate::register::{Bug, Register};
 
 /// The register version this binary writes.
-pub const SUPPORTED: &str = "2.0.0-alpha.1";
+pub const SUPPORTED: &str = "2.0.0-alpha.2";
 
 pub struct Unconvertible {
     pub id: String,

@@ -256,10 +256,15 @@ fi
 # bin/ no longer appears under an installed skill at all -- todo's binary
 # lands in the shared location above instead. binaries.tsv itself still
 # ships, since it is the packaging-side declaration, not the installed
-# artifact.
+# artifact. Every historical schema.*.json ships forever (an agent holding
+# an old TODO.json needs its own version's upgrade recipe), so the expected
+# list is however many actually exist on disk right now, not a fixed count
+# of two -- a hardcoded "1.4.2 plus current" broke the moment a third
+# version (2.0.0-alpha.2) shipped alongside the first two.
+expected_schemas="$(cd "$repo_root/todo" && ls schema.*.json 2>/dev/null | sort | tr '\n' ' ')"
 t_assert_eq 'and the installed skill is complete' \
     "$(ls "$work/installed/todo" 2>/dev/null | sort | tr '\n' ' ')" \
-     "SKILL.md binaries.tsv docs requires.tsv schema.1.4.2.json schema.$version.json "
+     "SKILL.md binaries.tsv docs requires.tsv ${expected_schemas}"
 t_assert_eq 'and its binary reached the shared bin' \
     "$([ -x "$scratch_home/.config/tsch-ai-skills/bin/todo" ] && printf present)" 'present'
 
