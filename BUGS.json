@@ -3451,6 +3451,25 @@
       "updated_at": "2026-09-26T11:49:31Z"
     },
     {
+      "id": "B380",
+      "title": "release-npm.yml's npm publish step fails on any prerelease version with no --tag",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Cut a real prerelease (e.g. v2.0.0-alpha.2), approve the npm-publish environment's gated deployment, and let release-npm.yml's 'Publish to npm' step run plain 'npm publish --access public' against it.",
+      "observed": "npm error You must specify a tag using --tag when publishing a prerelease version. Process completed with exit code 1 -- the whole release-npm.yml run failed after the approval, on the real v2.0.0-alpha.2 release.",
+      "expected": "A prerelease version publishes successfully under a dist-tag matching its own prerelease identifier (e.g. 'alpha' for 2.0.0-alpha.2), and a stable version continues to publish under the default 'latest' tag exactly as before.",
+      "mechanism": "npm refuses to let a bare 'npm publish' move the 'latest' dist-tag onto a prerelease version (anything with a semver '-identifier' suffix) without an explicit --tag; the workflow's Publish to npm step never accounted for this because every version shipped through it before this one was a stable release (1.0.0, 1.1.0, ...) -- v2.0.0-alpha.2 is the first prerelease to ever reach this step for real, since v2.0.0-alpha.1's npm publish never ran at all (B378).",
+      "surfaces": [],
+      "fix": "Publish to npm now reads package.json's version and, when it carries a semver prerelease suffix (anything after the first '-', up to the next '.'), passes that as --tag to npm publish (e.g. 2.0.0-alpha.2 -> --tag alpha). A stable version (no '-') publishes exactly as before with no --tag, defaulting to latest. Verified the tag-derivation logic directly against 2.0.0-alpha.2, 2.0.0, 1.4.2, 2.0.0-beta.1 and 2.0.0-rc.1+build.5; actionlint/shellcheck-in-actionlint reports zero new findings.",
+      "verification": "Not yet re-verified against a real release -- the failed v2.0.0-alpha.2 run needs a fresh workflow_dispatch re-run (or a future release) to confirm npm publish actually succeeds and lands under the 'alpha' dist-tag.",
+      "found_by": "real release attempt: v2.0.0-alpha.2, approved by the user, failed at npm publish",
+      "notes": null,
+      "created_at": "2026-09-26T19:44:38Z",
+      "updated_at": "2026-09-26T19:44:49Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
