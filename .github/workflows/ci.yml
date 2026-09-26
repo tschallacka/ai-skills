@@ -1336,9 +1336,15 @@ jobs:
           [ -f "$bin" ] || { echo "::error::no bugs artifact at $bin"; exit 1; }
 
           work="$(mktemp -d)"
+          # The fixture's own skill_version must match whatever this binary
+          # actually writes (src/bug-report/src/migrate.rs's SUPPORTED), or
+          # the very first "$bin" check below refuses it as a stale version
+          # -- read it from package.json rather than hardcoding it a third
+          # time, so a future version bump cannot forget this one.
+          version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -1)"
           # printf rather than a heredoc: a heredoc terminator cannot be
           # indented, and YAML block scalars indent every line.
-          printf '%s\n' '{ "skill": "bug-report", "skill_version": "2.0.0-alpha.1", "comment": "CI fixture.", "bugs": [] }' > "$work/reg.json"
+          printf '{ "skill": "bug-report", "skill_version": "%s", "comment": "CI fixture.", "bugs": [] }\n' "$version" > "$work/reg.json"
           export BUGS_JSON="$work/reg.json"
           "$bin" check
           "$bin" add --title "a CI defect" --reproduce "run the leg" \
@@ -1384,7 +1390,10 @@ jobs:
           [ -f "$bin" ] || { echo "::error::no todo artifact at $bin"; exit 1; }
 
           work="$(mktemp -d)"
-          printf '%s\n' '{ "skill": "todo", "skill_version": "2.0.0-alpha.1", "comment": "CI fixture.", "tasks": [] }' > "$work/queue.json"
+          # See the bug-report leg above for why this is read rather than
+          # hardcoded: it must match src/todo/src/migrate.rs's SUPPORTED.
+          version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -1)"
+          printf '{ "skill": "todo", "skill_version": "%s", "comment": "CI fixture.", "tasks": [] }\n' "$version" > "$work/queue.json"
           export TODO_JSON="$work/queue.json"
           "$bin" check
           "$bin" add --title "a CI task" --detail "run the leg" --priority high
