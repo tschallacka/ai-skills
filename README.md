@@ -53,8 +53,10 @@ contributing a harness that is not yet listed.
 | macOS | 11+ with the stock `/bin/bash` 3.2, BSD userland; Homebrew bash not required |
 | Windows | Git for Windows' bash with its bundled coreutils, checked by CI legs, or WSL2, which is a Linux install. The evidence and the conventions are in `.agents/MAINTAINER.md` 1.16, which is in a full git checkout and not part of the installed package |
 
-The installer and the helper scripts need `bash`, POSIX `coreutils`, `awk`,
-`sed`, `grep`, `git`, and `curl` for the one-command install. The `planning`
+The one-command install needs a POSIX `sh` (bootstrap.sh has no bash-only
+constructs), plus `curl`, `tar`, `awk`, and standard `coreutils`; the
+installed skills' own helper scripts need `bash`, POSIX `coreutils`, `awk`,
+`sed`, `grep`, and `git`. The `planning`
 skill additionally needs `rjq`, and on macOS `resource-limited-testing` needs
 `memlimit`; the installer checks for both up front and prints a per-platform
 install hint rather than failing partway through. Those two are the only extra
@@ -82,7 +84,7 @@ them. Every other skill behaves identically on both.
 Run this command and choose the skills and agent destination interactively:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh | sh
 ```
 
 The installer can install all the skills or one skill, and supports these
@@ -150,7 +152,7 @@ Interactively, choose that one skill at the menu. Headless, name it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh \
-  | bash -s -- install --skill planning --target "$HOME/.codex/skills"
+  | sh -s -- install --skill planning --target "$HOME/.codex/skills"
 ```
 
 `--skill` may be given more than once, and each value may itself be a
@@ -166,12 +168,12 @@ known. `--target` takes a single root, so installing into two roots is two runs.
 ```bash
 # Install all skills into the shared Agent Skills root
 curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh \
-  | bash -s -- install --all --target "$HOME/.agents/skills"
+  | sh -s -- install --all --target "$HOME/.agents/skills"
 
 # Unattended replacement: managed version transitions replace without backups,
 # unmanaged changed files are still backed up as <file>.bak
 curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh \
-  | bash -s -- install --all --target "$HOME/.agents/skills" --yes
+  | sh -s -- install --all --target "$HOME/.agents/skills" --yes
 ```
 
 Every run ends with a **summary block on stdout** saying what was installed,
@@ -258,9 +260,10 @@ Review the installer before running it if you do not trust the source. Skills
 are instructions that may guide agents to run commands or access files.
 
 `install.sh` retired in favor of a compiled Rust installer
-(`src/installer/`); `installer/bootstrap.sh` is the small, still-bash entry
-point that detects the platform, downloads the matching release, and hands
-off to it — see [CONTRIBUTING.md](CONTRIBUTING.md) before editing either.
+(`src/installer/`); `installer/bootstrap.sh` is the small, pure-POSIX-`sh`
+entry point (`#!/usr/bin/env sh`, no bash-only constructs) that detects the
+platform, downloads the matching release, and hands off to it — see
+[CONTRIBUTING.md](CONTRIBUTING.md) before editing either.
 
 ## Supported agent documentation
 

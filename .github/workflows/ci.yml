@@ -1135,8 +1135,8 @@ jobs:
       # cfg-gated on Unix only where that already has a working non-Unix
       # branch (install.rs/permissions.rs's executable-bit handling), and
       # installer_platform already resolves x86_64-pc-windows-msvc as a real
-      # target. installer/bootstrap.sh, the curl-piped bash LAUNCHER around
-      # this binary, is the actually POSIX-only piece -- but that is a
+      # target. installer/bootstrap.sh, the curl-piped POSIX sh LAUNCHER
+      # around this binary, is the actually POSIX-only piece -- but that is a
       # statement about bootstrap.sh, not about whether this binary builds,
       # runs, and answers --platform/--help correctly on Windows, which is
       # what this leg checks.

@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# test-bootstrap-piped-stdin.sh — the documented `curl ... | bash` one-liner
+# test-bootstrap-piped-stdin.sh — the documented `curl ... | sh` one-liner
 # must deliver a REAL keystroke to the compiled installer's interactive
 # prompts, not a leftover line of bootstrap.sh's own source text.
 #
-# Measured for real (B381): bash reading bootstrap.sh FROM STDIN (the shape
-# `curl ... | bash` actually is -- no script file argument, so bash treats
-# stdin as its own script source) still needs to read more of that same
-# script after any earlier statement that reassigns fd 0. A bare `exec <
-# /dev/tty` placed before the final handoff starves that reading and bash
-# then tries to parse the next REAL keystroke as more shell source. The fix
-# is putting the `< /dev/tty` redirect directly on the exec statement that
-# hands off to the compiled installer -- the last thing bash ever does, so
-# it never needs its own script again after it runs.
+# Measured for real (B381): a shell reading bootstrap.sh FROM STDIN (the
+# shape `curl ... | sh` actually is -- no script file argument, so the
+# shell treats stdin as its own script source) still needs to read more of
+# that same script after any earlier statement that reassigns fd 0. A bare
+# `exec < /dev/tty` placed before the final handoff starves that reading
+# and the shell then tries to parse the next REAL keystroke as more shell
+# source. The fix is putting the `< /dev/tty` redirect directly on the exec
+# statement that hands off to the compiled installer -- the last thing the
+# shell ever does, so it never needs its own script again after it runs.
+# bootstrap.sh itself is pure POSIX sh (`#!/usr/bin/env sh`); this test
+# pipes it through the real `sh` on this machine's PATH (dash), the
+# interpreter the documented one-liner actually invokes.
 #
 # This needs a REAL pty: the bug is specifically about what a process gets
 # when it opens /dev/tty, which has no meaning against a plain pipe. `script`
@@ -74,7 +77,7 @@ run_piped() {
     # The delayed keystroke goes in on script's OWN stdin (relayed into the
     # pty); the pipe reading bootstrap.sh is entirely internal to the
     # command script runs, so it never touches those relayed bytes.
-    local piped_cmd="RESULT_LOG='$result_log' AI_SKILLS_NO_SPLASH=1 AI_SKILLS_RELEASE_URL='$release_url' bash -c \"cat '$repo_root/installer/bootstrap.sh' | bash\""
+    local piped_cmd="RESULT_LOG='$result_log' AI_SKILLS_NO_SPLASH=1 AI_SKILLS_RELEASE_URL='$release_url' bash -c \"cat '$repo_root/installer/bootstrap.sh' | sh\""
     if [ "$is_util_linux" -eq 1 ]; then
         ( sleep 1; printf 'hello\n' ) | script -qec "$piped_cmd" "$typescript" >/dev/null 2>&1 || true
     else

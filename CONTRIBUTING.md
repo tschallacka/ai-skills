@@ -196,7 +196,9 @@ Then, specific to this repo:
   retired; see git history and `.agents/MAINTAINER.md` for the writeup. Change
   installer behavior in `src/installer/src/*.rs`, run its own test suite
   (`cargo test -p installer`), and rebuild (`cargo build --release -p
-  installer`). `installer/bootstrap.sh` is the one part still bash: a small,
+  installer`). `installer/bootstrap.sh` is pure POSIX `sh` (`#!/usr/bin/env
+  sh`, no bash-only constructs — arrays, `(( ))` arithmetic, `<<<` here-strings,
+  `printf -v`, and bash substring expansion are all off limits): a small,
   self-contained curl-piped entry point that detects the platform, downloads
   the matching release asset, and hands off to the binary — see its own header
   comment before editing it, since it cannot source anything else in this
