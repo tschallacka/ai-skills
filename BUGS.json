@@ -412,6 +412,25 @@
       "updated_at": "2026-09-24T09:20:49Z"
     },
     {
+      "id": "B381",
+      "title": "installer/bootstrap.sh: the documented curl-pipe-bash one-liner corrupts the first interactive prompt's input",
+      "status": "fixed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Pipe bootstrap.sh into bash exactly as README documents (curl -fsSL .../bootstrap.sh | bash, or equivalently 'cat bootstrap.sh | bash' for a local copy), against a destination with more than one detected agent root, and actually type a real answer at the first interactive prompt ('Install into which skill root?') through a real PTY.",
+      "observed": "The compiled installer's read of the root-choice answer returns a literal line of bootstrap.sh's OWN source text (e.g. 'exec \"$installer_bin\" \"$@\"') instead of the digit actually typed, and the run fails with 'installer: Unknown target choice'. Confirmed live via a real PTY session (interactive-shell skill) driving the actual documented one-liner.",
+      "expected": "A real keystroke typed at the installer's interactive prompt is what the installer reads back, regardless of whether bootstrap.sh was invoked as 'curl | bash' (piped, no script file) or downloaded to a file first and run as 'bash bootstrap.sh'.",
+      "mechanism": "curl ... | bash gives bash no script-file argument, so bash reads bootstrap.sh itself FROM STDIN, exactly like the interactive installer's own prompts read from stdin -- they share the one fd. exec inherits whatever that fd currently is into the compiled installer, so the installer's read can return whatever is left of bootstrap.sh's own unconsumed script bytes rather than real terminal input. bash bootstrap.sh (downloaded to a file first) never hits this, since the script then comes from a path argument and stdin is the real terminal throughout.",
+      "surfaces": [],
+      "fix": "installer/bootstrap.sh's final handoff now redirects stdin from /dev/tty directly ON the exec statement that hands off to the compiled installer (exec \"$installer_bin\" ... < /dev/tty), not via a separate prior 'exec < /dev/tty' statement -- an earlier attempt at that separate-statement form reproduced a DIFFERENT corruption (bash itself then tried to read more of its own script from the redirected fd and interpreted a real keystroke as shell source), confirmed live before landing on the exec-statement form. Only redirects when needed (stdin is not already a tty) and possible (/dev/tty opens); a headless run with no controlling terminal at all is left untouched.",
+      "verification": "New automated regression test tests/test-bootstrap-piped-stdin.sh: allocates a real pty (script(1)) around 'cat bootstrap.sh | bash' exactly reproducing the piped invocation shape, delivers a keystroke on a real delay so it arrives separately in time from bootstrap.sh's own bytes (as a real user's keypress would), and asserts a stub installer reads it back verbatim. Confirmed the test fails against the pre-fix bootstrap.sh (reproducing the exact corruption) and passes against the fix. Also verified live end-to-end via the interactive-shell skill: the real documented one-liner, piped, against a real GitHub release binary, now correctly delivers typed input through the root-choice prompt and the full-screen picker, completing a real install.",
+      "found_by": "live verification via the interactive-shell skill, user-requested testing of the documented GUI/npm install paths and their real per-platform binary downloads",
+      "notes": null,
+      "created_at": "2026-09-27T11:10:41Z",
+      "updated_at": "2026-09-27T11:10:52Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
