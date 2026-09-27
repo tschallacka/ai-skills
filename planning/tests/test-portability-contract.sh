@@ -88,6 +88,12 @@ in_allowlist() {
         ./planning/tests/test-register-helpers.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-plan-dir-synonym.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-overview-state.sh:bash-by-path-lookup) return 0 ;;
+        # The whole point of this test is the literal `curl | bash` shape a
+        # real user types -- whatever bare "bash" resolves to on THEIR PATH,
+        # not this suite's own pinned $BASH/RUN_TESTS_BASH interpreter, since
+        # that is a different, more controlled scenario than what the bug
+        # this guards against actually needs.
+        ./tests/test-bootstrap-piped-stdin.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-runtime-dependencies.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/lib-portable.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/tests/test-review-lifecycle.sh:sha256-tool) return 0 ;;

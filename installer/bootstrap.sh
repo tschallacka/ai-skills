@@ -352,10 +352,46 @@ done
 [ -n "$installer_bin" ] && [ -x "$installer_bin" ] \
     || bootstrap_die "the downloaded release has no executable 'installer'"
 
+# The documented one-liner is `curl ... | bash`: bash then reads THIS
+# SCRIPT from stdin, not a file, so stdin is the pipe carrying bootstrap.sh's
+# own remaining bytes. `exec` inherits that fd as-is into the compiled
+# installer -- confirmed for real: its interactive root-choice `read` came
+# back with a line of bootstrap.sh's OWN source text ("exec \"\$installer_bin\"
+# \"\$@\"") instead of the keystroke actually typed, because bash was still
+# reading ITS OWN script from that same fd. `bash bootstrap.sh` (downloaded
+# to a file first) never hits this: its stdin is the real terminal from the
+# start, since the script comes from a path argument, not from stdin.
+#
+# The redirect belongs on the exec statement itself, not on a bare `exec <
+# /dev/tty` line before it: a bare redirect is its own statement, and bash
+# must still read more of ITS OWN script from the (now-redirected) fd 0
+# afterward -- confirmed for real, this starves bash's own script reading
+# and it tries to parse a typed keystroke as the next line of shell source.
+# `exec CMD ARGS < /dev/tty`, in contrast, is parsed as a single complete
+# statement before any part of it runs, and it is unconditionally the last
+# thing this script ever does, so bash never needs to read its own source
+# again after it.
+#
+# Only redirect when it is actually needed (stdin is not already a tty,
+# i.e. it is that pipe) and actually possible (/dev/tty exists and opens):
+# a headless run with no controlling terminal at all (many CI runners)
+# never reads a prompt regardless, so it is left alone rather than failing
+# this redirect.
+use_tty=0
+if [ ! -t 0 ] && [ -r /dev/tty ]; then
+    use_tty=1
+fi
+
 # With no arguments, default to the interactive skill picker: the compiled
 # installer's own argv parsing does not special-case an empty argv (it
 # prints --help instead), so bootstrap.sh supplies that default here.
 if [ "$#" -eq 0 ]; then
+    if [ "$use_tty" -eq 1 ]; then
+        exec "$installer_bin" interactive < /dev/tty
+    fi
     exec "$installer_bin" interactive
+fi
+if [ "$use_tty" -eq 1 ]; then
+    exec "$installer_bin" "$@" < /dev/tty
 fi
 exec "$installer_bin" "$@"
