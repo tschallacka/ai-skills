@@ -15,10 +15,15 @@ use std::path::{Path, PathBuf};
 pub enum PermissionOutcome {
     /// No settings.json exists at the resolved path; nothing was touched.
     NoConfigFile,
-    /// Every entry this grant needs was already present.
+    /// Every entry this grant needs was already present, and no dead entry
+    /// was found to prune.
     AlreadyPresent,
-    /// These entries were appended to `permissions.allow`.
-    Added(Vec<String>),
+    /// `added` were appended to `permissions.allow`; `pruned` were removed
+    /// from it as dead rules Claude Code never matches (`is_dead_allow_rule`).
+    Changed {
+        added: Vec<String>,
+        pruned: Vec<String>,
+    },
 }
 
 fn strip_trailing_slashes(value: &str) -> &str {
@@ -184,31 +189,53 @@ fn allow_array(permissions: &Map<String, Value>) -> Vec<Value> {
     }
 }
 
+/// The two shapes of allow rule earlier installers wrote that Claude Code
+/// never matches: a `**` inside a `Bash(<prefix>:*)` literal prefix, and a
+/// `Write(P)` beside an `Edit(P)`, which already covers every editing tool.
+fn is_dead_allow_rule(rule: &str, allow: &[Value]) -> bool {
+    if let Some(prefix) = rule
+        .strip_prefix("Bash(")
+        .and_then(|r| r.strip_suffix(":*)"))
+    {
+        return prefix.contains("**");
+    }
+    rule.strip_prefix("Write(")
+        .is_some_and(|rest| allow.contains(&Value::String(format!("Edit({rest}"))))
+}
+
 fn merge_allow_entries(cfg: &Path, entries: &[String]) -> io::Result<PermissionOutcome> {
     backup::backup_file(cfg)?;
 
     let raw = fs::read_to_string(cfg)?;
     let mut doc = as_object(serde_json::from_str(&raw).ok());
     let mut permissions = as_object(doc.get("permissions").cloned());
-    let allow = allow_array(&permissions);
+    let mut allow = allow_array(&permissions);
 
-    let already_present = |value: &Value| allow.contains(value);
     let added: Vec<String> = entries
         .iter()
-        .filter(|e| !already_present(&Value::String((*e).clone())))
+        .filter(|e| !allow.contains(&Value::String((*e).clone())))
         .cloned()
         .collect();
-    if added.is_empty() {
+    allow.extend(added.iter().cloned().map(Value::String));
+
+    let snapshot = allow.clone();
+    let mut pruned = Vec::new();
+    allow.retain(|value| match value.as_str() {
+        Some(rule) if is_dead_allow_rule(rule, &snapshot) => {
+            pruned.push(rule.to_string());
+            false
+        }
+        _ => true,
+    });
+    if added.is_empty() && pruned.is_empty() {
         return Ok(PermissionOutcome::AlreadyPresent);
     }
 
-    let mut new_allow = allow;
-    new_allow.extend(added.iter().cloned().map(Value::String));
-    permissions.insert("allow".to_string(), Value::Array(new_allow));
+    permissions.insert("allow".to_string(), Value::Array(allow));
     doc.insert("permissions".to_string(), Value::Object(permissions));
 
     write_preserving_mode(cfg, &serde_json::to_string_pretty(&Value::Object(doc))?)?;
-    Ok(PermissionOutcome::Added(added))
+    Ok(PermissionOutcome::Changed { added, pruned })
 }
 
 pub enum PermissionRemovalOutcome {
@@ -933,7 +960,7 @@ mod tests {
         let outcome =
             claude_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
         let added = match outcome {
-            PermissionOutcome::Added(entries) => entries,
+            PermissionOutcome::Changed { added, .. } => added,
             _ => panic!("expected Added"),
         };
         assert_eq!(added.len(), 8);
@@ -974,6 +1001,71 @@ mod tests {
     }
 
     #[test]
+    fn dead_rules_earlier_installers_wrote_are_pruned_and_reported() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = settings_at(
+            home.path(),
+            r#"{"permissions":{"allow":[
+                "Bash(ls:*)",
+                "Bash(/scripts/**:*)",
+                "Bash(python3 /old/skills/**:*)",
+                "Write(/wt/**)",
+                "Write(/elsewhere/**)",
+                "Bash(python3 */.claude-paul/skills/:*)"
+            ]}}"#,
+        );
+
+        let outcome = claude_worktrees_permissions("/wt", home.path()).unwrap();
+        let pruned = match outcome {
+            PermissionOutcome::Changed { pruned, .. } => pruned,
+            _ => panic!("expected Changed"),
+        };
+        assert_eq!(
+            pruned,
+            vec![
+                "Bash(/scripts/**:*)",
+                "Bash(python3 /old/skills/**:*)",
+                "Write(/wt/**)"
+            ]
+        );
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        let allow: Vec<&str> = doc["permissions"]["allow"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(allow.contains(&"Bash(ls:*)"));
+        assert!(allow.contains(&"Write(/elsewhere/**)"));
+        assert!(allow.contains(&"Bash(python3 */.claude-paul/skills/:*)"));
+        assert!(allow.contains(&"Edit(/wt/**)"));
+        assert!(!allow.iter().any(|r| r.contains("**:*")));
+    }
+
+    #[test]
+    fn a_grant_already_in_place_still_prunes_dead_rules() {
+        let home = tempfile::tempdir().unwrap();
+        settings_at(home.path(), "{}");
+        claude_worktrees_permissions("/wt", home.path()).unwrap();
+        let cfg = claude_settings_path(home.path());
+        let mut doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        doc["permissions"]["allow"]
+            .as_array_mut()
+            .unwrap()
+            .push(Value::String("Bash(/wt/**:*)".to_string()));
+        fs::write(&cfg, doc.to_string()).unwrap();
+
+        let outcome = claude_worktrees_permissions("/wt", home.path()).unwrap();
+        match outcome {
+            PermissionOutcome::Changed { added, pruned } => {
+                assert!(added.is_empty());
+                assert_eq!(pruned, vec!["Bash(/wt/**:*)"]);
+            }
+            _ => panic!("expected Changed"),
+        }
+    }
+
+    #[test]
     fn trailing_slashes_on_the_input_paths_do_not_duplicate_entries() {
         let home = tempfile::tempdir().unwrap();
         settings_at(home.path(), "{}");
@@ -991,7 +1083,7 @@ mod tests {
 
         let outcome =
             claude_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
-        assert!(matches!(outcome, PermissionOutcome::Added(_)));
+        assert!(matches!(outcome, PermissionOutcome::Changed { .. }));
     }
 
     #[cfg(unix)]
@@ -1125,7 +1217,7 @@ mod tests {
 
         let outcome = claude_worktrees_permissions("/wt", home.path()).unwrap();
         let added = match outcome {
-            PermissionOutcome::Added(entries) => entries,
+            PermissionOutcome::Changed { added, .. } => added,
             _ => panic!("expected Added"),
         };
         assert_eq!(added.len(), 3);
@@ -1339,7 +1431,7 @@ mod tests {
             claude_project_specifics_permissions("/home/x/.config/tsch-ai-skills", home.path())
                 .unwrap();
         let added = match outcome {
-            PermissionOutcome::Added(entries) => entries,
+            PermissionOutcome::Changed { added, .. } => added,
             _ => panic!("expected Added"),
         };
         assert_eq!(added.len(), 3);
