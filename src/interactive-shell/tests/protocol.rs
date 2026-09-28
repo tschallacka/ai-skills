@@ -324,6 +324,31 @@ fn unreachable_socket(dir: &Path, last_error: &str) -> String {
     )
 }
 
+/// Retries the connect itself, the way `request` does, but hands back the
+/// raw stream for a caller that must control the write timing (a late-body
+/// test, say) rather than sending one body immediately.
+///
+/// `wait_for_socket`'s file-`exists()` check is not the same claim as "the
+/// server is listening": on the macOS runner the wrapper can `bind()` the
+/// path -- so the file is there -- before its accept loop is actually
+/// polling that listener, and a loaded runner can widen that gap enough for
+/// the very first client connect to be refused (measured: "Connection
+/// refused (os error 61)" immediately after `wait_for_socket` returned).
+/// Retrying the connect itself is the only check that actually observes
+/// "up and listening", so every caller that opens its own socket uses this
+/// instead of a single `connect_socket(&dir).expect(..)`.
+fn connect_socket_retrying(dir: &Path) -> ClientStream {
+    let mut last_error = String::new();
+    for _ in 0..READY_POLLS {
+        match connect_socket(dir) {
+            Ok(stream) => return stream,
+            Err(error) => last_error = error,
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    panic!("{}", unreachable_socket(dir, &last_error))
+}
+
 fn request(dir: &Path, body: &str) -> Value {
     let mut last_error = String::new();
     for _ in 0..READY_POLLS {
@@ -1151,8 +1176,7 @@ fn malformed_cli_arguments_do_not_panic() {
 fn a_request_body_that_arrives_late_is_still_served() {
     let dir = temp_dir("late-body");
     let mut child = start(&dir, &["sh", "-c", "sleep 600"], "600");
-    wait_for_socket(&dir);
-    let mut stream = connect_socket(&dir).expect("the socket must accept a connection");
+    let mut stream = connect_socket_retrying(&dir);
     thread::sleep(Duration::from_millis(150));
     let reply = exchange(&dir, &mut stream, "{\"v\":1,\"op\":\"observe\"}\n");
     assert!(
