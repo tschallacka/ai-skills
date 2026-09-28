@@ -117,6 +117,43 @@ c27f18 c27f18 6c3100 6c3100 c27f18 c27f18 67522d 67522d 67522d 67522d 883300 883
 300d0a 300d0a 280c02 280c02 240a00 240a00 67522d 67522d 67522d 67522d 210000 210000 3e0907 3e0907 240a00 240a00
 300d0a 300d0a 280c02 280c02 240a00 240a00 67522d 67522d 67522d 67522d 210000 210000 3e0907 3e0907 240a00 240a00'
 
+# Whether the mascot's solid block glyph (the two-column `██`, U+2588) is
+# safe to draw -- purely a "does this terminal decode UTF-8 at all"
+# question, answered the same way the standard locale variables answer it
+# for any other program: LC_ALL, then LC_CTYPE, then LANG, in that POSIX
+# precedence order (the first one that is SET decides it, whether or not it
+# says UTF-8 -- an explicit non-UTF-8 locale is a real answer, not an absent
+# one, so it must not fall through to a later variable), checked for a
+# case-insensitive "utf-8"/"utf8" substring. AI_SKILLS_ASCII_ART=1 forces
+# the plain `#` fallback regardless.
+#
+# This mascot used to draw `#` unconditionally, on the strength of a
+# comment here claiming a real terminal had been found rendering the block
+# glyph blank, sourced from src/installer/src/ui/mascot.rs. Checked
+# directly rather than taken on faith: neither this file's own git history
+# nor mascot.rs's ever recorded which terminal, or any other detail of that
+# verification. Live testing across a real PTY and a real terminal emulator
+# showed the block glyph rendering exactly as expected wherever this
+# mascot's colors already did. Capability-gating it removes the original,
+# unconditional caution without removing the fallback entirely: a terminal
+# that never claims UTF-8 still gets plain `#`.
+detect_utf8_capable() {
+    if [ "${AI_SKILLS_ASCII_ART:-0}" = 1 ]; then
+        return 1
+    fi
+    _du_value="${LC_ALL:-}"
+    if [ -z "$_du_value" ]; then
+        _du_value="${LC_CTYPE:-}"
+    fi
+    if [ -z "$_du_value" ]; then
+        _du_value="${LANG:-}"
+    fi
+    case "$_du_value" in
+        *[Uu][Tt][Ff]-8* | *[Uu][Tt][Ff]8*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 detect_color_mode() {
     _dc_colors=0
     if command -v tput >/dev/null 2>&1; then
@@ -201,9 +238,9 @@ eye_row_for() {
     esac
 }
 
-# One sprite row, ASCII fill glyph ('#', not the Unicode block character):
-# a real verification found U+2588 rendering blank in at least one real
-# terminal-emulation stack, so this never risks it either.
+# One sprite row, `UTF8_CAPABLE` (set once in the main body, from
+# detect_utf8_capable above) picking the fill glyph: the solid block `█` on
+# a UTF-8-capable terminal, plain `#` otherwise.
 #
 # Takes the row's own pixel-color STRING directly (not an index into ART --
 # there is no array to index into any more): render_art already read that
@@ -218,11 +255,13 @@ render_row_pixels() {
     _rrp_scale="$2"
     _rrp_out=''
     _rrp_blocks=''
+    _rrp_glyph='#'
+    [ "$UTF8_CAPABLE" = 1 ] && _rrp_glyph='█'
 
     _rrp_n=$((_rrp_scale * 2))
     _rrp_i=0
     while [ "$_rrp_i" -lt "$_rrp_n" ]; do
-        _rrp_blocks="${_rrp_blocks}#"
+        _rrp_blocks="${_rrp_blocks}${_rrp_glyph}"
         _rrp_i=$((_rrp_i + 1))
     done
     _rrp_pad="$(printf "%${_rrp_n}s" '')"
@@ -357,6 +396,11 @@ if command -v tput >/dev/null 2>&1; then
     lines="$(tput lines 2>/dev/null || echo "$lines")"
 fi
 detect_color_mode
+if detect_utf8_capable; then
+    UTF8_CAPABLE=1
+else
+    UTF8_CAPABLE=0
+fi
 show_mascot=0
 scale=1
 if [ -t 1 ] && [ "$COLOR_MODE" != "none" ] \

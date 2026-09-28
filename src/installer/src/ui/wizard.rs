@@ -23,7 +23,7 @@
 use super::input::{self, Key};
 use super::render::BorderSet;
 use super::terminal;
-use super::text::{overflow, pad};
+use super::text::{overflow, pad, wrap};
 use std::path::PathBuf;
 
 /// One selectable install destination, already resolved to a real path --
@@ -142,14 +142,26 @@ pub fn run(
     let mut state = WizardState::new(available);
     let saved = terminal::enter();
     let rx = terminal::spawn_reader();
+    // Probed once, the same reason `run_picker` does: this redraws on every
+    // keypress and tick, and a per-frame `tput` shellout would spawn a
+    // process on every redraw.
+    let color_mode = super::mascot::detect_color_mode();
     let unicode = super::mascot::detect_utf8_capable();
+    let mut eyes = super::mascot::EyeAnimator::new();
 
     loop {
         let (cols, rows) = terminal::size();
-        terminal::draw(&render(&state, cols, rows, unicode));
+        let (frame, layout) = render(&state, cols, rows, color_mode, unicode);
+        terminal::draw(&frame);
+        if layout.mascot_on {
+            super::draw_mascot(&layout, color_mode, eyes.current(), unicode);
+        }
 
         match input::read_key(&rx) {
-            Key::Tick => continue,
+            Key::Tick => {
+                eyes.advance();
+                continue;
+            }
             Key::Eof => {
                 state.done = true;
                 state.confirmed = false;
@@ -444,48 +456,173 @@ fn handle_use_previous(state: &mut WizardState, key: Key) {
 
 // ---- rendering --------------------------------------------------------
 
-fn render(state: &WizardState, cols: usize, rows: usize, unicode: bool) -> Vec<String> {
-    let (title, body, hint) = match state.step {
-        Step::RootSelect => root_select_view(state, cols),
-        Step::CustomPath => custom_path_view(state, cols),
-        Step::InstallOrUninstall => install_or_uninstall_view(state, cols),
-        Step::UsePrevious => use_previous_view(state, cols),
-    };
-    bordered_frame(cols, rows, unicode, &title, body, &hint)
+fn render(
+    state: &WizardState,
+    cols: usize,
+    rows: usize,
+    color_mode: super::mascot::ColorMode,
+    unicode: bool,
+) -> (Vec<String>, super::layout::Layout) {
+    let color_capable = color_mode != super::mascot::ColorMode::None;
+    match state.step {
+        Step::RootSelect => root_select_frame(state, cols, rows, color_capable, unicode),
+        Step::InstallOrUninstall => {
+            install_or_uninstall_frame(state, cols, rows, color_capable, unicode)
+        }
+        Step::CustomPath => {
+            let (title, body, hint) = custom_path_view(state, cols);
+            single_pane_frame(cols, rows, color_capable, unicode, &title, body, &hint)
+        }
+        Step::UsePrevious => {
+            let (title, body, hint) = use_previous_view(state, cols);
+            single_pane_frame(cols, rows, color_capable, unicode, &title, body, &hint)
+        }
+    }
 }
 
-fn root_select_view(state: &WizardState, width: usize) -> (String, Vec<String>, String) {
-    let mut body = Vec::new();
-    for (i, root) in state.available.iter().enumerate() {
-        let cursor = if i == state.cursor { '>' } else { ' ' };
-        let checkbox = if state.checked[i] { "[x]" } else { "[ ]" };
-        let tag = if root.exists {
-            "[exists]"
-        } else {
-            "[will create]"
-        };
-        body.push(pad(
-            &format!("{cursor}{checkbox} {} {tag}", root.label),
-            width - 2,
-        ));
+/// A short, human explanation of what installing into this kind of root
+/// means, for the details pane -- `None` (a custom location, never one of
+/// `manifest::AGENTS`' own kinds) gets its own generic description rather
+/// than an empty pane.
+fn kind_description(kind: Option<&str>) -> &'static str {
+    match kind {
+        Some("universal") => {
+            "Shared by every agent tool that looks here, so one install covers all of them at once."
+        }
+        Some("codex") => "Codex CLI's own skills directory.",
+        Some("claude") => "Claude Code's own skills directory.",
+        Some("opencode") => "OpenCode's own skills directory.",
+        Some("openclaw") => "OpenClaw's own managed skills directory.",
+        Some("cline") => "Cline's own skills directory.",
+        _ => "A directory used before, or a new one about to be added below.",
     }
-    let custom_cursor = if state.cursor == state.available.len() {
+}
+
+fn root_select_frame(
+    state: &WizardState,
+    cols: usize,
+    rows: usize,
+    color_capable: bool,
+    unicode: bool,
+) -> (Vec<String>, super::layout::Layout) {
+    let mut labels: Vec<&str> = state.available.iter().map(|r| r.label.as_str()).collect();
+    labels.push("+ Add a custom directory...");
+
+    let mut list_rows: Vec<String> = state
+        .available
+        .iter()
+        .enumerate()
+        .map(|(i, root)| {
+            let cursor = if i == state.cursor { '>' } else { ' ' };
+            let checkbox = if state.checked[i] { "[x]" } else { "[ ]" };
+            let tag = if root.exists {
+                "[exists]"
+            } else {
+                "[will create]"
+            };
+            format!("{cursor}{checkbox} {} {tag}", root.label)
+        })
+        .collect();
+    let custom_index = state.available.len();
+    let custom_cursor = if state.cursor == custom_index {
         '>'
     } else {
         ' '
     };
-    body.push(pad(
-        &format!("{custom_cursor}    + Add a custom directory..."),
-        width - 2,
-    ));
+    list_rows.push(format!("{custom_cursor}    + Add a custom directory..."));
+
+    let mut details: Vec<String> = if state.cursor == custom_index {
+        vec![
+            "+ Add a custom directory".to_string(),
+            String::new(),
+            "Type any absolute path on the next step. It will be".to_string(),
+            "created if it does not exist yet, and remembered for".to_string(),
+            "next time.".to_string(),
+        ]
+    } else {
+        let root = &state.available[state.cursor];
+        vec![
+            root.label.clone(),
+            String::new(),
+            format!("Path: {}", root.path.display()),
+            if root.exists {
+                "[exists] -- already has skills installed, or ready to.".to_string()
+            } else {
+                "[will create] -- created the moment something installs".to_string()
+            },
+            kind_description(root.kind.as_deref()).to_string(),
+        ]
+    };
     if let Some(message) = &state.message {
-        body.push(pad("", width - 2));
-        body.push(pad(message, width - 2));
+        details.push(String::new());
+        details.push(message.clone());
     }
-    (
-        "Choose where to install".to_string(),
-        body,
-        " Up/Dn move  Space select  Enter continue  q quit".to_string(),
+
+    two_pane_frame(
+        cols,
+        rows,
+        color_capable,
+        unicode,
+        "Choose where to install",
+        "DESTINATIONS",
+        "DETAILS",
+        &labels,
+        &list_rows,
+        state.cursor,
+        &details,
+        " Up/Dn move  Space select  Enter continue  q quit",
+    )
+}
+
+fn install_or_uninstall_frame(
+    state: &WizardState,
+    cols: usize,
+    rows: usize,
+    color_capable: bool,
+    unicode: bool,
+) -> (Vec<String>, super::layout::Layout) {
+    let labels = ["Install", "Uninstall"];
+    let list_rows: Vec<String> = labels
+        .iter()
+        .enumerate()
+        .map(|(i, label)| {
+            let cursor = if state.uninstall_cursor == i {
+                '>'
+            } else {
+                ' '
+            };
+            format!("{cursor} [ {label} ]")
+        })
+        .collect();
+    let details: Vec<String> = if state.uninstall_cursor == 0 {
+        vec![
+            "Install".to_string(),
+            String::new(),
+            "Choose which skills to add, update, or reconfigure at".to_string(),
+            "the destination(s) just picked.".to_string(),
+        ]
+    } else {
+        vec![
+            "Uninstall".to_string(),
+            String::new(),
+            "Choose one previously installed skill to remove from".to_string(),
+            "the destination just picked.".to_string(),
+        ]
+    };
+
+    two_pane_frame(
+        cols,
+        rows,
+        color_capable,
+        unicode,
+        "Install or uninstall?",
+        "CHOOSE",
+        "DETAILS",
+        &labels,
+        &list_rows,
+        state.uninstall_cursor,
+        &details,
+        " Up/Dn move  Enter choose  Esc back  q quit",
     )
 }
 
@@ -513,23 +650,6 @@ fn custom_path_view(state: &WizardState, width: usize) -> (String, Vec<String>, 
     )
 }
 
-fn install_or_uninstall_view(state: &WizardState, width: usize) -> (String, Vec<String>, String) {
-    let row = |index: usize, label: &str| {
-        let cursor = if state.uninstall_cursor == index {
-            '>'
-        } else {
-            ' '
-        };
-        pad(&format!("{cursor} {label}"), width - 2)
-    };
-    let body = vec![row(0, "Install"), row(1, "Uninstall")];
-    (
-        "Install or uninstall?".to_string(),
-        body,
-        " Up/Dn move  Enter choose  Esc back  q quit".to_string(),
-    )
-}
-
 fn use_previous_view(state: &WizardState, width: usize) -> (String, Vec<String>, String) {
     let mut body = vec![pad("Already installed here:", width - 2)];
     for skill in &state.installed_here {
@@ -548,30 +668,43 @@ fn use_previous_view(state: &WizardState, width: usize) -> (String, Vec<String>,
     )
 }
 
-fn bordered_frame(
+/// A single full-width pane (`CustomPath`, `UsePrevious`) -- no details
+/// pane, since neither step has a per-row "choice" for one to explain.
+/// Still computes a `layout::Layout` (from an empty item list: its
+/// `left_w`/`right_w`/`narrow` go unused here, only `body_rows`/
+/// `list_rows`/`mascot_on` do) so the mascot placement rule stays the one
+/// `draw_mascot` already implements, the same as every other step.
+fn single_pane_frame(
     cols: usize,
     rows: usize,
+    color_capable: bool,
     unicode: bool,
     title: &str,
     body: Vec<String>,
     hint: &str,
-) -> Vec<String> {
+) -> (Vec<String>, super::layout::Layout) {
     let b = BorderSet::for_unicode(unicode);
     let inner = cols.saturating_sub(2).max(1);
+    let title_lines = overflow(title, cols, 3);
+    let hint_lines = overflow(hint, cols, 3);
+    let layout = super::layout::compute(
+        cols,
+        rows,
+        &[],
+        color_capable,
+        title_lines.len(),
+        hint_lines.len(),
+        unicode,
+    );
     let mut out = Vec::with_capacity(rows);
-    out.extend(overflow(title, cols, 3));
+    out.extend(title_lines);
     out.push(format!(
         "{}{}{}",
         b.corner_tl,
         std::iter::repeat_n(b.horizontal, inner).collect::<String>(),
         b.corner_tr
     ));
-    let hint_lines = overflow(hint, cols, 3).len();
-    // `out` so far holds the title bar line(s) and the top border; one more
-    // row is reserved for the bottom border, then `hint_lines` for the hint
-    // bar -- whatever is left is the body's own row budget.
-    let body_rows = rows.saturating_sub(out.len() + 1 + hint_lines);
-    for i in 0..body_rows {
+    for i in 0..layout.body_rows {
         let content = body.get(i).cloned().unwrap_or_else(|| pad("", inner));
         out.push(format!("{}{content}{}", b.vertical, b.vertical));
     }
@@ -582,7 +715,117 @@ fn bordered_frame(
         b.corner_br
     ));
     out.extend(overflow(hint, cols, 3));
-    out
+    (out, layout)
+}
+
+/// A list pane + a details pane, the same visual shape (and using the same
+/// `Layout`/`BorderSet` machinery) as the skill picker itself, since
+/// `RootSelect` and `InstallOrUninstall` are the same KIND of screen the
+/// picker is: a list of choices, and an explanation of whichever one has
+/// the cursor. `list_item_labels` sizes the left pane's width exactly the
+/// way the picker's own skill names do; `list_rows` are the already-built
+/// (but not yet padded) row strings, one per item, in the SAME order as
+/// `list_item_labels`; `details_raw` is the raw (unwrapped) lines to show
+/// for the current `cursor` -- wrapped to the details pane's actual width
+/// here, once that width is known, rather than by the caller.
+///
+/// The cursor row is wrapped in reverse video (`\x1b[7m`/`\x1b[0m`) around
+/// its own already-padded content -- the row a real GUI would render as a
+/// pressed/focused button. This is the one place a returned row's byte
+/// length is not its display width (the SGR bytes are zero-width), which
+/// is why the width-invariant tests below check the cursor row separately
+/// from every other row instead of holding all of them to `.chars().count()`.
+#[allow(clippy::too_many_arguments)]
+fn two_pane_frame(
+    cols: usize,
+    rows: usize,
+    color_capable: bool,
+    unicode: bool,
+    title: &str,
+    list_label: &str,
+    details_label: &str,
+    list_item_labels: &[&str],
+    list_rows: &[String],
+    cursor: usize,
+    details_raw: &[String],
+    hint: &str,
+) -> (Vec<String>, super::layout::Layout) {
+    let b = BorderSet::for_unicode(unicode);
+    let title_lines = overflow(title, cols, 3);
+    let hint_lines = overflow(hint, cols, 3);
+    let layout = super::layout::compute(
+        cols,
+        rows,
+        list_item_labels,
+        color_capable,
+        title_lines.len(),
+        hint_lines.len(),
+        unicode,
+    );
+
+    let details: Vec<String> = details_raw
+        .iter()
+        .flat_map(|line| {
+            if line.is_empty() {
+                vec![String::new()]
+            } else {
+                wrap(line, layout.right_w)
+            }
+        })
+        .map(|line| pad(&line, layout.right_w))
+        .collect();
+
+    let mut out = Vec::with_capacity(rows);
+    out.extend(title_lines);
+    out.push(format!(
+        "{}{}{}{}{}",
+        b.corner_tl,
+        pad_center(list_label, layout.left_w, b.horizontal),
+        b.divider_top,
+        pad_center(details_label, layout.right_w, b.horizontal),
+        b.corner_tr
+    ));
+    for body in 0..layout.body_rows {
+        let list_content = list_rows.get(body).cloned().unwrap_or_default();
+        let list_cell = pad(&list_content, layout.left_w);
+        let list_cell = if body == cursor {
+            format!("\x1b[7m{list_cell}\x1b[0m")
+        } else {
+            list_cell
+        };
+        let details_cell = details
+            .get(body)
+            .cloned()
+            .unwrap_or_else(|| pad("", layout.right_w));
+        out.push(format!(
+            "{}{list_cell}{}{details_cell}{}",
+            b.vertical, b.vertical, b.vertical
+        ));
+    }
+    out.push(format!(
+        "{}{}{}{}{}",
+        b.corner_bl,
+        std::iter::repeat_n(b.horizontal, layout.left_w).collect::<String>(),
+        b.divider_bottom,
+        std::iter::repeat_n(b.horizontal, layout.right_w).collect::<String>(),
+        b.corner_br
+    ));
+    out.extend(overflow(hint, cols, 3));
+    (out, layout)
+}
+
+/// Like `render.rs`'s private `pad_center_dash`, generalized to any fill
+/// character (that module's own version is hardcoded to `-`, and is not
+/// `pub(crate)`): centers `label` inside `width` by right-padding with
+/// `fill`, or truncates it when `label` itself does not fit.
+fn pad_center(label: &str, width: usize, fill: char) -> String {
+    if label.len() >= width {
+        return label[..width.min(label.len())].to_string();
+    }
+    format!(
+        "{label}{}",
+        std::iter::repeat_n(fill, width - label.len()).collect::<String>()
+    )
 }
 
 #[cfg(test)]
@@ -920,15 +1163,52 @@ mod tests {
     }
 
     #[test]
-    fn root_select_view_renders_every_root_and_the_custom_row() {
+    fn root_select_frame_renders_every_root_and_the_custom_row() {
         let mut state = WizardState::new(roots(&["/a", "/b"]));
         state.checked[0] = true;
-        let (title, body, _hint) = root_select_view(&state, 40);
-        assert!(title.contains("install"));
-        assert!(body[0].contains("[x]"));
-        assert!(body[0].contains("/a"));
-        assert!(body[1].contains("[ ]"));
-        assert!(body.last().unwrap().contains("custom directory"));
+        let (frame, _layout) = root_select_frame(&state, 90, 24, true, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains("Choose where to install"));
+        assert!(joined.contains("[x]"));
+        assert!(joined.contains("/a"));
+        assert!(joined.contains("[ ]"));
+        assert!(joined.contains("custom directory"));
+        // the highlighted (cursor) row is wrapped in reverse video
+        assert!(joined.contains("\x1b[7m"));
+    }
+
+    #[test]
+    fn root_select_frame_details_pane_explains_the_highlighted_root() {
+        let state = WizardState::new(roots(&["/a", "/b"]));
+        let (frame, _layout) = root_select_frame(&state, 90, 24, true, false);
+        let joined = frame.join("\n");
+        // cursor starts on the first root ("/a"); its path and kind
+        // description must appear in the details pane. The fixture's own
+        // "test" kind matches none of kind_description's real branches, so
+        // its default ("a directory used before...") is what should show.
+        assert!(joined.contains("Path: /a"));
+        // a single word, so word-wrapping at this width cannot split it
+        assert!(joined.contains("directory"));
+    }
+
+    #[test]
+    fn root_select_frame_details_pane_explains_the_custom_row() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.cursor = 1; // the "add custom" row
+        let (frame, _layout) = root_select_frame(&state, 90, 24, true, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains("Add a custom directory"));
+        assert!(joined.contains("remembered for"));
+    }
+
+    #[test]
+    fn install_or_uninstall_frame_shows_both_choices_as_buttons() {
+        let state = WizardState::new(roots(&["/a"]));
+        let (frame, _layout) = install_or_uninstall_frame(&state, 90, 24, true, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains("[ Install ]"));
+        assert!(joined.contains("[ Uninstall ]"));
+        assert!(joined.contains("\x1b[7m"));
     }
 
     #[test]
@@ -956,16 +1236,65 @@ mod tests {
     }
 
     #[test]
-    fn bordered_frame_lines_are_all_exactly_cols_wide() {
+    fn single_pane_frame_lines_are_all_exactly_cols_wide() {
         // Every real view function pads its own body lines to `cols - 2`
-        // before handing them to `bordered_frame` (`root_select_view` and
-        // its siblings all call `pad`); this fixture does the same, the
-        // same contract `render.rs`'s own list/info cells rely on.
+        // before handing them to `single_pane_frame` (`custom_path_view`
+        // and its sibling both call `pad`); this fixture does the same,
+        // the same contract `render.rs`'s own list/info cells rely on.
         for unicode in [false, true] {
-            let frame = bordered_frame(40, 12, unicode, "Title", vec![pad("one", 38)], "hint");
+            let (frame, _layout) =
+                single_pane_frame(40, 12, true, unicode, "Title", vec![pad("one", 38)], "hint");
             for line in &frame {
                 assert_eq!(line.chars().count(), 40, "line was: {line:?}");
             }
+        }
+    }
+
+    #[test]
+    fn two_pane_frame_divider_sits_at_the_left_panes_width() {
+        let labels = ["alpha", "beta"];
+        let rows = vec!["row a".to_string(), "row b".to_string()];
+        let details = vec!["detail".to_string()];
+        let (frame, layout) = two_pane_frame(
+            90, 24, true, false, "Title", "LIST", "DETAILS", &labels, &rows, 0, &details, "hint",
+        );
+        assert!(!layout.narrow);
+        // the top border row: corner, left_w horizontals, divider, right_w
+        // horizontals, corner -- so the divider character sits right after
+        // left_w plain '-' characters (ASCII mode here).
+        let top = &frame[1];
+        let chars: Vec<char> = top.chars().collect();
+        assert_eq!(chars[1 + layout.left_w], '+');
+    }
+
+    #[test]
+    fn two_pane_frame_only_the_cursor_row_is_reverse_video() {
+        let labels = ["alpha", "beta"];
+        let rows = vec!["row a".to_string(), "row b".to_string()];
+        let details = vec!["detail".to_string()];
+        let (frame, _layout) = two_pane_frame(
+            90, 24, true, false, "Title", "LIST", "DETAILS", &labels, &rows, 1, &details, "hint",
+        );
+        // body starts right after the title line and the top border
+        let cursor_row = &frame[3]; // title(1) + top border(1) + body row 1
+        let other_row = &frame[2]; // body row 0
+        assert!(cursor_row.contains("\x1b[7m"), "row was: {cursor_row:?}");
+        assert!(!other_row.contains("\x1b[7m"), "row was: {other_row:?}");
+    }
+
+    #[test]
+    fn two_pane_frame_non_cursor_rows_still_measure_exactly_cols_wide() {
+        let labels = ["alpha", "beta"];
+        let rows = vec!["row a".to_string(), "row b".to_string()];
+        let details = vec!["detail".to_string()];
+        let (frame, _layout) = two_pane_frame(
+            90, 24, true, false, "Title", "LIST", "DETAILS", &labels, &rows, 0, &details, "hint",
+        );
+        for (i, line) in frame.iter().enumerate() {
+            if line.contains("\x1b[7m") {
+                continue; // the cursor row: SGR bytes are not display columns
+            }
+            assert_eq!(line.chars().count(), 90, "line {i} was: {line:?}");
         }
     }
 }

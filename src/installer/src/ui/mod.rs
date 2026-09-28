@@ -77,7 +77,7 @@ fn run_picker_with(
         clamp_info_scroll(&mut state, &layout);
         terminal::draw(&render::render_frame(&state, &layout));
         if layout.mascot_on {
-            draw_mascot(&layout, color_mode, eyes.current());
+            draw_mascot(&layout, color_mode, eyes.current(), unicode_borders);
         }
 
         match input::read_key(&rx) {
@@ -108,9 +108,14 @@ fn run_picker_with(
 /// pane's leading `|`), starting right below the separator render.rs left
 /// blank at body row `layout.list_rows` -- title(1) + top border(1) + that
 /// separator's own row + 1 = `list_rows + 4` in absolute terminal rows.
-fn draw_mascot(layout: &layout::Layout, mode: ColorMode, eye: mascot::EyeState) {
+pub(crate) fn draw_mascot(
+    layout: &layout::Layout,
+    mode: ColorMode,
+    eye: mascot::EyeState,
+    unicode: bool,
+) {
     let lines: Vec<String> = (0..mascot::HEIGHT)
-        .map(|row| mascot::head_line(mode, row, eye))
+        .map(|row| mascot::head_line(mode, row, eye, unicode))
         .collect();
     terminal::draw_overlay(layout.list_rows + 4, 2, &lines);
 }

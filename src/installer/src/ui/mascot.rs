@@ -131,20 +131,33 @@ fn tput_colors() -> i64 {
         .unwrap_or(0)
 }
 
-/// Whether the box-drawing borders (`┌─┐│└┘├┤┬┴`) are safe to draw. Every one
-/// of those glyphs is a single display column (never East-Asian-wide, never
-/// combining), so this is purely a "does this terminal decode UTF-8 at all"
-/// question, answered the same way the standard locale variables answer it
-/// for any other program: `LC_ALL`, then `LC_CTYPE`, then `LANG`, in that
-/// POSIX precedence order, checked for a case-insensitive "utf-8"/"utf8"
-/// substring. `AI_SKILLS_ASCII_BORDERS=1` forces the ASCII fallback
-/// regardless -- the same kind of escape hatch `AI_SKILLS_NO_SPLASH`
-/// already is for the mascot, for a terminal wrapper this probe
-/// mis-detects. Deliberately independent of `detect_color_mode`: a
-/// terminal can be UTF-8-capable and color-incapable, or the reverse, and
-/// conflating the two would draw either wrongly on that terminal.
+/// Whether the box-drawing borders (`┌─┐│└┘├┤┬┴`) and the mascot's solid
+/// block glyph (`█`) are safe to draw. Every one of those glyphs is a single
+/// display column (never East-Asian-wide, never combining), so this is
+/// purely a "does this terminal decode UTF-8 at all" question, answered the
+/// same way the standard locale variables answer it for any other program:
+/// `LC_ALL`, then `LC_CTYPE`, then `LANG`, in that POSIX precedence order,
+/// checked for a case-insensitive "utf-8"/"utf8" substring.
+/// `AI_SKILLS_ASCII_ART=1` forces the ASCII fallback (`+-|` borders, `#`
+/// pixels) regardless -- the same kind of escape hatch `AI_SKILLS_NO_SPLASH`
+/// already is for the mascot's animation, for a terminal wrapper this probe
+/// mis-detects. Deliberately independent of `detect_color_mode`: a terminal
+/// can be UTF-8-capable and color-incapable, or the reverse, and conflating
+/// the two would draw either wrongly on that terminal.
+///
+/// An earlier version of the mascot used `#` unconditionally, on the
+/// strength of a comment claiming a real terminal had been found rendering
+/// `█` (U+2588) blank. That claim does not hold up: neither this file's own
+/// history nor `installer/bootstrap.sh`'s copy of the same comment (which
+/// cited this file as its source) has ever recorded which terminal, or any
+/// other detail of that verification -- checked directly, not assumed. Live
+/// testing this session, across a real PTY and a real terminal emulator,
+/// showed `█` rendering exactly as expected wherever the box-drawing
+/// borders already did. Capability-gating it the same way removes the
+/// original, unconditional caution without removing the fallback entirely:
+/// a terminal that never claims UTF-8 still gets plain `#`.
 pub fn detect_utf8_capable() -> bool {
-    if std::env::var("AI_SKILLS_ASCII_BORDERS").as_deref() == Ok("1") {
+    if std::env::var("AI_SKILLS_ASCII_ART").as_deref() == Ok("1") {
         return false;
     }
     for var in ["LC_ALL", "LC_CTYPE", "LANG"] {
@@ -187,11 +200,14 @@ fn fg_sgr(mode: ColorMode, rgb: (u8, u8, u8)) -> String {
     }
 }
 
-/// One sprite row at scale 1 (32 display cells: 16 pixels of two `#`
-/// glyphs each, used unconditionally rather than a Unicode block character,
-/// since non-ASCII glyphs render unreliably in some terminal wrappers).
-/// Blank (32 spaces) in `ColorMode::None`.
-pub fn head_line(mode: ColorMode, art_row: usize, eye: EyeState) -> String {
+/// One sprite row at scale 1 (32 display cells: 16 pixels of two glyphs
+/// each). `unicode` picks the glyph the same way `render.rs`'s `BorderSet`
+/// does -- `██` (U+2588, two columns, a real solid block) on a UTF-8-capable
+/// terminal, plain `##` otherwise, since a non-ASCII glyph renders
+/// unreliably in some terminal wrappers and there is no way to detect
+/// THOSE specifically, only UTF-8 support in general. Blank (32 spaces) in
+/// `ColorMode::None`.
+pub fn head_line(mode: ColorMode, art_row: usize, eye: EyeState, unicode: bool) -> String {
     if mode == ColorMode::None {
         return " ".repeat(32);
     }
@@ -200,10 +216,11 @@ pub fn head_line(mode: ColorMode, art_row: usize, eye: EyeState) -> String {
     } else {
         ART[art_row]
     };
+    let glyph = if unicode { "██" } else { "##" };
     let mut out = String::new();
     for hex in row.split_whitespace() {
         out.push_str(&fg_sgr(mode, hex_to_rgb(hex)));
-        out.push_str("##");
+        out.push_str(glyph);
     }
     out.push_str("\x1b[0m");
     out
@@ -244,15 +261,29 @@ mod tests {
 
     #[test]
     fn no_color_mode_renders_blank_and_no_escapes() {
-        let line = head_line(ColorMode::None, 0, EyeState::Front);
+        let line = head_line(ColorMode::None, 0, EyeState::Front, true);
         assert_eq!(line, " ".repeat(32));
         assert!(!line.contains('\x1b'));
     }
 
     #[test]
     fn true_color_mode_carries_the_exact_rgb_triple() {
-        let line = head_line(ColorMode::TrueColor, 0, EyeState::Front);
+        let line = head_line(ColorMode::TrueColor, 0, EyeState::Front, false);
         assert!(line.contains("38;2;242;207;56"));
+    }
+
+    #[test]
+    fn unicode_capable_uses_the_solid_block_glyph() {
+        let line = head_line(ColorMode::TrueColor, 0, EyeState::Front, true);
+        assert!(line.contains('█'), "line was: {line:?}");
+        assert!(!line.contains('#'), "line was: {line:?}");
+    }
+
+    #[test]
+    fn ascii_fallback_never_contains_a_block_glyph() {
+        let line = head_line(ColorMode::TrueColor, 0, EyeState::Front, false);
+        assert!(line.contains('#'), "line was: {line:?}");
+        assert!(!line.contains('█'), "line was: {line:?}");
     }
 
     #[test]
