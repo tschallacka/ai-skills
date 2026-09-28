@@ -183,6 +183,26 @@ fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
     (byte(0), byte(2), byte(4))
 }
 
+/// The background twin of `fg_sgr`, same downgrade ladder (SGR 4x instead
+/// of 3x, 48 instead of 38) -- `wizard.rs` uses this to color its own
+/// buttons; nothing here needs it for the mascot itself.
+pub(crate) fn bg_sgr(mode: ColorMode, rgb: (u8, u8, u8)) -> String {
+    match mode {
+        ColorMode::TrueColor => format!("\x1b[48;2;{};{};{}m", rgb.0, rgb.1, rgb.2),
+        ColorMode::None => String::new(),
+        ColorMode::Ansi256 => {
+            let scale = |c: u8| c as u32 * 5 / 255;
+            let index = 16 + 36 * scale(rgb.0) + 6 * scale(rgb.1) + scale(rgb.2);
+            format!("\x1b[48;5;{index}m")
+        }
+        ColorMode::Ansi8 => {
+            let index =
+                (rgb.0 >= 128) as u32 + 2 * (rgb.1 >= 128) as u32 + 4 * (rgb.2 >= 128) as u32;
+            format!("\x1b[4{index}m")
+        }
+    }
+}
+
 fn fg_sgr(mode: ColorMode, rgb: (u8, u8, u8)) -> String {
     match mode {
         ColorMode::TrueColor => format!("\x1b[38;2;{};{};{}m", rgb.0, rgb.1, rgb.2),
@@ -226,6 +246,11 @@ pub fn head_line(mode: ColorMode, art_row: usize, eye: EyeState, unicode: bool) 
     out
 }
 pub const HEIGHT: usize = 16;
+/// Every `head_line` is exactly this many display columns wide (16 pixels
+/// of two glyph columns each), in every `ColorMode` including `None` --
+/// `wizard.rs`'s centered `InstallOrUninstall` screen uses this to compute
+/// where to place the sprite's left edge.
+pub const WIDTH: usize = 32;
 
 #[cfg(test)]
 mod tests {

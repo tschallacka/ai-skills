@@ -114,10 +114,24 @@ pub(crate) fn draw_mascot(
     eye: mascot::EyeState,
     unicode: bool,
 ) {
+    draw_mascot_at(layout.list_rows + 4, 2, mode, eye, unicode);
+}
+
+/// Like `draw_mascot`, but the caller supplies the absolute (row, col)
+/// itself instead of deriving it from a list-based `Layout` -- the wizard's
+/// `InstallOrUninstall` screen has no list pane to pin the sprite under, and
+/// centers it at the top instead.
+pub(crate) fn draw_mascot_at(
+    row: usize,
+    col: usize,
+    mode: ColorMode,
+    eye: mascot::EyeState,
+    unicode: bool,
+) {
     let lines: Vec<String> = (0..mascot::HEIGHT)
-        .map(|row| mascot::head_line(mode, row, eye, unicode))
+        .map(|r| mascot::head_line(mode, r, eye, unicode))
         .collect();
-    terminal::draw_overlay(layout.list_rows + 4, 2, &lines);
+    terminal::draw_overlay(row, col, &lines);
 }
 
 /// The info pane's own line count depends on the current skill's
