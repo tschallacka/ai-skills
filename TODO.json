@@ -4,6 +4,19 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
+      "id": "T152",
+      "title": "interactive-shell tool cannot verify absolute-cursor-positioned overlay draws",
+      "status": "open",
+      "priority": "low",
+      "parent": null,
+      "detail": "interactive-shell's 'view'/'observe' screen model does not surface content written via a standalone absolute-cursor-positioning escape sequence (e.g. an overlay drawn separately from the main sequential \\r\\n-joined frame, such as the installer TUI's terminal::draw_overlay used for the mascot sprite). Confirmed during T-wizard-redesign live verification: the wizard's two-pane RootSelect screen rendered correctly in interactive-shell's view (borders, list, details pane) but the mascot overlay below it stayed fully empty ([000-000] rows) even after an explicit resize+redraw. A DIRECT script(1)-based PTY capture with identical dimensions/env-vars/binary independently confirmed the real terminal output DOES contain the mascot's color codes and block glyphs -- so this is very likely a gap in interactive-shell's screen-model tracking for this specific draw pattern, not a defect in the installer code. Needs either a fix in interactive-shell's screen model (track absolute CUP-addressed writes outside the main frame the same as in-frame content) or an explicit documented caveat in its own skill/docs so a future agent doesn't waste time assuming a real rendering bug.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Filed from live PTY-verification during the installer wizard's graphical-overhaul work; see conversation for full investigation steps (tput colors check, script-based counter-evidence, resize+redraw retry).",
+      "created_at": "2026-09-28T13:56:29Z",
+      "updated_at": "2026-09-28T13:56:29Z"
+    },
+    {
       "id": "T70",
       "title": "Ship the 2.0.0-alpha binaries as release assets, not committed blobs",
       "status": "done",
@@ -21,50 +34,6 @@
       "note": "T72 and release-installer.yml already closed most of T70's originally-stated scope before this plan started (no committed binary blobs, existing per-target release-tarball attachment); this plan (release-asset-shipping) added a CI-driven npm-publish workflow (release-npm.yml, verified via a real workflow_dispatch dry run per W05), a real end-to-end rehearsal of the release-asset attachment and bootstrap install path (W06/W07, using a throwaway prerelease, deleted afterward), and a binaries.tsv-vs-skill_files() drift check (W08/W09).",
       "created_at": "2026-08-28T17:15:01Z",
       "updated_at": "2026-09-25T06:15:55Z"
-    },
-    {
-      "id": "T56",
-      "title": "Mark a review rationale superseded when a later cycle replaces it",
-      "status": "done",
-      "priority": "normal",
-      "parent": null,
-      "detail": "codex postmortem recommendation 6. The Verdict rationale is a single field rewritten by hand each cycle; across four cycles here I replaced it four times, and nothing would have flagged it had I forgotten. A stale rationale is worse than an absent one because it reads as current: it names findings by id and asserts a verdict that the findings table may already contradict. Either stamp the rationale with the cycle it was written for and warn when the archived cycle count moves past it, or fold the rationale into the same helper that rewrites the findings table.",
-      "blocked_on": "",
-      "refs": [
-        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
-        "planning/scripts/update-adversarial-review.sh"
-      ],
-      "note": "Fixed in nextupdate 83f60704, CI green (all 33 checks). Resolved the exact off-by-one trap this entry's own note warned about, by making the write side and the read side share ONE function rather than each re-deriving \"which cycle\" separately: update-adversarial-review.sh gains --set-rationale, which stamps the Verdict with `- Rationale cycle: N` using cycle_number(history, None) -- the SAME function the archiver itself already uses to decide what to call the cycle it is about to archive. planning-validator-docs then flags staleness only when cycle_number() (its own copy of the identical 8-line logic, cross-referenced in a doc comment rather than sharing a crate) now returns something greater than the stamp -- i.e. only once a cycle has actually been archived since the rationale was written, never on the normal same-cycle path the reverted attempt misfired on. Verified end-to-end with real compiled binaries through the full mint-keys/claim-fix/approve/validate workflow, twice: once where the stamp is current (no finding) and once after a second cycle lands unstamped (staleness correctly flagged, naming the fix). Unit tests on both sides plus a new shell integration test (planning/tests/test-adversarial-review-cycles.sh) cover this permanently.",
-      "created_at": "2026-08-27T22:38:42Z",
-      "updated_at": "2026-09-24T14:15:43Z"
-    },
-    {
-      "id": "T1e",
-      "title": "Decide what a converted test prints on success",
-      "status": "done",
-      "priority": "normal",
-      "parent": "T1",
-      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
-      "blocked_on": null,
-      "refs": [],
-      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. This decided the acceptance criterion for T1a-T1d, all of which are done and archived. Closed 2026-09-24: orphaned decision gate -- parent T1 ('One test reporter, not eighteen') is done, and all four children T1a-T1d are done and archived in TODO.2026-09-01.archive.json. The decision was made and fully acted on; T1e itself was simply never re-flagged after serving its purpose. No outstanding work.",
-      "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-09-24T12:56:47Z"
-    },
-    {
-      "id": "T38",
-      "title": "Review record: what was checked on the -ox merge, and what was not",
-      "status": "done",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
-      "blocked_on": null,
-      "refs": [
-        "https://github.com/tschallacka/ai-skills/pull/3"
-      ],
-      "note": "Closed 2026-09-24, re-verified against the current tree rather than left as a stale review snapshot: (1) B18-B29, the defects this review could not verify without their original environments, are now ALL status=fixed in the live register. (2) The chat skill runtime chain, unexercised at review time, now has real crate tests (chat-mcp, chat-server-rs, chat-client-rs, chat-spool-watch) passing consistently across every CI run this session. (3) The plan-to-HTML overview renderer, checked only for existence/registration at review time, now has real behavioral tests (plan-overview's pages_primary.rs, mode.rs, autoplay.rs, serve_routing.rs) passing consistently. (4) 'CI had never run on this branch' -- PR #3 (opened to get exactly that run) was closed 2026-08-31 without merging, but nextupdate has since run CI green dozens of times including every batch of this session's own work, superseding the concern. No remaining verification gap.\n\nOriginal note: NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
-      "created_at": "2026-08-24T12:17:47Z",
-      "updated_at": "2026-09-24T12:56:47Z"
     },
     {
       "id": "T72",
@@ -633,6 +602,50 @@
       "note": " Re-measured with an awk function-range scan instead of brace matching: two planning/tests files still define their own fail() without lib-test (test-installer-manifest, test-planning-context-contract), both inside the duplication-ratchet cap of 7 tolerated shims; no hidden eighteenth reporter.",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-24T10:33:41Z"
+    },
+    {
+      "id": "T1e",
+      "title": "Decide what a converted test prints on success",
+      "status": "done",
+      "priority": "normal",
+      "parent": "T1",
+      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. This decided the acceptance criterion for T1a-T1d, all of which are done and archived. Closed 2026-09-24: orphaned decision gate -- parent T1 ('One test reporter, not eighteen') is done, and all four children T1a-T1d are done and archived in TODO.2026-09-01.archive.json. The decision was made and fully acted on; T1e itself was simply never re-flagged after serving its purpose. No outstanding work.",
+      "created_at": "2026-08-20T00:00:00Z",
+      "updated_at": "2026-09-24T12:56:47Z"
+    },
+    {
+      "id": "T38",
+      "title": "Review record: what was checked on the -ox merge, and what was not",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/ai-skills/pull/3"
+      ],
+      "note": "Closed 2026-09-24, re-verified against the current tree rather than left as a stale review snapshot: (1) B18-B29, the defects this review could not verify without their original environments, are now ALL status=fixed in the live register. (2) The chat skill runtime chain, unexercised at review time, now has real crate tests (chat-mcp, chat-server-rs, chat-client-rs, chat-spool-watch) passing consistently across every CI run this session. (3) The plan-to-HTML overview renderer, checked only for existence/registration at review time, now has real behavioral tests (plan-overview's pages_primary.rs, mode.rs, autoplay.rs, serve_routing.rs) passing consistently. (4) 'CI had never run on this branch' -- PR #3 (opened to get exactly that run) was closed 2026-08-31 without merging, but nextupdate has since run CI green dozens of times including every batch of this session's own work, superseding the concern. No remaining verification gap.\n\nOriginal note: NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
+      "created_at": "2026-08-24T12:17:47Z",
+      "updated_at": "2026-09-24T12:56:47Z"
+    },
+    {
+      "id": "T56",
+      "title": "Mark a review rationale superseded when a later cycle replaces it",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "codex postmortem recommendation 6. The Verdict rationale is a single field rewritten by hand each cycle; across four cycles here I replaced it four times, and nothing would have flagged it had I forgotten. A stale rationale is worse than an absent one because it reads as current: it names findings by id and asserts a verdict that the findings table may already contradict. Either stamp the rationale with the cycle it was written for and warn when the archived cycle count moves past it, or fold the rationale into the same helper that rewrites the findings table.",
+      "blocked_on": "",
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "note": "Fixed in nextupdate 83f60704, CI green (all 33 checks). Resolved the exact off-by-one trap this entry's own note warned about, by making the write side and the read side share ONE function rather than each re-deriving \"which cycle\" separately: update-adversarial-review.sh gains --set-rationale, which stamps the Verdict with `- Rationale cycle: N` using cycle_number(history, None) -- the SAME function the archiver itself already uses to decide what to call the cycle it is about to archive. planning-validator-docs then flags staleness only when cycle_number() (its own copy of the identical 8-line logic, cross-referenced in a doc comment rather than sharing a crate) now returns something greater than the stamp -- i.e. only once a cycle has actually been archived since the rationale was written, never on the normal same-cycle path the reverted attempt misfired on. Verified end-to-end with real compiled binaries through the full mint-keys/claim-fix/approve/validate workflow, twice: once where the stamp is current (no finding) and once after a second cycle lands unstamped (staleness correctly flagged, naming the fix). Unit tests on both sides plus a new shell integration test (planning/tests/test-adversarial-review-cycles.sh) cover this permanently.",
+      "created_at": "2026-08-27T22:38:42Z",
+      "updated_at": "2026-09-24T14:15:43Z"
     },
     {
       "id": "T71",
