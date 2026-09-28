@@ -5184,6 +5184,25 @@
       "updated_at": "2026-09-26T14:27:16Z"
     },
     {
+      "id": "B382",
+      "title": "build-installer-release.sh repacks a stale installer binary after a git pull",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "1) Build the installer once (cargo build --release -p installer --target <triple>), producing target/<triple>/release/installer. 2) git pull a commit that changes src/installer/. 3) Run installer/build-installer-release.sh again for that target. Expected: it detects the binary predates the new commit and rebuilds. Observed: ensure_installer_binary sees the old binary is still executable and skips the cargo build entirely, so build-installer-release.sh repacks the STALE binary into the release tarball with no warning.",
+      "observed": "A release tarball built this way silently ships an installer binary compiled from an OLDER commit than the one build-installer-release.sh was actually run against -- discovered live while re-testing the wizard footer/buttons feature (commit 9704af72): the tester had to manually verify the tarball's installer hash matched a fresh build before trusting the test run.",
+      "expected": "ensure_installer_binary should rebuild whenever the source it would build from is newer than the existing binary (e.g. compare the binary's mtime against 'git log -1 --format=%ct -- src/installer' for the current HEAD, or simply always rebuild and let cargo's own incremental-compilation cache make a no-op rebuild cheap), so a stale binary is never silently repacked.",
+      "mechanism": "ensure_installer_binary() in installer/build-installer-release.sh only checks '[ -x \"$bin\" ]' before skipping the cargo build -- it never compares the binary's mtime/commit against the current source tree. A binary compiled before a git pull is still executable, so it is silently reused (and repacked into the release tarball) even though the source it was built from is now behind HEAD. The function's own comment says 'staleness detection is left to the tests', but no test in this repo actually catches this: build-release.sh/pack-target's own tests check the PACKAGE CONTENTS shape, not whether the installer binary inside it matches the current git commit.",
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "Tschallacka (live GUI test-drive re-test, reported to the assistant mid-session)",
+      "notes": "Not yet fixed. Filed at the user's own request after independently confirming the mechanism by reading ensure_installer_binary's source; the user had already worked around it this time by rebuilding both target binaries by hand before re-running build-installer-release.sh.",
+      "created_at": "2026-09-28T15:40:49Z",
+      "updated_at": "2026-09-28T15:40:49Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
