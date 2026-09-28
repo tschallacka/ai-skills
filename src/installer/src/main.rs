@@ -1777,10 +1777,18 @@ fn print_permission_outcome(
         permissions::PermissionOutcome::AlreadyPresent => {
             println!("{agent}: {already_present}");
         }
-        permissions::PermissionOutcome::Added(entries) => {
-            println!("{agent}: added to permissions.allow:");
-            for entry in entries {
-                println!("  - {entry}");
+        permissions::PermissionOutcome::Changed { added, pruned } => {
+            if !added.is_empty() {
+                println!("{agent}: added to permissions.allow:");
+                for entry in added {
+                    println!("  - {entry}");
+                }
+            }
+            if !pruned.is_empty() {
+                println!("{agent}: removed dead rules Claude Code never matches:");
+                for entry in pruned {
+                    println!("  - {entry}");
+                }
             }
         }
     }
