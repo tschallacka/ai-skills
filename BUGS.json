@@ -7787,6 +7787,27 @@
       "updated_at": "2026-09-24T11:26:17Z"
     },
     {
+      "id": "B383",
+      "title": "installer tests intermittently panic 'test host must be a supported platform': installer_platform::current() reads a failed uname spawn as an unsupported host",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "for i in 1 2 3 4 5 6 7 8 9 10; do nix develop -c cargo test -p installer 2>&1 | awk \"/^---- |panicked|^test result/\"; done | sort | uniq -c",
+      "observed": "1 of 7 consecutive runs on macOS aarch64 (nix dev shell, 2026-09-28, branch mr/installer-prune-dead-claude-rules at 375b2293, which does not touch install.rs): \"test result: FAILED. 320 passed; 1 failed\", with\n\n  ---- install::tests::switching_mode_keeps_the_shared_binary_a_sibling_root_still_needs stdout ----\n  panicked at src/installer/src/install.rs:408:39\n\ninstall.rs:408 is current_target()'s expect(\"test host must be a supported platform\"). The other six runs passed 321/321. The same panic site also appeared in the same test module when the suite ran from git's pre-push hook (a_skill_mode_install_ships_only_the_skill_binary, switching_mode_removes_the_previous_modes_shared_binary_when_nothing_else_needs_it, switching_mode_keeps_the_shared_binary_a_sibling_root_still_needs), failing the push gate on a change unrelated to install.rs.\n",
+      "expected": "installer_platform::current() resolves aarch64-apple-darwin on every call on a supported host, and the installer suite passes on every run.",
+      "mechanism": null,
+      "surfaces": [
+        "src/installer-platform/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "repeated cargo test -p installer while verifying PR #169",
+      "notes": "Reproduced (1 of 7 runs) but the mechanism is not yet proven, hence reported rather than confirmed. Hypothesis: current() spawns uname via Command::output() and maps any spawn or read error to an empty string (.ok() then unwrap_or_default()), which resolve() then reports as UnsupportedHost; a transient spawn failure under parallel test threads would produce exactly this panic. Confirm by logging the Command error when output() fails. Separate and not filed here: in the pre-push hook run, backup::tests::outside_a_git_tree_a_dotfile_backup_is_written, backup::tests::a_second_backup_the_same_second_does_not_clobber_the_first and install::tests::a_reinstall_over_a_user_edited_file_backs_it_up_first also failed (backup.rs:76, :118, install.rs:599 expected exactly one backup), consistent with the temp dir resolving inside a tracked tree because HOME carries a stray repository; unconfirmed.",
+      "created_at": "2026-09-28T16:00:13Z",
+      "updated_at": "2026-09-28T16:00:13Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
