@@ -50,7 +50,7 @@ impl fmt::Display for Target {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnsupportedHost {
     pub os: String,
     pub arch: String,
@@ -93,26 +93,77 @@ pub fn resolve(os: &str, arch: &str) -> Result<Target, UnsupportedHost> {
     }
 }
 
+/// Retries a possibly-flaky lookup (real use: spawning `uname`) up to three
+/// times with a short backoff, returning the first success or an empty
+/// string once every attempt has failed. Generic over the lookup itself so
+/// the retry logic is unit-testable against a deterministically-flaky fake,
+/// rather than depending on a real subprocess actually failing to prove it
+/// works (B383: `Command::new("uname").output()` intermittently failed to
+/// spawn under the parallel load of `cargo test`'s own thread pool on a
+/// loaded macOS CI runner -- roughly 1 run in 7 -- and the old code mapped
+/// that failure straight to an empty string, which `resolve` then reported
+/// as `UnsupportedHost` on a host that plainly was supported).
+fn retry_field_lookup(mut attempt: impl FnMut() -> Option<String>) -> String {
+    for i in 0..3 {
+        if let Some(value) = attempt() {
+            return value;
+        }
+        if i < 2 {
+            std::thread::sleep(std::time::Duration::from_millis(20 * (i + 1) as u64));
+        }
+    }
+    String::new()
+}
+
+fn uname(flag: &str) -> String {
+    let flag = flag.to_string();
+    retry_field_lookup(move || {
+        std::process::Command::new("uname")
+            .arg(&flag)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    })
+}
+
 /// Resolve the actual running host via `uname`-equivalent values from `std`.
 /// There is no `uname(2)` in `std`, so this shells out to `uname` on
 /// Unix-like hosts (present on every target `resolve` accepts except
 /// cmd/PowerShell, which report their platform through `std::env::consts`
 /// instead).
+///
+/// The host does not change mid-process, so a SUCCESSFUL answer is cached
+/// permanently rather than re-spawning `uname` (twice) on every call -- a
+/// caller like the installer's own test suite, where dozens of tests each
+/// call this once, used to mean dozens of processes spawned concurrently
+/// under `cargo test`'s thread pool. That contention is the other half of
+/// B383, alongside `uname`'s own retry: fewer processes racing to spawn at
+/// once means the retry has far less to recover from in the first place.
+///
+/// A FAILED resolution is never cached: caching it would let one transient
+/// spawn failure (the exact thing the retry above exists to absorb) turn
+/// into a permanent one for the rest of the process's life, on a host that
+/// is plainly supported. Concurrent callers racing the very first
+/// resolution may each spawn `uname` once more before the cache is warm --
+/// harmless, since they all compute the same answer from the same host.
 pub fn current() -> Result<Target, UnsupportedHost> {
+    static CURRENT: std::sync::OnceLock<Target> = std::sync::OnceLock::new();
+    if let Some(target) = CURRENT.get() {
+        return Ok(*target);
+    }
+    let target = resolve_current()?;
+    Ok(*CURRENT.get_or_init(|| target))
+}
+
+fn resolve_current() -> Result<Target, UnsupportedHost> {
     if cfg!(windows) {
         // std::env::consts::ARCH is the compiled target's arch, which is fine
         // here: this binary itself only ever ships for x86_64-pc-windows-msvc.
         return resolve("Windows_NT", std::env::consts::ARCH);
     }
-    let uname = |flag: &str| -> String {
-        std::process::Command::new("uname")
-            .arg(flag)
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default()
-    };
     resolve(&uname("-s"), &uname("-m"))
 }
 
@@ -180,5 +231,48 @@ mod tests {
             assert_eq!(Target::parse(t.as_str()), Some(t));
         }
         assert_eq!(Target::parse("bogus-triple"), None);
+    }
+
+    // B383: `current()`'s own transient-spawn-failure recovery is exercised
+    // against a fake, deterministically-flaky lookup rather than a real
+    // `uname` -- forcing the real subprocess to fail on demand is not
+    // practical, and doing so would make the FIX's own test just as
+    // dependent on real-world timing as the bug it closes was.
+
+    #[test]
+    fn retry_field_lookup_recovers_from_transient_failures() {
+        let mut calls = 0;
+        let value = retry_field_lookup(|| {
+            calls += 1;
+            if calls < 3 {
+                None
+            } else {
+                Some("Darwin".to_string())
+            }
+        });
+        assert_eq!(value, "Darwin");
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn retry_field_lookup_succeeds_immediately_when_the_first_attempt_does() {
+        let mut calls = 0;
+        let value = retry_field_lookup(|| {
+            calls += 1;
+            Some("Linux".to_string())
+        });
+        assert_eq!(value, "Linux");
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn retry_field_lookup_gives_up_after_three_attempts_and_returns_empty() {
+        let mut calls = 0;
+        let value = retry_field_lookup(|| {
+            calls += 1;
+            None
+        });
+        assert_eq!(value, "");
+        assert_eq!(calls, 3);
     }
 }
