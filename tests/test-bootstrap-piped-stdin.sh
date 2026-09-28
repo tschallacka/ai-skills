@@ -22,7 +22,14 @@
 # allocates one. The keystroke must arrive SEPARATELY IN TIME from
 # bootstrap.sh's own bytes -- concatenating them defeats the point, since a
 # real `curl | bash` delivers the whole script before a person can type
-# anything -- so the timed instructions here are the test.
+# anything -- so this test does not send it until the compiled installer
+# itself is the process actually holding the tty (see `ready_marker`
+# below), rather than guessing a delay long enough with a plain `sleep`.
+# A fixed sleep raced bootstrap.sh's own runtime on a loaded CI runner: it
+# genuinely failed this way (not a defect in bootstrap.sh -- `GOT:` empty
+# meant the keystroke arrived too early, while bootstrap.sh's own `sh` was
+# still the process reading the tty), which is exactly the class of flake a
+# readiness signal, not a timeout, is supposed to make impossible.
 set -euo pipefail
 export LC_ALL=C
 
@@ -53,11 +60,19 @@ trap 'rm -rf "$work"' EXIT
 # A stub release tarball: its "installer" reads exactly one line and reports
 # it verbatim, so the assertion is purely about what byte sequence a real
 # keystroke arrives as -- not about the real binary or a network fetch.
+# `touch "$READY_MARKER"` is the stub's OWN first statement, so its very
+# existence proves bootstrap.sh's handoff `exec ... < /dev/tty` already
+# happened and THIS process (not bootstrap.sh's own `sh`, already replaced
+# by that exec) now owns the tty -- the exact condition B381's bug was
+# about. A keystroke sent any time after that is safe even if `read` itself
+# hasn't executed yet: the kernel's own tty input queue buffers it either
+# way, since a pty's input side does not require an active reader.
 payload_dir="$work/payload"
 mkdir -p "$payload_dir"
 stub="$payload_dir/installer"
 {
     printf '#!/usr/bin/env bash\n'
+    printf 'touch "$READY_MARKER"\n'
     printf 'read -r answer\n'
     printf 'printf '\''GOT:%%s\\n'\'' "$answer" > "$RESULT_LOG"\n'
 } > "$stub"
@@ -70,18 +85,37 @@ if command -v cygpath >/dev/null 2>&1; then
 fi
 
 result_log="$work/result.log"
+ready_marker="$work/ready"
 typescript="$work/typescript.log"
 
+# Polls for the stub's own readiness signal instead of guessing how long
+# bootstrap.sh takes to run -- 200 checks at 50ms is a 10s ceiling, an order
+# of magnitude past anything bootstrap.sh (AI_SKILLS_NO_SPLASH=1, a local
+# file:// tarball, no network) should ever take even on a loaded runner.
+# Exits with a named failure on timeout rather than sending the keystroke
+# anyway, which would just trade one flake for a more confusing one.
+wait_for_stub_ready() {
+    local i=0
+    while [ ! -e "$ready_marker" ]; do
+        i=$((i + 1))
+        if [ "$i" -ge 200 ]; then
+            printf 'test-bootstrap-piped-stdin: installer stub never signaled ready within 10s\n' >&2
+            exit 1
+        fi
+        sleep 0.05
+    done
+}
+
 run_piped() {
-    rm -f "$result_log"
-    # The delayed keystroke goes in on script's OWN stdin (relayed into the
-    # pty); the pipe reading bootstrap.sh is entirely internal to the
-    # command script runs, so it never touches those relayed bytes.
-    local piped_cmd="RESULT_LOG='$result_log' AI_SKILLS_NO_SPLASH=1 AI_SKILLS_RELEASE_URL='$release_url' bash -c \"cat '$repo_root/installer/bootstrap.sh' | sh\""
+    rm -f "$result_log" "$ready_marker"
+    # The keystroke goes in on script's OWN stdin (relayed into the pty);
+    # the pipe reading bootstrap.sh is entirely internal to the command
+    # script runs, so it never touches those relayed bytes.
+    local piped_cmd="RESULT_LOG='$result_log' READY_MARKER='$ready_marker' AI_SKILLS_NO_SPLASH=1 AI_SKILLS_RELEASE_URL='$release_url' bash -c \"cat '$repo_root/installer/bootstrap.sh' | sh\""
     if [ "$is_util_linux" -eq 1 ]; then
-        ( sleep 1; printf 'hello\n' ) | script -qec "$piped_cmd" "$typescript" >/dev/null 2>&1 || true
+        ( wait_for_stub_ready; printf 'hello\n' ) | script -qec "$piped_cmd" "$typescript" >/dev/null 2>&1 || true
     else
-        ( sleep 1; printf 'hello\n' ) | script -q "$typescript" bash -c "$piped_cmd" >/dev/null 2>&1 || true
+        ( wait_for_stub_ready; printf 'hello\n' ) | script -q "$typescript" bash -c "$piped_cmd" >/dev/null 2>&1 || true
     fi
 }
 
