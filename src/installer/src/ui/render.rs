@@ -2,9 +2,11 @@
 // PACKAGE: PROD
 //! Builds one frame as exactly `rows` lines of exactly `cols` display
 //! cells, independent of the terminal, so it is unit-testable without a
-//! live tty. ASCII-only content (skill names/descriptions are ASCII), so
-//! byte length is cell width throughout; the box-drawing is plain ASCII
-//! (+, -, |).
+//! live tty. Content (skill names/descriptions) is ASCII-only, so its byte
+//! length is its cell width; the border glyphs are the one place that is not
+//! true (`BorderSet::UNICODE`'s box-drawing characters are 3 UTF-8 bytes
+//! each but still exactly one display column), which is why every width
+//! check in this module's own tests counts `.chars()`, not `.len()`.
 //!
 //! The mascot itself is NOT drawn here: when `layout.mascot_on`, this just
 //! reserves its rows as blank cells (a separator line, then `mascot::HEIGHT`
@@ -142,7 +144,71 @@ pub(crate) fn info_lines(state: &PickerState, width: usize) -> Vec<String> {
     lines
 }
 
+/// The glyphs every border-drawing function below draws with, resolved once
+/// per frame from `layout.unicode_borders` rather than read as a global, the
+/// same reason `color_mode` is threaded as a value everywhere else here: a
+/// test can force either set with no terminal, and nothing here depends on
+/// probing anything live. Every field is exactly one display column in every
+/// terminal that renders it at all (plain ASCII, or the box-drawing block
+/// U+2500-U+257F) -- picking the wrong set for an incapable terminal is a
+/// portability bug, not a width bug, and `detect_utf8_capable` is what
+/// guards against that.
+pub(crate) struct BorderSet {
+    pub(crate) horizontal: char,
+    pub(crate) vertical: char,
+    pub(crate) corner_tl: char,
+    pub(crate) corner_tr: char,
+    pub(crate) corner_bl: char,
+    pub(crate) corner_br: char,
+    /// Where the list pane's top border meets the divider into the info
+    /// pane (a T pointing down into the frame).
+    pub(crate) divider_top: char,
+    /// The same divider's bottom-border counterpart (a T pointing up).
+    pub(crate) divider_bottom: char,
+}
+
+impl BorderSet {
+    pub(crate) const ASCII: BorderSet = BorderSet {
+        horizontal: '-',
+        vertical: '|',
+        corner_tl: '+',
+        corner_tr: '+',
+        corner_bl: '+',
+        corner_br: '+',
+        divider_top: '+',
+        divider_bottom: '+',
+    };
+    pub(crate) const UNICODE: BorderSet = BorderSet {
+        horizontal: '─',
+        vertical: '│',
+        corner_tl: '┌',
+        corner_tr: '┐',
+        corner_bl: '└',
+        corner_br: '┘',
+        divider_top: '┬',
+        divider_bottom: '┴',
+    };
+
+    /// `wizard`'s own full-screen steps have no `Layout` of their own (no
+    /// skill list, no info pane) but still want the same glyph set a
+    /// UTF-8-capable terminal gets everywhere else -- this is the plain
+    /// bool-driven half `for_layout` is built from, so both callers pick the
+    /// same two sets from one place rather than each hardcoding its own.
+    pub(crate) fn for_unicode(unicode: bool) -> &'static BorderSet {
+        if unicode {
+            &BorderSet::UNICODE
+        } else {
+            &BorderSet::ASCII
+        }
+    }
+
+    fn for_layout(layout: &Layout) -> &'static BorderSet {
+        BorderSet::for_unicode(layout.unicode_borders)
+    }
+}
+
 fn top_border(layout: &Layout, focus: Focus) -> String {
+    let b = BorderSet::for_layout(layout);
     let list_label = if focus == Focus::List {
         "[SKILLS]"
     } else {
@@ -154,24 +220,34 @@ fn top_border(layout: &Layout, focus: Focus) -> String {
         " DETAILS "
     };
     format!(
-        "+{}+{}+",
-        pad_center_dash(list_label, layout.left_w),
-        pad_center_dash(info_label, layout.right_w)
+        "{}{}{}{}{}",
+        b.corner_tl,
+        pad_center_dash(list_label, layout.left_w, b.horizontal),
+        b.divider_top,
+        pad_center_dash(info_label, layout.right_w, b.horizontal),
+        b.corner_tr
     )
 }
 
-fn pad_center_dash(label: &str, width: usize) -> String {
+fn pad_center_dash(label: &str, width: usize, fill: char) -> String {
     if label.len() >= width {
         return label[..width.min(label.len())].to_string();
     }
-    format!("{label}{}", "-".repeat(width - label.len()))
+    format!(
+        "{label}{}",
+        std::iter::repeat_n(fill, width - label.len()).collect::<String>()
+    )
 }
 
 fn bottom_border(layout: &Layout) -> String {
+    let b = BorderSet::for_layout(layout);
     format!(
-        "+{}+{}+",
-        "-".repeat(layout.left_w),
-        "-".repeat(layout.right_w)
+        "{}{}{}{}{}",
+        b.corner_bl,
+        std::iter::repeat_n(b.horizontal, layout.left_w).collect::<String>(),
+        b.divider_bottom,
+        std::iter::repeat_n(b.horizontal, layout.right_w).collect::<String>(),
+        b.corner_br
     )
 }
 
@@ -201,12 +277,14 @@ fn list_cell(state: &PickerState, layout: &Layout, body: usize) -> String {
         };
     }
     if layout.mascot_on && body == layout.list_rows {
-        return "-".repeat(layout.left_w);
+        let fill = BorderSet::for_layout(layout).horizontal;
+        return std::iter::repeat_n(fill, layout.left_w).collect();
     }
     pad("", layout.left_w)
 }
 
 fn render_wide(state: &PickerState, layout: &Layout, out: &mut Vec<String>) {
+    let b = BorderSet::for_layout(layout);
     out.push(top_border(layout, state.focus));
     let info = info_lines(state, layout.right_w);
     for body in 0..layout.body_rows {
@@ -215,18 +293,30 @@ fn render_wide(state: &PickerState, layout: &Layout, out: &mut Vec<String>) {
             .get(info_index)
             .cloned()
             .unwrap_or_else(|| pad("", layout.right_w));
-        out.push(format!("|{}|{info_cell}|", list_cell(state, layout, body)));
+        out.push(format!(
+            "{}{}{}{info_cell}{}",
+            b.vertical,
+            list_cell(state, layout, body),
+            b.vertical,
+            b.vertical
+        ));
     }
     out.push(bottom_border(layout));
 }
 
 fn render_narrow(state: &PickerState, layout: &Layout, out: &mut Vec<String>) {
+    let b = BorderSet::for_layout(layout);
     let label = if state.focus == Focus::Info {
         "[DETAILS]"
     } else {
         "[SKILLS]"
     };
-    out.push(format!("+{}+", pad_center_dash(label, layout.left_w)));
+    out.push(format!(
+        "{}{}{}",
+        b.corner_tl,
+        pad_center_dash(label, layout.left_w, b.horizontal),
+        b.corner_tr
+    ));
     let info = if state.focus == Focus::Info {
         info_lines(state, layout.left_w)
     } else {
@@ -242,9 +332,14 @@ fn render_narrow(state: &PickerState, layout: &Layout, out: &mut Vec<String>) {
         } else {
             pad("", layout.left_w)
         };
-        out.push(format!("|{cell}|"));
+        out.push(format!("{}{cell}{}", b.vertical, b.vertical));
     }
-    out.push(format!("+{}+", "-".repeat(layout.left_w)));
+    out.push(format!(
+        "{}{}{}",
+        b.corner_bl,
+        std::iter::repeat_n(b.horizontal, layout.left_w).collect::<String>(),
+        b.corner_br
+    ));
 }
 
 #[cfg(test)]
@@ -278,10 +373,28 @@ mod tests {
     /// way `render_frame` derives them, so a test's `Layout` always agrees
     /// with what `render_frame` actually produces at the same inputs.
     fn layout_for(cols: usize, rows: usize, state: &PickerState, color_capable: bool) -> Layout {
+        layout_for_borders(cols, rows, state, color_capable, false)
+    }
+
+    fn layout_for_borders(
+        cols: usize,
+        rows: usize,
+        state: &PickerState,
+        color_capable: bool,
+        unicode_borders: bool,
+    ) -> Layout {
         let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
         let title_rows = title_bar_lines(state, cols).len();
         let hint_rows = hint_bar_lines(cols).len();
-        layout::compute(cols, rows, &names, color_capable, title_rows, hint_rows)
+        layout::compute(
+            cols,
+            rows,
+            &names,
+            color_capable,
+            title_rows,
+            hint_rows,
+            unicode_borders,
+        )
     }
 
     #[test]
@@ -291,7 +404,58 @@ mod tests {
         let frame = render_frame(&state, &layout);
         assert_eq!(frame.len(), layout.rows);
         for line in &frame {
-            assert_eq!(line.len(), layout.cols, "line was: {line:?}");
+            assert_eq!(line.chars().count(), layout.cols, "line was: {line:?}");
+        }
+    }
+
+    /// The same invariant as above, but with the box-drawing border set,
+    /// where a border cell is 3 UTF-8 bytes yet still exactly one display
+    /// column -- `.chars().count()`, not `.len()`, is what must hold here.
+    #[test]
+    fn unicode_borders_still_measure_one_column_per_glyph() {
+        let state = PickerState::new(skills(&["todo", "bug-report"]));
+        let layout = layout_for_borders(80, 24, &state, true, true);
+        let frame = render_frame(&state, &layout);
+        assert_eq!(frame.len(), layout.rows);
+        for line in &frame {
+            assert_eq!(line.chars().count(), layout.cols, "line was: {line:?}");
+        }
+        // And the byte length is now genuinely longer than the column count
+        // on a bordered row -- proving this test would have caught a
+        // regression back to raw `.len()`, not just passed by coincidence.
+        let bordered_row = &frame[1];
+        assert!(
+            bordered_row.len() > bordered_row.chars().count(),
+            "expected multi-byte border glyphs on a bordered row: {bordered_row:?}"
+        );
+    }
+
+    #[test]
+    fn unicode_borders_draw_the_box_drawing_glyphs_ascii_never_does() {
+        let state = PickerState::new(skills(&["todo"]));
+        let layout = layout_for_borders(80, 24, &state, true, true);
+        let frame = render_frame(&state, &layout);
+        let top = &frame[1];
+        assert!(top.starts_with('┌'), "top border was: {top:?}");
+        assert!(top.ends_with('┐'), "top border was: {top:?}");
+        assert!(top.contains('┬'), "top border was: {top:?}");
+        // the hint bar is the true last line; the border sits one above it
+        let bottom = &frame[frame.len() - 2];
+        assert!(bottom.starts_with('└'), "bottom border was: {bottom:?}");
+        assert!(bottom.ends_with('┘'), "bottom border was: {bottom:?}");
+        assert!(bottom.contains('┴'), "bottom border was: {bottom:?}");
+    }
+
+    #[test]
+    fn ascii_borders_never_draw_a_box_drawing_glyph() {
+        let state = PickerState::new(skills(&["todo"]));
+        let layout = layout_for(80, 24, &state, true);
+        let frame = render_frame(&state, &layout);
+        for line in &frame {
+            assert!(
+                !line.contains(['┌', '┐', '└', '┘', '─', '│', '┬', '┴']),
+                "ASCII mode drew a box-drawing glyph: {line:?}"
+            );
         }
     }
 

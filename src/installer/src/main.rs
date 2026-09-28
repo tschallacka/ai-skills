@@ -502,14 +502,74 @@ fn read_line_trimmed() -> String {
     line.trim().to_string()
 }
 
-/// For when `interactive` is given neither `--target` nor `--agent`:
-/// auto-detects installed agent roots (`manifest::agent_available`), offers
-/// saved custom locations too (`custom_locations::load`), and prompts a
-/// numbered/comma-separated choice, a custom directory, or `a` for every
-/// listed root. Reached only once this installer already knows stdin is a
-/// real terminal (the picker itself already refused to run otherwise), so
-/// there is no separate "no interactive channel" branch here: that case
-/// never reaches here at all.
+/// `ui::wizard::run`'s own view of the same roots `select_targets_interactively`
+/// gathers below -- auto-detected agent roots plus saved custom locations --
+/// built once for the graphical flow rather than sharing `AvailableTarget`,
+/// since the wizard also wants to know whether each one already exists on
+/// disk (shown as `[exists]`/`[will create]`) up front, before any of them
+/// is even highlighted.
+fn build_available_roots(home: &Path) -> Result<Vec<ui::wizard::AvailableRoot>, String> {
+    let mut available = Vec::new();
+    for agent in manifest::AGENTS {
+        if manifest::agent_available(agent.kind, home) {
+            let path = home.join(agent.home_suffix);
+            let exists = path.is_dir();
+            available.push(ui::wizard::AvailableRoot {
+                path,
+                label: agent.name.to_string(),
+                kind: Some(agent.kind.to_string()),
+                exists,
+            });
+        }
+    }
+    for path in custom_locations::load(home) {
+        let label = format!("Custom: {}", path.display());
+        let exists = path.is_dir();
+        available.push(ui::wizard::AvailableRoot {
+            path,
+            label,
+            kind: None,
+            exists,
+        });
+    }
+    if available.is_empty() {
+        return Err("No installed agent roots or saved custom locations were found".to_string());
+    }
+    Ok(available)
+}
+
+/// What is already installed at `root`, for `ui::wizard`'s "use previous
+/// settings?" step -- the same `discover_skills` + `resolve_mode` glue
+/// `run_interactive` uses to build the picker's own `SkillEntry` list below,
+/// kept out of `ui::wizard` itself so that module depends on neither
+/// `discover` nor `integration` directly.
+fn installed_skills_summary(source: &Path, root: &Path) -> Vec<ui::wizard::InstalledSkill> {
+    let Ok(names) = discover::discover_skills(source) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for name in names {
+        let destination = root.join(&name);
+        if !destination.join("SKILL.md").is_file() {
+            continue;
+        }
+        // Only a skill that genuinely offers a choice gets a mode shown --
+        // `resolve_mode` still answers something for a mode-free skill (its
+        // own fallback default), but that answer was never a real choice.
+        let mode = (integration::modes(source, &name).len() > 1)
+            .then(|| integration::resolve_mode(source, &name, Some(&destination), None));
+        out.push(ui::wizard::InstalledSkill { name, mode });
+    }
+    out
+}
+
+/// The plain-text fallback for when `interactive` is given neither
+/// `--target` nor `--agent` and stdin is NOT a real terminal: a script, a CI
+/// job, `</dev/null`. A real terminal instead gets `ui::wizard::run`'s
+/// graphical flow (see `run_interactive`), which never calls this function
+/// at all; this one is reached only for the genuinely headless case, and its
+/// own `yes && !tty` branch (B163, below) keeps working exactly as it always
+/// has there.
 fn select_targets_interactively(yes: bool) -> Result<Vec<(PathBuf, Option<String>)>, String> {
     let home = home_dir_opt().ok_or("interactive: needs $HOME set to detect agent roots")?;
 
@@ -2551,10 +2611,43 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
     // This installer's own picker needs a `target` up front to compute
     // each skill's installed/mode status against, which is what forces
     // roots to resolve before skills are chosen.
-    let roots: Vec<(PathBuf, Option<String>)> = if target.is_some() || agent.is_some() {
-        vec![resolve_target_and_kind(target, agent)?]
+    //
+    // With neither --target nor --agent given, a real terminal gets the
+    // graphical wizard (root selection, a custom directory, install-vs-
+    // uninstall, and "use previous settings?" -- all one continuous
+    // full-screen flow with back-navigation); a non-tty stdin (a script, a
+    // CI job) falls back to `select_targets_interactively`'s plain-text
+    // prompts, unchanged, since there is no wizard to show it at all.
+    let (roots, uninstall_choice, use_previous) = if target.is_some() || agent.is_some() {
+        (
+            vec![resolve_target_and_kind(target, agent)?],
+            terminal_wants_uninstall()?,
+            false,
+        )
+    } else if ui::terminal::is_tty() {
+        let home = home_dir_opt().ok_or("interactive: needs $HOME set to detect agent roots")?;
+        let available = build_available_roots(&home)?;
+        let source_for_probe = source.clone();
+        match ui::wizard::run(available, |root| {
+            installed_skills_summary(&source_for_probe, root)
+        }) {
+            None => {
+                println!("interactive: no changes made");
+                return Ok(ExitCode::SUCCESS);
+            }
+            Some(outcome) => {
+                for path in &outcome.newly_added_custom {
+                    custom_locations::save(&home, path).map_err(|e| e.to_string())?;
+                }
+                (outcome.roots, outcome.uninstall, outcome.use_previous)
+            }
+        }
     } else {
-        select_targets_interactively(yes)?
+        (
+            select_targets_interactively(yes)?,
+            terminal_wants_uninstall()?,
+            false,
+        )
     };
     // Only used to compute each skill's own installed/mode status below --
     // the actual install loop iterates every resolved root, each with its
@@ -2562,7 +2655,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
     let target = roots[0].0.clone();
     let (_, target_kind) = &roots[0];
 
-    if terminal_wants_uninstall()? {
+    if uninstall_choice {
         let home = home_dir_opt().ok_or("interactive: HOME is not set")?;
         let entries = uninstall::installed_skill_dirs(&target)
             .into_iter()
@@ -2605,7 +2698,12 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
         })
         .collect();
 
-    match ui::run_picker(skills, &source) {
+    let picker_result = if use_previous {
+        ui::run_picker_preselecting_installed(skills, &source)
+    } else {
+        ui::run_picker(skills, &source)
+    };
+    match picker_result {
         None => {
             println!("interactive: no changes made");
             Ok(ExitCode::SUCCESS)

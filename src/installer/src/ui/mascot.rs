@@ -131,6 +131,40 @@ fn tput_colors() -> i64 {
         .unwrap_or(0)
 }
 
+/// Whether the box-drawing borders (`┌─┐│└┘├┤┬┴`) are safe to draw. Every one
+/// of those glyphs is a single display column (never East-Asian-wide, never
+/// combining), so this is purely a "does this terminal decode UTF-8 at all"
+/// question, answered the same way the standard locale variables answer it
+/// for any other program: `LC_ALL`, then `LC_CTYPE`, then `LANG`, in that
+/// POSIX precedence order, checked for a case-insensitive "utf-8"/"utf8"
+/// substring. `AI_SKILLS_ASCII_BORDERS=1` forces the ASCII fallback
+/// regardless -- the same kind of escape hatch `AI_SKILLS_NO_SPLASH`
+/// already is for the mascot, for a terminal wrapper this probe
+/// mis-detects. Deliberately independent of `detect_color_mode`: a
+/// terminal can be UTF-8-capable and color-incapable, or the reverse, and
+/// conflating the two would draw either wrongly on that terminal.
+pub fn detect_utf8_capable() -> bool {
+    if std::env::var("AI_SKILLS_ASCII_BORDERS").as_deref() == Ok("1") {
+        return false;
+    }
+    for var in ["LC_ALL", "LC_CTYPE", "LANG"] {
+        if let Ok(value) = std::env::var(var) {
+            let lower = value.to_lowercase();
+            if lower.contains("utf-8") || lower.contains("utf8") {
+                return true;
+            }
+            if !value.is_empty() {
+                // A locale variable IS set, and named something other than
+                // UTF-8 (e.g. "C", "POSIX", "en_US.ISO-8859-1") -- that is a
+                // real, explicit answer, not an absent one, so later,
+                // less-specific variables must not override it.
+                return false;
+            }
+        }
+    }
+    false
+}
+
 fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
     let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0);
     (byte(0), byte(2), byte(4))

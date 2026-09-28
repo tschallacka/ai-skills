@@ -45,6 +45,19 @@ impl PickerState {
     /// preselected through `toggle`, so it cannot end up selected: `toggle`
     /// refuses it the same way a later keypress would.
     pub fn new(skills: Vec<SkillEntry>) -> Self {
+        Self::new_with(skills, |_| true)
+    }
+
+    /// Like `new`, but only a skill this run's own `SkillEntry.installed`
+    /// already reports true starts selected -- the wizard's "use previous
+    /// settings?" step (`ui::wizard`) asking for exactly what is already at
+    /// the target root instead of everything. A Blocked skill is still
+    /// refused through `toggle` regardless, the same as `new`.
+    pub fn new_preselecting_installed(skills: Vec<SkillEntry>) -> Self {
+        Self::new_with(skills, |skill| skill.installed)
+    }
+
+    fn new_with(skills: Vec<SkillEntry>, wants: impl Fn(&SkillEntry) -> bool) -> Self {
         let selected = vec![false; skills.len()];
         let mut state = PickerState {
             skills,
@@ -58,7 +71,9 @@ impl PickerState {
             confirmed: false,
         };
         for i in 0..state.skills.len() {
-            state.toggle(i);
+            if wants(&state.skills[i]) {
+                state.toggle(i);
+            }
         }
         state.message.clear();
         state

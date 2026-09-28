@@ -38,14 +38,20 @@ pub fn enter() -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
     let _ = stty(&["raw", "-echo"]);
-    print!("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H");
+    // ?1000 (basic button tracking) + ?1006 (SGR extended coordinates, so a
+    // click past column/row 223 still decodes -- the older non-SGR encoding
+    // packs each coordinate into one byte and cannot). input::decode_mouse
+    // is the other half of this contract; enabling tracking with nothing on
+    // the read side to parse it would leave a raw mouse report arriving as
+    // garbage keystrokes instead.
+    print!("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1006h");
     use std::io::Write;
     let _ = std::io::stdout().flush();
     saved
 }
 
 pub fn leave(saved: &str) {
-    print!("\x1b[?25h\x1b[?1049l");
+    print!("\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l");
     use std::io::Write;
     let _ = std::io::stdout().flush();
     if !saved.is_empty() {

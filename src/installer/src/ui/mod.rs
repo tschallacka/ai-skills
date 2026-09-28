@@ -2,8 +2,9 @@
 // PACKAGE: PROD
 //! The full-screen skill picker's event loop. Ties layout, model, render,
 //! input, terminal and the mascot together; see each submodule's own doc
-//! comment for what it deliberately leaves out (no mouse, no "right-top"
-//! mascot placement).
+//! comment for what it deliberately leaves out ("right-top" mascot
+//! placement is the one still missing; mouse clicks are handled below via
+//! `layout::hit_test`).
 
 pub mod input;
 pub mod layout;
@@ -13,6 +14,7 @@ pub mod render;
 pub mod terminal;
 pub mod text;
 pub mod uninstall_picker;
+pub mod wizard;
 
 use input::Key;
 use mascot::{ColorMode, EyeAnimator};
@@ -26,15 +28,35 @@ use std::path::Path;
 /// never pressed for that skill). `source_root` is only used by `r`
 /// (reverify).
 pub fn run_picker(skills: Vec<SkillEntry>, source_root: &Path) -> Option<Vec<(String, String)>> {
+    run_picker_with(skills, source_root, PickerState::new)
+}
+
+/// Like `run_picker`, but only a skill this run's own `SkillEntry.installed`
+/// already reports true starts selected -- `ui::wizard`'s "use previous
+/// settings?" step accepted, so the picker opens showing exactly what is
+/// already at the target root rather than everything checked.
+pub fn run_picker_preselecting_installed(
+    skills: Vec<SkillEntry>,
+    source_root: &Path,
+) -> Option<Vec<(String, String)>> {
+    run_picker_with(skills, source_root, PickerState::new_preselecting_installed)
+}
+
+fn run_picker_with(
+    skills: Vec<SkillEntry>,
+    source_root: &Path,
+    make_state: impl FnOnce(Vec<SkillEntry>) -> PickerState,
+) -> Option<Vec<(String, String)>> {
     if !terminal::is_tty() {
         return None;
     }
-    let mut state = PickerState::new(skills);
+    let mut state = make_state(skills);
     let saved = terminal::enter();
     let rx = terminal::spawn_reader();
     // Probed once: the picker redraws on every keypress and tick, and a
     // per-frame `tput` shellout would spawn a process on every redraw.
     let color_mode = mascot::detect_color_mode();
+    let unicode_borders = mascot::detect_utf8_capable();
     let mut eyes = EyeAnimator::new();
 
     loop {
@@ -49,6 +71,7 @@ pub fn run_picker(skills: Vec<SkillEntry>, source_root: &Path) -> Option<Vec<(St
             color_mode != ColorMode::None,
             title_rows,
             hint_rows,
+            unicode_borders,
         );
         state.clamp_scroll(layout.body_rows);
         clamp_info_scroll(&mut state, &layout);
@@ -66,7 +89,7 @@ pub fn run_picker(skills: Vec<SkillEntry>, source_root: &Path) -> Option<Vec<(St
                 state.done = true;
                 state.confirmed = false;
             }
-            key => handle_key(&mut state, key, &layout, source_root),
+            key => handle_key(&mut state, key, &layout, title_rows, source_root),
         }
         if state.done {
             break;
@@ -108,8 +131,29 @@ fn clamp_info_scroll(state: &mut PickerState, layout: &layout::Layout) {
     }
 }
 
-fn handle_key(state: &mut PickerState, key: Key, layout: &layout::Layout, source_root: &Path) {
+fn handle_key(
+    state: &mut PickerState,
+    key: Key,
+    layout: &layout::Layout,
+    title_rows: usize,
+    source_root: &Path,
+) {
     match key {
+        Key::Click { col, row } => {
+            let info_focused = layout.narrow && state.focus == Focus::Info;
+            match layout::hit_test(layout, title_rows, info_focused, col, row) {
+                Some(layout::ClickTarget::ListRow(body_row)) => {
+                    let index = state.scroll + body_row;
+                    if index < state.skills.len() {
+                        state.cursor = index;
+                        state.toggle(index);
+                        state.focus = Focus::List;
+                    }
+                }
+                Some(layout::ClickTarget::Info) => state.focus = Focus::Info,
+                None => {}
+            }
+        }
         Key::Up | Key::Char('k') => state.move_by(-1),
         Key::Down | Key::Char('j') => state.move_by(1),
         Key::PageUp => state.move_by(-(layout.body_rows as isize)),
@@ -157,5 +201,95 @@ fn handle_key(state: &mut PickerState, key: Key, layout: &layout::Layout, source
             state.confirmed = false;
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::requirements::SkillState as RequirementState;
+    use crate::requirements::SkillStatus;
+
+    fn skills(names: &[&str]) -> Vec<SkillEntry> {
+        names
+            .iter()
+            .map(|n| SkillEntry {
+                name: n.to_string(),
+                description: format!("{n} does things."),
+                installed: false,
+                status: SkillStatus {
+                    state: RequirementState::Ok,
+                    blocker: None,
+                    requirements: Vec::new(),
+                },
+                offered_modes: Vec::new(),
+                mode: "skill".to_string(),
+            })
+            .collect()
+    }
+
+    /// A wide 80x24 layout at title_rows=1 -- the same numbers `layout`'s
+    /// own hit_test tests use, so the click coordinates below (col 2, row
+    /// 3/4 for the first/second list rows; col 25, row 3 for the info pane)
+    /// are exactly what those tests already proved lands where this expects.
+    fn wide_layout(names: &[&str]) -> layout::Layout {
+        layout::compute(80, 24, names, true, 1, 1, false)
+    }
+
+    #[test]
+    fn clicking_a_list_row_moves_the_cursor_there_and_toggles_it() {
+        let mut state = PickerState::new(skills(&["todo", "bug-report"]));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        // Everything starts selected; clicking the second row deselects it
+        // and moves the cursor there in one action.
+        handle_key(
+            &mut state,
+            Key::Click { col: 2, row: 4 },
+            &layout,
+            1,
+            source,
+        );
+        assert_eq!(state.cursor, 1);
+        assert!(!state.selected[1]);
+        assert_eq!(state.focus, Focus::List);
+    }
+
+    #[test]
+    fn clicking_the_info_pane_moves_focus_there_without_changing_selection() {
+        let mut state = PickerState::new(skills(&["todo", "bug-report"]));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        handle_key(
+            &mut state,
+            Key::Click { col: 25, row: 3 },
+            &layout,
+            1,
+            source,
+        );
+        assert_eq!(state.focus, Focus::Info);
+        assert!(state.selected[0]);
+        assert!(state.selected[1]);
+    }
+
+    #[test]
+    fn clicking_a_border_changes_nothing() {
+        let mut state = PickerState::new(skills(&["todo", "bug-report"]));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        handle_key(
+            &mut state,
+            Key::Click { col: 1, row: 3 },
+            &layout,
+            1,
+            source,
+        );
+        assert_eq!(state.cursor, 0);
+        assert_eq!(state.focus, Focus::List);
+        assert!(state.selected[0]);
+        assert!(state.selected[1]);
     }
 }

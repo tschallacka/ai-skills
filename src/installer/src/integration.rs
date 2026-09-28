@@ -118,10 +118,11 @@ pub fn mcp_adapter_path(source_root: &Path, skill: &str, home: &Path) -> Option<
 }
 
 /// The mode to install `skill` in at `destination`: an explicit choice for
-/// this run outranks whatever is already on disk, which outranks the
-/// `skill` default. `skill` is the default only on a first install (T109):
-/// an unattended update with no flag must carry an existing mcp install
-/// forward, not silently revert it.
+/// this run outranks whatever is already on disk, which outranks the `mcp`
+/// default. `mcp` is the default only on a first install (T109): an
+/// unattended update with no flag must carry an existing skill-mode install
+/// forward, not silently switch it -- the same guarantee that used to protect
+/// an existing mcp install now protects an existing skill install instead.
 pub fn resolve_mode(
     source_root: &Path,
     skill: &str,
@@ -136,7 +137,7 @@ pub fn resolve_mode(
             return mode;
         }
     }
-    "skill".to_string()
+    "mcp".to_string()
 }
 
 /// Where `resolve_mode`'s answer came from, for the install summary (T109:
@@ -337,11 +338,24 @@ mod tests {
     }
 
     #[test]
-    fn resolve_mode_falls_back_to_skill_on_a_first_install_with_no_explicit_choice() {
+    fn resolve_mode_falls_back_to_mcp_on_a_first_install_with_no_explicit_choice() {
         let dir = tempfile::tempdir().unwrap();
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
         assert_eq!(
             resolve_mode(dir.path(), "ai-text-editor", None, None),
+            "mcp"
+        );
+    }
+
+    #[test]
+    fn resolve_mode_carries_an_existing_skill_mode_install_forward() {
+        let dir = tempfile::tempdir().unwrap();
+        write_integration(dir.path(), "ai-text-editor", SAMPLE);
+        let dest = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dest.path()).unwrap();
+        fs::write(mode_marker_path(dest.path()), "skill").unwrap();
+        assert_eq!(
+            resolve_mode(dir.path(), "ai-text-editor", Some(dest.path()), None),
             "skill"
         );
     }
