@@ -12,6 +12,35 @@ what they cost, how to verify any of it yourself, and what does not work yet.
 
 [wiki]: https://github.com/tschallacka/ai-skills/wiki
 
+## Install
+
+Pick whichever fits how you work. Any of these opens the same interactive
+installer, where you choose the skills and the agent destination(s).
+
+**npx** — installs and runs in one step, nothing left on `PATH` afterward:
+
+```bash
+npx --yes --package @tschallacka/ai-skills ai-skills-install
+```
+
+**Linux / macOS** — the one-command installer, no npm required:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh | sh
+```
+
+**Windows** — the identical command, run inside Git Bash or WSL2 (both
+provide the POSIX `sh` it needs; there is no separate PowerShell/cmd
+installer):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/installer/bootstrap.sh | sh
+```
+
+See "[One-command installer](#one-command-installer)" below for the full
+list of install destinations, and "[npm installation](#npm-installation)"
+for a persistent `ai-skills-install` command on `PATH` instead of `npx`.
+
 ## Skills
 
 | Skill | Purpose | Documentation |
