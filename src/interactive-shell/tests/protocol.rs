@@ -816,6 +816,65 @@ fn rgbview_preserves_styles_without_json_wrapping() {
     child.wait().unwrap();
 }
 
+// T152, end to end over the REAL wrapper binary and socket protocol (not just
+// the unit-tested Screen): a standalone absolute-cursor-positioning write
+// (CUP, `ESC[r;cH`) issued SEPARATELY from the child's main `\r\n`-joined
+// frame -- the installer wizard's mascot-overlay shape the ticket was filed
+// against -- must show up in `view`. The overlay text here is deliberately
+// real multi-byte UTF-8 (U+2500 BOX DRAWINGS LIGHT HORIZONTAL, `\342\224\200`
+// in octal), not plain ASCII: plain-ASCII CUP overlays already worked before
+// this fix, so an ASCII-only fixture here would not have caught the actual
+// regression (Screen::byte's Ground state silently dropped every byte
+// outside 0x20..=0x7e, including a whole multi-byte glyph, before it ever
+// reached a row).
+#[test]
+fn a_standalone_cup_addressed_overlay_of_a_unicode_glyph_reaches_view_over_the_socket() {
+    let dir = temp_dir("overlay");
+    let mut child = start(
+        &dir,
+        &[
+            "sh",
+            "-c",
+            "printf 'MAIN\\r\\n\\033[3;3H\\342\\224\\200\\342\\224\\200TAIL'; sleep 600",
+        ],
+        "600",
+    );
+    let _ = request_all(
+        &dir,
+        r#"{"v":1,"op":"wait","contains":"MAIN"}
+"#,
+    );
+    let snapshot = wait_for_rows(&dir, "\u{2500}\u{2500}TAIL");
+    // The row's own two untouched leading blank cells (cols 1-2, before the
+    // CUP-addressed write at col 3) stay part of its text -- `snapshot`/
+    // `view`/`rgbview` only trim the trailing blanks off a row, never the
+    // leading ones.
+    assert_eq!(
+        snapshot["rows"]["2"], "  \u{2500}\u{2500}TAIL",
+        "the overlay row never carried its box-drawing glyphs: {snapshot}"
+    );
+    let view = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "view",
+            "3",
+        ])
+        .output()
+        .unwrap();
+    assert!(view.status.success());
+    assert_eq!(
+        String::from_utf8(view.stdout).unwrap(),
+        "terminal=20x4\n003 [003-008]   \u{2500}\u{2500}TAIL\n"
+    );
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
+}
+
 // B142: the markup mode over the real socket, not just the unit-tested
 // Screen::markup -- proves the CLI wiring (dispatch, row filtering, the
 // "markup" event name the CLI's response printer looks for) round-trips.

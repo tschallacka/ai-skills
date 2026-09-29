@@ -497,11 +497,17 @@ enum Parser {
     Charset,
     CsiDiscard,
     OscDiscard(bool),
+    /// Accumulating the continuation bytes of a multi-byte UTF-8 sequence
+    /// (a real Unicode glyph -- box-drawing, block characters, etc. -- written
+    /// directly rather than via the VT100 ACS charset `line_drawing` already
+    /// handles). Holds the bytes seen so far and the total the lead byte
+    /// promised.
+    Utf8(Vec<u8>, usize),
 }
 
 #[derive(Debug)]
 struct Screen {
-    rows: Vec<Vec<u8>>,
+    rows: Vec<Vec<char>>,
     dirty: Vec<bool>,
     row: usize,
     col: usize,
@@ -510,8 +516,8 @@ struct Screen {
     wrap_pending: bool,
     saved_cursor: Option<(usize, usize)>,
     line_drawing: bool,
-    /// The last graphic byte `put` wrote, which `CSI Ps b` (REP) repeats.
-    last_printed: Option<u8>,
+    /// The last graphic character `put` wrote, which `CSI Ps b` (REP) repeats.
+    last_printed: Option<char>,
     parser: Parser,
     saved_primary: Option<ScreenState>,
     active_link: Option<String>,
@@ -527,7 +533,7 @@ struct Screen {
 
 #[derive(Clone, Debug)]
 struct ScreenState {
-    rows: Vec<Vec<u8>>,
+    rows: Vec<Vec<char>>,
     row: usize,
     col: usize,
     visible: bool,
@@ -541,7 +547,7 @@ struct ScreenState {
 impl Screen {
     fn new(rows: usize, cols: usize) -> Self {
         Self {
-            rows: vec![vec![b' '; cols]; rows],
+            rows: vec![vec![' '; cols]; rows],
             dirty: vec![true; rows],
             row: 0,
             col: 0,
@@ -609,10 +615,21 @@ impl Screen {
                 0x0e => self.line_drawing = true,
                 0x0f => self.line_drawing = false,
                 0x20..=0x7e => self.put(if self.line_drawing {
-                    line_drawing(byte)
+                    line_drawing(byte) as char
                 } else {
-                    byte
+                    byte as char
                 }),
+                // A UTF-8 lead byte: a real Unicode glyph (box-drawing,
+                // block characters, ...) written directly rather than via
+                // the VT100 ACS charset `line_drawing` already handles.
+                // Accumulate the continuation bytes the lead byte promises;
+                // stray continuation bytes (0x80..=0xBF) and invalid lead
+                // bytes (0xF5..=0xFF) with no valid sequence are dropped,
+                // matching this parser's existing tolerance for malformed
+                // input elsewhere.
+                0xc2..=0xdf => self.parser = Parser::Utf8(vec![byte], 2),
+                0xe0..=0xef => self.parser = Parser::Utf8(vec![byte], 3),
+                0xf0..=0xf4 => self.parser = Parser::Utf8(vec![byte], 4),
                 _ => {}
             },
             Parser::Esc => match byte {
@@ -670,10 +687,32 @@ impl Screen {
                     self.parser = Parser::OscDiscard(escaped);
                 }
             }
+            Parser::Utf8(mut buf, needed) => {
+                if (0x80..=0xbf).contains(&byte) {
+                    buf.push(byte);
+                    if buf.len() >= needed {
+                        if let Some(ch) = std::str::from_utf8(&buf)
+                            .ok()
+                            .and_then(|s| s.chars().next())
+                        {
+                            self.put(ch);
+                        }
+                        self.parser = Parser::Ground;
+                    } else {
+                        self.parser = Parser::Utf8(buf, needed);
+                    }
+                } else {
+                    // Malformed sequence (too short): drop it and reprocess
+                    // this byte from Ground rather than losing it -- it may
+                    // be the start of the NEXT escape/character.
+                    self.parser = Parser::Ground;
+                    self.byte(byte);
+                }
+            }
         }
     }
-    fn put(&mut self, byte: u8) {
-        self.last_printed = Some(byte);
+    fn put(&mut self, ch: char) {
+        self.last_printed = Some(ch);
         if self.wrap_pending {
             self.wrap_pending = false;
             self.col = 0;
@@ -681,7 +720,7 @@ impl Screen {
         }
         if let Some(row) = self.rows.get_mut(self.row) {
             if self.col < row.len() {
-                row[self.col] = byte;
+                row[self.col] = ch;
                 self.dirty[self.row] = true;
                 self.styles[self.row][self.col] = self.style;
             }
@@ -692,13 +731,13 @@ impl Screen {
                     && element.row == self.row
                     && element.col + element.width == self.col
                 {
-                    element.label.push(byte as char);
+                    element.label.push(ch);
                     element.width += 1;
                 } else {
                     let id = format!("link-{}", self.elements.len() + 1);
                     self.elements.push(Clickable {
                         id,
-                        label: (byte as char).to_string(),
+                        label: ch.to_string(),
                         uri: uri.clone(),
                         actionable: true,
                         highlighted: false,
@@ -711,7 +750,7 @@ impl Screen {
             } else {
                 self.elements.push(Clickable {
                     id: "link-1".into(),
-                    label: (byte as char).to_string(),
+                    label: ch.to_string(),
                     uri: uri.clone(),
                     actionable: true,
                     highlighted: false,
@@ -737,12 +776,12 @@ impl Screen {
         } else if self.row + 1 >= self.rows.len() {
             let removed = self.rows.remove(0);
             self.scrollback
-                .push(String::from_utf8_lossy(&removed).trim_end().to_string());
+                .push(cells_to_string(&removed).trim_end().to_string());
             if self.scrollback.len() > 1000 {
                 self.scrollback.remove(0);
             }
             let cols = self.rows[0].len();
-            self.rows.push(vec![b' '; cols]);
+            self.rows.push(vec![' '; cols]);
             self.styles.remove(0);
             self.styles.push(vec![self.style; cols]);
             self.dirty.fill(true);
@@ -754,13 +793,13 @@ impl Screen {
         for _ in 0..count {
             let removed = self.rows.remove(self.scroll_top);
             let cols = removed.len();
-            self.rows.insert(self.scroll_bottom, vec![b' '; cols]);
+            self.rows.insert(self.scroll_bottom, vec![' '; cols]);
             self.styles.remove(self.scroll_top);
             self.styles
                 .insert(self.scroll_bottom, vec![self.style; cols]);
             if record {
                 self.scrollback
-                    .push(String::from_utf8_lossy(&removed).trim_end().to_string());
+                    .push(cells_to_string(&removed).trim_end().to_string());
                 if self.scrollback.len() > 1000 {
                     self.scrollback.remove(0);
                 }
@@ -774,7 +813,7 @@ impl Screen {
         for _ in 0..count {
             let removed = self.rows.remove(self.scroll_bottom);
             let cols = removed.len();
-            self.rows.insert(self.scroll_top, vec![b' '; cols]);
+            self.rows.insert(self.scroll_top, vec![' '; cols]);
             self.styles.remove(self.scroll_bottom);
             self.styles.insert(self.scroll_top, vec![self.style; cols]);
         }
@@ -788,7 +827,7 @@ impl Screen {
         }
         for _ in 0..count.min(self.scroll_bottom - self.row + 1) {
             let cols = self.rows[0].len();
-            self.rows.insert(self.row, vec![b' '; cols]);
+            self.rows.insert(self.row, vec![' '; cols]);
             self.rows.remove(self.scroll_bottom + 1);
             self.styles.insert(self.row, vec![self.style; cols]);
             self.styles.remove(self.scroll_bottom + 1);
@@ -804,7 +843,7 @@ impl Screen {
         for _ in 0..count.min(self.scroll_bottom - self.row + 1) {
             let cols = self.rows[0].len();
             self.rows.remove(self.row);
-            self.rows.insert(self.scroll_bottom, vec![b' '; cols]);
+            self.rows.insert(self.scroll_bottom, vec![' '; cols]);
             self.styles.remove(self.row);
             self.styles
                 .insert(self.scroll_bottom, vec![self.style; cols]);
@@ -906,7 +945,7 @@ impl Screen {
             _ => return,
         };
         for row in start..end {
-            self.rows[row].fill(b' ');
+            self.rows[row].fill(' ');
             self.styles[row].fill(self.style);
             self.dirty[row] = true;
         }
@@ -923,7 +962,7 @@ impl Screen {
             2 => (0, self.rows[self.row].len()),
             _ => return,
         };
-        self.rows[self.row][start..end].fill(b' ');
+        self.rows[self.row][start..end].fill(' ');
         self.styles[self.row][start..end].fill(self.style);
         self.dirty[self.row] = true;
     }
@@ -967,7 +1006,7 @@ impl Screen {
         });
         let rows = self.saved_primary.as_ref().unwrap().rows.len();
         let cols = self.saved_primary.as_ref().unwrap().rows[0].len();
-        self.rows = vec![vec![b' '; cols]; rows];
+        self.rows = vec![vec![' '; cols]; rows];
         self.styles = vec![vec![self.style; cols]; rows];
         self.dirty = vec![true; rows];
         self.row = 0;
@@ -993,7 +1032,7 @@ impl Screen {
         let mut out = BTreeMap::new();
         for (i, row) in self.rows.iter().enumerate() {
             if self.dirty[i] {
-                out.insert(i, String::from_utf8_lossy(row).trim_end().to_string());
+                out.insert(i, cells_to_string(row).trim_end().to_string());
             }
         }
         self.dirty.fill(false);
@@ -1003,14 +1042,14 @@ impl Screen {
         self.rows
             .iter()
             .enumerate()
-            .map(|(i, row)| (i, String::from_utf8_lossy(row).trim_end().to_string()))
+            .map(|(i, row)| (i, cells_to_string(row).trim_end().to_string()))
             .collect()
     }
     fn view(&mut self, delta: bool, requested_rows: &[usize]) -> String {
         let current = self
             .rows
             .iter()
-            .map(|row| String::from_utf8_lossy(row).trim_end().to_string())
+            .map(|row| cells_to_string(row).trim_end().to_string())
             .collect::<Vec<_>>();
         let previous = self.last_view.replace(current.clone());
         let requested = if requested_rows.is_empty() {
@@ -1033,7 +1072,8 @@ impl Screen {
             })
             .map(|row| {
                 let text = &current[row];
-                let (start, end) = rendered_span(text.as_bytes());
+                let chars: Vec<char> = text.chars().collect();
+                let (start, end) = rendered_span(&chars);
                 format!("{line:03} [{start:03}-{end:03}] {text}", line = row + 1,)
             })
             .collect::<Vec<_>>()
@@ -1047,7 +1087,7 @@ impl Screen {
             .map(|(row, cells)| {
                 let end = cells
                     .iter()
-                    .rposition(|cell| *cell != b' ')
+                    .rposition(|cell| *cell != ' ')
                     .map_or(0, |index| index + 1);
                 let (start, end) = rendered_span(&cells[..end]);
                 let mut text = format!("{line:03} [{start:03}-{end:03}] ", line = row + 1);
@@ -1062,7 +1102,7 @@ impl Screen {
                         text.push_str(&style_sgr(*style));
                         previous = *style;
                     }
-                    text.push(*cell as char);
+                    text.push(*cell);
                 }
                 if previous.fg != 0 || previous.bg != 0 || previous.bold || previous.reverse {
                     text.push_str("\x1b[0m");
@@ -1101,7 +1141,7 @@ impl Screen {
                 self.rows
                     .get(element.row)
                     .and_then(|row| row.get(element.col..element.col.saturating_add(element.width)))
-                    .is_some_and(|cells| cells == element.label.as_bytes())
+                    .is_some_and(|cells| cells.iter().copied().eq(element.label.chars()))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -1116,7 +1156,7 @@ impl Screen {
                     col += 1;
                 }
                 if col > start + 1 {
-                    let label = String::from_utf8_lossy(&cells[start..col]).into_owned();
+                    let label = cells_to_string(&cells[start..col]);
                     elements.push(Clickable {
                         id: format!("text-{row}-{start}"),
                         label,
@@ -1173,16 +1213,21 @@ impl Screen {
         comparable >= 2 && different * 2 >= comparable
     }
     // B142: a lightweight HTML-like markup mode, additive alongside view/rgbview/
-    // elements/observe. Box-drawing borders reach this model only as the ASCII
-    // '-'/'|'/'+' that `line_drawing` normalizes ACS output to (real multi-byte
-    // UTF-8 box-drawing glyphs would desync the one-byte-per-cell model this
-    // parser uses everywhere else), so pane detection is scoped to that ASCII
-    // shape and is deliberately non-nested: the first bottom border whose column
-    // extent matches a top border, with '|'/'+' at both edges on every row
-    // between, closes the pane. Table synthesis is likewise a single-pass,
-    // exact-match heuristic (same run of whitespace-delimited field start
-    // columns across >=2 consecutive rows), not a general table parser -- same
-    // risk class as the existing `highlighted` heuristic, not a stronger claim.
+    // elements/observe. Box-drawing borders reach THIS heuristic only as the
+    // ASCII '-'/'|'/'+' that `line_drawing` normalizes ACS output to; the cell
+    // grid itself is one decoded Unicode scalar per column (T152/T157: it used
+    // to be one raw byte per cell, which silently dropped real multi-byte UTF-8
+    // box-drawing glyphs such as U+2500 before they ever reached a row -- view/
+    // rgbview/markup now see them), but this specific pane/border detector is
+    // still scoped to the ASCII shape on purpose: recognizing U+2500-family
+    // glyphs as borders too is a real but separate widening of the heuristic,
+    // not needed by anything that currently calls it. Pane detection stays
+    // deliberately non-nested: the first bottom border whose column extent
+    // matches a top border, with '|'/'+' at both edges on every row between,
+    // closes the pane. Table synthesis is likewise a single-pass, exact-match
+    // heuristic (same run of whitespace-delimited field start columns across
+    // >=2 consecutive rows), not a general table parser -- same risk class as
+    // the existing `highlighted` heuristic, not a stronger claim.
     fn markup(&self, requested_rows: &[usize]) -> String {
         let elements = self.elements();
         let total = self.rows.len();
@@ -1231,8 +1276,8 @@ impl Screen {
     }
     fn trimmed_span(&self, row: usize, start: usize, end: usize) -> Option<(usize, usize)> {
         let cells = self.rows.get(row)?.get(start..end)?;
-        let first = cells.iter().position(|cell| *cell != b' ')?;
-        let last = cells.iter().rposition(|cell| *cell != b' ')?;
+        let first = cells.iter().position(|cell| *cell != ' ')?;
+        let last = cells.iter().rposition(|cell| *cell != ' ')?;
         Some((start + first, start + last + 1))
     }
     fn row_fields(&self, row: usize, start: usize, end: usize) -> Vec<(usize, usize)> {
@@ -1244,7 +1289,7 @@ impl Screen {
         // surrounding space at all (B142, confirmed against a live mc
         // screen), so whitespace-only splitting left every such row as one
         // fused field.
-        let is_delimiter = |cell: u8| cell.is_ascii_whitespace() || cell == b'|';
+        let is_delimiter = |cell: char| cell.is_ascii_whitespace() || cell == '|';
         let mut fields = Vec::new();
         let mut col = 0;
         while col < cells.len() {
@@ -1272,12 +1317,12 @@ impl Screen {
     // rest of this heuristic).
     fn is_border_row(&self, row: usize) -> Option<(usize, usize)> {
         let cells = self.rows.get(row)?;
-        let first = cells.iter().position(|cell| *cell != b' ')?;
-        let last = cells.iter().rposition(|cell| *cell != b' ')?;
+        let first = cells.iter().position(|cell| *cell != ' ')?;
+        let last = cells.iter().rposition(|cell| *cell != ' ')?;
         if last <= first {
             return None;
         }
-        let is_border = |cell: u8| cell == b'-' || cell == b'+';
+        let is_border = |cell: char| cell == '-' || cell == '+';
         (is_border(cells[first]) && is_border(cells[last])).then_some((first, last))
     }
     fn detect_panes(&self) -> Vec<Pane> {
@@ -1302,8 +1347,8 @@ impl Screen {
                 }
                 let walls_hold = (top + 1..bottom).all(|row| {
                     let cells = &self.rows[row];
-                    matches!(cells.get(left), Some(b'|') | Some(b'+'))
-                        && matches!(cells.get(right), Some(b'|') | Some(b'+'))
+                    matches!(cells.get(left), Some('|') | Some('+'))
+                        && matches!(cells.get(right), Some('|') | Some('+'))
                 });
                 if walls_hold {
                     panes.push(Pane {
@@ -1331,7 +1376,7 @@ impl Screen {
             self.rows
                 .get(candidate)
                 .and_then(|cells| cells.get(col))
-                .is_some_and(|cell| *cell == b'|' || *cell == b'+')
+                .is_some_and(|cell| *cell == '|' || *cell == '+')
         };
         (row > 0 && continues(row - 1)) || continues(row + 1)
     }
@@ -1346,7 +1391,7 @@ impl Screen {
         rows.iter().all(|&row| {
             self.rows.get(row).is_some_and(|cells| {
                 (start..end.min(cells.len()))
-                    .filter(|&col| cells[col] == b'|')
+                    .filter(|&col| cells[col] == '|')
                     .all(|col| self.pipe_joins_a_neighbor(row, col))
             })
         })
@@ -1444,9 +1489,7 @@ impl Screen {
         };
         for element in filtered {
             if element.col > cursor {
-                html.push_str(&html_escape(&String::from_utf8_lossy(
-                    &cells[cursor..element.col],
-                )));
+                html.push_str(&html_escape(&cells_to_string(&cells[cursor..element.col])));
             }
             let label = html_escape(&element.label);
             if element.actionable {
@@ -1467,7 +1510,7 @@ impl Screen {
             cursor = element.col + element.width;
         }
         if cursor < end && cursor < cells.len() {
-            html.push_str(&html_escape(&String::from_utf8_lossy(
+            html.push_str(&html_escape(&cells_to_string(
                 &cells[cursor..end.min(cells.len())],
             )));
         }
@@ -1530,9 +1573,9 @@ impl Screen {
         self.scrollback.clone()
     }
     fn resize(&mut self, rows: usize, cols: usize) {
-        self.rows.resize_with(rows, || vec![b' '; cols]);
+        self.rows.resize_with(rows, || vec![' '; cols]);
         for row in &mut self.rows {
-            row.resize(cols, b' ');
+            row.resize(cols, ' ');
         }
         self.dirty = vec![true; rows];
         self.styles.resize_with(rows, || vec![self.style; cols]);
@@ -1561,12 +1604,20 @@ fn line_drawing(b: u8) -> u8 {
     }
 }
 
-fn rendered_span(row: &[u8]) -> (usize, usize) {
-    let Some(start) = row.iter().position(|cell| *cell != b' ') else {
+fn rendered_span(row: &[char]) -> (usize, usize) {
+    let Some(start) = row.iter().position(|cell| *cell != ' ') else {
         return (0, 0);
     };
-    let end = row.iter().rposition(|cell| *cell != b' ').unwrap_or(start);
+    let end = row.iter().rposition(|cell| *cell != ' ').unwrap_or(start);
     (start + 1, end + 1)
+}
+
+/// Builds the display text of a row (or a slice of one) from its cells --
+/// each cell already holds one decoded Unicode scalar value (ASCII or a
+/// multi-byte character such as a box-drawing glyph), one per display
+/// column, so this is a plain collect rather than a byte decode.
+fn cells_to_string(cells: &[char]) -> String {
+    cells.iter().collect()
 }
 
 fn style_sgr(style: CellStyle) -> String {
@@ -2022,7 +2073,7 @@ fn client(
                 .iter()
                 .enumerate()
                 .flat_map(|(row, cells)| {
-                    let line = String::from_utf8_lossy(cells).into_owned();
+                    let line = cells_to_string(cells);
                     line.match_indices(&query)
                         .map(|(col, text)| LocateMatch {
                             text: text.to_owned(),
@@ -2464,14 +2515,14 @@ mod tests {
         let mut s = Screen::new(2, 10);
         s.feed(b"\x1b[");
         s.feed(b"2JX");
-        assert_eq!(s.rows[0][0], b'X')
+        assert_eq!(s.rows[0][0], 'X')
     }
     #[test]
     fn printable_output_wraps_at_the_terminal_width() {
         let mut screen = Screen::new(2, 4);
         screen.feed(b"abcde");
-        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "abcd");
-        assert_eq!(String::from_utf8_lossy(&screen.rows[1]), "e   ");
+        assert_eq!(cells_to_string(&screen.rows[0]), "abcd");
+        assert_eq!(cells_to_string(&screen.rows[1]), "e   ");
         assert_eq!(screen.col, 1);
     }
     #[test]
@@ -2487,14 +2538,14 @@ mod tests {
         overlong.extend(std::iter::repeat_n(b'1', 129));
         overlong.extend_from_slice(b"mSAFE");
         s.feed(&overlong);
-        assert_eq!(s.rows[0][3], b'-');
-        assert_eq!(s.rows[0][4], b'S');
+        assert_eq!(s.rows[0][3], '-');
+        assert_eq!(s.rows[0][4], 'S');
         let mut osc = vec![0x1b, b']'];
         osc.extend(std::iter::repeat_n(b'x', 4097));
         osc.extend_from_slice(b"\x07O");
         let mut osc_screen = Screen::new(1, 10);
         osc_screen.feed(&osc);
-        assert_eq!(osc_screen.rows[0][0], b'O');
+        assert_eq!(osc_screen.rows[0][0], 'O');
     }
     #[test]
     fn alternate_screen_round_trips_primary_content() {
@@ -2502,7 +2553,7 @@ mod tests {
         s.feed(b"\x1b[31mprimary");
         let _ = s.delta();
         s.feed(b"\x1b[?1049hALT\x1b[?1049l");
-        assert_eq!(String::from_utf8_lossy(&s.rows[0][..7]), "primary");
+        assert_eq!(cells_to_string(&s.rows[0][..7]), "primary");
         assert_eq!(s.styles[0][0].fg, 2);
         assert!(s.delta().contains_key(&0));
     }
@@ -2510,10 +2561,10 @@ mod tests {
     fn erase_sequences_clear_text_and_styles_by_mode() {
         let mut s = Screen::new(2, 6);
         s.feed(b"\x1b[31mabcdef\x1b[2K");
-        assert_eq!(String::from_utf8_lossy(&s.rows[0]), "      ");
+        assert_eq!(cells_to_string(&s.rows[0]), "      ");
         assert_eq!(s.styles[0][0].fg, 2);
         s.feed(b"\x1b[1Gabcdef\x1b[1G\x1b[K");
-        assert_eq!(String::from_utf8_lossy(&s.rows[0]), "      ");
+        assert_eq!(cells_to_string(&s.rows[0]), "      ");
     }
     /// The exact stream ncurses sent when a menu selection moved down a row:
     /// the seven spaces inside `> canary       5% of ...` arrive as one space
@@ -2526,7 +2577,7 @@ mod tests {
         screen.feed(b"  canary       5% of production traffic\r");
         screen.feed(b"\x1b[0;7m> canary \x1b[6b5% of production traffic");
         assert_eq!(
-            String::from_utf8_lossy(&screen.rows[0]).trim_end(),
+            cells_to_string(&screen.rows[0]).trim_end(),
             "> canary       5% of production traffic"
         );
     }
@@ -2535,22 +2586,22 @@ mod tests {
     fn rep_uses_the_last_printed_byte_defaults_to_one_and_wraps_like_typing() {
         let mut screen = Screen::new(2, 4);
         screen.feed(b"x\x1b[b");
-        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "xx  ");
+        assert_eq!(cells_to_string(&screen.rows[0]), "xx  ");
         screen.feed(b"\x1b[4b");
-        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "xxxx");
-        assert_eq!(String::from_utf8_lossy(&screen.rows[1]), "xx  ");
+        assert_eq!(cells_to_string(&screen.rows[0]), "xxxx");
+        assert_eq!(cells_to_string(&screen.rows[1]), "xx  ");
     }
 
     #[test]
     fn rep_with_nothing_printed_yet_or_a_huge_count_is_harmless() {
         let mut screen = Screen::new(2, 4);
         screen.feed(b"\x1b[5b");
-        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "    ");
+        assert_eq!(cells_to_string(&screen.rows[0]), "    ");
         // Bounded by rows*cols (8 puts here): it terminates, and every cell
         // that was written holds the repeated byte.
         screen.feed(b"z\x1b[999999999b");
-        assert_eq!(screen.rows[0], b"zzzz");
-        assert_eq!(screen.rows[1][0], b'z');
+        assert_eq!(screen.rows[0], ['z', 'z', 'z', 'z']);
+        assert_eq!(screen.rows[1][0], 'z');
     }
 
     #[test]
@@ -2559,9 +2610,9 @@ mod tests {
         screen.feed(b"\x1b[2;3H\x1b[s\x1b[3;5H\x1b[uX");
         assert_eq!(screen.row, 1);
         assert_eq!(screen.col, 3);
-        assert_eq!(screen.rows[1][2], b'X');
+        assert_eq!(screen.rows[1][2], 'X');
         screen.feed(b"\x1b7\x1b[1;1H\x1b8Y");
-        assert_eq!(screen.rows[1][3], b'Y');
+        assert_eq!(screen.rows[1][3], 'Y');
     }
     #[test]
     fn visible_text_reports_reverse_video_as_a_highlight_hint() {
@@ -2655,7 +2706,7 @@ mod tests {
     fn maximal_cursor_parameters_do_not_overflow() {
         let mut s = Screen::new(2, 10);
         s.feed(b"\x1b[999999999999999999999999999999999999999BX");
-        assert_eq!(s.rows[1][0], b'X');
+        assert_eq!(s.rows[1][0], 'X');
     }
     #[test]
     fn meta_right_is_distinct() {
@@ -2702,8 +2753,8 @@ mod tests {
         );
         s.feed(b"\nc");
         assert_eq!(s.scrollback, vec!["Ra"]);
-        assert_eq!(String::from_utf8_lossy(&s.rows[0]), "  b ");
-        assert_eq!(String::from_utf8_lossy(&s.rows[1]), "   c");
+        assert_eq!(cells_to_string(&s.rows[0]), "  b ");
+        assert_eq!(cells_to_string(&s.rows[1]), "   c");
     }
     #[test]
     fn alt_graphic_keys_are_encoded_without_raw_bytes() {
@@ -2767,5 +2818,138 @@ mod tests {
             ),
             Ok(b"\x1b[6;5~".to_vec())
         );
+    }
+
+    // T152: a standalone absolute-cursor-positioning write (CUP, `ESC[r;cH`
+    // followed by text) issued SEPARATELY from the main `\r\n`-joined
+    // sequential frame -- e.g. the installer wizard's `terminal::draw_overlay`
+    // painting the mascot sprite below the main screen after it has already
+    // been drawn. Plain ASCII already worked (byte()'s 0x20..=0x7e path was
+    // never the gap); this pins the exact T152 shape end to end.
+    #[test]
+    fn a_standalone_cup_addressed_overlay_is_visible_in_view() {
+        let mut screen = Screen::new(5, 20);
+        screen.feed(b"line one\r\nline two\r\nline three");
+        let _ = screen.delta();
+        screen.feed(b"\x1b[5;3HMASCOT");
+        let view = screen.view(false, &[]);
+        assert!(
+            view.contains("005 [003-008]   MASCOT"),
+            "overlay text missing from view: {view}"
+        );
+    }
+
+    // What T152's own live symptom actually was: the installer's mascot
+    // overlay is not plain ASCII, it is SGR-colored `\u{2588}\u{2588}` (U+2588
+    // FULL BLOCK) painted a row at a time via draw_overlay's own
+    // `ESC[{row};{col}H` per line. Before the T152/glyph-visibility fix this
+    // never reached `view`/`rgbview` at all: `Screen::byte`'s Ground state
+    // dropped every byte outside 0x20..=0x7e (`_ => {}`), so a multi-byte
+    // UTF-8 glyph -- lead byte and continuation bytes alike -- was silently
+    // discarded before it was ever stored, not merely mis-rendered once
+    // stored. This is the SAME root cause as the plain box-drawing-row case
+    // below, exercised here through the actual multi-row, SGR-interleaved
+    // overlay shape the ticket was filed against.
+    #[test]
+    fn a_standalone_cup_addressed_overlay_of_colored_block_glyphs_is_visible() {
+        let mut screen = Screen::new(6, 20);
+        screen.feed(b"line one\r\nline two\r\nline three");
+        let _ = screen.delta();
+        screen.feed("\x1b[5;3H\x1b[38;2;10;20;30m\u{2588}\u{2588}\x1b[0m".as_bytes());
+        screen.feed("\x1b[6;3H\x1b[38;2;40;50;60m\u{2588}\u{2588}\x1b[0m".as_bytes());
+        let view = screen.view(false, &[]);
+        assert!(
+            view.contains("005 [003-004]   \u{2588}\u{2588}"),
+            "overlay row 5 missing its block glyphs: {view}"
+        );
+        assert!(
+            view.contains("006 [003-004]   \u{2588}\u{2588}"),
+            "overlay row 6 missing its block glyphs: {view}"
+        );
+        // rgbview must carry the actual glyphs through its SGR-wrapped output
+        // too, not just the plain view.
+        let rgb = screen.rgbview(false, &[5]);
+        assert!(
+            rgb.contains('\u{2588}'),
+            "rgbview dropped the overlay's block glyphs: {rgb}"
+        );
+    }
+
+    // The second, distinct-but-related gap found live: a row consisting of a
+    // Unicode box-drawing character (not the VT100 ACS charset `line_drawing`
+    // already normalizes to ASCII) surrounded by ordinary spaces -- a bordered
+    // box's own top/bottom rule, or a plain horizontal divider -- used to be
+    // reported by `view` as fully blank (`[000-000]`) even though other rows
+    // in the same frame rendered correctly, because the glyph's bytes never
+    // reached the row at all (see the comment above).
+    #[test]
+    fn a_box_drawing_divider_row_is_not_reported_as_blank() {
+        let mut screen = Screen::new(3, 12);
+        let divider = "\u{2500}".repeat(8); // ────────, left/right padded by
+                                            // the row's own untouched initial blank cells, not literal spaces.
+        screen.feed(b"top line\r\n");
+        screen.feed(divider.as_bytes());
+        screen.feed(b"\r\nbottom line");
+        let view = screen.view(false, &[]);
+        assert!(
+            view.contains(&format!("002 [001-008] {divider}")),
+            "box-drawing divider row reported blank or wrong: {view}"
+        );
+        // The rows around it -- proof this is scoped to the one row, not a
+        // side effect that also broke ordinary ASCII rows.
+        assert!(view.contains("001 [001-008] top line"));
+        assert!(view.contains("003 [001-011] bottom line"));
+    }
+
+    // Guards the fix's own column-width assumption: every decoded Unicode
+    // scalar (ASCII or multi-byte) occupies exactly one cell/column, so a
+    // border row that MIXES box-drawing glyphs with an embedded ASCII title
+    // (a common real pattern: "┌── Title ──┐") keeps content after it
+    // aligned with a plain-ASCII row directly below it, rather than drifting
+    // right by however many extra bytes each glyph used to cost under a
+    // one-byte-per-cell model.
+    #[test]
+    fn box_drawing_glyphs_occupy_exactly_one_column_each() {
+        let border = "\u{250c}\u{2500}\u{2500} Title \u{2500}\u{2500}\u{2510}"; // ┌── Title ──┐
+        let width = border.chars().count();
+        let mut screen = Screen::new(2, width);
+        screen.feed(border.as_bytes());
+        // "A" at col 0, "B" at the last column -- same width as the border.
+        let bottom = format!("A{}B", " ".repeat(width - 2));
+        screen.feed(b"\r\n");
+        screen.feed(bottom.as_bytes());
+        assert_eq!(
+            screen.rows[0].len(),
+            width,
+            "the 13-character border desynced the row's column count"
+        );
+        // The bottom row's trailing 'B' must land in the same column as the
+        // top row's closing corner -- proof glyphs didn't smear columns.
+        let top_close = screen.rows[0]
+            .iter()
+            .position(|c| *c == '\u{2510}')
+            .unwrap();
+        let bottom_b = screen.rows[1].iter().position(|c| *c == 'B').unwrap();
+        assert_eq!(top_close, bottom_b);
+        assert_eq!(top_close, width - 1);
+    }
+
+    // A stray or truncated multi-byte sequence (a lead byte with no valid
+    // continuation, or cut off by the end of a `feed` call) must be dropped
+    // harmlessly -- not panic, corrupt later columns, or wedge the parser --
+    // matching this parser's existing tolerance for other malformed input
+    // (see e.g. `parser_fragments_other_common_sequences`).
+    #[test]
+    fn a_malformed_utf8_sequence_is_dropped_without_corrupting_later_content() {
+        let mut screen = Screen::new(1, 10);
+        // 0xE2 promises 3 bytes total but is immediately followed by an
+        // ASCII byte, not a continuation byte.
+        screen.feed(b"A\xe2BC");
+        assert_eq!(cells_to_string(&screen.rows[0]).trim_end(), "ABC");
+        // A lead byte with no continuation at all before the feed ends.
+        let mut screen2 = Screen::new(1, 10);
+        screen2.feed(b"X\xf0");
+        screen2.feed(b"Y");
+        assert_eq!(cells_to_string(&screen2.rows[0]).trim_end(), "XY");
     }
 }
