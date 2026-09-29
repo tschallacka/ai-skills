@@ -8063,6 +8063,29 @@
       "updated_at": "2026-09-29T12:28:11Z"
     },
     {
+      "id": "B385",
+      "title": "A raw-mode/mouse-tracking screen that exits on a click can leak the trailing mouse-release SGR bytes onto the next plain-text output",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "In a real PTY, drive the installer's interactive wizard through to the new ui::progress graphical install screen (installer interactive, no --target, picking a known agent root like Claude Code so run_worktrees_permission_step fires). When the worktrees-permission modal appears, answer it with a mouse click on one of its buttons (down then up as two separate xterm mouse reports) rather than a keypress, on a click that is the LAST interaction before the graphical screen itself exits (e.g. its answer lets the worker thread finish and the render loop calls terminal::leave()).",
+      "observed": "Once the screen exits and the terminal returns to plain cooked/echo mode for the next (unconverted) post-install step's own plain-text println!/stdin prompt, a short garbage sequence appears merged into that next prompt's own line -- observed literally as '^[[<0;38;1' immediately after the prompt text, continuing as '3mn' on the following line once an answer was typed. This exactly matches the raw SGR mouse-RELEASE report for column 38, row 13 (\\x1b[<0;38;13m) -- i.e. the mouse-UP event's own byte sequence, sent by the PTY driver as a second, separate report after the mouse-DOWN report that Key::Click already fired on, arriving at the child's stdin AFTER terminal::leave() has already disabled mouse tracking and restored cooked/echo mode, so the tty driver echoes it as literal text instead of a program silently discarding it.",
+      "expected": "No terminal-control byte sequence should ever be echoed as visible text on screen, regardless of exactly when it arrives relative to a screen's own raw-mode exit. This is an architectural property of ui/terminal.rs's enter()/leave() (mouse tracking is enabled with \\x1b[?1000h\\x1b[?1006h and disabled with \\x1b[?1000l\\x1b[?1006l, but leave() does not drain any input already in flight before restoring cooked mode) shared by every raw-mode screen with mouse support in this crate (the wizard, the skill picker, and now ui::progress) -- not something specific to ui::progress's own code. Not confirmed to reproduce on the wizard/picker screens specifically (not deliberately tested there this session), but the same mechanism applies to any of them whenever a mouse click is the interaction that causes that screen to exit.",
+      "mechanism": "A real mouse click generates two reports (press, then release). Every click-to-exit control (Key::Click apparently acts on the press report only) can, in principle, still have its matching release report arrive after that same click's press already caused the screen to finish and call terminal::leave(), which does not drain the input channel first.",
+      "surfaces": [
+        "installer",
+        "ui",
+        "terminal"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "",
+      "notes": "Purely cosmetic in the one live case actually observed (this session's verification of the new ui::progress screen): the functional outcome (the click's own answer, and the rest of the pipeline) was unaffected -- the next plain-text prompt still worked correctly once the garbage bytes were skipped over. A fix would touch ui/terminal.rs's leave() (shared by every screen), e.g. draining any immediately-available bytes from the reader channel before restoring cooked mode, or disabling mouse tracking and giving the terminal a moment to stop sending further reports before leave() prints its own restore sequence and returns. Not attempted here: out of scope for the task that surfaced it, and touching shared terminal shutdown logic needs its own dedicated verification across every screen that uses it.",
+      "created_at": "2026-09-29T13:38:15Z",
+      "updated_at": "2026-09-29T13:38:15Z"
+    },
+    {
       "id": "B59",
       "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
       "status": "fixed",
