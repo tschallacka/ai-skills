@@ -45,12 +45,22 @@ fi
 
 # util-linux's script takes `-c COMMAND OUTFILE`; BSD/macOS's takes
 # `OUTFILE COMMAND...` with no -c at all. Probed once, since --version is
-# itself the distinguishing feature (BSD script has no such flag).
+# itself the distinguishing feature (BSD script has no such flag) --
+# BSD/macOS script does not recognize `--version` and exits nonzero for it.
+# Confirmed live (macOS CI): `lib-test.sh`'s ERR trap still fires and prints
+# its own "command failed: script --version 2>&1" diagnostic for that
+# (`set -e` does not actually abort here -- a command substitution used as
+# a case's own subject is exempt, confirmed locally under both a current
+# bash and this repo's own bash 3.2 floor), but the printed line is pure
+# noise that looks like a real failure at a glance. `|| true` on the
+# substitution makes the expected case explicit and silences it: a nonzero
+# exit here means only "not util-linux", exactly what the case's own
+# no-match default (`is_util_linux` staying 0) already means.
 # PORTABILITY(pipefail-grep-q): a case match on a captured string, not
 # `cmd | grep -q`, which under pipefail can report the upstream command's
 # SIGPIPE death instead of grep's own answer once -q stops reading early.
 is_util_linux=0
-case "$(script --version 2>&1)" in
+case "$(script --version 2>&1 || true)" in
     *[Uu]til-linux*) is_util_linux=1 ;;
 esac
 
