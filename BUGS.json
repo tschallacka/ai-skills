@@ -8041,6 +8041,28 @@
       "updated_at": "2026-09-24T14:15:53Z"
     },
     {
+      "id": "B384",
+      "title": "chat-client-rs resolution test flakes on the x86_64-apple-darwin CI leg: beacon not received within a 3s wait",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Run 'cargo test -p chat-client-rs --test resolution' repeatedly on a loaded/shared macOS runner (observed on GitHub Actions' x86_64-apple-darwin build-and-test job; not reproduced locally in this session). The test spawns a real chat-server-rs with CHAT_ANNOUNCE=1, CHAT_BCAST=127.0.0.1, a free ephemeral CHAT_BEACON_PORT, and CHAT_ANNOUNCE_HOST=203.0.113.7, waits for it to report its port, then runs 'chat-client-rs discover --bcast 127.0.0.1 --beacon-port PORT --wait 3 --json' and asserts the JSON output contains \"host\":\"203.0.113.7\".",
+      "observed": "CI run 36561983199 (job 109385016809, commit 672525d5) failed at src/chat-client-rs/tests/resolution.rs:230 with 'the beacon did not carry the announced host: ' (disco was the empty string -- the client's 3s --wait window elapsed with no beacon captured at all, not a wrong host value). An unmodified rerun of the identical job on the identical commit passed cleanly (0 failures), and the commit under test only touched src/installer/src/ui/wizard.rs, with no chat-client-rs/chat-server-rs changes anywhere in its diff -- ruling out a regression from that push.",
+      "expected": "The test should pass deterministically regardless of runner load; a UDP beacon send/receive cycle over loopback within a fixed 3-second wait is inherently a timing-dependent test on a shared, possibly oversubscribed CI runner (scheduling delay before the spawned server's first broadcast, or dropped loopback UDP under load), which is the likely mechanism, though not confirmed by a local repro.",
+      "mechanism": "Suspected: a real UDP send/receive race against a fixed, short (3s) --wait timeout, on a CI runner whose CPU/network scheduling can be delayed under load -- not confirmed locally, since the failure did not reproduce on a second run of the same job/commit.",
+      "surfaces": [
+        "ci",
+        "chat-client-rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "",
+      "notes": "Not locally reproduced; filed from a single observed CI failure that did not recur on an immediate rerun of the same job/commit. Needs repeated local/CI runs (a loop of the resolution test, or a stress run under artificial CPU load) to confirm the timing-race mechanism before attempting a fix.",
+      "created_at": "2026-09-29T12:28:11Z",
+      "updated_at": "2026-09-29T12:28:11Z"
+    },
+    {
       "id": "B59",
       "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
       "status": "fixed",
