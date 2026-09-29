@@ -4,19 +4,6 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
-      "id": "T152",
-      "title": "interactive-shell tool cannot verify absolute-cursor-positioned overlay draws",
-      "status": "open",
-      "priority": "low",
-      "parent": null,
-      "detail": "interactive-shell's 'view'/'observe' screen model does not surface content written via a standalone absolute-cursor-positioning escape sequence (e.g. an overlay drawn separately from the main sequential \\r\\n-joined frame, such as the installer TUI's terminal::draw_overlay used for the mascot sprite). Confirmed during T-wizard-redesign live verification: the wizard's two-pane RootSelect screen rendered correctly in interactive-shell's view (borders, list, details pane) but the mascot overlay below it stayed fully empty ([000-000] rows) even after an explicit resize+redraw. A DIRECT script(1)-based PTY capture with identical dimensions/env-vars/binary independently confirmed the real terminal output DOES contain the mascot's color codes and block glyphs -- so this is very likely a gap in interactive-shell's screen-model tracking for this specific draw pattern, not a defect in the installer code. Needs either a fix in interactive-shell's screen model (track absolute CUP-addressed writes outside the main frame the same as in-frame content) or an explicit documented caveat in its own skill/docs so a future agent doesn't waste time assuming a real rendering bug.",
-      "blocked_on": null,
-      "refs": [],
-      "note": "Filed from live PTY-verification during the installer wizard's graphical-overhaul work; see conversation for full investigation steps (tput colors check, script-based counter-evidence, resize+redraw retry).",
-      "created_at": "2026-09-28T13:56:29Z",
-      "updated_at": "2026-09-28T13:56:29Z"
-    },
-    {
       "id": "T70",
       "title": "Ship the 2.0.0-alpha binaries as release assets, not committed blobs",
       "status": "done",
@@ -1350,6 +1337,19 @@
       "note": "Swept the whole tree (top-level and planning/ shell scripts, and every Rust crate under src/) for CODE-STYLE.md section 11 violations: measurement/benchmark numbers used as justification (byte/line/test counts, dated 'Measured on...' paragraphs, CI-run-id citations) and cross-file relationship pointers ('mirrors X.rs's own Y', 'matching bash's own Z', 'see also'), the latter concentrated in ~230 sites left over from the bash-to-Rust ports. Each fix kept the local structural/behavioral point and dropped only the number or the other file's name; real OS/protocol constants (sun_path's 104/108 bytes, RFC 1459's 512-byte line cap) and single-line TODO-style markers were left alone per the rule's own exceptions. 140 files touched, comment-text only (confirmed via diff: every changed line is // /// //! or shell #). Verified: cargo build/fmt/clippy/test --workspace clean, full local suite (249/249), pre-push-check.sh PASS, npm-package-baseline.tsv refreshed for the resulting byte-size drift in shipped shell scripts, and CI green (commit c867ce98d20b257a816d183fd505a61d38b63eed, 33/33 checks) on nextupdate.",
       "created_at": "2026-09-21T10:45:14Z",
       "updated_at": "2026-09-22T22:46:01Z"
+    },
+    {
+      "id": "T152",
+      "title": "interactive-shell tool cannot verify absolute-cursor-positioned overlay draws",
+      "status": "done",
+      "priority": "low",
+      "parent": null,
+      "detail": "interactive-shell's 'view'/'observe' screen model does not surface content written via a standalone absolute-cursor-positioning escape sequence (e.g. an overlay drawn separately from the main sequential \\r\\n-joined frame, such as the installer TUI's terminal::draw_overlay used for the mascot sprite). Confirmed during T-wizard-redesign live verification: the wizard's two-pane RootSelect screen rendered correctly in interactive-shell's view (borders, list, details pane) but the mascot overlay below it stayed fully empty ([000-000] rows) even after an explicit resize+redraw. A DIRECT script(1)-based PTY capture with identical dimensions/env-vars/binary independently confirmed the real terminal output DOES contain the mascot's color codes and block glyphs -- so this is very likely a gap in interactive-shell's screen-model tracking for this specific draw pattern, not a defect in the installer code. Needs either a fix in interactive-shell's screen model (track absolute CUP-addressed writes outside the main frame the same as in-frame content) or an explicit documented caveat in its own skill/docs so a future agent doesn't waste time assuming a real rendering bug.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Reproduced both gaps for real before fixing (a temporary unit test against the unfixed Screen, plus manually swapping in the pre-fix lib.rs to prove the new end-to-end protocol test a_standalone_cup_addressed_overlay_of_a_unicode_glyph_reaches_view_over_the_socket actually fails against it: row read '  TAIL' with the box-drawing glyphs silently gone). Root cause: Screen::byte's Ground state (src/interactive-shell/src/lib.rs) only handled 0x20..=0x7e as printable and silently dropped every other byte, including every byte of a multi-byte UTF-8 character -- the CUP/cursor-addressing itself was already correct (a plain-ASCII standalone-CUP overlay worked before this fix too). The installer mascot draws colored block glyphs (U+2588, multi-byte UTF-8) via terminal::draw_overlay's own per-line ESC[r;cH, so T152's overlay symptom and a second live-found gap (an ordinary Unicode box-drawing divider/border row reported blank by view/rgbview) are the SAME bug, not two. Fixed in commit 27ef6d43 (pushed to master, CI green) by changing Screen's per-cell storage from raw u8 to a decoded Unicode char and adding a Parser::Utf8 state to accumulate continuation bytes; every byte-literal comparison across put/erase/scroll/resize/alt-screen/markup was updated to match. Verification: interactive-shell's full test suite (41 lib + 25 protocol + 2 pty_orchestration), clippy -D warnings, and fmt are clean; new regression tests added (a_standalone_cup_addressed_overlay_is_visible_in_view, a_standalone_cup_addressed_overlay_of_colored_block_glyphs_is_visible, a_box_drawing_divider_row_is_not_reported_as_blank, box_drawing_glyphs_occupy_exactly_one_column_each, a_malformed_utf8_sequence_is_dropped_without_corrupting_later_content, and the end-to-end protocol test named above); repo's pre-push-check.sh --full passed (250/250) and CI on master is green (34/34 checks, sha 27ef6d43). Scope note: every decoded scalar occupies exactly one column (matches this model's existing single-width assumption); wide/CJK characters remain out of scope, unchanged from before this fix.",
+      "created_at": "2026-09-28T13:56:29Z",
+      "updated_at": "2026-09-29T09:57:44Z"
     },
     {
       "id": "T140",
