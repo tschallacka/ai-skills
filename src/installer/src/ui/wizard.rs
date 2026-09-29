@@ -101,11 +101,20 @@ struct WizardState {
     confirmed: bool,
     use_previous: bool,
     newly_added_custom: Vec<PathBuf>,
-    /// `None` while `RootSelect`'s destination list has keyboard focus (the
-    /// default); `Some(0)`/`Some(1)` once Tab has moved focus to the
-    /// Install-now/Cancel buttons in the details pane instead. Meaningless
-    /// outside `RootSelect`; nothing else reads or sets it.
-    footer_focus: Option<usize>,
+    /// `None` while whichever step is active has its own LIST pane focused
+    /// (the default); `Some(0)`/`Some(1)` once Tab has moved focus to that
+    /// step's own two details-pane buttons instead (`RootSelect`'s
+    /// Install-now/Cancel, `UsePrevious`'s Use-these-settings/Start-fresh).
+    /// Shared across steps rather than one field per step, since only one
+    /// step is ever active at a time; `commit_root_selection` resets it to
+    /// `None` on every transition into `UsePrevious` so a stale focus from
+    /// `RootSelect` never carries over.
+    button_focus: Option<usize>,
+    /// `UsePrevious`'s own list cursor, into `installed_here` -- separate
+    /// from `cursor` (`RootSelect`'s), since a user could in principle
+    /// (via Escape) revisit `RootSelect` after `UsePrevious` and neither
+    /// should disturb the other's position.
+    use_previous_cursor: usize,
 }
 
 impl WizardState {
@@ -131,7 +140,8 @@ impl WizardState {
             confirmed: false,
             newly_added_custom: Vec::new(),
             use_previous: false,
-            footer_focus: None,
+            button_focus: None,
+            use_previous_cursor: 0,
         }
     }
 
@@ -280,6 +290,10 @@ fn handle_click(
         }
         return;
     }
+    if matches!(state.step, Step::UsePrevious) {
+        handle_use_previous_click(state, layout, col, row);
+        return;
+    }
     if !matches!(state.step, Step::RootSelect) {
         return;
     }
@@ -305,13 +319,13 @@ fn handle_click(
             root_select_button_row_index(state, layout.right_w, layout.unicode_borders);
         if body_row == button_row {
             let content_col = col - details_start_col;
-            if content_col < INSTALL_LABEL.chars().count() {
-                commit_root_selection(state, installed_at);
-            } else if (cancel_start_col()..cancel_start_col() + CANCEL_LABEL.chars().count())
-                .contains(&content_col)
-            {
-                state.done = true;
-                state.confirmed = false;
+            match button_hit(content_col, INSTALL_LABEL, CANCEL_LABEL) {
+                Some(0) => commit_root_selection(state, installed_at),
+                Some(1) => {
+                    state.done = true;
+                    state.confirmed = false;
+                }
+                _ => {}
             }
         }
         return;
@@ -320,7 +334,7 @@ fn handle_click(
         return;
     }
     state.cursor = body_row;
-    state.footer_focus = None; // clicking a list row returns focus to the list
+    state.button_focus = None; // clicking a list row returns focus to the list
     if body_row == state.available.len() {
         state.custom_input.clear();
         state.custom_pending_create = None;
@@ -331,32 +345,79 @@ fn handle_click(
     }
 }
 
+/// Mirrors `handle_click`'s own `RootSelect` handling, for the same shape
+/// of screen: a click in the LIST pane moves the cursor there and returns
+/// focus to the list; a click in the DETAILS pane only does anything on the
+/// button row under the mode explanation (`use_previous_details_raw`
+/// always appends it last), where it commits exactly like Enter/y/n
+/// already do.
+fn handle_use_previous_click(
+    state: &mut WizardState,
+    layout: &super::layout::Layout,
+    col: usize,
+    row: usize,
+) {
+    const TITLE_LINES: usize = 1;
+    let body_start = TITLE_LINES + 2;
+    if row < body_start {
+        return;
+    }
+    let body_row = row - body_start;
+    let details_start_col = layout.left_w + 3;
+    if col >= details_start_col {
+        let button_row =
+            use_previous_button_row_index(state, layout.right_w, layout.unicode_borders);
+        if body_row == button_row {
+            let content_col = col - details_start_col;
+            match button_hit(content_col, USE_PREVIOUS_LABEL, START_FRESH_LABEL) {
+                Some(0) => {
+                    state.use_previous = true;
+                    state.done = true;
+                    state.confirmed = true;
+                }
+                Some(1) => {
+                    state.use_previous = false;
+                    state.done = true;
+                    state.confirmed = true;
+                }
+                _ => {}
+            }
+        }
+        return;
+    }
+    if body_row >= state.installed_here.len() {
+        return;
+    }
+    state.use_previous_cursor = body_row;
+    state.button_focus = None;
+}
+
 fn handle_root_select(
     state: &mut WizardState,
     key: Key,
     installed_at: &impl Fn(&std::path::Path) -> Vec<InstalledSkill>,
 ) {
-    if let Some(focused) = state.footer_focus {
+    if let Some(focused) = state.button_focus {
         match key {
             Key::Left | Key::Right | Key::Char('h') | Key::Char('l') => {
-                state.footer_focus = Some(1 - focused);
+                state.button_focus = Some(1 - focused);
             }
             Key::Tab => {
-                state.footer_focus = if focused == 1 {
+                state.button_focus = if focused == 1 {
                     None
                 } else {
                     Some(focused + 1)
                 };
             }
             Key::ShiftTab => {
-                state.footer_focus = if focused == 0 {
+                state.button_focus = if focused == 0 {
                     None
                 } else {
                     Some(focused - 1)
                 };
             }
             Key::Up => {
-                state.footer_focus = None;
+                state.button_focus = None;
             }
             Key::Enter if focused == 0 => commit_root_selection(state, installed_at),
             Key::Enter => {
@@ -369,7 +430,7 @@ fn handle_root_select(
             }
             Key::Escape => {
                 state.step = state.back_stack.pop().unwrap_or(Step::InstallOrUninstall);
-                state.footer_focus = None;
+                state.button_focus = None;
             }
             _ => {}
         }
@@ -384,10 +445,10 @@ fn handle_root_select(
             state.cursor = (state.cursor + 1).min(rows - 1);
         }
         Key::Tab => {
-            state.footer_focus = Some(0);
+            state.button_focus = Some(0);
         }
         Key::ShiftTab => {
-            state.footer_focus = Some(1); // reverses in from the list: lands on the LAST button
+            state.button_focus = Some(1); // reverses in from the list: lands on the LAST button
         }
         Key::Space => {
             if state.cursor < state.available.len() {
@@ -455,6 +516,8 @@ fn commit_root_selection(
         state.use_previous = false;
     } else {
         state.installed_here = installed;
+        state.use_previous_cursor = 0;
+        state.button_focus = None;
         state.back_stack.push(Step::RootSelect);
         state.step = Step::UsePrevious;
     }
@@ -559,8 +622,79 @@ fn handle_install_or_uninstall(state: &mut WizardState, key: Key) {
     }
 }
 
+/// `y`/`n` always work, focused or not -- muscle memory from every earlier
+/// version of this screen. Tab/Shift-Tab/Left/Right/Up mirror
+/// `handle_root_select`'s own button-focus handling exactly (the two
+/// screens share the same "list pane + two details-pane buttons" shape).
 fn handle_use_previous(state: &mut WizardState, key: Key) {
+    if let Some(focused) = state.button_focus {
+        match key {
+            Key::Left | Key::Right | Key::Char('h') | Key::Char('l') => {
+                state.button_focus = Some(1 - focused);
+            }
+            Key::Tab => {
+                state.button_focus = if focused == 1 {
+                    None
+                } else {
+                    Some(focused + 1)
+                };
+            }
+            Key::ShiftTab => {
+                state.button_focus = if focused == 0 {
+                    None
+                } else {
+                    Some(focused - 1)
+                };
+            }
+            Key::Up => {
+                state.button_focus = None;
+            }
+            Key::Enter if focused == 0 => {
+                state.use_previous = true;
+                state.done = true;
+                state.confirmed = true;
+            }
+            Key::Enter => {
+                state.use_previous = false;
+                state.done = true;
+                state.confirmed = true;
+            }
+            Key::Char('y') | Key::Char('Y') => {
+                state.use_previous = true;
+                state.done = true;
+                state.confirmed = true;
+            }
+            Key::Char('n') | Key::Char('N') => {
+                state.use_previous = false;
+                state.done = true;
+                state.confirmed = true;
+            }
+            Key::Char('q') => {
+                state.done = true;
+                state.confirmed = false;
+            }
+            Key::Escape => {
+                state.step = state.back_stack.pop().unwrap_or(Step::RootSelect);
+                state.button_focus = None;
+            }
+            _ => {}
+        }
+        return;
+    }
+    let rows = state.installed_here.len().max(1);
     match key {
+        Key::Up | Key::Char('k') => {
+            state.use_previous_cursor = state.use_previous_cursor.saturating_sub(1);
+        }
+        Key::Down | Key::Char('j') => {
+            state.use_previous_cursor = (state.use_previous_cursor + 1).min(rows - 1);
+        }
+        Key::Tab => {
+            state.button_focus = Some(0);
+        }
+        Key::ShiftTab => {
+            state.button_focus = Some(1);
+        }
         Key::Char('y') | Key::Char('Y') | Key::Enter => {
             state.use_previous = true;
             state.done = true;
@@ -601,10 +735,7 @@ fn render(
             let (title, body, hint) = custom_path_view(state, cols);
             single_pane_frame(cols, rows, color_capable, unicode, &title, body, &hint)
         }
-        Step::UsePrevious => {
-            let (title, body, hint) = use_previous_view(state, cols);
-            single_pane_frame(cols, rows, color_capable, unicode, &title, body, &hint)
-        }
+        Step::UsePrevious => use_previous_frame(state, cols, rows, color_mode, unicode),
     }
 }
 
@@ -654,8 +785,13 @@ const BUTTON_GAP: &str = "    ";
 const INSTALL_BUTTON_BG: (u8, u8, u8) = (25, 110, 60);
 const CANCEL_BUTTON_BG: (u8, u8, u8) = (120, 45, 45);
 
-fn cancel_start_col() -> usize {
-    INSTALL_LABEL.chars().count() + BUTTON_GAP.chars().count()
+/// Where the SECOND of two side-by-side buttons starts, in content columns,
+/// given the first one's label -- shared by every screen with this "two
+/// buttons, one row" shape (`RootSelect`, `UsePrevious`) so the layout math
+/// and the click hit-test (`button_hit`) always agree on where the second
+/// button actually begins.
+fn second_button_col(first_label: &str) -> usize {
+    first_label.chars().count() + BUTTON_GAP.chars().count()
 }
 
 /// Wraps `label` in a colored background SGR span (and its reset) when
@@ -676,18 +812,56 @@ fn colorize_button(mode: ColorMode, label: &str, bg: (u8, u8, u8), focused: bool
     }
 }
 
-/// The Install-now/Cancel button row, side by side, sized to `right_w` --
-/// the DETAILS pane's own width, so it sits directly under the "Selected"
-/// summary rather than spanning the full frame. Already padded here (using
+/// A row of two side-by-side buttons, sized to `right_w` -- the DETAILS
+/// pane's own width, so it sits directly under that pane's own summary
+/// content rather than spanning the full frame. Already padded here (using
 /// the PLAIN, uncolored text's visual width) rather than left to
 /// `two_pane_frame`'s generic `pad`, which would miscount a colored line's
-/// width by counting its invisible SGR bytes as display columns.
-fn root_select_buttons_line(mode: ColorMode, right_w: usize, focus: Option<usize>) -> String {
-    let install = colorize_button(mode, INSTALL_LABEL, INSTALL_BUTTON_BG, focus == Some(0));
-    let cancel = colorize_button(mode, CANCEL_LABEL, CANCEL_BUTTON_BG, focus == Some(1));
-    let visual_len = cancel_start_col() + CANCEL_LABEL.chars().count();
+/// width by counting its invisible SGR bytes as display columns. Shared by
+/// every "two buttons, one row" screen; `button_hit` is this same
+/// construction read backwards, for click testing.
+#[allow(clippy::too_many_arguments)]
+fn two_button_line(
+    mode: ColorMode,
+    right_w: usize,
+    focus: Option<usize>,
+    first_label: &str,
+    first_bg: (u8, u8, u8),
+    second_label: &str,
+    second_bg: (u8, u8, u8),
+) -> String {
+    let first = colorize_button(mode, first_label, first_bg, focus == Some(0));
+    let second = colorize_button(mode, second_label, second_bg, focus == Some(1));
+    let visual_len = second_button_col(first_label) + second_label.chars().count();
     let trailing = " ".repeat(right_w.saturating_sub(visual_len));
-    format!("{install}{BUTTON_GAP}{cancel}{trailing}")
+    format!("{first}{BUTTON_GAP}{second}{trailing}")
+}
+
+/// Which of the two buttons (0 or 1) a click's 0-based content column
+/// landed on, if either -- the read-backwards counterpart to
+/// `two_button_line`'s own layout, so a click is tested against exactly
+/// the columns that construction actually produces.
+fn button_hit(content_col: usize, first_label: &str, second_label: &str) -> Option<usize> {
+    if content_col < first_label.chars().count() {
+        return Some(0);
+    }
+    let second_start = second_button_col(first_label);
+    if (second_start..second_start + second_label.chars().count()).contains(&content_col) {
+        return Some(1);
+    }
+    None
+}
+
+fn root_select_buttons_line(mode: ColorMode, right_w: usize, focus: Option<usize>) -> String {
+    two_button_line(
+        mode,
+        right_w,
+        focus,
+        INSTALL_LABEL,
+        INSTALL_BUTTON_BG,
+        CANCEL_LABEL,
+        CANCEL_BUTTON_BG,
+    )
 }
 
 /// Wraps a pane's raw lines to `width`, the rule `two_pane_frame` already
@@ -849,7 +1023,7 @@ fn root_select_frame(
     details.push(root_select_buttons_line(
         color_mode,
         probe.right_w,
-        state.footer_focus,
+        state.button_focus,
     ));
 
     two_pane_frame(
@@ -987,26 +1161,139 @@ fn custom_path_view(state: &WizardState, width: usize) -> (String, Vec<String>, 
     )
 }
 
-fn use_previous_view(state: &WizardState, width: usize) -> (String, Vec<String>, String) {
-    let mut body = vec![pad("Already installed here:", width - 2)];
-    for skill in &state.installed_here {
-        let line = match &skill.mode {
-            Some(mode) => format!("  {}  ({mode})", skill.name),
-            None => format!("  {}", skill.name),
-        };
-        body.push(pad(&line, width - 2));
+const USE_PREVIOUS_LABEL: &str = "[ Use these settings ]";
+const START_FRESH_LABEL: &str = "[ Start fresh ]";
+/// The same affirmative green `INSTALL_BUTTON_BG` uses -- "use these
+/// settings" is the affirmative choice here too. A muted blue, not the same
+/// red `CANCEL_BUTTON_BG` uses: "start fresh" is a different path forward,
+/// not a cancel/destructive action, so it earns its own resting color
+/// rather than borrowing one that means something else elsewhere.
+const START_FRESH_BUTTON_BG: (u8, u8, u8) = (55, 90, 130);
+
+/// A short, human explanation of what an integration mode means for the
+/// DETAILS pane -- `None` (the near-total majority of skills, which offer
+/// no mode choice at all) gets its own generic line rather than an empty
+/// one, the same reason `kind_description` exists for `RootSelect`.
+fn mode_description(mode: Option<&str>) -> String {
+    match mode {
+        Some("mcp") => {
+            "Installed as an MCP server: your agent talks to it directly over a background connection, instead of running shell commands.".to_string()
+        }
+        Some("skill") => {
+            "Installed as a plain skill: your agent runs its shell commands directly, no background server.".to_string()
+        }
+        Some(other) => format!("Installed in '{other}' integration mode."),
+        None => "No separate integration mode for this skill -- installed as plain files.".to_string(),
     }
-    body.push(pad("", width - 2));
-    body.push(pad("Use these settings?", width - 2));
-    (
-        "Use previous settings?".to_string(),
-        body,
-        " y use them  n start fresh  Esc back  q quit".to_string(),
+}
+
+/// Everything `UsePrevious`'s DETAILS pane shows ABOVE its own buttons: the
+/// highlighted skill's name, what its integration mode means, a divider
+/// rule, then the question itself. `right_w` sizes the divider to the
+/// pane's own width, the same reason `root_select_details_raw` takes it.
+fn use_previous_details_raw(state: &WizardState, right_w: usize, unicode: bool) -> Vec<String> {
+    let mut details = match state.installed_here.get(state.use_previous_cursor) {
+        Some(skill) => vec![
+            skill.name.clone(),
+            String::new(),
+            mode_description(skill.mode.as_deref()),
+        ],
+        None => vec!["Nothing was installed here yet.".to_string()],
+    };
+    details.push(String::new());
+    details.push(
+        BorderSet::for_unicode(unicode)
+            .horizontal
+            .to_string()
+            .repeat(right_w),
+    );
+    details.push(String::new());
+    details.push("Use these settings, or start fresh and choose again?".to_string());
+    details
+}
+
+/// Where the button row lands in the DETAILS pane's own wrapped row
+/// numbering -- the same reasoning as `root_select_button_row_index`: it
+/// is always the last row, since `use_previous_frame` always appends
+/// exactly one blank line then the button line after
+/// `use_previous_details_raw`.
+fn use_previous_button_row_index(state: &WizardState, right_w: usize, unicode: bool) -> usize {
+    let above = use_previous_details_raw(state, right_w, unicode);
+    wrap_pane_lines(&above, right_w).len() + 1 // + the blank line before the buttons
+}
+
+fn use_previous_frame(
+    state: &WizardState,
+    cols: usize,
+    rows: usize,
+    color_mode: ColorMode,
+    unicode: bool,
+) -> (Vec<String>, super::layout::Layout) {
+    let color_capable = color_mode != ColorMode::None;
+    let labels: Vec<&str> = state
+        .installed_here
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    let list_rows: Vec<String> = state
+        .installed_here
+        .iter()
+        .enumerate()
+        .map(|(i, skill)| {
+            let cursor = if i == state.use_previous_cursor {
+                '>'
+            } else {
+                ' '
+            };
+            match &skill.mode {
+                Some(mode) => format!("{cursor}{}  ({mode})", skill.name),
+                None => format!("{cursor}{}", skill.name),
+            }
+        })
+        .collect();
+
+    const TITLE: &str = "Use previous settings?";
+    const HINT: &str = " Up/Dn move  Tab focus  y use  n fresh  Esc back  q quit";
+    let probe = super::layout::compute(
+        cols,
+        rows,
+        &labels,
+        color_capable,
+        overflow(TITLE, cols, 3).len(),
+        overflow(HINT, cols, 3).len(),
+        unicode,
+    );
+
+    let mut details = use_previous_details_raw(state, probe.right_w, unicode);
+    details.push(String::new());
+    details.push(two_button_line(
+        color_mode,
+        probe.right_w,
+        state.button_focus,
+        USE_PREVIOUS_LABEL,
+        INSTALL_BUTTON_BG,
+        START_FRESH_LABEL,
+        START_FRESH_BUTTON_BG,
+    ));
+
+    two_pane_frame(
+        cols,
+        rows,
+        color_capable,
+        unicode,
+        TITLE,
+        "INSTALLED",
+        "DETAILS",
+        &labels,
+        &list_rows,
+        state.use_previous_cursor,
+        &details,
+        HINT,
     )
 }
 
-/// A single full-width pane (`CustomPath`, `UsePrevious`) -- no details
-/// pane, since neither step has a per-row "choice" for one to explain.
+/// A single full-width pane (`CustomPath` only now) -- no details pane,
+/// since that step has no per-row "choice" for one to explain.
 /// Still computes a `layout::Layout` (from an empty item list: its
 /// `left_w`/`right_w`/`narrow` go unused here, only `body_rows`/
 /// `list_rows`/`mascot_on` do) so the mascot placement rule stays the one
@@ -1726,49 +2013,49 @@ mod tests {
     #[test]
     fn tab_from_the_list_moves_focus_to_install_then_cancel_then_back() {
         let mut state = WizardState::new(roots(&["/a"]));
-        assert_eq!(state.footer_focus, None);
+        assert_eq!(state.button_focus, None);
         handle_root_select(&mut state, Key::Tab, &no_prior_installs);
-        assert_eq!(state.footer_focus, Some(0));
+        assert_eq!(state.button_focus, Some(0));
         handle_root_select(&mut state, Key::Tab, &no_prior_installs);
-        assert_eq!(state.footer_focus, Some(1));
+        assert_eq!(state.button_focus, Some(1));
         handle_root_select(&mut state, Key::Tab, &no_prior_installs);
-        assert_eq!(state.footer_focus, None);
+        assert_eq!(state.button_focus, None);
     }
 
     #[test]
     fn shift_tab_cycles_the_opposite_way() {
         let mut state = WizardState::new(roots(&["/a"]));
         handle_root_select(&mut state, Key::ShiftTab, &no_prior_installs);
-        assert_eq!(state.footer_focus, Some(1));
+        assert_eq!(state.button_focus, Some(1));
         handle_root_select(&mut state, Key::ShiftTab, &no_prior_installs);
-        assert_eq!(state.footer_focus, Some(0));
+        assert_eq!(state.button_focus, Some(0));
         handle_root_select(&mut state, Key::ShiftTab, &no_prior_installs);
-        assert_eq!(state.footer_focus, None);
+        assert_eq!(state.button_focus, None);
     }
 
     #[test]
     fn left_and_right_switch_between_the_focused_buttons() {
         let mut state = WizardState::new(roots(&["/a"]));
-        state.footer_focus = Some(0);
+        state.button_focus = Some(0);
         handle_root_select(&mut state, Key::Right, &no_prior_installs);
-        assert_eq!(state.footer_focus, Some(1));
+        assert_eq!(state.button_focus, Some(1));
         handle_root_select(&mut state, Key::Left, &no_prior_installs);
-        assert_eq!(state.footer_focus, Some(0));
+        assert_eq!(state.button_focus, Some(0));
     }
 
     #[test]
     fn up_from_a_focused_button_returns_focus_to_the_list() {
         let mut state = WizardState::new(roots(&["/a"]));
-        state.footer_focus = Some(1);
+        state.button_focus = Some(1);
         handle_root_select(&mut state, Key::Up, &no_prior_installs);
-        assert_eq!(state.footer_focus, None);
+        assert_eq!(state.button_focus, None);
     }
 
     #[test]
     fn enter_while_install_is_focused_commits_the_selection() {
         let mut state = WizardState::new(roots(&["/a"]));
         state.checked[0] = true;
-        state.footer_focus = Some(0);
+        state.button_focus = Some(0);
         handle_root_select(&mut state, Key::Enter, &no_prior_installs);
         assert!(state.done);
         assert!(state.confirmed);
@@ -1777,7 +2064,7 @@ mod tests {
     #[test]
     fn enter_while_cancel_is_focused_quits_unconfirmed() {
         let mut state = WizardState::new(roots(&["/a"]));
-        state.footer_focus = Some(1);
+        state.button_focus = Some(1);
         handle_root_select(&mut state, Key::Enter, &no_prior_installs);
         assert!(state.done);
         assert!(!state.confirmed);
@@ -1786,7 +2073,7 @@ mod tests {
     #[test]
     fn the_focused_button_is_drawn_in_reverse_video() {
         let mut state = WizardState::new(roots(&["/a"]));
-        state.footer_focus = Some(0);
+        state.button_focus = Some(0);
         let (frame, _layout) = root_select_frame(&state, 90, 24, ColorMode::TrueColor, false);
         let button_line = frame
             .iter()
@@ -1860,7 +2147,7 @@ mod tests {
             + root_select_button_row_index(&state, layout.right_w, layout.unicode_borders))
             as u16;
         let details_start_col = (layout.left_w + 3) as u16;
-        let cancel_col = details_start_col + cancel_start_col() as u16;
+        let cancel_col = details_start_col + second_button_col(INSTALL_LABEL) as u16;
         handle_key(
             &mut state,
             Key::Click {
@@ -1958,8 +2245,9 @@ mod tests {
     }
 
     #[test]
-    fn use_previous_view_lists_every_installed_skill_and_its_mode() {
+    fn use_previous_frame_lists_every_installed_skill_and_its_mode() {
         let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
         state.installed_here = vec![
             InstalledSkill {
                 name: "ai-text-editor".to_string(),
@@ -1970,15 +2258,144 @@ mod tests {
                 mode: None,
             },
         ];
-        let (_title, body, _hint) = use_previous_view(&state, 40);
-        assert!(body
-            .iter()
-            .any(|l| l.contains("ai-text-editor") && l.contains("mcp")));
-        let todo_line = body.iter().find(|l| l.contains("todo")).unwrap();
+        let (frame, _layout) = use_previous_frame(&state, 90, 24, ColorMode::TrueColor, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains("ai-text-editor"));
+        assert!(joined.contains("mcp"));
+        let todo_line = frame.iter().find(|l| l.contains("todo")).unwrap();
         assert!(
             !todo_line.contains('('),
             "a mode-free skill should show no parenthetical: {todo_line:?}"
         );
+    }
+
+    #[test]
+    fn use_previous_frame_explains_the_highlighted_skills_mode() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
+        state.installed_here = vec![
+            InstalledSkill {
+                name: "ai-text-editor".to_string(),
+                mode: Some("mcp".to_string()),
+            },
+            InstalledSkill {
+                name: "todo".to_string(),
+                mode: None,
+            },
+        ];
+        let (frame, _layout) = use_previous_frame(&state, 90, 24, ColorMode::TrueColor, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains("MCP server"));
+        assert!(joined.contains("[ Use these settings ]"));
+        assert!(joined.contains("[ Start fresh ]"));
+
+        state.use_previous_cursor = 1;
+        let (frame, _layout) = use_previous_frame(&state, 90, 24, ColorMode::TrueColor, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains("No separate integration mode"));
+    }
+
+    #[test]
+    fn tab_from_use_previous_list_moves_focus_to_the_buttons_and_back() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
+        assert_eq!(state.button_focus, None);
+        handle_use_previous(&mut state, Key::Tab);
+        assert_eq!(state.button_focus, Some(0));
+        handle_use_previous(&mut state, Key::Tab);
+        assert_eq!(state.button_focus, Some(1));
+        handle_use_previous(&mut state, Key::Tab);
+        assert_eq!(state.button_focus, None);
+    }
+
+    #[test]
+    fn enter_while_use_these_settings_is_focused_accepts_them() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
+        state.button_focus = Some(0);
+        handle_use_previous(&mut state, Key::Enter);
+        assert!(state.done);
+        assert!(state.confirmed);
+        assert!(state.use_previous);
+    }
+
+    #[test]
+    fn enter_while_start_fresh_is_focused_declines_them() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
+        state.button_focus = Some(1);
+        handle_use_previous(&mut state, Key::Enter);
+        assert!(state.done);
+        assert!(state.confirmed);
+        assert!(!state.use_previous);
+    }
+
+    #[test]
+    fn y_and_n_work_regardless_of_button_focus() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
+        state.button_focus = Some(1); // Start fresh focused
+        handle_use_previous(&mut state, Key::Char('y'));
+        assert!(state.use_previous);
+        assert!(state.done);
+    }
+
+    #[test]
+    fn clicking_use_these_settings_accepts_them_even_with_a_different_skill_highlighted() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
+        state.installed_here = vec![
+            InstalledSkill {
+                name: "ai-text-editor".to_string(),
+                mode: Some("mcp".to_string()),
+            },
+            InstalledSkill {
+                name: "todo".to_string(),
+                mode: None,
+            },
+        ];
+        state.use_previous_cursor = 1;
+        let (_frame, layout) = use_previous_frame(&state, 90, 24, ColorMode::TrueColor, false);
+        let body_start = 3;
+        let button_row = (body_start
+            + use_previous_button_row_index(&state, layout.right_w, layout.unicode_borders))
+            as u16;
+        let details_start_col = (layout.left_w + 3) as u16;
+        handle_key(
+            &mut state,
+            Key::Click {
+                col: details_start_col,
+                row: button_row,
+            },
+            &layout,
+            &no_prior_installs,
+        );
+        assert!(state.done);
+        assert!(state.confirmed);
+        assert!(state.use_previous);
+    }
+
+    #[test]
+    fn clicking_a_skill_row_moves_the_cursor_there() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
+        state.installed_here = vec![
+            InstalledSkill {
+                name: "ai-text-editor".to_string(),
+                mode: Some("mcp".to_string()),
+            },
+            InstalledSkill {
+                name: "todo".to_string(),
+                mode: None,
+            },
+        ];
+        handle_key(
+            &mut state,
+            Key::Click { col: 2, row: 4 },
+            &test_layout(),
+            &no_prior_installs,
+        );
+        assert_eq!(state.use_previous_cursor, 1);
     }
 
     #[test]
