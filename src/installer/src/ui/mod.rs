@@ -11,6 +11,7 @@ pub mod input;
 pub mod layout;
 pub mod mascot;
 pub mod model;
+pub mod progress;
 pub mod render;
 pub mod terminal;
 pub mod text;

@@ -295,23 +295,48 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
 /// every question without reading stdin at all -- the flag headless runs
 /// need so an unattended install cannot block on a question nobody will
 /// answer.
+///
+/// An optional `bridge` (only present while `run_interactive`'s graphical
+/// progress screen, `ui::progress`, is driving this run) redirects `ask`
+/// from stderr/stdin to that screen's own modal popup instead -- every
+/// existing call site (`confirms.ask(prompt)`) is unchanged either way.
 struct Confirms {
     yes: bool,
+    bridge: Option<ui::progress::AskBridge>,
 }
 
 impl Confirms {
     fn new(yes: bool) -> Self {
-        Confirms { yes }
+        Confirms { yes, bridge: None }
     }
 
-    /// Prints `prompt` to stderr, never stdout, and reads one line from
-    /// stdin. `y`/`yes` answers this question only; `a`/`all` answers it
-    /// and every question after it for the rest of the run. A read error
-    /// (no stdin at all, e.g. under `curl | bash`) reads as "no" rather
-    /// than blocking.
+    fn with_bridge(yes: bool, bridge: ui::progress::AskBridge) -> Self {
+        Confirms {
+            yes,
+            bridge: Some(bridge),
+        }
+    }
+
+    /// With a bridge, sends `prompt` to the graphical screen's modal and
+    /// blocks for its answer. Without one, prints `prompt` to stderr, never
+    /// stdout, and reads one line from stdin. Either way: `y`/`yes` (or a
+    /// click on "Yes") answers this question only; `a`/`all` (or "All")
+    /// answers it and every question after it for the rest of the run. A
+    /// stdin read error (no stdin at all, e.g. under `curl | bash`) reads as
+    /// "no", the same fail-safe the bridge's own dropped-channel case uses.
     fn ask(&mut self, prompt: &str) -> bool {
         if self.yes {
             return true;
+        }
+        if let Some(bridge) = &self.bridge {
+            return match bridge.ask(prompt) {
+                ui::progress::Answer::Yes => true,
+                ui::progress::Answer::All => {
+                    self.yes = true;
+                    true
+                }
+                ui::progress::Answer::No => false,
+            };
         }
         eprint!("{prompt} [y/N/a] ");
         let _ = std::io::stderr().flush();
@@ -335,7 +360,7 @@ impl Confirms {
 /// plus at most one run-wide bare-mode default. A later `--integration` for
 /// the same skill overwrites an earlier one, the usual last-flag-wins CLI
 /// convention.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct IntegrationSelection {
     per_skill: std::collections::HashMap<String, String>,
     default_mode: Option<String>,
@@ -780,6 +805,7 @@ impl Summary {
 /// platform-unsupported skill has no requirements worth checking and
 /// nothing worth replaying, so it gets its own reason rather than being
 /// reported as a missing-tool block.
+#[allow(clippy::too_many_arguments)]
 fn install_selected_skills(
     source: &Path,
     target: &Path,
@@ -788,23 +814,31 @@ fn install_selected_skills(
     integration_selection: &IntegrationSelection,
     package_dev: bool,
     summary: &mut Summary,
+    sink: &mut dyn ui::progress::Sink,
 ) -> Result<Vec<String>, String> {
     let mut installed = Vec::with_capacity(skills.len());
-    for skill in skills {
+    for (index, skill) in skills.iter().enumerate() {
         if let Some(reason) = manifest::skill_unsupported_here(skill) {
-            println!("Skipped: {skill} -- {reason}, nothing was written");
+            sink.log(&format!(
+                "Skipped: {skill} -- {reason}, nothing was written"
+            ));
+            sink.status(index, ui::progress::SkillRunStatus::Skipped);
             summary
                 .platform_blocked
                 .push((skill.clone(), reason.to_string()));
             continue;
         }
+        sink.status(index, ui::progress::SkillRunStatus::Running);
         let status = requirements::skill_status(source, skill);
         if status.state == requirements::SkillState::Blocked {
             let reason = status
                 .blocker
                 .clone()
                 .unwrap_or_else(|| "a required tool".to_string());
-            println!("Skipped: {skill} -- {reason} is required and missing; nothing was written");
+            sink.log(&format!(
+                "Skipped: {skill} -- {reason} is required and missing; nothing was written"
+            ));
+            sink.status(index, ui::progress::SkillRunStatus::Skipped);
             // Install hints are per bare tool (installer/tools.tsv is keyed
             // by a single tool id, not a group), so a group requirement's
             // hint is every member's hint concatenated -- same reasoning as
@@ -872,7 +906,8 @@ fn install_selected_skills(
                 "\n             integration mode: {mode} ({source_label})"
             ));
         }
-        println!("{line}");
+        sink.log(&line);
+        sink.status(index, ui::progress::SkillRunStatus::Done);
         summary.installed.push(line);
         installed.push(skill.clone());
     }
@@ -965,40 +1000,76 @@ fn run_post_install_steps(
     source: &Path,
     skills: &[String],
     confirms: &mut Confirms,
+    sink: &mut dyn ui::progress::Sink,
 ) {
+    let Some(known_roots) = known_agent_roots(roots) else {
+        return;
+    };
+    let Some(home) = home_dir_opt() else { return };
+
+    // Worktrees permissions run for every install, whatever skills were
+    // selected -- unlike everything else below, not gated on any
+    // particular skill being among them. The only post-install step
+    // `ui::progress`'s graphical screen also covers (see its own doc
+    // comment for the scope boundary), so it alone takes `sink`; every
+    // other step below still prints directly, unchanged -- see
+    // `run_remaining_post_install_steps`'s own doc comment for why it is a
+    // separate function rather than inlined here.
+    run_worktrees_permission_step(&known_roots, confirms, &home, sink);
+    run_remaining_post_install_steps(roots, source, skills, confirms, &known_roots, &home);
+}
+
+/// Every root with a known, auto-editable agent kind (`claude`/`opencode`/
+/// `codex`), or `None` when there is not one -- the common first step of
+/// `run_post_install_steps` and `run_interactive`'s own graphical path,
+/// factored out so both compute it identically rather than maintaining the
+/// same filter twice.
+fn known_agent_roots(roots: &[(PathBuf, Option<String>)]) -> Option<Vec<(&Path, &str)>> {
     let known_roots: Vec<(&Path, &str)> = roots
         .iter()
         .filter_map(|(p, k)| k.as_deref().map(|k| (p.as_path(), k)))
         .filter(|(_, k)| matches!(*k, "claude" | "opencode" | "codex"))
         .collect();
     if known_roots.is_empty() {
-        return;
+        None
+    } else {
+        Some(known_roots)
     }
-    let Some(home) = home_dir_opt() else { return };
+}
 
-    // Worktrees permissions run for every install, whatever skills were
-    // selected -- unlike everything else below, not gated on any
-    // particular skill being among them.
-    run_worktrees_permission_step(&known_roots, confirms, &home);
-
+/// Everything `run_post_install_steps` does other than the worktrees step,
+/// factored out so `run_interactive`'s own graphical path can run it AFTER
+/// `ui::progress`'s screen has already closed and restored the terminal --
+/// every step here still prints directly with plain `println!`, which would
+/// corrupt that screen's alternate-screen display if it ran while the
+/// screen was still open the way the worktrees step (folded into that
+/// screen via `sink`) does not.
+fn run_remaining_post_install_steps(
+    roots: &[(PathBuf, Option<String>)],
+    source: &Path,
+    skills: &[String],
+    confirms: &mut Confirms,
+    known_roots: &[(&Path, &str)],
+    home: &Path,
+) {
     if skills.iter().any(|s| s == "planning") {
-        run_planning_post_install(&known_roots, &home, confirms);
+        run_planning_post_install(known_roots, home, confirms);
     }
     if skills.iter().any(|s| s == "project-specifics") {
-        run_project_specifics_post_install(&known_roots, &home, confirms);
+        run_project_specifics_post_install(known_roots, home, confirms);
     }
     run_mcp_registration_step(roots, source, skills);
     if skills.iter().any(|s| s == "interactive-shell") {
-        run_interactive_shell_post_install(&known_roots, source, &home, confirms);
+        run_interactive_shell_post_install(known_roots, source, home, confirms);
     }
     if skills.iter().any(|s| s == "ai-text-editor") {
-        run_editor_steering_and_gate_step(&known_roots, source, &home, confirms);
+        run_editor_steering_and_gate_step(known_roots, source, home, confirms);
     }
-    run_agent_identity_post_install(&known_roots, source, skills);
+    run_agent_identity_post_install(known_roots, source, skills);
     if skills.iter().any(|s| s == "chat") {
-        run_chat_interrupt_plugin_post_install(&known_roots, source);
+        run_chat_interrupt_plugin_post_install(known_roots, source);
     }
-    run_profiles_post_install(&known_roots, source, &home);
+    run_profiles_post_install(known_roots, source, home);
 }
 
 /// T102: installs every `manifest::PROFILES` entry into `home` for each
@@ -1160,17 +1231,27 @@ fn run_chat_interrupt_plugin_post_install(roots: &[(&Path, &str)], source: &Path
 /// skills were selected: not gated behind any particular skill, since any
 /// agent may be asked to take a worktree. The two prompts are asked once
 /// for the whole run; the grant itself is applied once per root.
-fn run_worktrees_permission_step(roots: &[(&Path, &str)], confirms: &mut Confirms, home: &Path) {
-    println!();
-    println!("== Agent worktree permissions ==");
+/// The one post-install step `ui::progress`'s graphical screen also covers
+/// (see that module's own doc comment for the scope boundary): every line
+/// goes through `sink` instead of `println!` directly, so it reads
+/// correctly whether `sink` is a `PlainSink` (unchanged stdout behavior) or
+/// the graphical screen's own channel-backed one.
+fn run_worktrees_permission_step(
+    roots: &[(&Path, &str)],
+    confirms: &mut Confirms,
+    home: &Path,
+    sink: &mut dyn ui::progress::Sink,
+) {
+    sink.log("");
+    sink.log("== Agent worktree permissions ==");
     let worktrees = permissions::default_worktrees_root(home);
     let worktrees_str = worktrees.to_string_lossy().to_string();
     if confirms.ask(&format!(
         "Create {worktrees_str} as the agent worktree root?"
     )) {
         match std::fs::create_dir_all(&worktrees) {
-            Ok(()) => println!("  Created {worktrees_str}"),
-            Err(e) => println!("  cannot create {worktrees_str}: {e}"),
+            Ok(()) => sink.log(&format!("  Created {worktrees_str}")),
+            Err(e) => sink.log(&format!("  cannot create {worktrees_str}: {e}")),
         }
     }
     if !confirms.ask(&format!(
@@ -1183,22 +1264,34 @@ fn run_worktrees_permission_step(roots: &[(&Path, &str)], confirms: &mut Confirm
     for (_, kind) in roots {
         match *kind {
             "claude" => match permissions::claude_worktrees_permissions(&worktrees_str, home) {
-                Ok(outcome) => print_permission_outcome(
-                    "claude-code",
-                    "worktree permissions already present",
-                    outcome,
-                ),
-                Err(e) => println!("claude-code: {e}"),
+                Ok(outcome) => {
+                    for line in permission_outcome_lines(
+                        "claude-code",
+                        "worktree permissions already present",
+                        outcome,
+                    ) {
+                        sink.log(&line);
+                    }
+                }
+                Err(e) => sink.log(&format!("claude-code: {e}")),
             },
             "opencode" => match permissions::opencode_worktrees_permissions(&worktrees_str, home) {
                 Ok(outcome) => {
-                    print_opencode_outcome("worktree permissions already present", outcome)
+                    for line in
+                        opencode_outcome_lines("worktree permissions already present", outcome)
+                    {
+                        sink.log(&line);
+                    }
                 }
-                Err(e) => println!("opencode: {e}"),
+                Err(e) => sink.log(&format!("opencode: {e}")),
             },
             "codex" => match permissions::codex_worktrees_permissions(&worktrees_str, home) {
-                Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
-                Err(e) => println!("codex: {e}"),
+                Ok(outcome) => {
+                    for line in codex_outcome_lines("writable_roots already present", outcome) {
+                        sink.log(&line);
+                    }
+                }
+                Err(e) => sink.log(&format!("codex: {e}")),
             },
             _ => {}
         }
@@ -1548,6 +1641,13 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     let mut confirms = Confirms::new(args.yes);
     let mut summary = Summary::default();
     let mut installed_skills: Vec<String> = Vec::new();
+    // `install` (this CLI subcommand, always requiring an explicit --target
+    // or --agent) never goes through `ui::progress`'s graphical screen --
+    // that is reserved for `interactive`'s own picker-then-install flow,
+    // the one path that was already fully graphical up to this point. A
+    // plain `PlainSink` here preserves this subcommand's existing
+    // plain-stdout behavior exactly.
+    let mut sink = ui::progress::PlainSink;
     for (target, kind) in &roots {
         let installed = install_selected_skills(
             &source,
@@ -1557,6 +1657,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
             &integration_selection,
             args.package_dev,
             &mut summary,
+            &mut sink,
         )?;
         let _ = kind;
         for skill in installed {
@@ -1565,7 +1666,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
             }
         }
     }
-    run_post_install_steps(&roots, &source, &installed_skills, &mut confirms);
+    run_post_install_steps(&roots, &source, &installed_skills, &mut confirms, &mut sink);
     let root_paths: Vec<PathBuf> = roots.iter().map(|(t, _)| t.clone()).collect();
     summary.print(&root_paths, args.yes);
     // A partial install (a skill hard-blocked on every root that offered
@@ -1765,82 +1866,123 @@ fn parse_grant_args(argv: &[String]) -> Result<GrantArgs, String> {
     Ok(GrantArgs { agent, target })
 }
 
+/// Returns the lines to show rather than printing them directly, so a
+/// caller running under `ui::progress`'s graphical screen (currently only
+/// `run_worktrees_permission_step`) can route them through its `Sink`
+/// instead -- every other call site just prints each line unchanged,
+/// exactly as this function used to do itself.
+fn permission_outcome_lines(
+    agent: &str,
+    already_present: &str,
+    outcome: permissions::PermissionOutcome,
+) -> Vec<String> {
+    match outcome {
+        permissions::PermissionOutcome::NoConfigFile => {
+            vec![format!("{agent}: no settings.json found; skipped")]
+        }
+        permissions::PermissionOutcome::AlreadyPresent => {
+            vec![format!("{agent}: {already_present}")]
+        }
+        permissions::PermissionOutcome::Changed { added, pruned } => {
+            let mut lines = Vec::new();
+            if !added.is_empty() {
+                lines.push(format!("{agent}: added to permissions.allow:"));
+                for entry in added {
+                    lines.push(format!("  - {entry}"));
+                }
+            }
+            if !pruned.is_empty() {
+                lines.push(format!(
+                    "{agent}: removed dead rules Claude Code never matches:"
+                ));
+                for entry in pruned {
+                    lines.push(format!("  - {entry}"));
+                }
+            }
+            lines
+        }
+    }
+}
+
 fn print_permission_outcome(
     agent: &str,
     already_present: &str,
     outcome: permissions::PermissionOutcome,
 ) {
-    match outcome {
-        permissions::PermissionOutcome::NoConfigFile => {
-            println!("{agent}: no settings.json found; skipped");
-        }
-        permissions::PermissionOutcome::AlreadyPresent => {
-            println!("{agent}: {already_present}");
-        }
-        permissions::PermissionOutcome::Changed { added, pruned } => {
-            if !added.is_empty() {
-                println!("{agent}: added to permissions.allow:");
-                for entry in added {
-                    println!("  - {entry}");
-                }
-            }
-            if !pruned.is_empty() {
-                println!("{agent}: removed dead rules Claude Code never matches:");
-                for entry in pruned {
-                    println!("  - {entry}");
-                }
-            }
-        }
+    for line in permission_outcome_lines(agent, already_present, outcome) {
+        println!("{line}");
     }
 }
 
-fn print_opencode_outcome(already_present: &str, outcome: permissions::OpencodePermissionOutcome) {
+fn opencode_outcome_lines(
+    already_present: &str,
+    outcome: permissions::OpencodePermissionOutcome,
+) -> Vec<String> {
     match outcome {
         permissions::OpencodePermissionOutcome::NotStrictJson => {
-            println!("opencode: config is not strict JSON; add the rules by hand");
+            vec!["opencode: config is not strict JSON; add the rules by hand".to_string()]
         }
         permissions::OpencodePermissionOutcome::Merged {
             legacy_removed,
             added,
         } => {
+            let mut lines = Vec::new();
             if legacy_removed {
-                println!("opencode: removed invalid claude-style permission.allow list");
+                lines.push(
+                    "opencode: removed invalid claude-style permission.allow list".to_string(),
+                );
             }
             if added.is_empty() {
-                println!("opencode: {already_present}");
+                lines.push(format!("opencode: {already_present}"));
             } else {
-                println!("opencode: allowed:");
+                lines.push("opencode: allowed:".to_string());
                 for entry in added {
-                    println!("  - {entry}");
+                    lines.push(format!("  - {entry}"));
                 }
             }
+            lines
         }
     }
 }
 
-/// Always prints its caller's own "done" label at the end, even on a fresh
-/// create or prepend -- `label` carries that same per-context wording
+fn print_opencode_outcome(already_present: &str, outcome: permissions::OpencodePermissionOutcome) {
+    for line in opencode_outcome_lines(already_present, outcome) {
+        println!("{line}");
+    }
+}
+
+/// Always includes its caller's own "done" label at the end, even on a
+/// fresh create or prepend -- `label` carries that same per-context wording
 /// through (planning says "writable_roots already present", worktrees says
 /// "worktree grant already in place", regardless of which of those two
 /// branches actually ran).
-fn print_codex_outcome(label: &str, outcome: permissions::CodexOutcome) {
+fn codex_outcome_lines(label: &str, outcome: permissions::CodexOutcome) -> Vec<String> {
     match outcome {
         permissions::CodexOutcome::Created => {
-            println!("codex: created config.toml");
-            println!("codex: {label}");
+            vec![
+                "codex: created config.toml".to_string(),
+                format!("codex: {label}"),
+            ]
         }
         permissions::CodexOutcome::Prepended | permissions::CodexOutcome::AlreadyPresent => {
-            println!("codex: {label}");
+            vec![format!("codex: {label}")]
         }
         permissions::CodexOutcome::Appended(paths) => {
-            println!("codex: added to writable_roots:");
+            let mut lines = vec!["codex: added to writable_roots:".to_string()];
             for path in paths {
-                println!("  - {path}");
+                lines.push(format!("  - {path}"));
             }
+            lines
         }
         permissions::CodexOutcome::NotSingleLineArray => {
-            println!("codex: writable_roots is not a single-line array; add these by hand");
+            vec!["codex: writable_roots is not a single-line array; add these by hand".to_string()]
         }
+    }
+}
+
+fn print_codex_outcome(label: &str, outcome: permissions::CodexOutcome) {
+    for line in codex_outcome_lines(label, outcome) {
+        println!("{line}");
     }
 }
 
@@ -2727,26 +2869,74 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 picked.per_skill.insert(name.clone(), mode.clone());
             }
             let home = home_dir_opt().ok_or("interactive: HOME is not set")?;
-            let mut summary = Summary::default();
-            let mut confirms = Confirms::new(yes);
-            let mut installed_skills: Vec<String> = Vec::new();
-            for (root, _root_kind) in &roots {
-                let installed = install_selected_skills(
-                    &source,
-                    root,
-                    &home,
-                    &names,
-                    &picked,
-                    package_dev,
-                    &mut summary,
-                )?;
-                for skill in installed {
-                    if !installed_skills.contains(&skill) {
-                        installed_skills.push(skill);
+
+            // The actual install loop, plus the one post-install step this
+            // screen also covers (worktrees permissions), run on a
+            // background thread while `ui::progress::run` drives the
+            // graphical screen on this one -- see that module's own doc
+            // comment for the scope boundary. Everything captured here is
+            // owned/cloned, never borrowed, since the closure must be
+            // `'static` to cross the thread boundary.
+            let source_for_thread = source.clone();
+            let roots_for_thread = roots.clone();
+            let names_for_thread = names.clone();
+            let home_for_thread = home.clone();
+            let picked_for_thread = picked.clone();
+            let outcome: Result<(Vec<String>, Summary, bool), String> = ui::progress::run(
+                &names,
+                move |sink, bridge| -> Result<(Vec<String>, Summary, bool), String> {
+                    let mut confirms = match bridge {
+                        Some(bridge) => Confirms::with_bridge(yes, bridge),
+                        None => Confirms::new(yes),
+                    };
+                    let mut summary = Summary::default();
+                    let mut installed_skills: Vec<String> = Vec::new();
+                    for (root, _root_kind) in &roots_for_thread {
+                        let installed = install_selected_skills(
+                            &source_for_thread,
+                            root,
+                            &home_for_thread,
+                            &names_for_thread,
+                            &picked_for_thread,
+                            package_dev,
+                            &mut summary,
+                            sink,
+                        )?;
+                        for skill in installed {
+                            if !installed_skills.contains(&skill) {
+                                installed_skills.push(skill);
+                            }
+                        }
                     }
-                }
+                    if let Some(known_roots) = known_agent_roots(&roots_for_thread) {
+                        run_worktrees_permission_step(
+                            &known_roots,
+                            &mut confirms,
+                            &home_for_thread,
+                            sink,
+                        );
+                    }
+                    Ok((installed_skills, summary, confirms.yes))
+                },
+            );
+            let (installed_skills, summary, final_yes) = outcome?;
+
+            // The graphical screen has now closed and the terminal is
+            // restored; every OTHER post-install step still prints plainly,
+            // exactly as it always has -- `final_yes` carries an "a" (all)
+            // answer given during the worktrees step forward, so it is not
+            // asked again here.
+            let mut confirms = Confirms::new(final_yes);
+            if let Some(known_roots) = known_agent_roots(&roots) {
+                run_remaining_post_install_steps(
+                    &roots,
+                    &source,
+                    &installed_skills,
+                    &mut confirms,
+                    &known_roots,
+                    &home,
+                );
             }
-            run_post_install_steps(&roots, &source, &installed_skills, &mut confirms);
             let root_paths: Vec<PathBuf> = roots.iter().map(|(p, _)| p.clone()).collect();
             summary.print(&root_paths, yes);
             // A partial install cannot read as success in CI.
