@@ -114,9 +114,17 @@ pub enum ClickTarget {
     /// `state.scroll` to reach an absolute skill index, exactly as
     /// `list_cell` does.
     ListRow(usize),
-    /// Anywhere in the details/info pane (only reachable at all in a wide
-    /// layout, or a narrow one currently showing it).
-    Info,
+    /// A cell inside the details/info pane (only reachable at all in a wide
+    /// layout, or a narrow one currently showing it), given as the 0-based
+    /// row and column WITHIN THE PANE'S OWN CONTENT -- `row` is relative to
+    /// the currently scrolled view the same way `ListRow`'s is (a caller
+    /// adds `state.info_scroll` to reach an absolute line index into
+    /// `render::info_lines`), and `col` is the content column past the
+    /// pane's own leading border, matching what `render::info_layout`'s
+    /// button/toggle column ranges are computed against. Needed so a click
+    /// can be tested against the ACTIONS buttons and the integration-mode
+    /// toggle's own segments, not just "landed somewhere in this pane".
+    Info { row: usize, col: usize },
 }
 
 /// Maps a 1-based (col, row) mouse report onto what it landed on, or `None`
@@ -156,7 +164,10 @@ pub fn hit_test(
             return None;
         }
         return if info_focused {
-            Some(ClickTarget::Info)
+            Some(ClickTarget::Info {
+                row: body_row,
+                col: col - 1,
+            })
         } else if body_row < layout.list_rows {
             Some(ClickTarget::ListRow(body_row))
         } else {
@@ -182,7 +193,10 @@ pub fn hit_test(
     }
     let right_edge = divider + 1 + layout.right_w;
     if col < right_edge {
-        return Some(ClickTarget::Info);
+        return Some(ClickTarget::Info {
+            row: body_row,
+            col: col - (divider + 1),
+        });
     }
     None
 }
@@ -316,9 +330,27 @@ mod tests {
     #[test]
     fn a_click_inside_the_info_pane_hits_info() {
         let layout = compute(80, 24, &["todo", "bug-report"], true, 1, 1, false);
-        assert_eq!(hit_test(&layout, 1, false, 25, 3), Some(ClickTarget::Info));
+        // col 25 is the divider(24) + 1 -- the info pane's own first content
+        // column, so col 0 within the pane.
+        assert_eq!(
+            hit_test(&layout, 1, false, 25, 3),
+            Some(ClickTarget::Info { row: 0, col: 0 })
+        );
         // the last column still inside the info pane (right_w = 55)
-        assert_eq!(hit_test(&layout, 1, false, 79, 3), Some(ClickTarget::Info));
+        assert_eq!(
+            hit_test(&layout, 1, false, 79, 3),
+            Some(ClickTarget::Info { row: 0, col: 54 })
+        );
+    }
+
+    #[test]
+    fn an_info_click_reports_the_row_relative_to_the_scrolled_view() {
+        let layout = compute(80, 24, &["todo", "bug-report"], true, 1, 1, false);
+        // row 6 is body row 3 (row - body_start, body_start = title_rows(1) + 1)
+        assert_eq!(
+            hit_test(&layout, 1, false, 25, 6),
+            Some(ClickTarget::Info { row: 3, col: 0 })
+        );
     }
 
     #[test]
@@ -361,6 +393,9 @@ mod tests {
             hit_test(&layout, 1, false, 2, 3),
             Some(ClickTarget::ListRow(0))
         );
-        assert_eq!(hit_test(&layout, 1, true, 2, 3), Some(ClickTarget::Info));
+        assert_eq!(
+            hit_test(&layout, 1, true, 2, 3),
+            Some(ClickTarget::Info { row: 0, col: 0 })
+        );
     }
 }

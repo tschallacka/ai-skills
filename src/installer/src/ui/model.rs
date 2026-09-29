@@ -214,6 +214,27 @@ impl PickerState {
         )];
     }
 
+    /// Sets the skill under the cursor directly to `mode`, if it is one of
+    /// that skill's own offered modes -- the integration-mode toggle's click
+    /// handler, which always names the exact mode a segment represents
+    /// rather than advancing through them one at a time the way `m`
+    /// (`cycle_integration_mode`) does. A no-op, with no message, for a mode
+    /// the skill does not offer or a skill already in that mode -- neither
+    /// is a mistake worth surfacing the way `toggle`'s Blocked refusal is.
+    pub fn set_integration_mode(&mut self, mode: &str) {
+        let Some(skill) = self.skills.get_mut(self.cursor) else {
+            return;
+        };
+        if !skill.offered_modes.iter().any(|m| m == mode) || skill.mode == mode {
+            return;
+        }
+        skill.mode = mode.to_string();
+        self.message = vec![format!(
+            "{} will be installed in {} mode",
+            skill.name, skill.mode
+        )];
+    }
+
     /// Lists how to install every currently-missing requirement of the
     /// skill under the cursor. A group requirement's label names every
     /// member (`requirement_label`'s "any of a, b"); the install hint
@@ -483,6 +504,36 @@ mod tests {
                 ("b".to_string(), "mcp".to_string())
             ]
         );
+    }
+
+    #[test]
+    fn set_integration_mode_jumps_directly_to_the_named_mode() {
+        let mut list = skills(&["a"]);
+        list[0].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
+        let mut state = PickerState::new(list);
+        state.set_integration_mode("mcp");
+        assert_eq!(state.skills[0].mode, "mcp");
+        assert!(state.message[0].contains("a will be installed in mcp mode"));
+    }
+
+    #[test]
+    fn set_integration_mode_ignores_a_mode_the_skill_does_not_offer() {
+        let mut list = skills(&["a"]);
+        list[0].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
+        let mut state = PickerState::new(list);
+        state.set_integration_mode("bogus");
+        assert_eq!(state.skills[0].mode, "skill");
+    }
+
+    #[test]
+    fn set_integration_mode_operates_on_the_skill_under_the_cursor() {
+        let mut list = skills(&["a", "b"]);
+        list[1].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
+        let mut state = PickerState::new(list);
+        state.cursor = 1;
+        state.set_integration_mode("mcp");
+        assert_eq!(state.skills[0].mode, "skill");
+        assert_eq!(state.skills[1].mode, "mcp");
     }
 
     #[test]

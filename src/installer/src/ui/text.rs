@@ -89,9 +89,41 @@ pub(crate) fn overflow(text: &str, width: usize, max_lines: usize) -> Vec<String
     out
 }
 
+/// True for a line `wrap`/`pad` cannot safely measure by byte length alone:
+/// an escape-sequence-carrying line (its invisible SGR bytes would inflate
+/// the count and wrap/truncate it too early -- ASCII, so never a panic risk,
+/// just a wrong width) or a genuinely multi-byte one (a box-drawing divider
+/// or border glyph, e.g. `─` at 3 UTF-8 bytes per display column -- a panic
+/// risk too, since byte-slicing mid-character is undefined behavior `wrap`'s
+/// own `&remaining[..width]` will hit the instant such a line is long enough
+/// to need "wrapping" by its BYTE count). Either way the line is assumed to
+/// already be exactly as wide as its builder intended, and every caller that
+/// pre-builds a fully composed, already-exactly-sized line (a colored
+/// button, a reverse-video cursor row, a Unicode divider) uses this to skip
+/// re-wrapping/re-padding it. Shared by `wizard` and `render` rather than
+/// defined twice, since both build precomposed lines the same way.
+pub(crate) fn is_precomposed_line(line: &str) -> bool {
+    line.contains('\x1b') || line.len() != line.chars().count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_precomposed_line_flags_an_escape_sequence() {
+        assert!(is_precomposed_line("\x1b[7mhi\x1b[0m"));
+    }
+
+    #[test]
+    fn is_precomposed_line_flags_multi_byte_utf8() {
+        assert!(is_precomposed_line("──"));
+    }
+
+    #[test]
+    fn is_precomposed_line_is_false_for_plain_ascii() {
+        assert!(!is_precomposed_line("plain text"));
+    }
 
     #[test]
     fn pad_truncates_with_an_ellipsis_not_a_tilde() {

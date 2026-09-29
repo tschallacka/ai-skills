@@ -26,11 +26,12 @@
 //! only "back" meaning would make quitting mean two different things
 //! depending on how the picker was reached.
 
+use super::buttons::colorize_button;
 use super::input::{self, Key};
-use super::mascot::{self, bg_sgr, ColorMode};
+use super::mascot::{self, ColorMode};
 use super::render::BorderSet;
 use super::terminal;
-use super::text::{overflow, pad, wrap};
+use super::text::{is_precomposed_line, overflow, pad, wrap};
 use std::path::PathBuf;
 
 /// One selectable install destination, already resolved to a real path --
@@ -794,24 +795,6 @@ fn second_button_col(first_label: &str) -> usize {
     first_label.chars().count() + BUTTON_GAP.chars().count()
 }
 
-/// Wraps `label` in a colored background SGR span (and its reset) when
-/// resting, or in reverse video when `focused` -- reverse video wins
-/// outright rather than combining with the background color, since
-/// swapping foreground/background on top of an explicit background color
-/// is exactly the kind of SGR interaction that renders differently across
-/// terminals. `ColorMode::None` still gets the reverse-video focus marker
-/// (an ordinary terminal attribute, not a "color"), just never the resting
-/// background.
-fn colorize_button(mode: ColorMode, label: &str, bg: (u8, u8, u8), focused: bool) -> String {
-    if focused {
-        format!("\x1b[7m{label}\x1b[0m")
-    } else if mode == ColorMode::None {
-        label.to_string()
-    } else {
-        format!("{}{label}\x1b[0m", bg_sgr(mode, bg))
-    }
-}
-
 /// A row of two side-by-side buttons, sized to `right_w` -- the DETAILS
 /// pane's own width, so it sits directly under that pane's own summary
 /// content rather than spanning the full frame. Already padded here (using
@@ -869,20 +852,7 @@ fn root_select_buttons_line(mode: ColorMode, right_w: usize, focus: Option<usize
 /// rather than `wrap` collapsing it away) -- except a line already carrying
 /// an SGR escape (a colored, pre-padded button row) passes through
 /// untouched, since `wrap`/`pad` both measure by character count and would
-/// miscount one that includes invisible color bytes.
-/// True for a line `wrap`/`pad` cannot safely measure by byte length alone:
-/// an escape-sequence-carrying line (its invisible SGR bytes would inflate
-/// the count and wrap/truncate it too early -- ASCII, so never a panic risk,
-/// just a wrong width) or a genuinely multi-byte one (this module's own
-/// box-drawing divider rule, `─` at 3 UTF-8 bytes per display column -- a
-/// panic risk too, since byte-slicing mid-character is undefined behavior
-/// `wrap`'s own `&remaining[..width]` will hit the instant a divider is
-/// long enough to need "wrapping" by its BYTE count). Either way the line
-/// is assumed to already be exactly as wide as its builder intended.
-fn is_precomposed_line(line: &str) -> bool {
-    line.contains('\x1b') || line.len() != line.chars().count()
-}
-
+/// miscount one that includes invisible color bytes (`text::is_precomposed_line`).
 fn wrap_pane_lines(lines: &[String], width: usize) -> Vec<String> {
     lines
         .iter()

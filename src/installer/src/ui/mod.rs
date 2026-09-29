@@ -6,6 +6,7 @@
 //! placement is the one still missing; mouse clicks are handled below via
 //! `layout::hit_test`).
 
+pub mod buttons;
 pub mod input;
 pub mod layout;
 pub mod mascot;
@@ -75,7 +76,7 @@ fn run_picker_with(
         );
         state.clamp_scroll(layout.body_rows);
         clamp_info_scroll(&mut state, &layout);
-        terminal::draw(&render::render_frame(&state, &layout));
+        terminal::draw(&render::render_frame(&state, &layout, color_mode));
         if layout.mascot_on {
             draw_mascot(&layout, color_mode, eyes.current(), unicode_borders);
         }
@@ -89,7 +90,7 @@ fn run_picker_with(
                 state.done = true;
                 state.confirmed = false;
             }
-            key => handle_key(&mut state, key, &layout, title_rows, source_root),
+            key => handle_key(&mut state, key, &layout, title_rows, hint_rows, source_root),
         }
         if state.done {
             break;
@@ -155,10 +156,15 @@ fn handle_key(
     key: Key,
     layout: &layout::Layout,
     title_rows: usize,
+    hint_rows: usize,
     source_root: &Path,
 ) {
     match key {
         Key::Click { col, row } => {
+            if let Some(click) = render::hint_click_at(layout, hint_rows, col, row) {
+                apply_hint_click(state, click);
+                return;
+            }
             let info_focused = layout.narrow && state.focus == Focus::Info;
             match layout::hit_test(layout, title_rows, info_focused, col, row) {
                 Some(layout::ClickTarget::ListRow(body_row)) => {
@@ -169,7 +175,10 @@ fn handle_key(
                         state.focus = Focus::List;
                     }
                 }
-                Some(layout::ClickTarget::Info) => state.focus = Focus::Info,
+                Some(layout::ClickTarget::Info { row, col }) => {
+                    state.focus = Focus::Info;
+                    handle_info_click(state, row + state.info_scroll, col, layout, source_root);
+                }
                 None => {}
             }
         }
@@ -223,6 +232,64 @@ fn handle_key(
     }
 }
 
+/// A click on one of the hint bar's own buttons -- see `render::HintClick`
+/// for which segments have one at all (a compound label like "Up/Dn move"
+/// does not: the list rows are already directly clickable for that, and a
+/// single click has no obvious "up or down" meaning of its own).
+fn apply_hint_click(state: &mut PickerState, click: render::HintClick) {
+    match click {
+        render::HintClick::ToggleCurrent => state.toggle(state.cursor),
+        render::HintClick::FocusToggle => state.toggle_focus(),
+        render::HintClick::SelectAll => state.select_all(),
+        render::HintClick::SelectNone => state.select_none(),
+        render::HintClick::Install => {
+            state.done = true;
+            state.confirmed = true;
+        }
+        render::HintClick::Quit => {
+            state.done = true;
+            state.confirmed = false;
+        }
+    }
+}
+
+/// A click inside the DETAILS pane, once `layout::hit_test` has already
+/// resolved it to a pane-relative `(row, col)` -- `row` here is already the
+/// ABSOLUTE line index into `render::info_lines` (the caller added
+/// `state.info_scroll`), matching what `render::info_layout`'s own row
+/// numbers are computed against. Anywhere that is not one of the two
+/// ACTIONS buttons or an integration-mode toggle segment is simply focus,
+/// exactly as a click anywhere else in the pane always has been.
+fn handle_info_click(
+    state: &mut PickerState,
+    row: usize,
+    col: usize,
+    layout: &layout::Layout,
+    source_root: &Path,
+) {
+    let width = if layout.narrow {
+        layout.left_w
+    } else {
+        layout.right_w
+    };
+    let info_layout = render::info_layout(state, width);
+    if info_layout.dep_hint_row == Some(row) {
+        state.dep_hint();
+    } else if info_layout.reverify_row == Some(row) {
+        state.reverify(source_root);
+    } else if let Some(toggle) = &info_layout.mode_toggle {
+        if toggle.row == row {
+            if let Some((mode_name, _, _)) = toggle
+                .segments
+                .iter()
+                .find(|(_, start, end)| (*start..*end).contains(&col))
+            {
+                state.set_integration_mode(mode_name);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +335,7 @@ mod tests {
             Key::Click { col: 2, row: 4 },
             &layout,
             1,
+            1,
             source,
         );
         assert_eq!(state.cursor, 1);
@@ -286,6 +354,7 @@ mod tests {
             Key::Click { col: 25, row: 3 },
             &layout,
             1,
+            1,
             source,
         );
         assert_eq!(state.focus, Focus::Info);
@@ -303,6 +372,7 @@ mod tests {
             &mut state,
             Key::Click { col: 1, row: 3 },
             &layout,
+            1,
             1,
             source,
         );
