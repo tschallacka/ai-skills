@@ -194,6 +194,30 @@ fn the_server_prefers_its_session_port_across_restarts_and_argv_overrides() {
 }
 
 // ---- 2. the beacon carries a connectable host, never bare localhost ------
+//
+// B384: measured flaky on a contended CI host. The mechanism is not packet
+// loss or a UDP unreliability -- it is scheduling latency on both ends of a
+// fixed wall-clock race. `announce_loop` (chat-server-rs) sends its first
+// beacon the instant its OWN background thread actually gets a CPU quantum,
+// then again every `CHAT_ANNOUNCE_INTERVAL` (default 2s) after that; the
+// client's own `discover --wait N` listens against a `SystemTime::now() +
+// N` deadline. On a host where runners are packed tightly (the VM gets
+// descheduled regularly so sibling tenants get their own turn), either
+// side's thread can simply not be running yet when the other's packet is
+// sent -- the server's announce thread may not get scheduled at all for a
+// second or more after `spawn()`, or the client's own `recv_from` may not
+// get to run until after its deadline has already elapsed. A single fixed
+// --wait 3 has no room to absorb that.
+//
+// Fixed the same way `test-bootstrap-piped-stdin.sh` was earlier this
+// session: replace a single guessed wait with several short, independent
+// attempts and a generous ceiling, rather than one long wait that still
+// has no guarantee of overlapping a live thread's own schedule. A shorter
+// `CHAT_ANNOUNCE_INTERVAL` (1s, comfortably below production's need but
+// harmless -- it only shortens how often a real chat-server-rs advertises
+// itself, never anything about the protocol) also means every independent
+// attempt below has a beacon to catch roughly once a second, rather than
+// racing a 2-second gap with a 1-second read timeout.
 #[test]
 fn the_beacon_carries_a_connectable_host_never_bare_localhost() {
     let server_binary = resolve_workspace_binary("chat-server-rs");
@@ -202,6 +226,7 @@ fn the_beacon_carries_a_connectable_host_never_bare_localhost() {
     let server = Command::new(&server_binary)
         .env("AI_CHAT_HOME", home.path())
         .env("CHAT_ANNOUNCE", "1")
+        .env("CHAT_ANNOUNCE_INTERVAL", "1")
         .env("CHAT_BCAST", "127.0.0.1")
         .env("CHAT_BEACON_PORT", &beacon_port)
         .env("CHAT_ANNOUNCE_HOST", "203.0.113.7")
@@ -213,20 +238,29 @@ fn the_beacon_carries_a_connectable_host_never_bare_localhost() {
     let port = wait_port(home.path()).expect("beacon server did not report a port");
 
     let dir = ScratchDir::new("resolution-beacon-client");
-    let output = run_client(
-        dir.path(),
-        &[
-            "discover",
-            "--bcast",
-            "127.0.0.1",
-            "--beacon-port",
-            &beacon_port,
-            "--wait",
-            "3",
-            "--json",
-        ],
-    );
-    let disco = String::from_utf8_lossy(&output.stdout).into_owned();
+    // Up to 10 independent 2s listens (a 20s worst-case ceiling, only ever
+    // reached under real contention) rather than one fixed wait -- the
+    // common, uncontended case still finishes on the first attempt.
+    let mut disco = String::new();
+    for _ in 0..10 {
+        let output = run_client(
+            dir.path(),
+            &[
+                "discover",
+                "--bcast",
+                "127.0.0.1",
+                "--beacon-port",
+                &beacon_port,
+                "--wait",
+                "2",
+                "--json",
+            ],
+        );
+        disco = String::from_utf8_lossy(&output.stdout).into_owned();
+        if disco.contains(r#""host":"203.0.113.7""#) {
+            break;
+        }
+    }
     assert!(
         disco.contains(r#""host":"203.0.113.7""#),
         "the beacon did not carry the announced host: {disco}"
