@@ -82,6 +82,17 @@ returns. A test that snapshots, copies or deletes a directory a tool has just
 committed into is exposed to the same race unless the tool's git runs in the
 foreground.
 
+## A third, unrelated failure mode in the same test file
+
+`resolution.rs`'s beacon test (section 1 above) has since surfaced a THIRD,
+different problem, sharing nothing with either case above except the file:
+a fixed wall-clock wait racing real scheduling delay, not a shared resource
+collision. See `github-ci-runners.md`'s "Simulating 'the runner pauses for
+other tenants'" section (B384, fixed 2026-09-29) for the mechanism and how it
+was reproduced (`SIGSTOP`, not CPU load). Noted here so a future reader who
+lands on this file via this test's name does not stop at "already fixed,
+must be the port thing again."
+
 ## Re-checking
 
 Section 1 reproduces on `9e45b3b3` and section 2 on `48a09027`, using only the

@@ -110,6 +110,53 @@ perfectly, shortcut bar and all. Open the file by its **bare name** from inside
 its directory rather than widening the predicate — widening it would hide that
 the assertion depended on the temp directory's length.
 
+## Simulating "the runner pauses for other tenants": SIGSTOP, not CPU load
+
+Measured 2026-09-29 while diagnosing B384 (`chat-client-rs`'s
+`the_beacon_carries_a_connectable_host_never_bare_localhost`, which failed
+twice on `macos-latest`'s default-bash shard with "expected 'GOT:hello', got
+'GOT:'" — a UDP beacon the server genuinely sent, that the client's own
+`discover` never reported catching). The obvious way to test "is this a
+scheduling-pressure bug" is to load the CPU and see if it reproduces. That is
+the wrong tool for this shape of failure:
+
+| method | runs | reproduced |
+|---|---|---|
+| 8× `yes >/dev/null` on a 4-core box | 5 | 0/5 |
+| 64× `yes >/dev/null` on the same box | 5 | 0/5 |
+| `kill -STOP` the client mid-listen for longer than its own `--wait` window, then `-CONT` | 3 | 3/3 |
+
+Ordinary CPU contention is exactly what a fair scheduler (Linux CFS) is built
+to arbitrate; a process still gets turns, just smaller ones, and a short-lived
+test process is rarely starved long enough to matter. "The VPS pauses for
+other tenants" is a **hypervisor-level** freeze — the whole guest, scheduler
+included, stops running for a stretch — and the only local approximation of
+that is stopping the actual process, not competing with it. `SIGSTOP`/
+`SIGCONT` on the specific process under test is that approximation: cheap,
+exact about which window it freezes, and it reproduced the real failure on
+the first design that targeted the right mechanism (a fixed wall-clock
+deadline — `SystemTime::now() + Duration`, not an iteration count) rather than
+"the test is occasionally slow".
+
+**What it means:** a datagram (or any buffered I/O) arriving while a process
+is stopped is not lost — the kernel still buffers it — but a **wall-clock
+deadline computed before the freeze** does not move, so the process can wake
+up, check `SystemTime::now() < deadline`, find it already false, and exit
+having never read what was waiting for it the whole time. An iteration-count
+budget (`for _ in 0..N { sleep }`, `github-ci-runners.md`'s own "a readiness
+budget is a ceiling, not a sleep" above) does not have this failure mode: a
+frozen process just resumes counting from where it left off. A fixed
+deadline measured against real time does. Fixed in
+`src/chat-client-rs/tests/resolution.rs` (several short independent attempts
+instead of one long wait — see the commit that closed B384); the same
+technique (freeze the specific process, not the CPU) is worth trying before
+concluding any other CI-only flake with a real-time wait in it "just needs a
+bigger number" or "is a platform relay bug" (B386, `test-bootstrap-piped-
+stdin.sh`, still open as of this writing, is the next candidate — its own
+wait loop is iteration-count-based like the safe case above, so the exact
+B384 mechanism does not obviously transfer, but the SIGSTOP technique itself
+is untried there).
+
 ## Reading a failing run's logs
 
 `gh run view` refuses while a run is in progress. The per-job API does not, so
