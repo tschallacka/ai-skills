@@ -101,6 +101,11 @@ struct WizardState {
     confirmed: bool,
     use_previous: bool,
     newly_added_custom: Vec<PathBuf>,
+    /// `None` while `RootSelect`'s destination list has keyboard focus (the
+    /// default); `Some(0)`/`Some(1)` once Tab has moved focus to the
+    /// Install-now/Cancel buttons in the details pane instead. Meaningless
+    /// outside `RootSelect`; nothing else reads or sets it.
+    footer_focus: Option<usize>,
 }
 
 impl WizardState {
@@ -126,6 +131,7 @@ impl WizardState {
             confirmed: false,
             newly_added_custom: Vec::new(),
             use_previous: false,
+            footer_focus: None,
         }
     }
 
@@ -239,11 +245,13 @@ fn handle_key(
 
 /// Maps a click onto the same effect the equivalent keys already have --
 /// `InstallOrUninstall`'s two rows are real buttons a single click commits,
-/// `RootSelect`'s rows are clickable checkboxes (and the "add custom" row),
-/// and its own footer panel's two buttons commit exactly like Enter/`q`
-/// already do. `CustomPath` (a text field) and `UsePrevious` (no distinct
-/// button rows in its own view yet) stay keyboard-only for now -- a real,
-/// deliberate scope boundary, not an oversight.
+/// `RootSelect`'s list rows are clickable checkboxes (and the "add custom"
+/// row), and its Install-now/Cancel buttons (living in the DETAILS pane,
+/// under the "Selected" summary -- see `root_select_details_raw`) commit
+/// directly rather than routing through a key. `CustomPath` (a text field)
+/// and `UsePrevious` (no distinct button rows in its own view yet) stay
+/// keyboard-only for now -- a real, deliberate scope boundary, not an
+/// oversight.
 ///
 /// `InstallOrUninstall` is handled first and returns immediately: its
 /// centered layout has no title bar or border box at all (see
@@ -272,6 +280,9 @@ fn handle_click(
         }
         return;
     }
+    if !matches!(state.step, Step::RootSelect) {
+        return;
+    }
 
     // Assumes every OTHER step's own title is exactly one line, true for
     // every title string this module actually uses at any width realistic
@@ -281,68 +292,43 @@ fn handle_click(
     // frame.
     const TITLE_LINES: usize = 1;
     let body_start = TITLE_LINES + 2; // title line(s) + the top border, 1-based
-    if matches!(state.step, Step::RootSelect)
-        && handle_root_select_footer_click(state, layout, body_start, col, row, installed_at)
-    {
-        return;
-    }
     if row < body_start {
         return;
     }
     let body_row = row - body_start;
-    if let Step::RootSelect = state.step {
-        if body_row >= state.root_rows() {
-            return;
+    let details_start_col = layout.left_w + 3; // 1-based: the details pane's own first content column
+    if col >= details_start_col {
+        // A click inside the DETAILS pane, not the list -- the only thing
+        // there to click is the button row under the "Selected" summary
+        // (see `root_select_details_raw`, which always appends it last).
+        let button_row =
+            root_select_button_row_index(state, layout.right_w, layout.unicode_borders);
+        if body_row == button_row {
+            let content_col = col - details_start_col;
+            if content_col < INSTALL_LABEL.chars().count() {
+                commit_root_selection(state, installed_at);
+            } else if (cancel_start_col()..cancel_start_col() + CANCEL_LABEL.chars().count())
+                .contains(&content_col)
+            {
+                state.done = true;
+                state.confirmed = false;
+            }
         }
-        state.cursor = body_row;
-        if body_row == state.available.len() {
-            state.custom_input.clear();
-            state.custom_pending_create = None;
-            state.back_stack.push(Step::RootSelect);
-            state.step = Step::CustomPath;
-        } else {
-            state.checked[body_row] = !state.checked[body_row];
-        }
+        return;
     }
-}
-
-/// `RootSelect`'s footer panel sits below the main box, at a row offset that
-/// depends on the box's own height (`layout.body_rows`) -- unlike the box's
-/// own rows, which start right after the fixed title+top-border preamble
-/// `body_start` already names. Returns `true` (having already acted) when
-/// `row`/`col` landed anywhere in the footer's one-line button row (past
-/// it: its own bottom border, or the hint bar), so the caller can skip its
-/// own body-row handling entirely rather than mis-reading a footer click as
-/// some out-of-range list row.
-///
-/// Both buttons share that one row, so which one a click hit is a COLUMN
-/// question, not a row one -- `INSTALL_LABEL`/`CANCEL_LABEL`/`BUTTON_GAP`
-/// are the single source both this and `root_select_footer` build the row
-/// from, so a click is tested against exactly what is on screen rather than
-/// a second, potentially-diverging guess at it.
-fn handle_root_select_footer_click(
-    state: &mut WizardState,
-    layout: &super::layout::Layout,
-    body_start: usize,
-    col: usize,
-    row: usize,
-    installed_at: &impl Fn(&std::path::Path) -> Vec<InstalledSkill>,
-) -> bool {
-    let footer_top = body_start + layout.body_rows + 2; // + bottom border + footer's own top border
-    if row < footer_top {
-        return false;
+    if body_row >= state.root_rows() {
+        return;
     }
-    if row == footer_top {
-        let content_col = col.saturating_sub(2); // col 1 is the left border; content starts at col 2
-        if content_col < INSTALL_LABEL.chars().count() {
-            handle_root_select(state, Key::Enter, installed_at);
-        } else if (cancel_start_col()..cancel_start_col() + CANCEL_LABEL.chars().count())
-            .contains(&content_col)
-        {
-            handle_root_select(state, Key::Char('q'), installed_at);
-        }
+    state.cursor = body_row;
+    state.footer_focus = None; // clicking a list row returns focus to the list
+    if body_row == state.available.len() {
+        state.custom_input.clear();
+        state.custom_pending_create = None;
+        state.back_stack.push(Step::RootSelect);
+        state.step = Step::CustomPath;
+    } else {
+        state.checked[body_row] = !state.checked[body_row];
     }
-    true // any row from here down (this one, the footer's bottom border, the hint bar) is consumed
 }
 
 fn handle_root_select(
@@ -350,6 +336,45 @@ fn handle_root_select(
     key: Key,
     installed_at: &impl Fn(&std::path::Path) -> Vec<InstalledSkill>,
 ) {
+    if let Some(focused) = state.footer_focus {
+        match key {
+            Key::Left | Key::Right | Key::Char('h') | Key::Char('l') => {
+                state.footer_focus = Some(1 - focused);
+            }
+            Key::Tab => {
+                state.footer_focus = if focused == 1 {
+                    None
+                } else {
+                    Some(focused + 1)
+                };
+            }
+            Key::ShiftTab => {
+                state.footer_focus = if focused == 0 {
+                    None
+                } else {
+                    Some(focused - 1)
+                };
+            }
+            Key::Up => {
+                state.footer_focus = None;
+            }
+            Key::Enter if focused == 0 => commit_root_selection(state, installed_at),
+            Key::Enter => {
+                state.done = true;
+                state.confirmed = false;
+            }
+            Key::Char('q') => {
+                state.done = true;
+                state.confirmed = false;
+            }
+            Key::Escape => {
+                state.step = state.back_stack.pop().unwrap_or(Step::InstallOrUninstall);
+                state.footer_focus = None;
+            }
+            _ => {}
+        }
+        return;
+    }
     let rows = state.root_rows();
     match key {
         Key::Up | Key::Char('k') => {
@@ -357,6 +382,12 @@ fn handle_root_select(
         }
         Key::Down | Key::Char('j') => {
             state.cursor = (state.cursor + 1).min(rows - 1);
+        }
+        Key::Tab => {
+            state.footer_focus = Some(0);
+        }
+        Key::ShiftTab => {
+            state.footer_focus = Some(1); // reverses in from the list: lands on the LAST button
         }
         Key::Space => {
             if state.cursor < state.available.len() {
@@ -612,10 +643,14 @@ fn selection_summary_line(root: &AvailableRoot) -> String {
 const INSTALL_LABEL: &str = "[ Install now ]";
 const CANCEL_LABEL: &str = "[ Cancel ]";
 const BUTTON_GAP: &str = "    ";
-/// A muted green and a muted red -- resting colors for the two footer
-/// buttons, distinct from each other and from the default terminal
-/// background, so they read as real buttons rather than plain bracketed
-/// text. `ColorMode::None` renders neither (see `colorize_button`).
+/// A muted green and a muted red -- resting colors for the two buttons,
+/// distinct from each other and from the default terminal background, so
+/// they read as real buttons rather than plain bracketed text.
+/// `ColorMode::None` renders neither (see `colorize_button`). Keyboard
+/// focus (Tab) is shown with reverse video instead of a brighter color --
+/// the same treatment the list's own cursor row already gets, so "this is
+/// the focused control" always looks the same way regardless of which
+/// pane it is in, and works even without color support.
 const INSTALL_BUTTON_BG: (u8, u8, u8) = (25, 110, 60);
 const CANCEL_BUTTON_BG: (u8, u8, u8) = (120, 45, 45);
 
@@ -623,52 +658,140 @@ fn cancel_start_col() -> usize {
     INSTALL_LABEL.chars().count() + BUTTON_GAP.chars().count()
 }
 
-/// Wraps `label` in a colored background SGR span (and its reset), or
-/// leaves it plain in `ColorMode::None` -- a color-incapable terminal gets
-/// exactly the bracketed text it always had, no stray escape codes.
-fn colorize_button(mode: ColorMode, label: &str, bg: (u8, u8, u8)) -> String {
-    if mode == ColorMode::None {
+/// Wraps `label` in a colored background SGR span (and its reset) when
+/// resting, or in reverse video when `focused` -- reverse video wins
+/// outright rather than combining with the background color, since
+/// swapping foreground/background on top of an explicit background color
+/// is exactly the kind of SGR interaction that renders differently across
+/// terminals. `ColorMode::None` still gets the reverse-video focus marker
+/// (an ordinary terminal attribute, not a "color"), just never the resting
+/// background.
+fn colorize_button(mode: ColorMode, label: &str, bg: (u8, u8, u8), focused: bool) -> String {
+    if focused {
+        format!("\x1b[7m{label}\x1b[0m")
+    } else if mode == ColorMode::None {
         label.to_string()
     } else {
         format!("{}{label}\x1b[0m", bg_sgr(mode, bg))
     }
 }
 
-/// `RootSelect`'s footer: just the two buttons now, side by side on one
-/// row -- the plain-language summary of what is checked lives in the
-/// details pane instead (see `root_select_frame`), since that is the pane
-/// already dedicated to explaining what a choice on this screen means.
-/// Already padded to `inner` here (using the PLAIN, uncolored text's visual
-/// width) rather than left to `two_pane_frame`'s generic `pad`, which would
-/// miscount a colored line's width by counting its invisible SGR bytes as
-/// display columns.
-fn root_select_footer(mode: ColorMode, inner: usize) -> Vec<String> {
-    let install = colorize_button(mode, INSTALL_LABEL, INSTALL_BUTTON_BG);
-    let cancel = colorize_button(mode, CANCEL_LABEL, CANCEL_BUTTON_BG);
+/// The Install-now/Cancel button row, side by side, sized to `right_w` --
+/// the DETAILS pane's own width, so it sits directly under the "Selected"
+/// summary rather than spanning the full frame. Already padded here (using
+/// the PLAIN, uncolored text's visual width) rather than left to
+/// `two_pane_frame`'s generic `pad`, which would miscount a colored line's
+/// width by counting its invisible SGR bytes as display columns.
+fn root_select_buttons_line(mode: ColorMode, right_w: usize, focus: Option<usize>) -> String {
+    let install = colorize_button(mode, INSTALL_LABEL, INSTALL_BUTTON_BG, focus == Some(0));
+    let cancel = colorize_button(mode, CANCEL_LABEL, CANCEL_BUTTON_BG, focus == Some(1));
     let visual_len = cancel_start_col() + CANCEL_LABEL.chars().count();
-    let trailing = " ".repeat(inner.saturating_sub(visual_len));
-    vec![format!("{install}{BUTTON_GAP}{cancel}{trailing}")]
+    let trailing = " ".repeat(right_w.saturating_sub(visual_len));
+    format!("{install}{BUTTON_GAP}{cancel}{trailing}")
 }
 
-/// Wraps a footer's raw lines to `width`, the same rule `two_pane_frame`
-/// already applies to the details pane (an empty line stays one blank row
+/// Wraps a pane's raw lines to `width`, the rule `two_pane_frame` already
+/// applies to any details content (an empty line stays one blank row
 /// rather than `wrap` collapsing it away) -- except a line already carrying
 /// an SGR escape (a colored, pre-padded button row) passes through
 /// untouched, since `wrap`/`pad` both measure by character count and would
 /// miscount one that includes invisible color bytes.
-fn wrap_footer(lines: &[String], width: usize) -> Vec<String> {
+/// True for a line `wrap`/`pad` cannot safely measure by byte length alone:
+/// an escape-sequence-carrying line (its invisible SGR bytes would inflate
+/// the count and wrap/truncate it too early -- ASCII, so never a panic risk,
+/// just a wrong width) or a genuinely multi-byte one (this module's own
+/// box-drawing divider rule, `─` at 3 UTF-8 bytes per display column -- a
+/// panic risk too, since byte-slicing mid-character is undefined behavior
+/// `wrap`'s own `&remaining[..width]` will hit the instant a divider is
+/// long enough to need "wrapping" by its BYTE count). Either way the line
+/// is assumed to already be exactly as wide as its builder intended.
+fn is_precomposed_line(line: &str) -> bool {
+    line.contains('\x1b') || line.len() != line.chars().count()
+}
+
+fn wrap_pane_lines(lines: &[String], width: usize) -> Vec<String> {
     lines
         .iter()
         .flat_map(|line| {
             if line.is_empty() {
                 vec![String::new()]
-            } else if line.contains('\x1b') {
+            } else if is_precomposed_line(line) {
                 vec![line.clone()]
             } else {
                 wrap(line, width)
             }
         })
         .collect()
+}
+
+/// Everything `RootSelect`'s DETAILS pane shows ABOVE its own buttons: the
+/// highlighted item's own explanation, any transient message, a divider
+/// rule, then a plain-language summary of every CHECKED root (never just
+/// the cursor's). `right_w` sizes the divider to the pane's own width --
+/// known only once `layout::compute` has run, hence the parameter rather
+/// than a `WizardState`-only computation. Shared by the renderer and
+/// `root_select_button_row_index` so the button row's position is always
+/// derived from the SAME content, never a second guess at it.
+fn root_select_details_raw(state: &WizardState, right_w: usize, unicode: bool) -> Vec<String> {
+    let custom_index = state.available.len();
+    let mut details: Vec<String> = if state.cursor == custom_index {
+        vec![
+            "+ Add a custom directory".to_string(),
+            String::new(),
+            "Type any absolute path on the next step. It will be".to_string(),
+            "created if it does not exist yet, and remembered for".to_string(),
+            "next time.".to_string(),
+        ]
+    } else {
+        let root = &state.available[state.cursor];
+        vec![
+            root.label.clone(),
+            String::new(),
+            format!("Path: {}", root.path.display()),
+            if root.exists {
+                "[exists] -- already has skills installed, or ready to.".to_string()
+            } else {
+                "[will create] -- created the moment something installs".to_string()
+            },
+            kind_description(root.kind.as_deref()).to_string(),
+        ]
+    };
+    if let Some(message) = &state.message {
+        details.push(String::new());
+        details.push(message.clone());
+    }
+    details.push(String::new());
+    details.push(
+        BorderSet::for_unicode(unicode)
+            .horizontal
+            .to_string()
+            .repeat(right_w),
+    );
+    details.push(String::new());
+    // What is actually going to happen -- every CHECKED root, never just
+    // the one the cursor happens to be explaining above.
+    if state.checked.iter().any(|c| *c) {
+        details.push("Selected:".to_string());
+        for (root, checked) in state.available.iter().zip(&state.checked) {
+            if *checked {
+                details.push(format!("  {}", selection_summary_line(root)));
+            }
+        }
+    } else {
+        details.push("Nothing selected yet -- pick a destination above.".to_string());
+    }
+    details
+}
+
+/// Where the button row lands in the DETAILS pane's own WRAPPED row
+/// numbering (0-based, relative to the pane's first body row) -- it is
+/// always the last row, since `root_select_frame` always appends exactly
+/// one blank line then the button line after `root_select_details_raw`,
+/// and the button line's own SGR content makes `wrap_pane_lines` pass it
+/// through as a single row unchanged (see its own doc comment).
+fn root_select_button_row_index(state: &WizardState, right_w: usize, unicode: bool) -> usize {
+    let above = root_select_details_raw(state, right_w, unicode);
+    wrap_pane_lines(&above, right_w).len() + 1 // + the blank line before the buttons
 }
 
 fn root_select_frame(
@@ -705,65 +828,43 @@ fn root_select_frame(
     };
     list_rows.push(format!("{custom_cursor}    + Add a custom directory..."));
 
-    let mut details: Vec<String> = if state.cursor == custom_index {
-        vec![
-            "+ Add a custom directory".to_string(),
-            String::new(),
-            "Type any absolute path on the next step. It will be".to_string(),
-            "created if it does not exist yet, and remembered for".to_string(),
-            "next time.".to_string(),
-        ]
-    } else {
-        let root = &state.available[state.cursor];
-        vec![
-            root.label.clone(),
-            String::new(),
-            format!("Path: {}", root.path.display()),
-            if root.exists {
-                "[exists] -- already has skills installed, or ready to.".to_string()
-            } else {
-                "[will create] -- created the moment something installs".to_string()
-            },
-            kind_description(root.kind.as_deref()).to_string(),
-        ]
-    };
-    if let Some(message) = &state.message {
-        details.push(String::new());
-        details.push(message.clone());
-    }
-    // What is actually going to happen -- every CHECKED root, never just
-    // the one the cursor happens to be explaining above -- lives in the
-    // details pane too, since that is already the pane dedicated to
-    // explaining a choice on this screen. The footer below keeps only the
-    // two buttons.
-    details.push(String::new());
-    if state.checked.iter().any(|c| *c) {
-        details.push("Selected:".to_string());
-        for (root, checked) in state.available.iter().zip(&state.checked) {
-            if *checked {
-                details.push(format!("  {}", selection_summary_line(root)));
-            }
-        }
-    } else {
-        details.push("Nothing selected yet -- pick a destination above.".to_string());
-    }
+    const TITLE: &str = "Choose where to install";
+    const HINT: &str = " Up/Dn move  Space select  Tab focus  Enter continue  q quit";
+    // A probe layout, purely to learn `right_w` before the button row (part
+    // of `details_raw`, a parameter TO `two_pane_frame`) can be built --
+    // `two_pane_frame` recomputes the identical layout internally from the
+    // same inputs, so this can never drift from what actually renders.
+    let probe = super::layout::compute(
+        cols,
+        rows,
+        &labels,
+        color_capable,
+        overflow(TITLE, cols, 3).len(),
+        overflow(HINT, cols, 3).len(),
+        unicode,
+    );
 
-    let inner = cols.saturating_sub(2).max(1);
-    let footer = root_select_footer(color_mode, inner);
+    let mut details = root_select_details_raw(state, probe.right_w, unicode);
+    details.push(String::new());
+    details.push(root_select_buttons_line(
+        color_mode,
+        probe.right_w,
+        state.footer_focus,
+    ));
+
     two_pane_frame(
         cols,
         rows,
         color_capable,
         unicode,
-        "Choose where to install",
+        TITLE,
         "DESTINATIONS",
         "DETAILS",
         &labels,
         &list_rows,
         state.cursor,
         &details,
-        &footer,
-        " Up/Dn move  Space select  Enter continue  q quit",
+        HINT,
     )
 }
 
@@ -972,12 +1073,11 @@ fn single_pane_frame(
 /// is why the width-invariant tests below check the cursor row separately
 /// from every other row instead of holding all of them to `.chars().count()`.
 ///
-/// `footer_raw` is an optional extra panel drawn below the main box, full
-/// width, before the hint bar (empty draws nothing) -- `RootSelect`'s own
-/// selection summary and Install-now/Cancel buttons; every other caller
-/// passes `&[]`. Its rows are reserved out of the SAME budget `hint_rows`
-/// already existed to carve out of `body_rows`, so the box shrinks to make
-/// room rather than the frame growing past `rows`.
+/// `details_raw` may itself contain a pre-colored, pre-padded-to-`right_w`
+/// line (`RootSelect`'s own button row) -- `wrap_pane_lines` passes any
+/// line already carrying an SGR escape through unchanged rather than
+/// measuring it by character count, which would miscount its invisible
+/// color bytes as display columns.
 #[allow(clippy::too_many_arguments)]
 fn two_pane_frame(
     cols: usize,
@@ -991,39 +1091,30 @@ fn two_pane_frame(
     list_rows: &[String],
     cursor: usize,
     details_raw: &[String],
-    footer_raw: &[String],
     hint: &str,
 ) -> (Vec<String>, super::layout::Layout) {
     let b = BorderSet::for_unicode(unicode);
     let title_lines = overflow(title, cols, 3);
     let hint_lines = overflow(hint, cols, 3);
-    let inner = cols.saturating_sub(2).max(1);
-    let footer_content = wrap_footer(footer_raw, inner);
-    let footer_box_rows = if footer_content.is_empty() {
-        0
-    } else {
-        footer_content.len() + 2 // its own top and bottom border
-    };
     let layout = super::layout::compute(
         cols,
         rows,
         list_item_labels,
         color_capable,
         title_lines.len(),
-        footer_box_rows + hint_lines.len(),
+        hint_lines.len(),
         unicode,
     );
 
-    let details: Vec<String> = details_raw
-        .iter()
-        .flat_map(|line| {
-            if line.is_empty() {
-                vec![String::new()]
+    let details: Vec<String> = wrap_pane_lines(details_raw, layout.right_w)
+        .into_iter()
+        .map(|line| {
+            if is_precomposed_line(&line) {
+                line
             } else {
-                wrap(line, layout.right_w)
+                pad(&line, layout.right_w)
             }
         })
-        .map(|line| pad(&line, layout.right_w))
         .collect();
 
     let mut out = Vec::with_capacity(rows);
@@ -1061,32 +1152,6 @@ fn two_pane_frame(
         std::iter::repeat_n(b.horizontal, layout.right_w).collect::<String>(),
         b.corner_br
     ));
-    if !footer_content.is_empty() {
-        out.push(format!(
-            "{}{}{}",
-            b.corner_tl,
-            std::iter::repeat_n(b.horizontal, inner).collect::<String>(),
-            b.corner_tr
-        ));
-        for line in &footer_content {
-            // A colored, already-visually-padded line (root_select_footer's
-            // buttons) passes through as-is: `pad` measures by character
-            // count and would miscount its invisible SGR bytes as display
-            // columns, under-padding it and misaligning the right border.
-            let cell = if line.contains('\x1b') {
-                line.clone()
-            } else {
-                pad(line, inner)
-            };
-            out.push(format!("{}{cell}{}", b.vertical, b.vertical));
-        }
-        out.push(format!(
-            "{}{}{}",
-            b.corner_bl,
-            std::iter::repeat_n(b.horizontal, inner).collect::<String>(),
-            b.corner_br
-        ));
-    }
     out.extend(overflow(hint, cols, 3));
     (out, layout)
 }
@@ -1555,7 +1620,7 @@ mod tests {
     }
 
     #[test]
-    fn root_select_frame_footer_summarizes_every_checked_root_not_just_the_cursor() {
+    fn root_select_frame_details_pane_summarizes_every_checked_root_not_just_the_cursor() {
         let mut state = WizardState::new(roots(&["/a", "/b"]));
         // roots() defaults every fixture to exists:true; flip one so both
         // wordings (fresh vs. update) are exercised in the same test.
@@ -1572,7 +1637,7 @@ mod tests {
     }
 
     #[test]
-    fn root_select_frame_footer_says_nothing_selected_when_nothing_is_checked() {
+    fn root_select_frame_says_nothing_selected_when_nothing_is_checked() {
         let state = WizardState::new(roots(&["/a"]));
         let (frame, _layout) = root_select_frame(&state, 90, 24, ColorMode::TrueColor, false);
         let joined = frame.join("\n");
@@ -1586,7 +1651,7 @@ mod tests {
     }
 
     #[test]
-    fn a_universal_root_gets_its_own_footer_wording_not_fresh_install() {
+    fn a_universal_root_gets_its_own_selected_wording_not_fresh_install() {
         let mut available = roots(&["/a"]);
         available[0].kind = Some("universal".to_string());
         let mut state = WizardState::new(available);
@@ -1598,7 +1663,151 @@ mod tests {
     }
 
     #[test]
-    fn clicking_install_now_in_the_footer_finishes_like_enter() {
+    fn root_select_frame_draws_a_rule_between_the_item_details_and_selected() {
+        let state = WizardState::new(roots(&["/a"]));
+        let (frame, layout) = root_select_frame(&state, 90, 24, ColorMode::TrueColor, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains(&"-".repeat(layout.right_w)));
+    }
+
+    #[test]
+    fn root_select_frame_buttons_sit_under_the_selected_summary_not_full_width() {
+        // The button row must be no wider than the details pane, and must
+        // start at the details pane's own column -- not span the frame the
+        // way the old full-width footer used to.
+        let state = WizardState::new(roots(&["/a"]));
+        let (frame, layout) = root_select_frame(&state, 90, 24, ColorMode::TrueColor, false);
+        let button_line = frame
+            .iter()
+            .find(|l| l.contains(INSTALL_LABEL))
+            .expect("a rendered line must contain the Install button");
+        // The details pane's own left border sits at column layout.left_w+2
+        // (0-based index layout.left_w+1); nothing left of it should carry
+        // button text.
+        let details_col = layout.left_w + 2;
+        let before_details: String = button_line.chars().take(details_col).collect();
+        assert!(
+            !before_details.contains('['),
+            "button text leaked left of the details pane: {button_line:?}"
+        );
+    }
+
+    #[test]
+    fn clicking_install_now_commits_even_while_the_custom_row_is_highlighted() {
+        // Regression: Install-now used to route through the same Enter
+        // handling the list uses, which special-cases the cursor sitting on
+        // the "add custom directory" row -- so clicking the button while
+        // that row was highlighted opened the custom-path text field
+        // instead of committing the install.
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::RootSelect;
+        state.checked[0] = true;
+        state.cursor = state.available.len(); // the "+ Add a custom directory" row
+        let (_frame, layout) = root_select_frame(&state, 90, 24, ColorMode::TrueColor, false);
+        let body_start = 3;
+        let button_row = (body_start
+            + root_select_button_row_index(&state, layout.right_w, layout.unicode_borders))
+            as u16;
+        let details_start_col = (layout.left_w + 3) as u16;
+        handle_key(
+            &mut state,
+            Key::Click {
+                col: details_start_col,
+                row: button_row,
+            },
+            &layout,
+            &no_prior_installs,
+        );
+        assert!(state.done);
+        assert!(state.confirmed);
+        assert!(!matches!(state.step, Step::CustomPath));
+    }
+
+    #[test]
+    fn tab_from_the_list_moves_focus_to_install_then_cancel_then_back() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        assert_eq!(state.footer_focus, None);
+        handle_root_select(&mut state, Key::Tab, &no_prior_installs);
+        assert_eq!(state.footer_focus, Some(0));
+        handle_root_select(&mut state, Key::Tab, &no_prior_installs);
+        assert_eq!(state.footer_focus, Some(1));
+        handle_root_select(&mut state, Key::Tab, &no_prior_installs);
+        assert_eq!(state.footer_focus, None);
+    }
+
+    #[test]
+    fn shift_tab_cycles_the_opposite_way() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        handle_root_select(&mut state, Key::ShiftTab, &no_prior_installs);
+        assert_eq!(state.footer_focus, Some(1));
+        handle_root_select(&mut state, Key::ShiftTab, &no_prior_installs);
+        assert_eq!(state.footer_focus, Some(0));
+        handle_root_select(&mut state, Key::ShiftTab, &no_prior_installs);
+        assert_eq!(state.footer_focus, None);
+    }
+
+    #[test]
+    fn left_and_right_switch_between_the_focused_buttons() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.footer_focus = Some(0);
+        handle_root_select(&mut state, Key::Right, &no_prior_installs);
+        assert_eq!(state.footer_focus, Some(1));
+        handle_root_select(&mut state, Key::Left, &no_prior_installs);
+        assert_eq!(state.footer_focus, Some(0));
+    }
+
+    #[test]
+    fn up_from_a_focused_button_returns_focus_to_the_list() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.footer_focus = Some(1);
+        handle_root_select(&mut state, Key::Up, &no_prior_installs);
+        assert_eq!(state.footer_focus, None);
+    }
+
+    #[test]
+    fn enter_while_install_is_focused_commits_the_selection() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.checked[0] = true;
+        state.footer_focus = Some(0);
+        handle_root_select(&mut state, Key::Enter, &no_prior_installs);
+        assert!(state.done);
+        assert!(state.confirmed);
+    }
+
+    #[test]
+    fn enter_while_cancel_is_focused_quits_unconfirmed() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.footer_focus = Some(1);
+        handle_root_select(&mut state, Key::Enter, &no_prior_installs);
+        assert!(state.done);
+        assert!(!state.confirmed);
+    }
+
+    #[test]
+    fn the_focused_button_is_drawn_in_reverse_video() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.footer_focus = Some(0);
+        let (frame, _layout) = root_select_frame(&state, 90, 24, ColorMode::TrueColor, false);
+        let button_line = frame
+            .iter()
+            .find(|l| l.contains(INSTALL_LABEL))
+            .expect("a rendered line must contain the Install button");
+        assert!(button_line.contains("\x1b[7m"));
+    }
+
+    #[test]
+    fn neither_button_is_reverse_video_when_the_list_has_focus() {
+        let state = WizardState::new(roots(&["/a"]));
+        let (frame, _layout) = root_select_frame(&state, 90, 24, ColorMode::TrueColor, false);
+        let button_line = frame
+            .iter()
+            .find(|l| l.contains(INSTALL_LABEL))
+            .expect("a rendered line must contain the Install button");
+        assert!(!button_line.contains("\x1b[7m"));
+    }
+
+    #[test]
+    fn clicking_install_now_finishes_like_enter() {
         // RootSelect is the second step now, so Enter (or this button)
         // finishes the wizard directly rather than advancing further.
         let mut state = WizardState::new(roots(&["/a"]));
@@ -1606,20 +1815,23 @@ mod tests {
         state.checked[0] = true;
         let (_frame, layout) = root_select_frame(&state, 90, 24, ColorMode::TrueColor, false);
         // handle_click's own body_start (TITLE_LINES(1) + 2): the first row
-        // of the main box's body content. The footer's own one content
-        // row -- both buttons, side by side -- sits `body_rows` further
-        // down, past the main box's bottom border and the footer's own top
-        // border (+2).
+        // of the main box's body content. The button row lives in the
+        // DETAILS pane, under the "Selected" summary -- always the LAST
+        // wrapped row `root_select_details_raw` produces, plus the blank
+        // line before it.
         let body_start = 3;
-        let footer_row = (body_start + layout.body_rows + 2) as u16;
+        let button_row = (body_start
+            + root_select_button_row_index(&state, layout.right_w, layout.unicode_borders))
+            as u16;
+        let details_start_col = (layout.left_w + 3) as u16;
         // A click in the gap between the two buttons (content column
         // INSTALL_LABEL's length, the gap's own first column) hits neither.
-        let gap_col = (2 + INSTALL_LABEL.chars().count()) as u16;
+        let gap_col = details_start_col + INSTALL_LABEL.chars().count() as u16;
         handle_key(
             &mut state,
             Key::Click {
                 col: gap_col,
-                row: footer_row,
+                row: button_row,
             },
             &layout,
             &no_prior_installs,
@@ -1628,8 +1840,8 @@ mod tests {
         handle_key(
             &mut state,
             Key::Click {
-                col: 2,
-                row: footer_row,
+                col: details_start_col,
+                row: button_row,
             },
             &layout,
             &no_prior_installs,
@@ -1639,18 +1851,21 @@ mod tests {
     }
 
     #[test]
-    fn clicking_cancel_in_the_footer_quits_unconfirmed() {
+    fn clicking_cancel_quits_unconfirmed() {
         let mut state = WizardState::new(roots(&["/a"]));
         state.step = Step::RootSelect;
         let (_frame, layout) = root_select_frame(&state, 90, 24, ColorMode::TrueColor, false);
         let body_start = 3;
-        let footer_row = (body_start + layout.body_rows + 2) as u16;
-        let cancel_col = (2 + cancel_start_col()) as u16;
+        let button_row = (body_start
+            + root_select_button_row_index(&state, layout.right_w, layout.unicode_borders))
+            as u16;
+        let details_start_col = (layout.left_w + 3) as u16;
+        let cancel_col = details_start_col + cancel_start_col() as u16;
         handle_key(
             &mut state,
             Key::Click {
                 col: cancel_col,
-                row: footer_row,
+                row: button_row,
             },
             &layout,
             &no_prior_installs,
@@ -1787,19 +2002,7 @@ mod tests {
         let rows = vec!["row a".to_string(), "row b".to_string()];
         let details = vec!["detail".to_string()];
         let (frame, layout) = two_pane_frame(
-            90,
-            24,
-            true,
-            false,
-            "Title",
-            "LIST",
-            "DETAILS",
-            &labels,
-            &rows,
-            0,
-            &details,
-            &[],
-            "hint",
+            90, 24, true, false, "Title", "LIST", "DETAILS", &labels, &rows, 0, &details, "hint",
         );
         assert!(!layout.narrow);
         // the top border row: corner, left_w horizontals, divider, right_w
@@ -1816,19 +2019,7 @@ mod tests {
         let rows = vec!["row a".to_string(), "row b".to_string()];
         let details = vec!["detail".to_string()];
         let (frame, _layout) = two_pane_frame(
-            90,
-            24,
-            true,
-            false,
-            "Title",
-            "LIST",
-            "DETAILS",
-            &labels,
-            &rows,
-            1,
-            &details,
-            &[],
-            "hint",
+            90, 24, true, false, "Title", "LIST", "DETAILS", &labels, &rows, 1, &details, "hint",
         );
         // body starts right after the title line and the top border
         let cursor_row = &frame[3]; // title(1) + top border(1) + body row 1
@@ -1843,19 +2034,7 @@ mod tests {
         let rows = vec!["row a".to_string(), "row b".to_string()];
         let details = vec!["detail".to_string()];
         let (frame, _layout) = two_pane_frame(
-            90,
-            24,
-            true,
-            false,
-            "Title",
-            "LIST",
-            "DETAILS",
-            &labels,
-            &rows,
-            0,
-            &details,
-            &[],
-            "hint",
+            90, 24, true, false, "Title", "LIST", "DETAILS", &labels, &rows, 0, &details, "hint",
         );
         for (i, line) in frame.iter().enumerate() {
             if line.contains("\x1b[7m") {
