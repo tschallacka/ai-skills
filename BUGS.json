@@ -5203,6 +5203,29 @@
       "updated_at": "2026-09-28T15:40:49Z"
     },
     {
+      "id": "B386",
+      "title": "test-bootstrap-piped-stdin still flakes on macos-latest (default bash) despite the readiness-marker fix -- ~2/3 recent observations failed",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run the CI 'ci' workflow's 'Test suite passes on macos-latest (default bash, shard 2)' leg repeatedly (this is where test-bootstrap-piped-stdin happens to be sharded); or run tests/test-bootstrap-piped-stdin.sh directly on a real macOS runner (BSD script, not util-linux) under load, several times in a row.",
+      "observed": "Two of the three most recent observations on this exact shard failed with the identical assertion: \"FAIL: a real keystroke reaches the compiled installer, not a line of bootstrap.sh itself: expected 'GOT:hello', got 'GOT:'\" (commit 83496e37, job 109437931299; commit 088cebe5's first run, job 109451639983). A rerun of the identical job on the identical commit (088cebe5) then passed cleanly. This is the SAME assertion the readiness-marker fix earlier this session (replacing a fixed sleep with wait_for_stub_ready(), polling for the installer stub's own READY_MARKER touch-file) was meant to make impossible -- that fix was verified clean on the macOS bash-3.2 shard, but this is a DIFFERENT shard (macos-latest's own default/homebrew bash, not the bash-3.2 floor), and it is recurring there at a real, non-negligible rate.",
+      "expected": "The test should pass deterministically on every shard, the same as the bash-3.2 floor now does. Ruled out: the readiness marker's own polling loop is not the missing piece here -- pipes do not drop buffered bytes just because the reader has not called read() yet, so the SUBSHELL that waits on READY_MARKER then writes 'hello\\n' should deliver those bytes to script's own stdin pipe reliably regardless of exactly when script starts reading it.",
+      "mechanism": "Not confirmed (no macOS machine available this session to debug interactively), but the leading suspect given where the marker's own polling ends and the pipe hand-off begins: BSD/macOS's own `script` binary is normally driven interactively (a real controlling terminal as its own stdin), and this test instead gives it a PIPE as its own stdin (`( wait_for_stub_ready; printf 'hello\\n' ) | script -q \"$typescript\" bash -c \"$piped_cmd\"`). It is plausible BSD script's relay loop between its own stdin and the pty it allocates for the child does not reliably forward bytes from a non-tty (piped) stdin into that child pty -- intermittently, rather than never, which would explain a ~2/3 failure rate rather than 0/3 or 3/3. This would be a platform-specific reliability ceiling in the TEST's own use of `script`, not a bug in bootstrap.sh or the compiled installer, but it has not been verified against BSD script's actual source or documentation.",
+      "surfaces": [
+        "ci",
+        "bootstrap.sh",
+        "macos"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "",
+      "notes": "A prerequisite noisy-but-non-fatal ERR-trap line (from `script --version` exiting nonzero, which lib-test.sh's trap always prints for on macOS regardless of this bug) was already fixed separately (commit 088cebe5), so a future investigation sees only this test's own real assertion failure, not two unrelated-looking messages at once. Needs either a real macOS machine to debug script's own piped-stdin relay behavior directly (e.g. reproduce with `script`'s own strace/dtruss equivalent, or a minimal repro outside this test entirely), or enough repeated CI runs to establish a more precise failure rate before attempting a fix blind. A rerun-until-green pattern (matching this session's own practice for confirmed one-off flakes) is a reasonable short-term mitigation, but this flake rate is high enough that it will keep costing CI reruns until actually understood.",
+      "created_at": "2026-09-29T15:12:09Z",
+      "updated_at": "2026-09-29T15:12:09Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
