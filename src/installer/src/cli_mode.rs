@@ -92,6 +92,47 @@ pub fn version_marker_content(source_root: &Path) -> String {
     )
 }
 
+/// What an on-disk `.version` marker at a skill's destination implies about
+/// reinstalling it right now, compared against what `version_marker_content`
+/// would write if this skill were (re)installed from `source_root` this
+/// moment. Surfaced in the picker's own STATUS section (`ui::model::
+/// SkillEntry.version_status`) and computed the same way regardless of which
+/// install path (this CLI mode's own, or the interactive `install::
+/// install_skill`) last wrote the marker -- both write the identical format
+/// `version_marker_content` produces, so one comparison serves both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VersionStatus {
+    /// `SkillEntry.installed` is false: there is no on-disk install to
+    /// compare against at all.
+    NotInstalled,
+    /// The on-disk `.version` marker is byte-identical to what installing
+    /// right now would write.
+    UpToDate,
+    /// A `.version` marker exists but differs -- a newer source commit, a
+    /// different package version, or a different `source_ref` than what is
+    /// on disk.
+    WouldUpdate,
+    /// Installed, but with no `.version` marker at all -- predates this
+    /// tracking existing (or the interactive install path that wrote it),
+    /// so there is nothing to compare against.
+    Unknown,
+}
+
+/// See `VersionStatus`. `installed` is the caller's own already-computed
+/// answer (`SkillEntry.installed`'s own `SKILL.md`-presence check) rather
+/// than a second filesystem probe here, so the two can never disagree about
+/// what counts as "installed".
+pub fn version_status(source_root: &Path, dest_dir: &Path, installed: bool) -> VersionStatus {
+    if !installed {
+        return VersionStatus::NotInstalled;
+    }
+    match fs::read_to_string(dest_dir.join(".version")) {
+        Ok(existing) if existing == version_marker_content(source_root) => VersionStatus::UpToDate,
+        Ok(_) => VersionStatus::WouldUpdate,
+        Err(_) => VersionStatus::Unknown,
+    }
+}
+
 /// `installer print-skill-files planning`. Refuses any skill but planning:
 /// this is planning's own self-update tooling, not a general-purpose file
 /// lister.
@@ -283,6 +324,58 @@ mod tests {
         write(&dir.path().join("planning/SKILL.md"), "# planning\n");
         let resolved = resolve_source_file(dir.path(), "planning", "SKILL.md").unwrap();
         assert_eq!(resolved, dir.path().join("planning/SKILL.md"));
+    }
+
+    #[test]
+    fn version_status_of_an_uninstalled_skill_is_not_installed_even_with_a_stale_marker() {
+        let source_root = tempfile::tempdir().unwrap();
+        let dest_dir = tempfile::tempdir().unwrap();
+        // A `.version` file present but `installed` false (the caller's own
+        // SKILL.md check failed) must still report NotInstalled -- the
+        // marker's mere presence never overrides the caller's own answer.
+        write(&dest_dir.path().join(".version"), "leftover");
+        assert_eq!(
+            version_status(source_root.path(), dest_dir.path(), false),
+            VersionStatus::NotInstalled
+        );
+    }
+
+    #[test]
+    fn version_status_with_no_marker_at_all_is_unknown() {
+        let source_root = tempfile::tempdir().unwrap();
+        let dest_dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            version_status(source_root.path(), dest_dir.path(), true),
+            VersionStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn version_status_matching_the_current_marker_is_up_to_date() {
+        let source_root = tempfile::tempdir().unwrap();
+        let dest_dir = tempfile::tempdir().unwrap();
+        write(
+            &dest_dir.path().join(".version"),
+            &version_marker_content(source_root.path()),
+        );
+        assert_eq!(
+            version_status(source_root.path(), dest_dir.path(), true),
+            VersionStatus::UpToDate
+        );
+    }
+
+    #[test]
+    fn version_status_with_a_differing_marker_would_update() {
+        let source_root = tempfile::tempdir().unwrap();
+        let dest_dir = tempfile::tempdir().unwrap();
+        write(
+            &dest_dir.path().join(".version"),
+            "format=ai-skills-version-1\npackage_version=0.0.1-old\nsource_version=commit:old\nsource_ref=master\n",
+        );
+        assert_eq!(
+            version_status(source_root.path(), dest_dir.path(), true),
+            VersionStatus::WouldUpdate
+        );
     }
 
     #[test]

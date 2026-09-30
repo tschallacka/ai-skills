@@ -77,6 +77,20 @@ fn mode_active_bg(mode: &str) -> (u8, u8, u8) {
 }
 const HINT_BUTTON_BG: (u8, u8, u8) = (50, 90, 130);
 
+/// The STATUS section's own "version" line, in the user's own words rather
+/// than the enum's variant names -- `None` for `NotInstalled`, since that
+/// case is `build_info`'s own cue to print no version line at all (see its
+/// call site).
+fn version_status_word(status: crate::cli_mode::VersionStatus) -> Option<&'static str> {
+    use crate::cli_mode::VersionStatus;
+    match status {
+        VersionStatus::NotInstalled => None,
+        VersionStatus::UpToDate => Some("up to date"),
+        VersionStatus::WouldUpdate => Some("would update"),
+        VersionStatus::Unknown => Some("unknown (installed before version tracking)"),
+    }
+}
+
 pub(crate) fn title_bar_text(state: &PickerState) -> String {
     format!(
         " AI-SKILLS INSTALLER  {}/{} installed  {} selected ",
@@ -383,6 +397,11 @@ fn build_info(state: &PickerState, width: usize, unicode: bool) -> (Vec<String>,
         ),
         width,
     ));
+    // Omitted for `NotInstalled`: with nothing on disk to compare against,
+    // a version line would just repeat "installed no" in different words.
+    if let Some(word) = version_status_word(skill.version_status) {
+        lines.push(pad(&format!("  version        {word}"), width));
+    }
     // Every requirement this skill carries, except a tool this project
     // builds and installs itself (`is_self_provided`) -- shown here, that
     // would read as something the user needs to go source themselves, when
@@ -1157,6 +1176,7 @@ mod tests {
                 },
                 offered_modes: Vec::new(),
                 mode: "skill".to_string(),
+                version_status: crate::cli_mode::VersionStatus::NotInstalled,
             })
             .collect()
     }
@@ -1405,6 +1425,39 @@ mod tests {
             group: None,
             strength,
             why: why.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_not_installed_skill_shows_no_version_line_at_all() {
+        let state = PickerState::new(skills(&["todo"])); // installed: false by default
+        let lines = info_lines(&state, 60, false);
+        assert!(!lines.iter().any(|l| l.contains("version")));
+    }
+
+    #[test]
+    fn an_installed_skill_shows_its_version_status_in_plain_words() {
+        use crate::cli_mode::VersionStatus;
+        let cases = [
+            (VersionStatus::UpToDate, "up to date"),
+            (VersionStatus::WouldUpdate, "would update"),
+            (
+                VersionStatus::Unknown,
+                "unknown (installed before version tracking)",
+            ),
+        ];
+        for (status, expected_word) in cases {
+            let mut list = skills(&["todo"]);
+            list[0].installed = true;
+            list[0].version_status = status;
+            let state = PickerState::new(list);
+            let lines = info_lines(&state, 60, false);
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.contains("version") && l.contains(expected_word)),
+                "{status:?} should show {expected_word:?}: {lines:?}"
+            );
         }
     }
 

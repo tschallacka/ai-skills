@@ -100,6 +100,13 @@ pub fn install_skill(
             digest::manifest_path(&dest_dir).display()
         )));
     }
+    let version_path = dest_dir.join(".version");
+    if version_path.is_symlink() {
+        return Err(io::Error::other(format!(
+            "existing symlink requires manual review: {}",
+            version_path.display()
+        )));
+    }
 
     let mut installed_paths = Vec::with_capacity(relative_paths.len());
     for relative in &relative_paths {
@@ -179,6 +186,15 @@ pub fn install_skill(
     if !integration::modes(source_root, skill).is_empty() {
         fs::write(integration::mode_marker_path(&dest_dir), &mode)?;
     }
+    // Reuses the CLI self-update path's own marker format (`cli_mode::
+    // version_marker_content`) so one comparison (`cli_mode::version_status`)
+    // serves both install paths regardless of which one last wrote it --
+    // the interactive picker's STATUS section surfaces "up to date"/"would
+    // update" the same way either way.
+    fs::write(
+        &version_path,
+        crate::cli_mode::version_marker_content(source_root),
+    )?;
     Ok(())
 }
 
@@ -444,6 +460,85 @@ mod tests {
             fs::read_to_string(target_root.path().join("todo/scripts/run.sh")).unwrap(),
             "#!/bin/sh\n"
         );
+    }
+
+    #[test]
+    fn install_skill_writes_a_version_marker_matching_cli_mode_s_own_format() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        let target_root = tempfile::tempdir().unwrap();
+        install_skill(
+            source_root.path(),
+            "todo",
+            target_root.path(),
+            target_root.path(),
+            None,
+            false,
+        )
+        .unwrap();
+        let written = fs::read_to_string(target_root.path().join("todo/.version")).unwrap();
+        assert_eq!(
+            written,
+            crate::cli_mode::version_marker_content(source_root.path())
+        );
+        assert_eq!(
+            crate::cli_mode::version_status(
+                source_root.path(),
+                &target_root.path().join("todo"),
+                true,
+            ),
+            crate::cli_mode::VersionStatus::UpToDate
+        );
+    }
+
+    #[test]
+    fn reinstalling_unchanged_content_keeps_the_version_marker_up_to_date() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        let target_root = tempfile::tempdir().unwrap();
+        for _ in 0..2 {
+            install_skill(
+                source_root.path(),
+                "todo",
+                target_root.path(),
+                target_root.path(),
+                None,
+                false,
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            crate::cli_mode::version_status(
+                source_root.path(),
+                &target_root.path().join("todo"),
+                true,
+            ),
+            crate::cli_mode::VersionStatus::UpToDate
+        );
+    }
+
+    #[test]
+    fn a_version_symlink_at_the_destination_is_refused_not_silently_overwritten() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        let target_root = tempfile::tempdir().unwrap();
+        let dest_dir = target_root.path().join("todo");
+        fs::create_dir_all(&dest_dir).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/nonexistent", dest_dir.join(".version")).unwrap();
+        #[cfg(unix)]
+        {
+            let err = install_skill(
+                source_root.path(),
+                "todo",
+                target_root.path(),
+                target_root.path(),
+                None,
+                false,
+            )
+            .unwrap_err();
+            assert!(err.to_string().contains("existing symlink"));
+        }
     }
 
     #[test]

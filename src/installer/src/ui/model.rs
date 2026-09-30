@@ -5,6 +5,7 @@
 //! section, and `offered_modes`/`mode` carry integration-mode cycling
 //! (`m`).
 
+use crate::cli_mode::VersionStatus;
 use crate::requirements::{SkillState, SkillStatus};
 
 pub struct SkillEntry {
@@ -20,6 +21,12 @@ pub struct SkillEntry {
     /// already-resolved default until `m` cycles it, from then on whatever
     /// was last cycled to.
     pub mode: String,
+    /// Up to date / would update / installed before tracking existed --
+    /// `main.rs` computes this the same way it computes `installed`, from
+    /// `cli_mode::version_status`, and `render.rs`'s STATUS section shows it
+    /// only when `installed` is true (see `VersionStatus::NotInstalled`'s
+    /// own doc comment for why that case never needs its own display line).
+    pub version_status: VersionStatus,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -345,6 +352,7 @@ mod tests {
                 status: ok_status(),
                 offered_modes: Vec::new(),
                 mode: "skill".to_string(),
+                version_status: VersionStatus::NotInstalled,
             })
             .collect()
     }

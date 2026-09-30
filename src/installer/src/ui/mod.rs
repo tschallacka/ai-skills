@@ -335,6 +335,7 @@ mod tests {
                 },
                 offered_modes: Vec::new(),
                 mode: "skill".to_string(),
+                version_status: crate::cli_mode::VersionStatus::NotInstalled,
             })
             .collect()
     }

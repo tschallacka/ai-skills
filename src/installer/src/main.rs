@@ -2829,6 +2829,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 .unwrap_or_default();
             let destination = target.join(&name);
             let installed = destination.join("SKILL.md").is_file();
+            let version_status = cli_mode::version_status(&source, &destination, installed);
             let status = requirements::skill_status(&source, &name);
             let offered_modes = integration::modes(&source, &name);
             let mode = integration::resolve_mode(
@@ -2844,6 +2845,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 status,
                 offered_modes,
                 mode,
+                version_status,
             }
         })
         .collect();
