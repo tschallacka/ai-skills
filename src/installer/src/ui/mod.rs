@@ -145,7 +145,7 @@ fn clamp_info_scroll(state: &mut PickerState, layout: &layout::Layout) {
     } else {
         layout.right_w
     };
-    let total = render::info_lines(state, width).len();
+    let total = render::info_lines(state, width, layout.unicode_borders).len();
     let max_scroll = total.saturating_sub(layout.body_rows);
     if state.info_scroll > max_scroll {
         state.info_scroll = max_scroll;
@@ -194,7 +194,7 @@ fn handle_key(
             } else {
                 layout.right_w
             };
-            let max_scroll = render::info_lines(state, width)
+            let max_scroll = render::info_lines(state, width, layout.unicode_borders)
                 .len()
                 .saturating_sub(layout.body_rows);
             state.go_end(max_scroll);
@@ -273,7 +273,7 @@ fn handle_info_click(
     } else {
         layout.right_w
     };
-    let info_layout = render::info_layout(state, width);
+    let info_layout = render::info_layout(state, width, layout.unicode_borders);
     if let Some(actions) = &info_layout.actions {
         if actions.row == row {
             if (actions.dep_hint.0..actions.dep_hint.1).contains(&col) {
@@ -405,7 +405,7 @@ mod tests {
         let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
         let layout = wide_layout(&names);
         let source = std::path::Path::new(".");
-        let info_layout = render::info_layout(&state, layout.right_w);
+        let info_layout = render::info_layout(&state, layout.right_w, false);
         let actions = info_layout.actions.expect("actions");
         let key = info_click_at(&layout, actions.row, actions.dep_hint.0 + 1);
         handle_key(&mut state, key, &layout, 1, 1, source);
@@ -422,7 +422,7 @@ mod tests {
         let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
         let layout = wide_layout(&names);
         let source = std::path::Path::new(".");
-        let info_layout = render::info_layout(&state, layout.right_w);
+        let info_layout = render::info_layout(&state, layout.right_w, false);
         let actions = info_layout.actions.expect("actions");
         let key = info_click_at(&layout, actions.row, actions.check_again.0 + 1);
         handle_key(&mut state, key, &layout, 1, 1, source);

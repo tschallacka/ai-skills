@@ -307,22 +307,28 @@ pub(crate) struct ModeToggleLayout {
 /// `render_narrow`'s own job at actual draw time, using `info_layout`'s
 /// metadata, so this function (and the line COUNT it returns) stays simple
 /// and independent of `ColorMode`.
-pub(crate) fn info_lines(state: &PickerState, width: usize) -> Vec<String> {
-    build_info(state, width).0
+pub(crate) fn info_lines(state: &PickerState, width: usize, unicode: bool) -> Vec<String> {
+    build_info(state, width, unicode).0
 }
 
 /// Same content as `info_lines`, but returning the button/toggle row and
 /// column metadata instead of the text -- see `InfoLayout`.
-pub(crate) fn info_layout(state: &PickerState, width: usize) -> InfoLayout {
-    build_info(state, width).1
+pub(crate) fn info_layout(state: &PickerState, width: usize, unicode: bool) -> InfoLayout {
+    build_info(state, width, unicode).1
 }
 
-fn build_info(state: &PickerState, width: usize) -> (Vec<String>, InfoLayout) {
+fn build_info(state: &PickerState, width: usize, unicode: bool) -> (Vec<String>, InfoLayout) {
     let text_width = width.min(MAX_TEXT_COLS);
     let mut lines = Vec::new();
     let mut layout = InfoLayout::default();
     let skill = &state.skills[state.cursor];
-    lines.push(pad("-".repeat(text_width).as_str(), width));
+    let rule_char = BorderSet::for_unicode(unicode).horizontal;
+    lines.push(pad_display(
+        std::iter::repeat_n(rule_char, text_width)
+            .collect::<String>()
+            .as_str(),
+        width,
+    ));
     lines.push(pad(&skill.name, width));
     lines.push(pad("", width));
     for line in wrap(&skill.description, text_width) {
@@ -389,6 +395,7 @@ fn build_info(state: &PickerState, width: usize) -> (Vec<String>, InfoLayout) {
                 tool_col,
                 width,
                 text_width,
+                unicode,
             );
         }
         if !recommended.is_empty() {
@@ -401,6 +408,7 @@ fn build_info(state: &PickerState, width: usize) -> (Vec<String>, InfoLayout) {
                 tool_col,
                 width,
                 text_width,
+                unicode,
             );
         }
     }
@@ -483,16 +491,34 @@ fn is_self_provided(req: &crate::requirements::Requirement) -> bool {
     req.group.is_none() && req.tool == "rjq"
 }
 
+/// Like `text::pad`, but measured by displayed CHARACTER count rather than
+/// byte length -- safe for a line that may carry multi-byte UTF-8 (a
+/// Unicode box-drawing border), where `pad`'s own byte-length measurement
+/// would either miscount the padding needed or panic slicing mid-character
+/// on truncation (the exact hazard `wizard.rs`'s `is_precomposed_line`
+/// already documents for this same border-glyph reason). Never truncates
+/// with an ellipsis the way `pad` does: every caller here builds a line
+/// already known to be at most `width` characters, so overflow is not the
+/// case this needs to handle gracefully.
+fn pad_display(text: &str, width: usize) -> String {
+    let len = text.chars().count();
+    if len >= width {
+        text.chars().take(width).collect()
+    } else {
+        format!("{text}{}", " ".repeat(width - len))
+    }
+}
+
 /// One dependency table: a heading row spanning the full width, a column
-/// header row (`TOOL`/`STATUS`/`WHY`), then one row per requirement, each
-/// bordered with plain ASCII rules -- the same convention the very first
-/// divider line in `build_info` already uses regardless of Unicode
-/// capability, so this does not need its own `BorderSet`/`unicode`
-/// parameter. Appends every row it draws to `lines` and records each
-/// data row's own status-cell column span into `status_cells`, so
+/// header row (`TOOL`/`STATUS`/`WHY`), then one row per requirement, bordered
+/// with `BorderSet`'s own rules (Unicode box-drawing when the terminal
+/// supports it, plain ASCII otherwise -- the same choice every other border
+/// in this crate makes). Appends every row it draws to `lines` and records
+/// each data row's own status-cell column span into `status_cells`, so
 /// `colorize_info_row` can color "ok" green / "missing" red at actual draw
 /// time without this function (or `info_lines`'s plain content) knowing
 /// about `ColorMode` at all.
+#[allow(clippy::too_many_arguments)]
 fn append_dependency_table(
     lines: &mut Vec<String>,
     status_cells: &mut Vec<StatusCell>,
@@ -501,32 +527,50 @@ fn append_dependency_table(
     tool_col: usize,
     width: usize,
     text_width: usize,
+    unicode: bool,
 ) {
     const STATUS_COL: usize = 7; // "missing", the longer of "ok"/"missing"
     const CHROME: usize = 10; // "| " x3 + " |" x3, minus the double-counted middles: see below
     let why_col = text_width
         .saturating_sub(tool_col + STATUS_COL + CHROME)
         .max(8);
-    let rule = pad("-".repeat(text_width).as_str(), width);
+    let b = BorderSet::for_unicode(unicode);
+    let v = b.vertical;
+    let rule = pad_display(
+        std::iter::repeat_n(b.horizontal, text_width)
+            .collect::<String>()
+            .as_str(),
+        width,
+    );
 
     lines.push(rule.clone());
-    lines.push(pad(
-        &format!("| {}|", pad(heading, text_width.saturating_sub(3))),
+    lines.push(pad_display(
+        &format!("{v} {}{v}", pad(heading, text_width.saturating_sub(3))),
         width,
     ));
     lines.push(rule.clone());
-    lines.push(pad(
-        &table_row("TOOL", "STATUS", "WHY", tool_col, STATUS_COL, why_col),
+    lines.push(pad_display(
+        &table_row(v, "TOOL", "STATUS", "WHY", tool_col, STATUS_COL, why_col),
         width,
     ));
     lines.push(rule.clone());
     for (req, met) in rows {
         let label = crate::requirements::requirement_label(req);
         let status_word = if *met { "ok" } else { "missing" };
-        let row = table_row(&label, status_word, &req.why, tool_col, STATUS_COL, why_col);
+        let row = table_row(
+            v,
+            &label,
+            status_word,
+            &req.why,
+            tool_col,
+            STATUS_COL,
+            why_col,
+        );
         // "| " (2) + tool_col + " | " (3) -- the status cell's own start,
         // computed the same way `table_row` lays it out, so the two can
-        // never disagree about where it landed.
+        // never disagree about where it landed. The border glyph itself is
+        // one display column regardless of Unicode/ASCII, so this offset
+        // holds either way.
         let status_start = 2 + tool_col + 3;
         status_cells.push(StatusCell {
             row: lines.len(),
@@ -534,12 +578,13 @@ fn append_dependency_table(
             end: status_start + STATUS_COL,
             ok: *met,
         });
-        lines.push(pad(&row, width));
+        lines.push(pad_display(&row, width));
     }
     lines.push(rule);
 }
 
 fn table_row(
+    v: char,
     tool: &str,
     status: &str,
     why: &str,
@@ -548,7 +593,7 @@ fn table_row(
     why_col: usize,
 ) -> String {
     format!(
-        "| {} | {} | {} |",
+        "{v} {} {v} {} {v} {} {v}",
         pad(tool, tool_col),
         pad(status, status_col),
         pad(why, why_col)
@@ -871,8 +916,8 @@ fn list_cell(state: &PickerState, layout: &Layout, body: usize) -> String {
 fn render_wide(state: &PickerState, layout: &Layout, color_mode: ColorMode, out: &mut Vec<String>) {
     let b = BorderSet::for_layout(layout);
     out.push(top_border(layout, state.focus));
-    let info = info_lines(state, layout.right_w);
-    let info_meta = info_layout(state, layout.right_w);
+    let info = info_lines(state, layout.right_w, layout.unicode_borders);
+    let info_meta = info_layout(state, layout.right_w, layout.unicode_borders);
     let active_mode = state.skills[state.cursor].mode.as_str();
     for body in 0..layout.body_rows {
         let info_index = body + state.info_scroll;
@@ -915,12 +960,12 @@ fn render_narrow(
         b.corner_tr
     ));
     let info = if state.focus == Focus::Info {
-        info_lines(state, layout.left_w)
+        info_lines(state, layout.left_w, layout.unicode_borders)
     } else {
         Vec::new()
     };
     let info_meta = if state.focus == Focus::Info {
-        info_layout(state, layout.left_w)
+        info_layout(state, layout.left_w, layout.unicode_borders)
     } else {
         InfoLayout::default()
     };
@@ -1239,7 +1284,7 @@ mod tests {
             ),
         ];
         let state = PickerState::new(list);
-        let lines = info_lines(&state, 70);
+        let lines = info_lines(&state, 70, false);
         assert!(lines.iter().any(|l| l.contains("bash")));
         assert!(
             !lines.iter().any(|l| l.contains("rjq")),
@@ -1269,7 +1314,7 @@ mod tests {
             ),
         ];
         let state = PickerState::new(list);
-        let lines = info_lines(&state, 70);
+        let lines = info_lines(&state, 70, false);
         let joined = lines.join("\n");
         assert!(joined.contains("REQUIRED TOOLS"));
         assert!(joined.contains("RECOMMENDED TOOLS"));
@@ -1289,7 +1334,7 @@ mod tests {
             true,
         )];
         let state = PickerState::new(list);
-        let lines = info_lines(&state, 70);
+        let lines = info_lines(&state, 70, false);
         assert!(!lines.iter().any(|l| l.contains("REQUIRED TOOLS")));
         assert!(!lines.iter().any(|l| l.contains("RECOMMENDED TOOLS")));
     }
@@ -1334,12 +1379,12 @@ mod tests {
             true,
         )];
         let state = PickerState::new(list);
-        let lines = info_lines(&state, 70);
+        let lines = info_lines(&state, 70, false);
         assert!(
             !lines.iter().any(|l| l.contains("ACTIONS")),
             "neither button has a purpose with nothing missing: {lines:?}"
         );
-        let layout = info_layout(&state, 70);
+        let layout = info_layout(&state, 70, false);
         assert!(layout.actions.is_none());
     }
 
@@ -1348,7 +1393,7 @@ mod tests {
         // Vacuously "nothing missing": no requirements at all means
         // neither button has anything to act on either.
         let state = PickerState::new(skills(&["todo"]));
-        let lines = info_lines(&state, 70);
+        let lines = info_lines(&state, 70, false);
         assert!(!lines.iter().any(|l| l.contains("ACTIONS")));
     }
 
@@ -1360,10 +1405,50 @@ mod tests {
             false,
         )];
         let state = PickerState::new(list);
-        let lines = info_lines(&state, 70);
+        let lines = info_lines(&state, 70, false);
         assert!(lines.iter().any(|l| l.contains("ACTIONS")));
-        let layout = info_layout(&state, 70);
+        let layout = info_layout(&state, 70, false);
         assert!(layout.actions.is_some());
+    }
+
+    #[test]
+    fn the_dependency_table_draws_unicode_borders_when_asked() {
+        let mut list = skills(&["ci-failures"]);
+        list[0].status.requirements = vec![(
+            requirement("bash", crate::requirements::Strength::Hard, "runs it"),
+            true,
+        )];
+        let state = PickerState::new(list);
+        let unicode_lines = info_lines(&state, 70, true);
+        let joined = unicode_lines.join("\n");
+        assert!(joined.contains('─'));
+        assert!(joined.contains('│'));
+        // "ci-failures" (the skill's own name) legitimately contains a
+        // hyphen, so this checks for an ASCII RULE specifically (a run of
+        // several dashes), not the mere presence of one.
+        assert!(
+            !joined.contains("---"),
+            "expected no ASCII rule lines: {joined:?}"
+        );
+        let ascii_lines = info_lines(&state, 70, false);
+        let ascii_joined = ascii_lines.join("\n");
+        assert!(!ascii_joined.contains('─'));
+        assert!(ascii_joined.contains("---"));
+    }
+
+    #[test]
+    fn unicode_dependency_table_rows_are_still_exactly_the_pane_width() {
+        let mut list = skills(&["ci-failures"]);
+        list[0].status.requirements = vec![(
+            requirement("bash", crate::requirements::Strength::Hard, "runs it"),
+            true,
+        )];
+        let state = PickerState::new(list);
+        let width = 70;
+        let lines = info_lines(&state, width, true);
+        for line in &lines {
+            assert_eq!(line.chars().count(), width, "line was: {line:?}");
+        }
     }
 
     #[test]
@@ -1377,7 +1462,7 @@ mod tests {
         )];
         let state = PickerState::new(list);
         let width = 60;
-        let lines = info_lines(&state, width);
+        let lines = info_lines(&state, width, false);
         assert!(lines.iter().any(|l| l.contains("ACTIONS")));
         assert!(lines.iter().any(|l| l.contains("INTEGRATION MODE")));
         assert!(lines
@@ -1393,7 +1478,7 @@ mod tests {
             false,
         )];
         let state = PickerState::new(list);
-        let lines = info_lines(&state, 60);
+        let lines = info_lines(&state, 60, false);
         assert!(lines.iter().any(|l| l.contains("ACTIONS")));
         assert!(lines.iter().any(|l| l.contains("[ Install dependencies ]")));
         assert!(lines
@@ -1413,8 +1498,8 @@ mod tests {
         )];
         let state = PickerState::new(list);
         let width = 60;
-        let lines = info_lines(&state, width);
-        let layout = info_layout(&state, width);
+        let lines = info_lines(&state, width, false);
+        let layout = info_layout(&state, width, false);
         let actions = layout.actions.expect("actions");
         let dep_slice: String = lines[actions.row]
             .chars()
@@ -1448,7 +1533,7 @@ mod tests {
         list[0].mode = "skill".to_string();
         let mut state = PickerState::new(list);
         let width = 60;
-        let layout = info_layout(&state, width);
+        let layout = info_layout(&state, width, false);
         let toggle = layout.mode_toggle.unwrap();
         let (mcp_name, mcp_start, _) = toggle
             .segments
@@ -1488,10 +1573,10 @@ mod tests {
     #[test]
     fn the_output_section_only_appears_once_there_is_a_message() {
         let mut state = PickerState::new(skills(&["todo"]));
-        let before = info_lines(&state, 60);
+        let before = info_lines(&state, 60, false);
         assert!(!before.iter().any(|l| l.contains("OUTPUT")));
         state.dep_hint();
-        let after = info_lines(&state, 60);
+        let after = info_lines(&state, 60, false);
         assert!(after.iter().any(|l| l.contains("OUTPUT")));
     }
 
@@ -1501,7 +1586,7 @@ mod tests {
         list[0].description = "word ".repeat(40); // far longer than one line
         let state = PickerState::new(list);
         let width = 150; // a very wide DETAILS pane
-        let lines = info_lines(&state, width);
+        let lines = info_lines(&state, width, false);
         // Every content line is still padded to the full pane width, but no
         // wrapped text line should need more than MAX_TEXT_COLS of it -- the
         // rest is blank padding, not text stretched edge to edge.
