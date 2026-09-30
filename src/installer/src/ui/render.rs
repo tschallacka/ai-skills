@@ -53,6 +53,16 @@ const DEP_HINT_BUTTON_BG: (u8, u8, u8) = (55, 80, 150);
 const CHECK_AGAIN_BUTTON_BG: (u8, u8, u8) = (40, 115, 120);
 const DEPENDENCY_OK_FG: (u8, u8, u8) = (60, 180, 90);
 const DEPENDENCY_MISSING_FG: (u8, u8, u8) = (210, 80, 80);
+// Three distinct hues for the three PLUGIN BUTTONS -- green for "install
+// just this one", amber for the bulk "install everything selected", red for
+// "quit" -- so the three read as three different kinds of action (scope,
+// bulk, exit) rather than a row of interchangeable buttons. Each has at
+// least one channel >= 128, the same `bg_sgr` ANSI-8 downgrade constraint
+// every other button color here already follows (see `DEP_HINT_BUTTON_BG`'s
+// own comment).
+const INSTALL_THIS_BUTTON_BG: (u8, u8, u8) = (50, 140, 70);
+const INSTALL_ALL_BUTTON_BG: (u8, u8, u8) = (170, 130, 40);
+const QUIT_BUTTON_BG: (u8, u8, u8) = (150, 50, 50);
 /// The integration-mode toggle's own "cool colors": indigo for `skill`,
 /// teal for `mcp` -- deliberately a different family from the wizard's
 /// green/red/blue buttons, so the picker's own controls read as this
@@ -267,6 +277,7 @@ pub(crate) struct InfoLayout {
     pub(crate) actions: Option<ActionButtonsLayout>,
     pub(crate) mode_toggle: Option<ModeToggleLayout>,
     pub(crate) status_cells: Vec<StatusCell>,
+    pub(crate) plugin_buttons: Option<PluginButtonsLayout>,
 }
 
 /// The two side-by-side ACTIONS buttons' own column ranges within their
@@ -298,6 +309,24 @@ pub(crate) struct ModeToggleLayout {
     /// `(mode name, start content-column, end content-column exclusive)`
     /// for each offered mode, in the order drawn.
     pub(crate) segments: Vec<(String, usize, usize)>,
+}
+
+/// The DETAILS pane's own global controls, present for every skill
+/// regardless of its own dependency state -- unlike `ActionButtonsLayout`
+/// (only there when something is missing) or `ModeToggleLayout` (only there
+/// for a multi-mode skill), these three buttons always draw, mirroring the
+/// hint bar's own always-present "i install"/"q quit" segments but placed
+/// where a mouse-first user is already looking. "Install/update this skill"
+/// gets its own row; the bulk "install/update all" and "quit" share the row
+/// below it, the same side-by-side-buttons shape `ActionButtonsLayout`
+/// already uses for its own pair.
+#[derive(Debug, Clone)]
+pub(crate) struct PluginButtonsLayout {
+    pub(crate) install_this_row: usize,
+    pub(crate) install_this: (usize, usize),
+    pub(crate) all_and_quit_row: usize,
+    pub(crate) install_all: (usize, usize),
+    pub(crate) quit: (usize, usize),
 }
 
 /// Name, description, install status, DEPENDENCIES (when requires.tsv named
@@ -447,6 +476,20 @@ fn build_info(state: &PickerState, width: usize, unicode: bool) -> (Vec<String>,
         });
         lines.push(toggle_line);
     }
+    lines.push(pad("", width));
+    let (install_this_line, install_this_range) = install_this_button_line(width);
+    let install_this_row = lines.len();
+    lines.push(install_this_line);
+    let (all_quit_line, install_all_range, quit_range) = install_all_and_quit_line(width);
+    let all_and_quit_row = lines.len();
+    lines.push(all_quit_line);
+    layout.plugin_buttons = Some(PluginButtonsLayout {
+        install_this_row,
+        install_this: install_this_range,
+        all_and_quit_row,
+        install_all: install_all_range,
+        quit: quit_range,
+    });
     if !state.message.is_empty() {
         lines.push(pad("", width));
         lines.push(pad("OUTPUT", width));
@@ -633,6 +676,42 @@ fn action_buttons_line(width: usize) -> (String, (usize, usize), (usize, usize))
     )
 }
 
+const INSTALL_THIS_LABEL: &str = "[ Install/update this skill ]";
+const INSTALL_ALL_LABEL: &str = "[ Install/update all ]";
+const QUIT_LABEL: &str = "[ Quit ]";
+
+/// The single-button "install/update this skill" row -- its own line
+/// (rather than sharing one with the pair below it) since the mockup this
+/// was built from gives it that weight, and because a narrow DETAILS pane
+/// that cannot fit `INSTALL_THIS_LABEL` next to anything else at least still
+/// fits it alone. Hand-padded for the same truncate-with-ellipsis reason
+/// `action_buttons_line` already documents.
+fn install_this_button_line(width: usize) -> (String, (usize, usize)) {
+    let end = INSTALL_THIS_LABEL.chars().count();
+    let trailing = " ".repeat(width.saturating_sub(end));
+    (format!("{INSTALL_THIS_LABEL}{trailing}"), (0, end))
+}
+
+/// The bulk "install/update all" and "quit" buttons, side by side -- the
+/// same two-buttons-one-row shape `action_buttons_line` uses, for the same
+/// "two adjacent buttons read as two distinct actions" reason.
+fn install_all_and_quit_line(width: usize) -> (String, (usize, usize), (usize, usize)) {
+    let mut line = String::new();
+    let all_start = line.chars().count();
+    line.push_str(INSTALL_ALL_LABEL);
+    let all_end = line.chars().count();
+    line.push_str("  ");
+    let quit_start = line.chars().count();
+    line.push_str(QUIT_LABEL);
+    let quit_end = line.chars().count();
+    let trailing = " ".repeat(width.saturating_sub(quit_end));
+    (
+        format!("{line}{trailing}"),
+        (all_start, all_end),
+        (quit_start, quit_end),
+    )
+}
+
 /// Applies `InfoLayout`'s coloring to one already-built, already-padded
 /// plain row: the two ACTIONS buttons each get their own full-background
 /// color block, the toggle row gets only its ACTIVE segment colored
@@ -668,7 +747,42 @@ fn colorize_info_row(
     {
         return colorize_status_cell(&plain, cell.start, cell.end, cell.ok, mode);
     }
+    if let Some(buttons) = &info_layout.plugin_buttons {
+        if buttons.install_this_row == row_index {
+            return colorize_segment(
+                &plain,
+                buttons.install_this.0,
+                buttons.install_this.1,
+                INSTALL_THIS_BUTTON_BG,
+                mode,
+            );
+        }
+        if buttons.all_and_quit_row == row_index {
+            return colorize_install_all_and_quit_row(&plain, buttons, mode);
+        }
+    }
     plain
+}
+
+/// Colors just `[start, end)` of an already-built, already-padded line with
+/// `bg` as a button background, leaving the rest (padding, gaps) plain --
+/// the single-segment case `colorize_action_buttons_row` and
+/// `colorize_install_all_and_quit_row` each repeat for their own two
+/// segments.
+fn colorize_segment(
+    plain: &str,
+    start: usize,
+    end: usize,
+    bg: (u8, u8, u8),
+    mode: ColorMode,
+) -> String {
+    let chars: Vec<char> = plain.chars().collect();
+    let mut out = String::new();
+    out.extend(chars[..start].iter());
+    let seg: String = chars[start..end].iter().collect();
+    out.push_str(&colorize_button(mode, &seg, bg, false));
+    out.extend(chars[end..].iter());
+    out
 }
 
 fn colorize_action_buttons_row(
@@ -694,6 +808,30 @@ fn colorize_action_buttons_row(
         false,
     ));
     out.extend(chars[actions.check_again.1..].iter());
+    out
+}
+
+fn colorize_install_all_and_quit_row(
+    plain: &str,
+    buttons: &PluginButtonsLayout,
+    mode: ColorMode,
+) -> String {
+    let chars: Vec<char> = plain.chars().collect();
+    let mut out = String::new();
+    out.extend(chars[..buttons.install_all.0].iter());
+    let all_seg: String = chars[buttons.install_all.0..buttons.install_all.1]
+        .iter()
+        .collect();
+    out.push_str(&colorize_button(
+        mode,
+        &all_seg,
+        INSTALL_ALL_BUTTON_BG,
+        false,
+    ));
+    out.extend(chars[buttons.install_all.1..buttons.quit.0].iter());
+    let quit_seg: String = chars[buttons.quit.0..buttons.quit.1].iter().collect();
+    out.push_str(&colorize_button(mode, &quit_seg, QUIT_BUTTON_BG, false));
+    out.extend(chars[buttons.quit.1..].iter());
     out
 }
 
@@ -1578,6 +1716,68 @@ mod tests {
         state.dep_hint();
         let after = info_lines(&state, 60, false);
         assert!(after.iter().any(|l| l.contains("OUTPUT")));
+    }
+
+    #[test]
+    fn plugin_buttons_are_always_present_even_with_nothing_missing_and_no_modes() {
+        // "todo" here has no requirements and no offered modes -- the case
+        // where ACTIONS and INTEGRATION MODE both stay hidden -- yet the
+        // three plugin buttons still show: they are global controls, not
+        // conditional on this skill's own dependency state.
+        let state = PickerState::new(skills(&["todo"]));
+        let lines = info_lines(&state, 70, false);
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("[ Install/update this skill ]")));
+        assert!(lines.iter().any(|l| l.contains("[ Install/update all ]")));
+        assert!(lines.iter().any(|l| l.contains("[ Quit ]")));
+        let layout = info_layout(&state, 70, false);
+        assert!(layout.plugin_buttons.is_some());
+    }
+
+    #[test]
+    fn info_layout_locates_the_plugin_buttons_segments() {
+        let state = PickerState::new(skills(&["todo"]));
+        let width = 70;
+        let lines = info_lines(&state, width, false);
+        let layout = info_layout(&state, width, false);
+        let buttons = layout.plugin_buttons.expect("plugin_buttons");
+        let this_slice: String = lines[buttons.install_this_row]
+            .chars()
+            .skip(buttons.install_this.0)
+            .take(buttons.install_this.1 - buttons.install_this.0)
+            .collect();
+        assert_eq!(this_slice, "[ Install/update this skill ]");
+        let all_slice: String = lines[buttons.all_and_quit_row]
+            .chars()
+            .skip(buttons.install_all.0)
+            .take(buttons.install_all.1 - buttons.install_all.0)
+            .collect();
+        assert_eq!(all_slice, "[ Install/update all ]");
+        let quit_slice: String = lines[buttons.all_and_quit_row]
+            .chars()
+            .skip(buttons.quit.0)
+            .take(buttons.quit.1 - buttons.quit.0)
+            .collect();
+        assert_eq!(quit_slice, "[ Quit ]");
+    }
+
+    #[test]
+    fn each_plugin_button_gets_its_own_background_color() {
+        let state = PickerState::new(skills(&["todo"]));
+        let layout = layout_for(80, 24, &state, true);
+        let frame = render_frame(&state, &layout, ColorMode::TrueColor);
+        let this_row = frame
+            .iter()
+            .find(|l| l.contains("Install/update this skill") && l.contains("\x1b["))
+            .expect("a colored install-this row");
+        assert!(this_row.contains("\x1b[48;2;50;140;70m"));
+        let all_quit_row = frame
+            .iter()
+            .find(|l| l.contains("Install/update all") && l.contains("\x1b["))
+            .expect("a colored install-all/quit row");
+        assert!(all_quit_row.contains("\x1b[48;2;170;130;40m"));
+        assert!(all_quit_row.contains("\x1b[48;2;150;50;50m"));
     }
 
     #[test]

@@ -293,6 +293,24 @@ fn handle_info_click(
             {
                 state.set_integration_mode(mode_name);
             }
+            return;
+        }
+    }
+    if let Some(buttons) = &info_layout.plugin_buttons {
+        if buttons.install_this_row == row
+            && (buttons.install_this.0..buttons.install_this.1).contains(&col)
+        {
+            state.install_only_cursor();
+            return;
+        }
+        if buttons.all_and_quit_row == row {
+            if (buttons.install_all.0..buttons.install_all.1).contains(&col) {
+                state.done = true;
+                state.confirmed = true;
+            } else if (buttons.quit.0..buttons.quit.1).contains(&col) {
+                state.done = true;
+                state.confirmed = false;
+            }
         }
     }
 }
@@ -431,6 +449,56 @@ mod tests {
             .message
             .iter()
             .any(|m| m.contains("reverified; each skill is checked fresh")));
+    }
+
+    #[test]
+    fn clicking_install_this_skill_selects_only_the_cursor_skill_and_confirms() {
+        let mut state = PickerState::new(skills(&["todo", "bug-report"]));
+        state.cursor = 1; // everything starts selected; this narrows to just bug-report
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        let info_layout = render::info_layout(&state, layout.right_w, false);
+        let buttons = info_layout.plugin_buttons.expect("plugin_buttons");
+        let key = info_click_at(
+            &layout,
+            buttons.install_this_row,
+            buttons.install_this.0 + 1,
+        );
+        handle_key(&mut state, key, &layout, 1, 1, source);
+        assert_eq!(state.selected, vec![false, true]);
+        assert!(state.done);
+        assert!(state.confirmed);
+    }
+
+    #[test]
+    fn clicking_install_all_confirms_with_the_existing_selection_untouched() {
+        let mut state = PickerState::new(skills(&["todo", "bug-report"]));
+        state.toggle(1); // deselect bug-report; install-all must not restore it
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        let info_layout = render::info_layout(&state, layout.right_w, false);
+        let buttons = info_layout.plugin_buttons.expect("plugin_buttons");
+        let key = info_click_at(&layout, buttons.all_and_quit_row, buttons.install_all.0 + 1);
+        handle_key(&mut state, key, &layout, 1, 1, source);
+        assert_eq!(state.selected, vec![true, false]);
+        assert!(state.done);
+        assert!(state.confirmed);
+    }
+
+    #[test]
+    fn clicking_quit_in_the_details_pane_exits_unconfirmed() {
+        let mut state = PickerState::new(skills(&["todo"]));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        let info_layout = render::info_layout(&state, layout.right_w, false);
+        let buttons = info_layout.plugin_buttons.expect("plugin_buttons");
+        let key = info_click_at(&layout, buttons.all_and_quit_row, buttons.quit.0 + 1);
+        handle_key(&mut state, key, &layout, 1, 1, source);
+        assert!(state.done);
+        assert!(!state.confirmed);
     }
 
     #[test]

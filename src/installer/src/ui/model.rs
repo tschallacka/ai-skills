@@ -287,6 +287,25 @@ impl PickerState {
         self.message = vec!["reverified; each skill is checked fresh".to_string()];
     }
 
+    /// The DETAILS pane's own "install/update this skill" button: narrows
+    /// the selection to exactly the skill under the cursor and confirms
+    /// immediately, bypassing whatever the checkbox list currently has
+    /// selected -- the picker has no concept of "install one thing and keep
+    /// running", so this ends the run the same way `i` (install everything
+    /// selected) does, just with a selection this call forces first.
+    /// Refused, with `toggle`'s own message, for a Blocked skill: unlike
+    /// `select_all`, which silently skips a blocked skill because the user
+    /// did not ask about that one specifically, a button that names THIS
+    /// skill and does nothing owes an explanation.
+    pub fn install_only_cursor(&mut self) {
+        self.select_none();
+        self.toggle(self.cursor);
+        if self.selected.get(self.cursor).copied().unwrap_or(false) {
+            self.done = true;
+            self.confirmed = true;
+        }
+    }
+
     pub fn selected_count(&self) -> usize {
         self.selected.iter().filter(|s| **s).count()
     }
@@ -457,6 +476,36 @@ mod tests {
         state.select_none();
         state.select_all();
         assert_eq!(state.selected, vec![true, false]);
+    }
+
+    #[test]
+    fn install_only_cursor_narrows_selection_to_exactly_that_skill_and_confirms() {
+        let mut state = PickerState::new(skills(&["a", "b", "c"]));
+        state.cursor = 1;
+        state.install_only_cursor();
+        assert_eq!(state.selected, vec![false, true, false]);
+        assert!(state.done);
+        assert!(state.confirmed);
+    }
+
+    #[test]
+    fn install_only_cursor_overrides_a_full_prior_selection() {
+        let mut state = PickerState::new(skills(&["a", "b"])); // everything starts selected
+        state.cursor = 0;
+        state.install_only_cursor();
+        assert_eq!(state.selected, vec![true, false]);
+    }
+
+    #[test]
+    fn install_only_cursor_on_a_blocked_skill_refuses_with_a_reason_and_does_not_confirm() {
+        let mut list = skills(&["a"]);
+        list[0].status = blocked_status("rjq");
+        let mut state = PickerState::new(list);
+        state.install_only_cursor();
+        assert_eq!(state.selected, vec![false]);
+        assert!(!state.done);
+        assert!(!state.confirmed);
+        assert!(state.message[0].contains("rjq"));
     }
 
     #[test]
