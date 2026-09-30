@@ -274,11 +274,17 @@ fn handle_info_click(
         layout.right_w
     };
     let info_layout = render::info_layout(state, width);
-    if info_layout.dep_hint_row == Some(row) {
-        state.dep_hint();
-    } else if info_layout.reverify_row == Some(row) {
-        state.reverify(source_root);
-    } else if let Some(toggle) = &info_layout.mode_toggle {
+    if let Some(actions) = &info_layout.actions {
+        if actions.row == row {
+            if (actions.dep_hint.0..actions.dep_hint.1).contains(&col) {
+                state.dep_hint();
+            } else if (actions.check_again.0..actions.check_again.1).contains(&col) {
+                state.reverify(source_root);
+            }
+            return;
+        }
+    }
+    if let Some(toggle) = &info_layout.mode_toggle {
         if toggle.row == row {
             if let Some((mode_name, _, _)) = toggle
                 .segments
@@ -361,6 +367,70 @@ mod tests {
         assert_eq!(state.focus, Focus::Info);
         assert!(state.selected[0]);
         assert!(state.selected[1]);
+    }
+
+    /// Converts an `info_layout` row/column into the absolute (col, row)
+    /// `Key::Click` reports, the read-backwards counterpart of
+    /// `layout::hit_test`'s own Info-pane math -- shared by the two ACTIONS
+    /// button tests below so both agree on the same derivation rather than
+    /// each hand-deriving it.
+    fn info_click_at(layout: &layout::Layout, info_row: usize, info_col: usize) -> Key {
+        Key::Click {
+            col: (layout.left_w + 2 + info_col) as u16,
+            row: (3 + info_row) as u16, // title_rows(1) + top border(1) + info_row, 1-based
+        }
+    }
+
+    /// A missing hard requirement -- `render.rs`'s own ACTIONS row only
+    /// shows when something actually needs installing or re-checking, so a
+    /// click test on either button needs a skill with one, unlike the
+    /// zero-requirement default `skills()` builds.
+    fn skill_with_a_missing_requirement(name: &str) -> Vec<SkillEntry> {
+        let mut list = skills(&[name]);
+        list[0].status.requirements = vec![(
+            crate::requirements::Requirement {
+                tool: "bash".to_string(),
+                group: None,
+                strength: crate::requirements::Strength::Hard,
+                why: "runs it".to_string(),
+            },
+            false,
+        )];
+        list
+    }
+
+    #[test]
+    fn clicking_the_install_dependencies_button_shows_install_hints() {
+        let mut state = PickerState::new(skill_with_a_missing_requirement("todo"));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        let info_layout = render::info_layout(&state, layout.right_w);
+        let actions = info_layout.actions.expect("actions");
+        let key = info_click_at(&layout, actions.row, actions.dep_hint.0 + 1);
+        handle_key(&mut state, key, &layout, 1, 1, source);
+        assert_eq!(state.focus, Focus::Info);
+        assert!(state
+            .message
+            .iter()
+            .any(|m| m.contains("HOW TO INSTALL THE MISSING DEPENDENCIES")));
+    }
+
+    #[test]
+    fn clicking_the_check_again_button_reverifies_dependencies() {
+        let mut state = PickerState::new(skill_with_a_missing_requirement("todo"));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        let info_layout = render::info_layout(&state, layout.right_w);
+        let actions = info_layout.actions.expect("actions");
+        let key = info_click_at(&layout, actions.row, actions.check_again.0 + 1);
+        handle_key(&mut state, key, &layout, 1, 1, source);
+        assert_eq!(state.focus, Focus::Info);
+        assert!(state
+            .message
+            .iter()
+            .any(|m| m.contains("reverified; each skill is checked fresh")));
     }
 
     #[test]

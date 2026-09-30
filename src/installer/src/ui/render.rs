@@ -15,7 +15,7 @@
 //! escapes into these strings would break the "every line is exactly
 //! `cols` display cells" invariant every test here checks.
 
-use super::buttons::colorize_button;
+use super::buttons::{colorize_button, colorize_text};
 use super::layout::Layout;
 use super::mascot::ColorMode;
 use super::model::{Focus, PickerState};
@@ -47,7 +47,12 @@ const MAX_TEXT_COLS: usize = 80;
 // no color at all on a basic-color terminal. Verified live: the original
 // (60, 70, 110) rendered with no visible background at all in a real PTY.
 const DEP_HINT_BUTTON_BG: (u8, u8, u8) = (55, 80, 150);
-const REVERIFY_BUTTON_BG: (u8, u8, u8) = (55, 80, 150);
+// A different hue from the dep-hint button, deliberately -- two adjacent
+// buttons in the same color read as one compound control rather than two
+// distinct actions.
+const CHECK_AGAIN_BUTTON_BG: (u8, u8, u8) = (40, 115, 120);
+const DEPENDENCY_OK_FG: (u8, u8, u8) = (60, 180, 90);
+const DEPENDENCY_MISSING_FG: (u8, u8, u8) = (210, 80, 80);
 /// The integration-mode toggle's own "cool colors": indigo for `skill`,
 /// teal for `mcp` -- deliberately a different family from the wizard's
 /// green/red/blue buttons, so the picker's own controls read as this
@@ -251,17 +256,40 @@ fn list_row(state: &PickerState, index: usize, width: usize) -> String {
     }
 }
 
-/// Where the two ACTIONS buttons and the integration-mode toggle (when
-/// drawn at all) landed within `info_lines`' own returned rows, plus the
-/// toggle's own segment column ranges -- computed by `build_info` alongside
-/// the content itself so the two can never drift apart, and used by
+/// Where the two ACTIONS buttons, the dependency table's own status cells,
+/// and the integration-mode toggle (when drawn at all) landed within
+/// `info_lines`' own returned rows -- computed by `build_info` alongside the
+/// content itself so the two can never drift apart, and used by
 /// `mod::handle_key` to test a click against them and by `render_wide`/
 /// `render_narrow` to know which rows to colorize.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct InfoLayout {
-    pub(crate) dep_hint_row: Option<usize>,
-    pub(crate) reverify_row: Option<usize>,
+    pub(crate) actions: Option<ActionButtonsLayout>,
     pub(crate) mode_toggle: Option<ModeToggleLayout>,
+    pub(crate) status_cells: Vec<StatusCell>,
+}
+
+/// The two side-by-side ACTIONS buttons' own column ranges within their
+/// shared row -- unlike the mode toggle's N segments, this is always
+/// exactly two, named rather than indexed, since the two actions are
+/// different verbs, not interchangeable options.
+#[derive(Debug, Clone)]
+pub(crate) struct ActionButtonsLayout {
+    pub(crate) row: usize,
+    pub(crate) dep_hint: (usize, usize),
+    pub(crate) check_again: (usize, usize),
+}
+
+/// One dependency table row's own "ok"/"missing" cell -- colored green or
+/// red at render time, the same deferred-coloring pattern the action
+/// buttons and mode toggle already use, so `info_lines`'s plain content
+/// stays independent of `ColorMode`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StatusCell {
+    pub(crate) row: usize,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) ok: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -320,33 +348,82 @@ fn build_info(state: &PickerState, width: usize) -> (Vec<String>, InfoLayout) {
         ),
         width,
     ));
-    if !skill.status.requirements.is_empty() {
-        lines.push(pad("", width));
-        lines.push(pad("DEPENDENCIES", width));
-        for (req, met) in &skill.status.requirements {
-            let label = crate::requirements::requirement_label(req);
-            let mark = if *met { "ok" } else { "missing" };
-            let strength = match req.strength {
-                crate::requirements::Strength::Hard => "hard",
-                crate::requirements::Strength::Soft => "soft",
-            };
-            for line in wrap(
-                &format!("  {label} ({strength}): {mark} -- {}", req.why),
+    // Every requirement this skill carries, except a tool this project
+    // builds and installs itself (`is_self_provided`) -- shown here, that
+    // would read as something the user needs to go source themselves, when
+    // the normal release flow already takes care of it. `skill_status`'s
+    // own Ok/Degraded/Blocked computation is untouched by this filter (a
+    // genuinely unsupported host is still reported as blocked); only this
+    // display leaves it out.
+    let shown: Vec<&(crate::requirements::Requirement, bool)> = skill
+        .status
+        .requirements
+        .iter()
+        .filter(|(req, _)| !is_self_provided(req))
+        .collect();
+    let required: Vec<&(crate::requirements::Requirement, bool)> = shown
+        .iter()
+        .copied()
+        .filter(|(req, _)| req.strength == crate::requirements::Strength::Hard)
+        .collect();
+    let recommended: Vec<&(crate::requirements::Requirement, bool)> = shown
+        .iter()
+        .copied()
+        .filter(|(req, _)| req.strength == crate::requirements::Strength::Soft)
+        .collect();
+    if !required.is_empty() || !recommended.is_empty() {
+        let tool_col = shown
+            .iter()
+            .map(|(req, _)| crate::requirements::requirement_label(req).chars().count())
+            .max()
+            .unwrap_or(4)
+            .max("TOOL".len())
+            .clamp(4, 18);
+        if !required.is_empty() {
+            lines.push(pad("", width));
+            append_dependency_table(
+                &mut lines,
+                &mut layout.status_cells,
+                "REQUIRED TOOLS",
+                &required,
+                tool_col,
+                width,
                 text_width,
-            ) {
-                lines.push(pad(&line, width));
-            }
+            );
+        }
+        if !recommended.is_empty() {
+            lines.push(pad("", width));
+            append_dependency_table(
+                &mut lines,
+                &mut layout.status_cells,
+                "RECOMMENDED TOOLS",
+                &recommended,
+                tool_col,
+                width,
+                text_width,
+            );
         }
     }
-    // Always listed, usable only when the info pane has focus, but named
-    // here regardless so a reader in the list pane already knows what
-    // focusing it offers.
-    lines.push(pad("", width));
-    lines.push(pad("ACTIONS", width));
-    layout.dep_hint_row = Some(lines.len());
-    lines.push(pad("  [ d ] Help me install dependencies", width));
-    layout.reverify_row = Some(lines.len());
-    lines.push(pad("  [ r ] Reverify dependencies", width));
+    // Shown only when there is something to act on: with nothing missing
+    // (including a skill with no requirements at all, vacuously "nothing
+    // missing"), neither button has a purpose -- installing has nothing
+    // left to do, and re-checking would just confirm the same thing this
+    // pane is already showing. Side by side on one row when they DO show --
+    // two adjacent buttons read as two distinct actions; stacked, they read
+    // as one compound thing. "Check dependencies again" rather than
+    // "reverify": plain language over a word that sounds like it does
+    // something more exotic than "look at PATH again".
+    if shown.iter().any(|(_, met)| !met) {
+        lines.push(pad("", width));
+        lines.push(pad("ACTIONS", width));
+        let (actions_line, dep_hint_range, check_again_range) = action_buttons_line(width);
+        layout.actions = Some(ActionButtonsLayout {
+            row: lines.len(),
+            dep_hint: dep_hint_range,
+            check_again: check_again_range,
+        });
+        lines.push(actions_line);
+    }
     if skill.offered_modes.len() > 1 {
         lines.push(pad("", width));
         for line in wrap(
@@ -393,12 +470,132 @@ fn mode_toggle_line(modes: &[String], width: usize) -> (String, Vec<(String, usi
     (pad(&line, width), segments)
 }
 
+/// True for a tool this project builds and installs itself (currently:
+/// `rjq`, a bundled per-triple binary -- see `requirements.rs`'s own doc
+/// comment on the fallback ladder `tool_available` gives it). Shown in the
+/// picker's own DEPENDENCIES table, it would read as something the user
+/// needs to go source themselves, when the normal release flow already
+/// takes care of it. `requirements::skill_status`'s own Ok/Degraded/Blocked
+/// computation is untouched by this -- a host missing it (and any jq
+/// fallback) is still correctly reported as blocked -- only the per-tool
+/// table this module draws leaves the row out.
+fn is_self_provided(req: &crate::requirements::Requirement) -> bool {
+    req.group.is_none() && req.tool == "rjq"
+}
+
+/// One dependency table: a heading row spanning the full width, a column
+/// header row (`TOOL`/`STATUS`/`WHY`), then one row per requirement, each
+/// bordered with plain ASCII rules -- the same convention the very first
+/// divider line in `build_info` already uses regardless of Unicode
+/// capability, so this does not need its own `BorderSet`/`unicode`
+/// parameter. Appends every row it draws to `lines` and records each
+/// data row's own status-cell column span into `status_cells`, so
+/// `colorize_info_row` can color "ok" green / "missing" red at actual draw
+/// time without this function (or `info_lines`'s plain content) knowing
+/// about `ColorMode` at all.
+fn append_dependency_table(
+    lines: &mut Vec<String>,
+    status_cells: &mut Vec<StatusCell>,
+    heading: &str,
+    rows: &[&(crate::requirements::Requirement, bool)],
+    tool_col: usize,
+    width: usize,
+    text_width: usize,
+) {
+    const STATUS_COL: usize = 7; // "missing", the longer of "ok"/"missing"
+    const CHROME: usize = 10; // "| " x3 + " |" x3, minus the double-counted middles: see below
+    let why_col = text_width
+        .saturating_sub(tool_col + STATUS_COL + CHROME)
+        .max(8);
+    let rule = pad("-".repeat(text_width).as_str(), width);
+
+    lines.push(rule.clone());
+    lines.push(pad(
+        &format!("| {}|", pad(heading, text_width.saturating_sub(3))),
+        width,
+    ));
+    lines.push(rule.clone());
+    lines.push(pad(
+        &table_row("TOOL", "STATUS", "WHY", tool_col, STATUS_COL, why_col),
+        width,
+    ));
+    lines.push(rule.clone());
+    for (req, met) in rows {
+        let label = crate::requirements::requirement_label(req);
+        let status_word = if *met { "ok" } else { "missing" };
+        let row = table_row(&label, status_word, &req.why, tool_col, STATUS_COL, why_col);
+        // "| " (2) + tool_col + " | " (3) -- the status cell's own start,
+        // computed the same way `table_row` lays it out, so the two can
+        // never disagree about where it landed.
+        let status_start = 2 + tool_col + 3;
+        status_cells.push(StatusCell {
+            row: lines.len(),
+            start: status_start,
+            end: status_start + STATUS_COL,
+            ok: *met,
+        });
+        lines.push(pad(&row, width));
+    }
+    lines.push(rule);
+}
+
+fn table_row(
+    tool: &str,
+    status: &str,
+    why: &str,
+    tool_col: usize,
+    status_col: usize,
+    why_col: usize,
+) -> String {
+    format!(
+        "| {} | {} | {} |",
+        pad(tool, tool_col),
+        pad(status, status_col),
+        pad(why, why_col)
+    )
+}
+
+// "Install dependencies" rather than "Help me install dependencies": side
+// by side with the other button, the two need to fit a realistic DETAILS
+// pane width (a 30-column floor is possible, though this pair still
+// overflows one that narrow -- the same known tradeoff wizard.rs's own
+// two-button rows already accept, just with unavoidably wordier verbs than
+// "Install now"/"Cancel").
+const DEP_HINT_LABEL: &str = "[ Install dependencies ]";
+const CHECK_AGAIN_LABEL: &str = "[ Check dependencies again ]";
+
+/// Builds the plain (uncolored) ACTIONS row -- the two buttons side by
+/// side, a gap apart -- plus each one's own 0-based content-column span,
+/// the same pattern `mode_toggle_line` uses for its own segments. Padded by
+/// hand rather than through `pad`, which would TRUNCATE (with an ellipsis)
+/// a combination wider than `width` instead of just leaving it long --
+/// `wizard.rs`'s own `two_button_line` uses the identical pattern for the
+/// identical reason.
+fn action_buttons_line(width: usize) -> (String, (usize, usize), (usize, usize)) {
+    let mut line = String::new();
+    let dep_start = line.chars().count();
+    line.push_str(DEP_HINT_LABEL);
+    let dep_end = line.chars().count();
+    line.push_str("  ");
+    let chk_start = line.chars().count();
+    line.push_str(CHECK_AGAIN_LABEL);
+    let chk_end = line.chars().count();
+    let trailing = " ".repeat(width.saturating_sub(chk_end));
+    (
+        format!("{line}{trailing}"),
+        (dep_start, dep_end),
+        (chk_start, chk_end),
+    )
+}
+
 /// Applies `InfoLayout`'s coloring to one already-built, already-padded
-/// plain row: the ACTIONS buttons get a full-width colored background (a
-/// real button block, not just colored text), and the toggle row gets only
-/// its ACTIVE segment colored (`mode_active_bg`) -- the inactive segment(s)
-/// stay plain text, so the toggle reads as a switch rather than two equally
-/// weighted buttons. Any other row passes through unchanged.
+/// plain row: the two ACTIONS buttons each get their own full-background
+/// color block, the toggle row gets only its ACTIVE segment colored
+/// (`mode_active_bg`, the inactive segment(s) stay plain so it reads as a
+/// switch rather than two equally weighted buttons), and a dependency
+/// table's own status cell gets colored text (green "ok", red "missing")
+/// rather than a background block, since it is a table value, not a
+/// control. Any other row passes through unchanged.
 fn colorize_info_row(
     plain: String,
     row_index: usize,
@@ -409,18 +606,72 @@ fn colorize_info_row(
     if mode == ColorMode::None {
         return plain;
     }
-    if info_layout.dep_hint_row == Some(row_index) {
-        return colorize_button(mode, &plain, DEP_HINT_BUTTON_BG, false);
-    }
-    if info_layout.reverify_row == Some(row_index) {
-        return colorize_button(mode, &plain, REVERIFY_BUTTON_BG, false);
+    if let Some(actions) = &info_layout.actions {
+        if actions.row == row_index {
+            return colorize_action_buttons_row(&plain, actions, mode);
+        }
     }
     if let Some(toggle) = &info_layout.mode_toggle {
         if toggle.row == row_index {
             return colorize_mode_toggle_row(&plain, &toggle.segments, active_mode, mode);
         }
     }
+    if let Some(cell) = info_layout
+        .status_cells
+        .iter()
+        .find(|cell| cell.row == row_index)
+    {
+        return colorize_status_cell(&plain, cell.start, cell.end, cell.ok, mode);
+    }
     plain
+}
+
+fn colorize_action_buttons_row(
+    plain: &str,
+    actions: &ActionButtonsLayout,
+    mode: ColorMode,
+) -> String {
+    let chars: Vec<char> = plain.chars().collect();
+    let mut out = String::new();
+    out.extend(chars[..actions.dep_hint.0].iter());
+    let dep_seg: String = chars[actions.dep_hint.0..actions.dep_hint.1]
+        .iter()
+        .collect();
+    out.push_str(&colorize_button(mode, &dep_seg, DEP_HINT_BUTTON_BG, false));
+    out.extend(chars[actions.dep_hint.1..actions.check_again.0].iter());
+    let chk_seg: String = chars[actions.check_again.0..actions.check_again.1]
+        .iter()
+        .collect();
+    out.push_str(&colorize_button(
+        mode,
+        &chk_seg,
+        CHECK_AGAIN_BUTTON_BG,
+        false,
+    ));
+    out.extend(chars[actions.check_again.1..].iter());
+    out
+}
+
+fn colorize_status_cell(
+    plain: &str,
+    start: usize,
+    end: usize,
+    ok: bool,
+    mode: ColorMode,
+) -> String {
+    let chars: Vec<char> = plain.chars().collect();
+    let seg: String = chars[start..end].iter().collect();
+    let fg = if ok {
+        DEPENDENCY_OK_FG
+    } else {
+        DEPENDENCY_MISSING_FG
+    };
+    let colored = colorize_text(mode, &seg, fg);
+    let mut out = String::new();
+    out.extend(chars[..start].iter());
+    out.push_str(&colored);
+    out.extend(chars[end..].iter());
+    out
 }
 
 fn colorize_mode_toggle_row(
@@ -961,11 +1212,169 @@ mod tests {
         }
     }
 
+    fn requirement(
+        tool: &str,
+        strength: crate::requirements::Strength,
+        why: &str,
+    ) -> crate::requirements::Requirement {
+        crate::requirements::Requirement {
+            tool: tool.to_string(),
+            group: None,
+            strength,
+            why: why.to_string(),
+        }
+    }
+
+    #[test]
+    fn rjq_is_excluded_from_the_dependency_table_bash_is_shown() {
+        let mut list = skills(&["ci-failures"]);
+        list[0].status.requirements = vec![
+            (
+                requirement("bash", crate::requirements::Strength::Hard, "runs it"),
+                true,
+            ),
+            (
+                requirement("rjq", crate::requirements::Strength::Hard, "parses json"),
+                true,
+            ),
+        ];
+        let state = PickerState::new(list);
+        let lines = info_lines(&state, 70);
+        assert!(lines.iter().any(|l| l.contains("bash")));
+        assert!(
+            !lines.iter().any(|l| l.contains("rjq")),
+            "rjq (self-provided) should not appear in the dependency table: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn dependencies_render_as_required_and_recommended_tables() {
+        let mut list = skills(&["ci-failures"]);
+        list[0].status.requirements = vec![
+            (
+                requirement(
+                    "bash",
+                    crate::requirements::Strength::Hard,
+                    "runs the script",
+                ),
+                true,
+            ),
+            (
+                requirement(
+                    "gh",
+                    crate::requirements::Strength::Soft,
+                    "reads github CI results",
+                ),
+                false,
+            ),
+        ];
+        let state = PickerState::new(list);
+        let lines = info_lines(&state, 70);
+        let joined = lines.join("\n");
+        assert!(joined.contains("REQUIRED TOOLS"));
+        assert!(joined.contains("RECOMMENDED TOOLS"));
+        assert!(joined.contains("| bash"));
+        assert!(joined.contains("| gh"));
+        assert!(joined.contains("ok"));
+        assert!(joined.contains("missing"));
+        assert!(joined.contains("runs the script"));
+        assert!(joined.contains("reads github CI results"));
+    }
+
+    #[test]
+    fn a_skill_with_no_requirements_shown_has_no_dependency_table() {
+        let mut list = skills(&["ci-failures"]);
+        list[0].status.requirements = vec![(
+            requirement("rjq", crate::requirements::Strength::Hard, "parses json"),
+            true,
+        )];
+        let state = PickerState::new(list);
+        let lines = info_lines(&state, 70);
+        assert!(!lines.iter().any(|l| l.contains("REQUIRED TOOLS")));
+        assert!(!lines.iter().any(|l| l.contains("RECOMMENDED TOOLS")));
+    }
+
+    #[test]
+    fn a_missing_status_cell_is_colored_red_a_met_one_green() {
+        let mut list = skills(&["ci-failures"]);
+        list[0].status.requirements = vec![
+            (
+                requirement("bash", crate::requirements::Strength::Hard, "runs it"),
+                true,
+            ),
+            (
+                requirement(
+                    "gh",
+                    crate::requirements::Strength::Soft,
+                    "reads CI results",
+                ),
+                false,
+            ),
+        ];
+        let state = PickerState::new(list);
+        let layout = layout_for(90, 30, &state, true);
+        let frame = render_frame(&state, &layout, ColorMode::TrueColor);
+        let met_row = frame
+            .iter()
+            .find(|l| l.contains("bash") && l.contains("\x1b[38;2;60;180;90m"))
+            .expect("a green-colored ok row for bash");
+        assert!(met_row.contains("ok"));
+        let missing_row = frame
+            .iter()
+            .find(|l| l.contains("gh") && l.contains("\x1b[38;2;210;80;80m"))
+            .expect("a red-colored missing row for gh");
+        assert!(missing_row.contains("missing"));
+    }
+
+    #[test]
+    fn actions_are_hidden_when_nothing_is_missing() {
+        let mut list = skills(&["ci-failures"]);
+        list[0].status.requirements = vec![(
+            requirement("bash", crate::requirements::Strength::Hard, "runs it"),
+            true,
+        )];
+        let state = PickerState::new(list);
+        let lines = info_lines(&state, 70);
+        assert!(
+            !lines.iter().any(|l| l.contains("ACTIONS")),
+            "neither button has a purpose with nothing missing: {lines:?}"
+        );
+        let layout = info_layout(&state, 70);
+        assert!(layout.actions.is_none());
+    }
+
+    #[test]
+    fn actions_are_hidden_for_a_skill_with_no_requirements_at_all() {
+        // Vacuously "nothing missing": no requirements at all means
+        // neither button has anything to act on either.
+        let state = PickerState::new(skills(&["todo"]));
+        let lines = info_lines(&state, 70);
+        assert!(!lines.iter().any(|l| l.contains("ACTIONS")));
+    }
+
+    #[test]
+    fn actions_show_when_something_is_missing() {
+        let mut list = skills(&["ci-failures"]);
+        list[0].status.requirements = vec![(
+            requirement("bash", crate::requirements::Strength::Hard, "runs it"),
+            false,
+        )];
+        let state = PickerState::new(list);
+        let lines = info_lines(&state, 70);
+        assert!(lines.iter().any(|l| l.contains("ACTIONS")));
+        let layout = info_layout(&state, 70);
+        assert!(layout.actions.is_some());
+    }
+
     #[test]
     fn a_skill_offering_more_than_one_mode_shows_the_toggle() {
         let mut list = skills(&["ai-text-editor"]);
         list[0].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
         list[0].mode = "mcp".to_string();
+        list[0].status.requirements = vec![(
+            requirement("bash", crate::requirements::Strength::Hard, "runs it"),
+            false,
+        )];
         let state = PickerState::new(list);
         let width = 60;
         let lines = info_lines(&state, width);
@@ -978,15 +1387,18 @@ mod tests {
 
     #[test]
     fn a_skill_with_one_mode_still_shows_actions_but_no_toggle() {
-        let state = PickerState::new(skills(&["todo"]));
+        let mut list = skills(&["todo"]);
+        list[0].status.requirements = vec![(
+            requirement("bash", crate::requirements::Strength::Hard, "runs it"),
+            false,
+        )];
+        let state = PickerState::new(list);
         let lines = info_lines(&state, 60);
         assert!(lines.iter().any(|l| l.contains("ACTIONS")));
+        assert!(lines.iter().any(|l| l.contains("[ Install dependencies ]")));
         assert!(lines
             .iter()
-            .any(|l| l.contains("[ d ] Help me install dependencies")));
-        assert!(lines
-            .iter()
-            .any(|l| l.contains("[ r ] Reverify dependencies")));
+            .any(|l| l.contains("[ Check dependencies again ]")));
         assert!(!lines.iter().any(|l| l.contains("INTEGRATION MODE")));
     }
 
@@ -995,14 +1407,27 @@ mod tests {
         let mut list = skills(&["ai-text-editor"]);
         list[0].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
         list[0].mode = "skill".to_string();
+        list[0].status.requirements = vec![(
+            requirement("bash", crate::requirements::Strength::Hard, "runs it"),
+            false,
+        )];
         let state = PickerState::new(list);
         let width = 60;
         let lines = info_lines(&state, width);
         let layout = info_layout(&state, width);
-        let dep_row = layout.dep_hint_row.expect("dep_hint_row");
-        assert!(lines[dep_row].contains("[ d ] Help me install dependencies"));
-        let reverify_row = layout.reverify_row.expect("reverify_row");
-        assert!(lines[reverify_row].contains("[ r ] Reverify dependencies"));
+        let actions = layout.actions.expect("actions");
+        let dep_slice: String = lines[actions.row]
+            .chars()
+            .skip(actions.dep_hint.0)
+            .take(actions.dep_hint.1 - actions.dep_hint.0)
+            .collect();
+        assert_eq!(dep_slice, "[ Install dependencies ]");
+        let chk_slice: String = lines[actions.row]
+            .chars()
+            .skip(actions.check_again.0)
+            .take(actions.check_again.1 - actions.check_again.0)
+            .collect();
+        assert_eq!(chk_slice, "[ Check dependencies again ]");
         let toggle = layout.mode_toggle.expect("mode_toggle");
         assert!(lines[toggle.row].contains("[ skill ]"));
         assert_eq!(toggle.segments.len(), 2);

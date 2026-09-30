@@ -10,7 +10,7 @@
 //! color is a background SGR span gated on `ColorMode` -- so "this is the
 //! interactive control" looks the same regardless of which screen drew it.
 
-use super::mascot::{bg_sgr, ColorMode};
+use super::mascot::{bg_sgr, fg_sgr, ColorMode};
 
 /// Wraps `label` in a colored background SGR span (and its reset) when
 /// resting, or in reverse video when `focused` -- reverse video wins
@@ -32,6 +32,19 @@ pub(crate) fn colorize_button(
         label.to_string()
     } else {
         format!("{}{label}\x1b[0m", bg_sgr(mode, bg))
+    }
+}
+
+/// Colors `text`'s foreground only, with no background span and no
+/// reverse-video option -- a table cell's status word ("ok"/"missing"),
+/// not a clickable control, reads better as colored text than as a button.
+/// A no-op on `ColorMode::None`, the same fallback every colorizer here
+/// uses.
+pub(crate) fn colorize_text(mode: ColorMode, text: &str, fg: (u8, u8, u8)) -> String {
+    if mode == ColorMode::None {
+        text.to_string()
+    } else {
+        format!("{}{text}\x1b[0m", fg_sgr(mode, fg))
     }
 }
 
@@ -64,5 +77,18 @@ mod tests {
         let out = colorize_button(ColorMode::TrueColor, "[ OK ]", (1, 2, 3), false);
         assert!(out.starts_with("\x1b[48;2;1;2;3m"));
         assert!(out.ends_with("[ OK ]\x1b[0m"));
+    }
+
+    #[test]
+    fn colorize_text_is_plain_with_no_color_support() {
+        assert_eq!(colorize_text(ColorMode::None, "ok", (1, 2, 3)), "ok");
+    }
+
+    #[test]
+    fn colorize_text_carries_a_foreground_span_not_a_background_one() {
+        let out = colorize_text(ColorMode::TrueColor, "ok", (1, 2, 3));
+        assert!(out.starts_with("\x1b[38;2;1;2;3m"));
+        assert!(!out.contains("\x1b[48"));
+        assert!(out.ends_with("ok\x1b[0m"));
     }
 }

@@ -203,7 +203,10 @@ pub(crate) fn bg_sgr(mode: ColorMode, rgb: (u8, u8, u8)) -> String {
     }
 }
 
-fn fg_sgr(mode: ColorMode, rgb: (u8, u8, u8)) -> String {
+/// The foreground twin of `bg_sgr` -- `render.rs`'s dependency table uses
+/// this to color a status word ("ok"/"missing") without a background block,
+/// which reads as a table cell rather than a button.
+pub(crate) fn fg_sgr(mode: ColorMode, rgb: (u8, u8, u8)) -> String {
     match mode {
         ColorMode::TrueColor => format!("\x1b[38;2;{};{};{}m", rgb.0, rgb.1, rgb.2),
         ColorMode::None => String::new(),
