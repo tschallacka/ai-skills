@@ -299,7 +299,8 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
 /// An optional `bridge` (only present while `run_interactive`'s graphical
 /// progress screen, `ui::progress`, is driving this run) redirects `ask`
 /// from stderr/stdin to that screen's own modal popup instead -- every
-/// existing call site (`confirms.ask(prompt)`) is unchanged either way.
+/// existing call site (`confirms.ask(prompt, explanation)`) is unchanged
+/// either way.
 struct Confirms {
     yes: bool,
     bridge: Option<ui::progress::AskBridge>,
@@ -318,18 +319,23 @@ impl Confirms {
     }
 
     /// With a bridge, sends `prompt` to the graphical screen's modal and
-    /// blocks for its answer. Without one, prints `prompt` to stderr, never
-    /// stdout, and reads one line from stdin. Either way: `y`/`yes` (or a
-    /// click on "Yes") answers this question only; `a`/`all` (or "All")
-    /// answers it and every question after it for the rest of the run. A
-    /// stdin read error (no stdin at all, e.g. under `curl | bash`) reads as
-    /// "no", the same fail-safe the bridge's own dropped-channel case uses.
-    fn ask(&mut self, prompt: &str) -> bool {
+    /// blocks for its answer. Without one, prints `explanation` (when
+    /// non-empty) and then `prompt` to stderr, never stdout, and reads one
+    /// line from stdin. `explanation` is the longer, end-user-facing "what
+    /// is this and why does it need my permission" text -- see
+    /// `ui::progress::AskBridge::ask`'s own doc comment for why every
+    /// question now carries one with it instead of relying on the log
+    /// alone. Either way: `y`/`yes` (or a click on "Yes") answers this
+    /// question only; `a`/`all` (or "All") answers it and every question
+    /// after it for the rest of the run. A stdin read error (no stdin at
+    /// all, e.g. under `curl | bash`) reads as "no", the same fail-safe the
+    /// bridge's own dropped-channel case uses.
+    fn ask(&mut self, prompt: &str, explanation: &str) -> bool {
         if self.yes {
             return true;
         }
         if let Some(bridge) = &self.bridge {
-            return match bridge.ask(prompt) {
+            return match bridge.ask(prompt, explanation) {
                 ui::progress::Answer::Yes => true,
                 ui::progress::Answer::All => {
                     self.yes = true;
@@ -337,6 +343,11 @@ impl Confirms {
                 }
                 ui::progress::Answer::No => false,
             };
+        }
+        if !explanation.is_empty() {
+            for line in explanation.lines() {
+                eprintln!("{line}");
+            }
         }
         eprint!("{prompt} [y/N/a] ");
         let _ = std::io::stderr().flush();
@@ -354,6 +365,25 @@ impl Confirms {
             _ => false,
         }
     }
+}
+
+/// Logs `explanation` through `sink` (so it stays part of the permanent,
+/// scrollable install record a user can come back to) and then asks
+/// `prompt`, handing that same text to the question's own modal panel --
+/// see `Confirms::ask`'s own doc comment for what `explanation` is and why
+/// every post-install permission question now carries one with it, instead
+/// of a bare one-line question that gave an end user with zero context on
+/// the skill asking for it nothing to judge it by.
+fn ask_with_context(
+    sink: &mut dyn ui::progress::Sink,
+    confirms: &mut Confirms,
+    prompt: &str,
+    explanation: &str,
+) -> bool {
+    for line in explanation.lines() {
+        sink.log(line);
+    }
+    confirms.ask(prompt, explanation)
 }
 
 /// A resolved `--integration` selection: any number of `skill=mode` choices
@@ -698,10 +728,11 @@ fn select_targets_interactively(yes: bool) -> Result<Vec<(PathBuf, Option<String
                 return Err("Custom directory must be an absolute path".to_string());
             }
             if !expanded.is_dir() {
-                if !confirms.ask(&format!(
-                    "{} does not exist. Create it?",
-                    expanded.display()
-                )) {
+                if !confirms.ask(
+                    &format!("{} does not exist. Create it?", expanded.display()),
+                    "This directory doesn't exist yet. The installer can create it now, \
+                     empty, so your selected skills have somewhere to be copied to.",
+                ) {
                     return Err(format!(
                         "Custom directory does not exist: {}",
                         expanded.display()
@@ -746,50 +777,70 @@ impl Summary {
     /// `roots` and `yes` are threaded in at print time, not recorded per
     /// skill: the whole run shares one root list and one --yes, read fresh
     /// when the summary prints rather than when the skill was blocked.
-    fn print(&self, roots: &[PathBuf], yes: bool) {
+    ///
+    /// Returns ready-to-display lines rather than printing them directly, so
+    /// `run_interactive`'s graphical screen can show this exact content
+    /// through `sink.log` -- "no cool graphical, installation complete at
+    /// the end" was this summary, previously always `println!`-based,
+    /// landing as a wall of plain text only after that screen had already
+    /// torn itself down and restored the terminal. The headless `install`
+    /// CLI subcommand still gets it as plain stdout, via `print` below.
+    fn lines(&self, roots: &[PathBuf], yes: bool) -> Vec<String> {
+        let mut lines = Vec::new();
         if self.installed.is_empty()
             && self.platform_blocked.is_empty()
             && self.hard_blocked.is_empty()
         {
-            return;
+            return lines;
         }
-        println!();
-        println!("== Summary ==");
+        lines.push(String::new());
+        lines.push("== Summary ==".to_string());
         for line in &self.installed {
-            println!("{line}");
+            lines.push(line.clone());
         }
         for (skill, reason) in &self.platform_blocked {
-            println!("Skipped:   {skill} -- {reason}, nothing was written");
+            lines.push(format!(
+                "Skipped:   {skill} -- {reason}, nothing was written"
+            ));
         }
         let replay_prefix = std::env::args()
             .next()
             .unwrap_or_else(|| "installer".to_string());
         for blocked in &self.hard_blocked {
-            println!(
+            lines.push(format!(
                 "Skipped:   {} -- a hard requirement is missing, nothing was written",
                 blocked.skill
-            );
-            println!(
+            ));
+            lines.push(format!(
                 "To install {} once its requirements are met:",
                 blocked.skill
-            );
+            ));
             let mut step = 1;
             for (label, hint) in &blocked.unmet {
-                println!("  {step}. install {label}:");
+                lines.push(format!("  {step}. install {label}:"));
                 for line in hint {
-                    println!("  {line}");
+                    lines.push(format!("  {line}"));
                 }
                 step += 1;
             }
-            println!("  {step}. replay this run:");
+            lines.push(format!("  {step}. replay this run:"));
             for root in roots {
                 let yes_flag = if yes { " --yes" } else { "" };
-                println!(
+                lines.push(format!(
                     "  {replay_prefix} install --skill {} --target {}{yes_flag}",
                     blocked.skill,
                     root.display()
-                );
+                ));
             }
+        }
+        lines
+    }
+
+    /// The headless path's own presentation of `lines` -- plain `println!`,
+    /// unchanged from before this summary also gained a graphical path.
+    fn print(&self, roots: &[PathBuf], yes: bool) {
+        for line in self.lines(roots, yes) {
+            println!("{line}");
         }
     }
 }
@@ -1260,19 +1311,37 @@ fn run_worktrees_permission_step(
     sink.log("== Agent worktree permissions ==");
     let worktrees = permissions::default_worktrees_root(home);
     let worktrees_str = worktrees.to_string_lossy().to_string();
-    if confirms.ask(&format!(
-        "Create {worktrees_str} as the agent worktree root?"
-    )) {
+    if ask_with_context(
+        sink,
+        confirms,
+        &format!("Create {worktrees_str} as the agent worktree root?"),
+        "A git worktree is a second checked-out working copy of a repository, sharing its \
+         history but with its own files on disk, independent of whatever is checked out \
+         elsewhere. The git-worktrees skill uses one so an agent can branch off, make changes, \
+         and run long verifications in isolation, without colliding with whatever another task \
+         (or you) is currently editing. This creates the directory new worktrees will be put \
+         under; nothing is written to it yet.",
+    ) {
         match std::fs::create_dir_all(&worktrees) {
             Ok(()) => sink.log(&format!("  Created {worktrees_str}")),
             Err(e) => sink.log(&format!("  cannot create {worktrees_str}: {e}")),
         }
     }
-    if !confirms.ask(&format!(
-        "Grant the selected agents read/write/execute on {worktrees_str}, so a worktree there \
-         needs no prompt per file? (Each edited config is backed up beside itself, unless git \
-         already tracks it)"
-    )) {
+    if !ask_with_context(
+        sink,
+        confirms,
+        &format!(
+            "Grant the selected agents read/write/execute on {worktrees_str}, so a worktree \
+             there needs no prompt per file? (Each edited config is backed up beside itself, \
+             unless git already tracks it)"
+        ),
+        "Agents normally stop and ask your approval before touching anything outside the \
+         project they were started in. Saying yes here grants read/write/execute on the \
+         directory above only, so a worktree created there needs no such prompt per file and \
+         the git-worktrees skill can set one up and run its own checks without interrupting \
+         you each time. Declining leaves worktrees working as before, just with a permission \
+         prompt on every file they touch.",
+    ) {
         return;
     }
     for (_, kind) in roots {
@@ -1333,16 +1402,34 @@ fn run_project_specifics_post_install(
     sink.log("== project-specifics shared note directory ==");
     let root = permissions::default_tsch_ai_skills_root(home);
     let root_str = root.to_string_lossy().to_string();
-    if confirms.ask(&format!(
-        "Create {root_str} as the shared project-notes directory?"
-    )) {
+    if ask_with_context(
+        sink,
+        confirms,
+        &format!("Create {root_str} as the shared project-notes directory?"),
+        "project-specifics is a skill that records a project's own conventions, quirks, and \
+         deviations in one shared note, so an agent working on that project tomorrow -- or a \
+         different project entirely -- doesn't have to rediscover the same things from \
+         scratch. That note has to live outside any one project so it survives across \
+         checkouts; this creates the directory it's kept in. Nothing is written to it yet.",
+    ) {
         let _ = ensure_dir(&root, sink);
     }
-    if !confirms.ask(&format!(
-        "Grant the selected agents read/write on {root_str}, so a project-specifics note there \
-         needs no prompt per file? (Each edited config is backed up beside itself, unless git \
-         already tracks it)"
-    )) {
+    if !ask_with_context(
+        sink,
+        confirms,
+        &format!(
+            "Grant the selected agents read/write on {root_str}, so a project-specifics note \
+             there needs no prompt per file? (Each edited config is backed up beside itself, \
+             unless git already tracks it)"
+        ),
+        "Some agents (Codex's own sandboxed mode, in particular) refuse to write outside the \
+         current project folder at all unless a directory is explicitly declared writable. \
+         Without this grant, project-specifics either fails outright under that sandbox or \
+         silently saves its note inside the one project instead of the shared directory above, \
+         defeating the whole point of it being shared across projects, with no warning that it \
+         did so. Saying yes grants read/write on that one directory only, for the agents you \
+         selected.",
+    ) {
         return;
     }
     for (_, kind) in roots {
@@ -1419,16 +1506,33 @@ fn run_planning_post_install(
     let tmp = std::env::temp_dir().join("planning-agent");
     let plans_str = plans.to_string_lossy();
     let tmp_str = tmp.to_string_lossy();
-    if confirms.ask(&format!(
-        "Create {plans_str} as the global plans directory?"
-    )) {
+    if ask_with_context(
+        sink,
+        confirms,
+        &format!("Create {plans_str} as the global plans directory?"),
+        "The planning skill turns a task into a directory of durable, resumable plan files \
+         with steps and verification, so work can be picked back up -- by you, or by another \
+         session -- without reconstructing missing context. This creates the directory those \
+         plans are stored in, outside any one project so they survive across checkouts. \
+         Nothing is written to it yet.",
+    ) {
         let _ = ensure_dir(&plans, sink);
     }
-    if confirms.ask(&format!(
-        "Grant the selected agents read/write on {plans_str} and {tmp_str}, and allow them to \
-         execute the planning shell scripts? (Each edited config is backed up beside itself, \
-         unless git already tracks it)"
-    )) {
+    if ask_with_context(
+        sink,
+        confirms,
+        &format!(
+            "Grant the selected agents read/write on {plans_str} and {tmp_str}, and allow them \
+             to execute the planning shell scripts? (Each edited config is backed up beside \
+             itself, unless git already tracks it)"
+        ),
+        "Codex's own sandbox refuses to run any command at all -- not just a planning one -- if \
+         a directory it needs isn't already declared writable and executable, so without this \
+         grant planning's own scripts (verification, progress tracking) cannot run under that \
+         agent. Saying yes lets the agents you selected read and write plans in the directory \
+         above and its own scratch directory, and run planning's helper scripts, without a \
+         permission prompt on every single file.",
+    ) {
         // codex's own sandbox refuses to run ANY command at all if a
         // declared writable root does not already exist on disk (a bare
         // permission grant naming a not-yet-created directory is not
@@ -1522,10 +1626,18 @@ fn run_interactive_shell_post_install(
         .map(|(p, _)| *p)
         .collect();
     if !claude_roots.is_empty() {
-        if confirms.ask(
+        if ask_with_context(
+            sink,
+            confirms,
             "Allow the selected agents to execute the interactive-shell binaries, so driving a \
              terminal program needs no prompt per call? (Each edited config is backed up beside \
              itself, unless git already tracks it)",
+            "interactive-shell drives another full-screen or interactive program (an installer, \
+             an editor, a terminal menu) through a PTY wrapper, so an agent can navigate \
+             programs that expect a real terminal instead of a plain pipe. Saying yes lets the \
+             agents you selected run its compiled binaries without a permission prompt each \
+             time; declining means every call needs manual approval, which in practice reads as \
+             a broken tool and gets skipped rather than driven.",
         ) {
             // T72: interactive-shell's binaries no longer live under any one
             // target root at all -- every skill's compiled binary shares one
@@ -1656,12 +1768,37 @@ fn run_editor_steering_step(
         "    CLAUDE_CODE_COZY_TEAPOT=relaxed  softer wording that leaves the choice to the \
          agent, so the editor still competes",
     );
-    if confirms.ask("Turn the instruction off (env CLAUDE_CODE_THRIFTY_SONIC=false)? [recommended]")
-    {
+    // Same content the `sink.log` calls just wrote, as one string with a
+    // `\n` between each point -- so the question's own modal panel shows it
+    // too, instead of only the log the modal itself had been hiding (the
+    // "Turn the instruction off ...?" question used to show with nothing
+    // underneath it at all, even though this explanation was already being
+    // logged one call above).
+    let explanation = "Claude Code regularly injects an instruction into the agent's own \
+         context, steering it toward sed, heredocs, and short shell scripts instead of a real \
+         editor. It is not something you asked for, and an explicit opposing instruction in \
+         your own CLAUDE.md/AGENTS.md does not reliably win against it. While it is active, the \
+         ai-text-editor MCP is usually skipped entirely.\n\
+         - an in-place sed rewrites the file and exits 0 whether or not the pattern matched, so \
+         a mistype is indistinguishable from success\n\
+         - a script heredoc stacks the shell's escaping on top of the language's on top of the \
+         target file's syntax\n\
+         - neither verifies what it replaces, while the editor's expected_text refuses on \
+         mismatch and its journal survives a git checkout\n\
+         CLAUDE_CODE_THRIFTY_SONIC=false turns the instruction off entirely (recommended); \
+         CLAUDE_CODE_COZY_TEAPOT=relaxed softens it to wording that leaves the choice to the \
+         agent instead.";
+    if confirms.ask(
+        "Turn the instruction off (env CLAUDE_CODE_THRIFTY_SONIC=false)? [recommended]",
+        explanation,
+    ) {
         apply_claude_env_setting("CLAUDE_CODE_THRIFTY_SONIC", "false", home, sink);
         return;
     }
-    if confirms.ask("Soften it instead (env CLAUDE_CODE_COZY_TEAPOT=relaxed)?") {
+    if confirms.ask(
+        "Soften it instead (env CLAUDE_CODE_COZY_TEAPOT=relaxed)?",
+        explanation,
+    ) {
         apply_claude_env_setting("CLAUDE_CODE_COZY_TEAPOT", "relaxed", home, sink);
         return;
     }
@@ -1828,11 +1965,16 @@ fn run_uninstall(argv: &[String]) -> Result<ExitCode, String> {
                 println!("{}: {skill} is not installed there", target.display());
                 continue;
             }
-            if !confirms.ask(&format!(
-                "Remove {skill} from {}? Its shared binary and any co-installed plugin are only \
-                 removed if nothing else still installed needs them.",
-                target.display()
-            )) {
+            if !confirms.ask(
+                &format!(
+                    "Remove {skill} from {}? Its shared binary and any co-installed plugin are \
+                     only removed if nothing else still installed needs them.",
+                    target.display()
+                ),
+                "This deletes the skill's own installed files from this one location only. A \
+                 shared binary or vendor plugin it brought along is removed too, but only when \
+                 no other installed skill or root still needs it.",
+            ) {
                 println!("Left in place: {skill} at {}", target.display());
                 continue;
             }
@@ -3003,6 +3145,8 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             let names_for_thread = names.clone();
             let home_for_thread = home.clone();
             let picked_for_thread = picked.clone();
+            let root_paths_for_thread: Vec<PathBuf> =
+                roots.iter().map(|(p, _)| p.clone()).collect();
             let outcome: Result<Summary, String> = ui::progress::run(
                 &progress_skills,
                 move |sink, bridge| -> Result<Summary, String> {
@@ -3046,12 +3190,21 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                             sink,
                         );
                     }
+                    // Through `sink`, not a post-return `println!` -- "no
+                    // cool graphical, installation complete at the end" was
+                    // this exact summary, previously always printed only
+                    // after the graphical screen had already closed and
+                    // restored the terminal. Logging it here means it is the
+                    // last thing in the screen's own log, read before the
+                    // "installation complete" banner this run's `sink`
+                    // triggers once this closure returns.
+                    for line in summary.lines(&root_paths_for_thread, yes) {
+                        sink.log(&line);
+                    }
                     Ok(summary)
                 },
             );
             let summary = outcome?;
-            let root_paths: Vec<PathBuf> = roots.iter().map(|(p, _)| p.clone()).collect();
-            summary.print(&root_paths, yes);
             // A partial install cannot read as success in CI.
             if !summary.hard_blocked.is_empty() {
                 return Ok(ExitCode::FAILURE);

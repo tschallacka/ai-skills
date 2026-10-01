@@ -31,6 +31,18 @@
 //! deliberately read-only until the worker finishes -- scrolling the log,
 //! answering a question, and moving keyboard focus among a question's own
 //! buttons are the only interactive actions.
+//!
+//! Every question carries its own end-user-facing explanation (`AskBridge::
+//! ask`'s `explanation` argument), shown in a scrollable panel under its own
+//! buttons rather than relying on the log alone -- an end user asked to
+//! grant a permission with no idea what it is for has no basis to answer.
+//! The progress bar's own percentage includes one extra unit standing for
+//! "every post-install step", not just the file-copy loop, so it does not
+//! read 100% while real work (a pending question, a permission grant) is
+//! still happening; and the screen itself stays open, showing an
+//! "installation complete" state the user acknowledges with Enter, rather
+//! than tearing down the instant the worker thread returns and dropping the
+//! whole run's own summary into a wall of plain text after the fact.
 
 use super::buttons::colorize_button;
 use super::input::{self, Key};
@@ -55,8 +67,13 @@ enum Event {
     Log(String),
     /// A yes/no/all question -- the reply channel is answered exactly once,
     /// by whichever of a keypress or a mouse click on the popup's own
-    /// buttons the render loop sees first.
-    Ask(String, Sender<Answer>),
+    /// buttons the render loop sees first. `explanation` is the longer,
+    /// end-user-facing "what is this and why does it need my permission"
+    /// text, shown in the modal's own scrollable panel underneath the
+    /// buttons -- see `AskBridge::ask`'s own doc comment for why a question
+    /// carries this with it instead of relying on the user having already
+    /// scrolled the log back far enough to find it.
+    Ask(String, String, Sender<Answer>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,16 +127,27 @@ impl Sink for ChannelSink {
 pub struct AskBridge(Sender<Event>);
 
 impl AskBridge {
-    /// Blocks until the render loop answers. A dropped reply channel (the
-    /// render loop exited without answering, which should not normally
-    /// happen while the worker is still running) reads as `No`, the same
-    /// fail-safe `Confirms::ask`'s own stdin path already uses for a read
-    /// error.
-    pub fn ask(&self, prompt: &str) -> Answer {
+    /// Blocks until the render loop answers. `explanation` is shown in the
+    /// modal's own scrollable panel, below its Yes/No/All buttons -- it
+    /// exists because a bare one-line question ("Grant ... read/write ...?")
+    /// gives an end user with zero context on the skill asking for it no way
+    /// to judge whether to say yes, and the log line that used to carry that
+    /// context sat buried under whatever the question itself had already
+    /// pushed the log pane out of view -- every call site now hands its
+    /// explanation to the question that needs it, instead of relying on the
+    /// log alone. A dropped reply channel (the render loop exited without
+    /// answering, which should not normally happen while the worker is
+    /// still running) reads as `No`, the same fail-safe `Confirms::ask`'s
+    /// own stdin path already uses for a read error.
+    pub fn ask(&self, prompt: &str, explanation: &str) -> Answer {
         let (reply_tx, reply_rx) = mpsc::channel();
         if self
             .0
-            .send(Event::Ask(prompt.to_string(), reply_tx))
+            .send(Event::Ask(
+                prompt.to_string(),
+                explanation.to_string(),
+                reply_tx,
+            ))
             .is_err()
         {
             return Answer::No;
@@ -146,13 +174,31 @@ struct State {
     skills: Vec<SkillRow>,
     log: Vec<String>,
     log_scroll: usize,
-    question: Option<(String, Sender<Answer>)>,
+    /// `(prompt, explanation, reply)` -- see `Event::Ask`'s own doc comment
+    /// for what `explanation` is and why it travels with the question
+    /// rather than living only in the log.
+    question: Option<(String, String, Sender<Answer>)>,
     /// Which of the modal's three buttons (Yes/No/All, left to right) has
     /// keyboard focus -- reset to 0 ("Yes") whenever a new question
     /// arrives, so answering always starts from the same, most common
     /// choice rather than remembering wherever a previous question's
     /// answer left it.
     modal_focus: usize,
+    /// How many lines of the pending question's own explanation panel have
+    /// scrolled past -- reset to 0 whenever a new question arrives, same as
+    /// `modal_focus`. Unlike `log_scroll`, this has no upper clamp either;
+    /// see `log_scroll`'s own precedent for why overscrolling past the end
+    /// is harmless (it just windows to nothing further) and Up/Down always
+    /// being able to walk it back is what matters.
+    modal_text_scroll: usize,
+    /// Whether the worker thread has finished and handed back its result --
+    /// set once `run`'s own loop sees it, so the screen can show a final
+    /// "installation complete" state and wait for an acknowledging keypress
+    /// instead of tearing the screen down the instant the last background
+    /// line is still being read. Purely a render flag; `run` itself tracks
+    /// the actual `R` value separately, since this type does not know or
+    /// care what `R` is.
+    done: bool,
 }
 
 impl State {
@@ -170,16 +216,36 @@ impl State {
             log_scroll: 0,
             question: None,
             modal_focus: 0,
+            modal_text_scroll: 0,
+            done: false,
         }
     }
 
-    fn progress(&self) -> (usize, usize) {
+    /// Per-skill progress only (the file-copy loop) -- what the title bar's
+    /// own "N/M skills" text names, since "skills" there should mean skills,
+    /// not skills-plus-one-phantom-unit.
+    fn skills_progress(&self) -> (usize, usize) {
         let total = self.skills.len().max(1);
         let done = self
             .skills
             .iter()
             .filter(|s| !matches!(s.status, SkillRunStatus::Pending))
             .count();
+        (done, total)
+    }
+
+    /// Overall run progress, for the percentage bar: every skill's own copy
+    /// PLUS one more unit standing for "every post-install step" (worktree
+    /// permissions, planning, project-specifics, ...), which only completes
+    /// once `run`'s own loop sees the worker thread's result -- "progress
+    /// sits at 100%, that's unrealistic, as we're going through questions
+    /// that perform actions" was real: every skill file is copied well
+    /// before those later steps even start, so a bar driven by the skill
+    /// count alone reads as finished while real work is still happening.
+    fn progress(&self) -> (usize, usize) {
+        let (skills_done, skills_total) = self.skills_progress();
+        let total = skills_total + 1;
+        let done = skills_done + usize::from(self.done);
         (done, total)
     }
 }
@@ -214,6 +280,7 @@ pub fn run<R: Send + 'static>(
     let unicode = mascot::detect_utf8_capable();
     let key_rx = terminal::spawn_reader();
     let mut state = State::new(skills);
+    let mut pending_result: Option<R> = None;
 
     let final_result = loop {
         while let Ok(event) = rx.try_recv() {
@@ -224,13 +291,29 @@ pub fn run<R: Send + 'static>(
         // The worker's result lands only after every event it sent has
         // already been drained above (it is the last thing the worker
         // thread does), so seeing it here means the screen is fully
-        // caught up, not merely idle between two log lines.
-        if let Ok(result) = result_rx.try_recv() {
-            break result;
+        // caught up, not merely idle between two log lines. Rather than
+        // breaking the moment it arrives -- which used to tear the graphical
+        // screen down and drop straight back to a plain shell prompt, with
+        // whatever the worker last logged (the install summary) gone before
+        // anyone could read it, "no cool graphical, installation complete at
+        // the end" -- the result is held here and `state.done` drives a
+        // final "installation complete" frame until the user acknowledges
+        // it with Enter.
+        if pending_result.is_none() {
+            if let Ok(result) = result_rx.try_recv() {
+                pending_result = Some(result);
+                state.done = true;
+                state
+                    .log
+                    .push("== Installation complete -- press Enter to continue ==".to_string());
+            }
         }
         match input::read_key(&key_rx) {
             Key::Tick => continue,
             Key::Eof => continue,
+            Key::Enter if pending_result.is_some() => {
+                break pending_result.take().expect("checked is_some above");
+            }
             key => handle_key(&mut state, key, cols),
         }
     };
@@ -248,9 +331,10 @@ fn apply_event(state: &mut State, event: Event) {
             }
         }
         Event::Log(line) => state.log.push(line),
-        Event::Ask(prompt, reply) => {
-            state.question = Some((prompt, reply));
+        Event::Ask(prompt, explanation, reply) => {
+            state.question = Some((prompt, explanation, reply));
             state.modal_focus = 0;
+            state.modal_text_scroll = 0;
         }
     }
 }
@@ -287,11 +371,25 @@ fn handle_key(state: &mut State, key: Key, cols: usize) {
                 state.modal_focus = (state.modal_focus + 1).min(2);
                 None
             }
+            // Scrolls the question's OWN explanation panel, not the log --
+            // while a question is pending, that panel is what the user
+            // actually needs to read, and it used to be unreachable: Up/Down
+            // fell through to `_ => None` here and never touched anything,
+            // which is what made the log read as un-scrollable the moment a
+            // question (the normal time to want to read more) came up.
+            Key::Up | Key::Char('k') => {
+                state.modal_text_scroll = state.modal_text_scroll.saturating_sub(1);
+                None
+            }
+            Key::Down | Key::Char('j') => {
+                state.modal_text_scroll += 1;
+                None
+            }
             Key::Click { col, row } => modal_click_answer(state, cols, col, row),
             _ => None,
         };
         if let Some(answer) = answer {
-            if let Some((_, reply)) = state.question.take() {
+            if let Some((_, _, reply)) = state.question.take() {
                 let _ = reply.send(answer);
             }
         }
@@ -335,13 +433,13 @@ const MODAL_TOP_OFFSET: usize = 2;
 /// this function is only ever consulted from `handle_key`'s own
 /// `state.question.is_some()` branch.
 fn modal_click_answer(state: &State, cols: usize, col: u16, row: u16) -> Option<Answer> {
-    let (prompt, _) = state.question.as_ref()?;
+    let (prompt, explanation, _) = state.question.as_ref()?;
     if col == 0 || row == 0 {
         return None;
     }
     let left_w = left_pane_width(state);
     let right_w = cols.saturating_sub(left_w + 3);
-    let modal = build_modal(prompt, right_w);
+    let modal = build_modal(prompt, explanation, right_w, state.modal_text_scroll);
     // title(row 1) + top border(row 2) + the top section's own progress-bar
     // and blank rows + the button's own 0-based row within the modal.
     let button_abs_row = 2 + MODAL_TOP_OFFSET + modal.button_row + 1;
@@ -369,9 +467,19 @@ fn render_frame(
 ) -> Vec<String> {
     let b = BorderSet::for_unicode(unicode);
     let (done, total) = state.progress();
-    let title = pad(&format!(" Installing -- {done}/{total} skills "), cols);
+    let (skill_done, skill_total) = state.skills_progress();
+    let title = pad(
+        &format!(" Installing -- {skill_done}/{skill_total} skills "),
+        cols,
+    );
     let hint = pad(
-        " Up/Dn scroll log  Tab/Left/Right focus a question  Enter answer",
+        if state.done {
+            " Installation complete -- Enter to finish  Up/Dn scroll log"
+        } else if state.question.is_some() {
+            " Up/Dn scroll explanation  Tab/Left/Right focus  Enter answer"
+        } else {
+            " Up/Dn scroll log  Tab/Left/Right focus a question  Enter answer"
+        },
         cols,
     );
     let left_w = left_pane_width(state);
@@ -394,15 +502,27 @@ fn render_frame(
         .iter()
         .map(|s| colorize_skill_row(s, left_w, color_mode))
         .collect();
-    // The log is always visible, in the pane's own bottom half, below
-    // whatever is on top (the progress bar, and the question modal while
-    // one is pending) -- it used to be replaced outright by a pending
-    // question, which hid every line already logged the moment one came
-    // up. `top_rows`/`bottom_rows` split `body_rows` evenly; a modal taller
-    // than the top half is cut off the same way any other overflowing
-    // content here already is (the `.get(i)` fallback below), rather than
-    // stealing room from the log.
-    let top_rows = body_rows / 2;
+    // The log is always visible, below whatever is on top (the progress
+    // bar, and the question modal while one is pending) -- it used to be
+    // replaced outright by a pending question, which hid every line already
+    // logged the moment one came up. With no question pending, the two
+    // split `body_rows` evenly. While one IS pending, the modal (now
+    // carrying its own explanation panel -- "a larger, scrollable text area
+    // where it is all explained") gets most of the room instead: a straight
+    // 50/50 split routinely truncated that panel before a single word of it
+    // was visible on an ordinary ~24-row terminal, which is exactly the
+    // "0 context" complaint this panel exists to fix, just moved one layer
+    // down. The log still keeps a guaranteed minimum sliver (`MIN_LOG_ROWS`)
+    // so "ensure the log and this part have separate segments" holds even
+    // then; a modal taller than what's left is cut off the same way any
+    // other overflowing content here already is (the `.get(i)` fallback
+    // below).
+    const MIN_LOG_ROWS: usize = 3;
+    let top_rows = if state.question.is_some() {
+        body_rows.saturating_sub(MIN_LOG_ROWS).max(body_rows / 2)
+    } else {
+        body_rows / 2
+    };
     let bottom_rows = body_rows - top_rows;
     let top_lines = top_section_lines(state, right_w, done, total, unicode, color_mode);
     let bottom_lines = bottom_log_lines(state, right_w);
@@ -532,13 +652,15 @@ fn top_section_lines(
         &progress_bar(done, total, width, unicode),
         width,
     )];
-    if let Some((prompt, _)) = &state.question {
+    if let Some((prompt, explanation, _)) = &state.question {
         lines.push(pad("", width));
         lines.extend(modal_render_lines(
             prompt,
+            explanation,
             width,
             color_mode,
             state.modal_focus,
+            state.modal_text_scroll,
         ));
     }
     lines
@@ -549,9 +671,13 @@ fn top_section_lines(
 /// the yes no wizard, and ... cumulative, and newest at top." `log_scroll`
 /// skips from the front of this (now reversed) order, so scrolling DOWN
 /// still means "go further back in time", the same direction it always
-/// meant when the log read oldest-first.
+/// meant when the log read oldest-first. The header is a full-width dashed
+/// rule, the same `pad_dash` treatment every other section's own header
+/// already gets, rather than a plain padded label -- "ensure the log and
+/// this part have separate segments": a bare word gave the log no visible
+/// boundary from whatever sits above it in the top half of the pane.
 fn bottom_log_lines(state: &State, width: usize) -> Vec<String> {
-    let mut lines = vec![pad("LOG", width)];
+    let mut lines = vec![pad_dash("LOG", width, '-')];
     let visible_log = state.log.iter().rev().skip(state.log_scroll);
     for line in visible_log {
         for wrapped in wrap(line, width) {
@@ -582,7 +708,32 @@ struct ModalLayout {
     buttons: [(Answer, usize, usize); 3],
 }
 
-fn build_modal(prompt: &str, width: usize) -> ModalLayout {
+/// How many rows of the explanation panel are shown at once -- "a larger,
+/// scrollable text area", windowed by `state.modal_text_scroll` rather than
+/// shown in full, since an explanation routinely runs to more lines than the
+/// top half of the screen has room for.
+const EXPLANATION_VISIBLE_LINES: usize = 6;
+
+/// Wraps `explanation` to `width`, treating each `\n`-separated piece as its
+/// own paragraph with a blank separator line between -- `wrap` itself has no
+/// notion of a paragraph break (it only ever breaks on spaces), so an
+/// explanation built from several distinct points (one per `\n`, the same
+/// shape `sink.log` already used for this content one call per line) would
+/// otherwise run together into one wall of text with no structure at all.
+fn wrap_explanation(explanation: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (i, paragraph) in explanation.split('\n').enumerate() {
+        if i > 0 {
+            lines.push(String::new());
+        }
+        if !paragraph.is_empty() {
+            lines.extend(wrap(paragraph, width));
+        }
+    }
+    lines
+}
+
+fn build_modal(prompt: &str, explanation: &str, width: usize, text_scroll: usize) -> ModalLayout {
     let mut lines = vec![String::new(), "-- QUESTION --".to_string(), String::new()];
     lines.extend(wrap(prompt, width));
     lines.push(String::new());
@@ -602,6 +753,22 @@ fn build_modal(prompt: &str, width: usize) -> ModalLayout {
 
     let button_row = lines.len();
     lines.push(row);
+
+    // The explanation panel: its own clearly bordered segment below the
+    // buttons -- "these questions should have under the buttons a larger,
+    // scrollable text area where it is all explained, with the END user who
+    // has 0 context awareness why it's needed in mind". Always shown, even
+    // for an empty explanation (the windowed loop below just pads out
+    // blank), so every question gets the same segment rather than some
+    // having one and others not.
+    lines.push(String::new());
+    lines.push(pad_dash("WHY THIS IS ASKED -- Up/Dn to scroll", width, '-'));
+    let wrapped = wrap_explanation(explanation, width);
+    let start = text_scroll.min(wrapped.len());
+    for i in 0..EXPLANATION_VISIBLE_LINES {
+        lines.push(wrapped.get(start + i).cloned().unwrap_or_default());
+    }
+
     ModalLayout {
         lines,
         button_row,
@@ -646,8 +813,15 @@ fn colorize_modal_buttons(
     out
 }
 
-fn modal_render_lines(prompt: &str, width: usize, mode: ColorMode, focus: usize) -> Vec<String> {
-    let modal = build_modal(prompt, width);
+fn modal_render_lines(
+    prompt: &str,
+    explanation: &str,
+    width: usize,
+    mode: ColorMode,
+    focus: usize,
+    text_scroll: usize,
+) -> Vec<String> {
+    let modal = build_modal(prompt, explanation, width, text_scroll);
     modal
         .lines
         .iter()
@@ -680,7 +854,9 @@ mod tests {
             .skills
             .iter()
             .all(|s| s.status == SkillRunStatus::Pending));
-        assert_eq!(state.progress(), (0, 2));
+        assert_eq!(state.skills_progress(), (0, 2));
+        // +1: the post-install-steps unit, not yet done either.
+        assert_eq!(state.progress(), (0, 3));
     }
 
     #[test]
@@ -688,7 +864,24 @@ mod tests {
         let mut state = State::new(&names(&["a", "b"]));
         apply_event(&mut state, Event::Status(0, SkillRunStatus::Done));
         assert_eq!(state.skills[0].status, SkillRunStatus::Done);
-        assert_eq!(state.progress(), (1, 2));
+        assert_eq!(state.skills_progress(), (1, 2));
+        assert_eq!(state.progress(), (1, 3));
+    }
+
+    #[test]
+    fn overall_progress_only_reaches_full_once_the_run_is_marked_done() {
+        // "progress sits at 100%, that's unrealistic, as we're going
+        // through questions that perform actions" -- every skill finishing
+        // its own copy must not alone read as the whole run being done,
+        // since the post-install steps (worktrees, planning, ...) still run
+        // afterward, in the same screen session.
+        let mut state = State::new(&names(&["a", "b"]));
+        apply_event(&mut state, Event::Status(0, SkillRunStatus::Done));
+        apply_event(&mut state, Event::Status(1, SkillRunStatus::Done));
+        let (done, total) = state.progress();
+        assert!(done < total, "should not read 100% yet: {done}/{total}");
+        state.done = true;
+        assert_eq!(state.progress(), (3, 3));
     }
 
     #[test]
@@ -702,7 +895,10 @@ mod tests {
     fn an_ask_event_opens_a_question() {
         let mut state = State::new(&names(&["a"]));
         let (tx, _rx) = mpsc::channel();
-        apply_event(&mut state, Event::Ask("proceed?".to_string(), tx));
+        apply_event(
+            &mut state,
+            Event::Ask("proceed?".to_string(), String::new(), tx),
+        );
         assert!(state.question.is_some());
     }
 
@@ -710,7 +906,7 @@ mod tests {
     fn pressing_y_answers_yes_and_clears_the_question() {
         let mut state = State::new(&names(&["a"]));
         let (tx, rx) = mpsc::channel();
-        state.question = Some(("proceed?".to_string(), tx));
+        state.question = Some(("proceed?".to_string(), String::new(), tx));
         handle_key(&mut state, Key::Char('y'), 80);
         assert!(state.question.is_none());
         assert_eq!(rx.try_recv(), Ok(Answer::Yes));
@@ -720,7 +916,7 @@ mod tests {
     fn pressing_n_answers_no() {
         let mut state = State::new(&names(&["a"]));
         let (tx, rx) = mpsc::channel();
-        state.question = Some(("proceed?".to_string(), tx));
+        state.question = Some(("proceed?".to_string(), String::new(), tx));
         handle_key(&mut state, Key::Char('n'), 80);
         assert_eq!(rx.try_recv(), Ok(Answer::No));
     }
@@ -729,7 +925,7 @@ mod tests {
     fn pressing_a_answers_all() {
         let mut state = State::new(&names(&["a"]));
         let (tx, rx) = mpsc::channel();
-        state.question = Some(("proceed?".to_string(), tx));
+        state.question = Some(("proceed?".to_string(), String::new(), tx));
         handle_key(&mut state, Key::Char('a'), 80);
         assert_eq!(rx.try_recv(), Ok(Answer::All));
     }
@@ -739,15 +935,30 @@ mod tests {
         let mut state = State::new(&names(&["a"]));
         state.modal_focus = 2;
         let (tx, _rx) = mpsc::channel();
-        apply_event(&mut state, Event::Ask("proceed?".to_string(), tx));
+        apply_event(
+            &mut state,
+            Event::Ask("proceed?".to_string(), String::new(), tx),
+        );
         assert_eq!(state.modal_focus, 0);
+    }
+
+    #[test]
+    fn a_new_question_also_resets_the_explanation_scroll() {
+        let mut state = State::new(&names(&["a"]));
+        state.modal_text_scroll = 5;
+        let (tx, _rx) = mpsc::channel();
+        apply_event(
+            &mut state,
+            Event::Ask("proceed?".to_string(), String::new(), tx),
+        );
+        assert_eq!(state.modal_text_scroll, 0);
     }
 
     #[test]
     fn right_and_tab_move_modal_focus_forward_left_moves_it_back() {
         let mut state = State::new(&names(&["a"]));
         let (tx, _rx) = mpsc::channel();
-        state.question = Some(("proceed?".to_string(), tx));
+        state.question = Some(("proceed?".to_string(), String::new(), tx));
         handle_key(&mut state, Key::Right, 80);
         assert_eq!(state.modal_focus, 1);
         handle_key(&mut state, Key::Tab, 80);
@@ -760,10 +971,29 @@ mod tests {
     }
 
     #[test]
+    fn up_and_down_scroll_the_explanation_panel_while_a_question_is_pending() {
+        // These keys used to fall through to `_ => None` here and do
+        // nothing at all while a question was showing -- indistinguishable
+        // from "the log can't be scrolled", since the modal is exactly when
+        // a user actually wants to read more.
+        let mut state = State::new(&names(&["a"]));
+        let (tx, _rx) = mpsc::channel();
+        state.question = Some(("proceed?".to_string(), String::new(), tx));
+        handle_key(&mut state, Key::Down, 80);
+        assert_eq!(state.modal_text_scroll, 1);
+        handle_key(&mut state, Key::Char('j'), 80);
+        assert_eq!(state.modal_text_scroll, 2);
+        handle_key(&mut state, Key::Up, 80);
+        assert_eq!(state.modal_text_scroll, 1);
+        // It must not have touched the (unrelated, still-zero) log scroll.
+        assert_eq!(state.log_scroll, 0);
+    }
+
+    #[test]
     fn enter_activates_whichever_button_has_keyboard_focus() {
         let mut state = State::new(&names(&["a"]));
         let (tx, rx) = mpsc::channel();
-        state.question = Some(("proceed?".to_string(), tx));
+        state.question = Some(("proceed?".to_string(), String::new(), tx));
         state.modal_focus = 1; // "No"
         handle_key(&mut state, Key::Enter, 80);
         assert!(state.question.is_none());
@@ -774,14 +1004,14 @@ mod tests {
     fn clicking_the_no_button_answers_no() {
         let mut state = State::new(&names(&["a"]));
         let (tx, rx) = mpsc::channel();
-        state.question = Some(("Create the directory?".to_string(), tx));
+        state.question = Some(("Create the directory?".to_string(), String::new(), tx));
         let cols = 80;
         // Find the exact click coordinates the same way a real click would
         // be tested: recompute the modal layout and pick a column inside
         // the "No" button's own span.
         let left_w = left_pane_width(&state);
         let right_w = cols - (left_w + 3);
-        let modal = build_modal("Create the directory?", right_w);
+        let modal = build_modal("Create the directory?", "", right_w, 0);
         let (_, no_start, _) = modal.buttons[1];
         let col = (left_w + 3 + no_start + 1) as u16;
         let row = (2 + MODAL_TOP_OFFSET + modal.button_row + 1) as u16;
@@ -794,7 +1024,7 @@ mod tests {
     fn a_click_off_the_button_row_does_not_answer() {
         let mut state = State::new(&names(&["a"]));
         let (tx, rx) = mpsc::channel();
-        state.question = Some(("Create the directory?".to_string(), tx));
+        state.question = Some(("Create the directory?".to_string(), String::new(), tx));
         handle_key(&mut state, Key::Click { col: 5, row: 3 }, 80);
         assert!(state.question.is_some());
         assert!(rx.try_recv().is_err());
@@ -812,7 +1042,7 @@ mod tests {
         let (tx, rx) = mpsc::channel::<Event>();
         drop(rx);
         let bridge = AskBridge(tx);
-        assert_eq!(bridge.ask("anything?"), Answer::No);
+        assert_eq!(bridge.ask("anything?", "why"), Answer::No);
     }
 
     #[test]
@@ -917,10 +1147,23 @@ mod tests {
     }
 
     #[test]
+    fn render_frame_shows_a_completion_hint_once_done() {
+        // "no cool graphical, installation complete at the end" -- `run`'s
+        // own loop sets this once the worker thread hands back its result,
+        // and holds the screen open (rather than tearing it straight down to
+        // a plain shell prompt) until the user acknowledges it.
+        let mut state = State::new(&names(&["a"]));
+        state.done = true;
+        let frame = render_frame(&state, 80, 24, ColorMode::None, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains("Installation complete"));
+    }
+
+    #[test]
     fn a_pending_question_shows_the_modal_in_the_top_section() {
         let mut state = State::new(&names(&["a"]));
         let (tx, _rx) = mpsc::channel();
-        state.question = Some(("Create the directory?".to_string(), tx));
+        state.question = Some(("Create the directory?".to_string(), String::new(), tx));
         let frame = render_frame(&state, 80, 24, ColorMode::None, false);
         let joined = frame.join("\n");
         assert!(joined.contains("QUESTION"));
@@ -928,6 +1171,79 @@ mod tests {
         assert!(joined.contains("Yes (y)"));
         assert!(joined.contains("No (n)"));
         assert!(joined.contains("All (a)"));
+    }
+
+    #[test]
+    fn the_modal_shows_its_own_explanation_panel() {
+        // "these questions should have under the buttons a larger,
+        // scrollable text area where it is all explained, with the END user
+        // who has 0 context awareness why it's needed in mind".
+        let mut state = State::new(&names(&["a"]));
+        let (tx, _rx) = mpsc::channel();
+        state.question = Some((
+            "Grant access?".to_string(),
+            "A worktree is a second checked-out copy of this repository.".to_string(),
+            tx,
+        ));
+        let frame = render_frame(&state, 160, 60, ColorMode::None, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains("WHY THIS IS ASKED"));
+        assert!(joined.contains("A worktree is a second checked-out copy"));
+    }
+
+    #[test]
+    fn the_explanation_is_still_visible_on_an_ordinary_sized_terminal() {
+        // A straight 50/50 top/bottom split (the log's own original share)
+        // routinely truncated the explanation panel before a single word of
+        // it reached the screen on a perfectly ordinary 80x24 terminal --
+        // the whole point of the panel, silently defeated one layer down
+        // from where it looked fixed. `render_frame` now gives the modal
+        // most of the room while a question is pending instead.
+        let mut state = State::new(&names(&["a"]));
+        let (tx, _rx) = mpsc::channel();
+        state.question = Some((
+            "Grant access?".to_string(),
+            "A worktree is a second checked-out copy of this repository.".to_string(),
+            tx,
+        ));
+        let frame = render_frame(&state, 80, 24, ColorMode::None, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains("WHY THIS IS ASKED"));
+        assert!(
+            joined.contains("A worktree is a second checked-out"),
+            "explanation text was truncated off-screen: {joined}"
+        );
+    }
+
+    #[test]
+    fn the_log_keeps_a_minimum_visible_sliver_even_with_a_question_pending() {
+        let mut state = State::new(&names(&["a"]));
+        state.log.push("installed a -> /tmp/x".to_string());
+        let (tx, _rx) = mpsc::channel();
+        state.question = Some((
+            "Grant access?".to_string(),
+            "line one\nline two\nline three\nline four\nline five".to_string(),
+            tx,
+        ));
+        let frame = render_frame(&state, 80, 24, ColorMode::None, false);
+        let joined = frame.join("\n");
+        assert!(
+            joined.contains("installed a -> /tmp/x"),
+            "the log was pushed fully off-screen: {joined}"
+        );
+    }
+
+    #[test]
+    fn the_explanation_panel_is_windowed_by_its_own_scroll() {
+        let explanation = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten";
+        let unscrolled = build_modal("q?", explanation, 40, 0);
+        let scrolled = build_modal("q?", explanation, 40, 2);
+        let unscrolled_text = unscrolled.lines.join("\n");
+        let scrolled_text = scrolled.lines.join("\n");
+        assert!(unscrolled_text.contains("one"));
+        // Two lines ("one", a blank separator) scrolled past.
+        assert!(!scrolled_text.contains("one"));
+        assert!(scrolled_text.contains("two"));
     }
 
     #[test]
@@ -939,11 +1255,22 @@ mod tests {
         let mut state = State::new(&names(&["a"]));
         state.log.push("installed a -> /tmp/x".to_string());
         let (tx, _rx) = mpsc::channel();
-        state.question = Some(("Create the directory?".to_string(), tx));
+        state.question = Some(("Create the directory?".to_string(), String::new(), tx));
         let frame = render_frame(&state, 80, 24, ColorMode::None, false);
         let joined = frame.join("\n");
         assert!(joined.contains("Create the directory?"));
         assert!(joined.contains("installed a -> /tmp/x"));
+    }
+
+    #[test]
+    fn the_log_header_is_a_dashed_rule_separating_it_from_the_section_above() {
+        // "ensure the log and this part have separate segments" -- a plain
+        // padded "LOG" label gave no visible boundary; the dashed rule
+        // matches the same `pad_dash` treatment every other section header
+        // in this screen already gets.
+        let state = State::new(&names(&["a"]));
+        let lines = bottom_log_lines(&state, 40);
+        assert_eq!(lines[0], format!("LOG{}", "-".repeat(37)));
     }
 
     #[test]
