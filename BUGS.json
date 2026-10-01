@@ -8109,6 +8109,29 @@
       "updated_at": "2026-09-29T13:38:15Z"
     },
     {
+      "id": "B387",
+      "title": "interactive-shell's session file briefly has mode 644 before save_session's own chmod tightens it to 600, observed flaking on x86_64-apple-darwin CI",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Run 'cargo test -p interactive-shell --test protocol session_file_reuses_socket_and_command_without_repeating_arguments' repeatedly on a loaded/shared macOS runner (observed on GitHub Actions' x86_64-apple-darwin build-and-test job; not reproduced locally on this session's Linux dev machine). The test spawns interactive-shell with --session resume-case, polls sessions/resume-case.json in a tight 10ms loop (READY_POLLS=3000 in src/interactive-shell/tests/protocol.rs) until it exists, then immediately asserts fs::metadata(&session_file).permissions().mode() & 0o777 == 0o600 at protocol.rs:1011-1014.",
+      "observed": "CI run 36876393181 (job 110417773997, commit 9f5ca7ffae083e80182f3fff6660b0d4d6baee5a) failed at protocol.rs:1011 with 'assertion left == right failed: left: 420, right: 384' -- 420 decimal is 0o644, 384 decimal is the expected 0o600. The commit under test only touched src/installer/src/ui/{progress.rs,wizard.rs}, with no interactive-shell changes anywhere in its diff, ruling out a regression from that push.",
+      "expected": "The session file should always read as mode 0600 the instant it is observable to exist, regardless of runner load or timing.",
+      "mechanism": "save_session (src/interactive-shell/src/lib.rs:244-257) calls fs::write(&path, json) to create the session file, THEN calls restrict_to_owner(&path, 0o600) (an explicit fs::set_permissions/chmod) afterward -- two separate syscalls, not atomic. fs::write's own File::create uses mode 0o666 masked by the process umask; a typical CI runner umask of 022 yields exactly 0o644, matching the observed 420. Between the write and the chmod there is a real window where the file exists with the wider, umask-derived mode. The test's own polling loop (10ms interval, checking only existence) can observe the file inside that window on a slow/contended runner and read stale permissions before the chmod has executed -- the same general class of mac-CI-runner-scheduling-delay flake already documented and fixed for a different mechanism in B384 (UDP beacon discovery), not something ordinary CPU contention reproduces locally (B384's own verification needed a SIGSTOP-simulated scheduler pause to reproduce, not load).",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "src/interactive-shell/tests/protocol.rs",
+        "ci"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "CI (x86_64-apple-darwin build-and-runs-every-subject-in-scope job), surfaced while pushing an unrelated installer UI change",
+      "notes": "Not yet reproduced locally -- filed from a single observed CI failure on x86_64-apple-darwin, at the user's explicit request to investigate and write it up for them to test/confirm on their own Mac. Recommended fix direction (not yet attempted): make save_session's file creation atomic with its permissions, e.g. write to a sibling temp file opened via OpenOptions with mode 0o600 set BEFORE any bytes are written (not after), then rename() into place -- rename is atomic on POSIX, so no reader ever observes an intermediate mode. The existing restrict_to_owner(&path, 0o600) call after fs::write would then become redundant (or stay as a defensive no-op) rather than the only thing narrowing the window. To reproduce locally before fixing: loop 'cargo test -p interactive-shell --test protocol session_file_reuses_socket_and_command_without_repeating_arguments' under artificial scheduling pressure (e.g. 'sudo cpulimit' on the test process, or running many parallel 'cargo test' jobs concurrently to contend for CPU) and watch for the same assertion; if that doesn't reproduce it either, the race may need an actual SIGSTOP/SIGCONT around save_session's own write-then-chmod window (the same technique B384's own verification needed) to force the gap open on demand.",
+      "created_at": "2026-10-01T14:51:45Z",
+      "updated_at": "2026-10-01T14:52:14Z"
+    },
+    {
       "id": "B59",
       "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
       "status": "fixed",
