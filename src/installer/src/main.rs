@@ -1512,9 +1512,12 @@ fn run_planning_post_install(
         &format!("Create {plans_str} as the global plans directory?"),
         "The planning skill turns a task into a directory of durable, resumable plan files \
          with steps and verification, so work can be picked back up -- by you, or by another \
-         session -- without reconstructing missing context. This creates the directory those \
-         plans are stored in, outside any one project so they survive across checkouts. \
-         Nothing is written to it yet.",
+         session -- without reconstructing missing context. By default a plan is stored in a \
+         gitignored .plans directory inside the project itself, so most plans never touch this \
+         global directory at all. This one is for plans that should survive outside any single \
+         checkout -- too large or too long-lived to belong to one project's own .plans -- and \
+         this just creates the directory such plans would be stored in. Nothing is written to \
+         it yet.",
     ) {
         let _ = ensure_dir(&plans, sink);
     }
