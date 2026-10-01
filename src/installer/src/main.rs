@@ -367,22 +367,26 @@ impl Confirms {
     }
 }
 
-/// Logs `explanation` through `sink` (so it stays part of the permanent,
-/// scrollable install record a user can come back to) and then asks
-/// `prompt`, handing that same text to the question's own modal panel --
-/// see `Confirms::ask`'s own doc comment for what `explanation` is and why
-/// every post-install permission question now carries one with it, instead
-/// of a bare one-line question that gave an end user with zero context on
-/// the skill asking for it nothing to judge it by.
+/// Asks `prompt`, handing `explanation` to the question's own modal panel
+/// only -- see `Confirms::ask`'s own doc comment for what `explanation` is
+/// and why every post-install permission question now carries one with it,
+/// instead of a bare one-line question that gave an end user with zero
+/// context on the skill asking for it nothing to judge it by. This used to
+/// also `sink.log` the explanation, one line per call, so it would survive
+/// in the permanent record -- but the log has a small fixed window (see
+/// `ui::progress`'s own `LOG_CONTENT_ROWS`), and an explanation can run
+/// well past it: "the log just repeats the text above. I'd expect
+/// installation progress to be there" was that window filled with the
+/// explanation it had just shown seconds earlier, pushing the install
+/// progress a reader actually wants to scroll back to clean off the tail
+/// end entirely. The modal (and its own scrollback) is now the only place
+/// this text lives.
 fn ask_with_context(
-    sink: &mut dyn ui::progress::Sink,
+    _sink: &mut dyn ui::progress::Sink,
     confirms: &mut Confirms,
     prompt: &str,
     explanation: &str,
 ) -> bool {
-    for line in explanation.lines() {
-        sink.log(line);
-    }
     confirms.ask(prompt, explanation)
 }
 
@@ -1742,41 +1746,14 @@ fn run_editor_steering_step(
 ) {
     sink.log("");
     sink.log("== ai-text-editor tool steering ==");
-    sink.log(
-        "  Claude Code regularly injects an instruction into the agent's own context, steering \
-         it toward sed, heredocs, and short shell scripts instead of a real editor. It is not \
-         something you asked for, and it is not visible in your own prompt or in \
-         CLAUDE.md/AGENTS.md -- an explicit opposing instruction there does not reliably win: \
-         this repeats often enough that it routinely overrides it. While it is active, the \
-         ai-text-editor MCP is usually skipped entirely, and these are what that costs:",
-    );
-    sink.log(
-        "    - an in-place sed rewrites the file and exits 0 whether or not the pattern \
-         matched, so a mistype is indistinguishable from success",
-    );
-    sink.log(
-        "    - a script heredoc stacks the shell's escaping on top of the language's on top of \
-         the target file's syntax",
-    );
-    sink.log(
-        "    - neither verifies what it replaces, while the editor's expected_text refuses on \
-         mismatch and its journal survives a git checkout",
-    );
-    sink.log(
-        "  The only reliable way to stop it is one of the two settings below -- strongly \
-         recommended:",
-    );
-    sink.log("    CLAUDE_CODE_THRIFTY_SONIC=false  the instruction is not injected at all");
-    sink.log(
-        "    CLAUDE_CODE_COZY_TEAPOT=relaxed  softer wording that leaves the choice to the \
-         agent, so the editor still competes",
-    );
-    // Same content the `sink.log` calls just wrote, as one string with a
-    // `\n` between each point -- so the question's own modal panel shows it
-    // too, instead of only the log the modal itself had been hiding (the
-    // "Turn the instruction off ...?" question used to show with nothing
-    // underneath it at all, even though this explanation was already being
-    // logged one call above).
+    // The explanation used to also go through `sink.log`, one call per
+    // point, so it read right here in the log too -- but the log has a
+    // small fixed window (`ui::progress::LOG_CONTENT_ROWS`), and this
+    // explanation alone fills most of it: "the log just repeats the text
+    // above. I'd expect installation progress to be there" was exactly
+    // this, crowding install progress out of the only part of the log a
+    // reader can actually still see. The question's own modal panel below
+    // is the only place this text lives now.
     let explanation = "Claude Code regularly injects an instruction into the agent's own \
          context, steering it toward sed, heredocs, and short shell scripts instead of a real \
          editor. It is not something you asked for, and an explicit opposing instruction in \

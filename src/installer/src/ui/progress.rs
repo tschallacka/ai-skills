@@ -405,18 +405,29 @@ fn handle_key(state: &mut State, key: Key, cols: usize) {
                 state.modal_focus = (state.modal_focus + 1).min(2);
                 None
             }
-            // Scrolls the question's OWN explanation panel, not the log --
-            // while a question is pending, that panel is what the user
-            // actually needs to read, and it used to be unreachable: Up/Down
-            // fell through to `_ => None` here and never touched anything,
-            // which is what made the log read as un-scrollable the moment a
-            // question (the normal time to want to read more) came up.
-            Key::Up | Key::Char('k') => {
+            // 'j'/'k' scroll the question's OWN explanation panel. Up/Down
+            // are deliberately NOT used here: this crate's input layer
+            // decodes a mouse wheel notch as the exact same `Key::Up`/
+            // `Key::Down` a real arrow-key press produces, with no pointer
+            // position attached to either -- so dedicating them to the
+            // explanation would leave the log unreachable by wheel (or by
+            // arrow key) for as long as a question is pending, the same
+            // "always scrollable" gap this is fixing, just for the mouse
+            // this time. The log keeps Up/Down below, question or not.
+            Key::Char('k') => {
                 state.modal_text_scroll = state.modal_text_scroll.saturating_sub(1);
                 None
             }
-            Key::Down | Key::Char('j') => {
+            Key::Char('j') => {
                 state.modal_text_scroll += 1;
+                None
+            }
+            Key::Up => {
+                state.log_scroll += 1;
+                None
+            }
+            Key::Down => {
+                state.log_scroll = state.log_scroll.saturating_sub(1);
                 None
             }
             Key::Click { col, row } => modal_click_answer(state, cols, col, row),
@@ -430,12 +441,15 @@ fn handle_key(state: &mut State, key: Key, cols: usize) {
         return;
     }
     match key {
-        // The log reads oldest-to-newest, newest at the bottom, like an
-        // ordinary terminal -- so Up (further back in time) grows how far
-        // the view has scrolled from the live end, and Down (toward now)
-        // shrinks it back, the same direction any pager uses. `log_scroll`
-        // itself is never clamped here; `bottom_log_lines` clamps it against
-        // the actual log length at render time, the same "store unclamped,
+        // Same oldest-to-newest, newest-at-the-bottom direction
+        // `bottom_log_lines` reads in: Up/`k` (further back in time) grows
+        // how far the view has scrolled from the live end, Down/`j` (toward
+        // now) shrinks it back. `j`/`k` are accepted here too (nothing else
+        // claims them while no question is pending) purely as a vim-style
+        // convenience; Up/Down (and so the mouse wheel) are what the log
+        // can always rely on, question pending or not. `log_scroll` itself
+        // is never clamped here; `bottom_log_lines` clamps it against the
+        // actual log length at render time, the same "store unclamped,
         // clamp on display" shape `modal_text_scroll` already uses.
         Key::Up | Key::Char('k') => {
             state.log_scroll += 1;
@@ -525,11 +539,11 @@ fn render_frame(
     );
     let hint = pad(
         if state.done {
-            " Installation complete -- Enter to finish  Up/Dn scroll log"
+            " Installation complete -- Enter/Esc to finish  Up/Dn/wheel/j/k scroll log"
         } else if state.question.is_some() {
-            " Up/Dn scroll explanation  Tab/Left/Right focus  Enter answer"
+            " Up/Dn or wheel scroll log  j/k explanation  Tab/Left/Right focus  Enter answer"
         } else {
-            " Up/Dn scroll log  Tab/Left/Right focus a question  Enter answer"
+            " Up/Dn/wheel/j/k scroll log  Tab/Left/Right focus a question  Enter answer"
         },
         cols,
     );
@@ -806,8 +820,9 @@ fn top_section_lines(
 /// always shows -- "the log staying this size through all windows": a
 /// fixed budget, not a leftover share of whatever the top section didn't
 /// use, so the log pane never grows or shrinks as a question comes and
-/// goes or the run finishes.
-const LOG_CONTENT_ROWS: usize = 4;
+/// goes or the run finishes. "more log line space can be used there, 8
+/// lines".
+const LOG_CONTENT_ROWS: usize = 8;
 /// The log section's total height: its own header plus `LOG_CONTENT_ROWS`.
 const LOG_SECTION_ROWS: usize = 1 + LOG_CONTENT_ROWS;
 
@@ -934,9 +949,16 @@ fn build_modal(
     // having one and others not. `modal_overhead_lines` counts every line
     // pushed above this point plus this header -- keep the two in sync.
     lines.push(String::new());
-    lines.push(pad_dash("WHY THIS IS ASKED -- Up/Dn to scroll", width, '-'));
+    lines.push(pad_dash("WHY THIS IS ASKED -- j/k to scroll", width, '-'));
     let wrapped = wrap_explanation(explanation, width);
-    let start = text_scroll.min(wrapped.len());
+    // Clamped against how much is actually left to reveal, not just the
+    // explanation's own total length -- "if text is all on screen,
+    // scrolling shouldn't be possible. Useless to scroll stuff off screen."
+    // Without this, scrolling past the point everything already fit
+    // visibly pushed the whole, already-fully-shown explanation up out of
+    // view instead of refusing to move.
+    let max_scroll = wrapped.len().saturating_sub(explanation_rows);
+    let start = text_scroll.min(max_scroll);
     for i in 0..explanation_rows {
         lines.push(wrapped.get(start + i).cloned().unwrap_or_default());
     }
@@ -1144,22 +1166,46 @@ mod tests {
     }
 
     #[test]
-    fn up_and_down_scroll_the_explanation_panel_while_a_question_is_pending() {
-        // These keys used to fall through to `_ => None` here and do
-        // nothing at all while a question was showing -- indistinguishable
-        // from "the log can't be scrolled", since the modal is exactly when
-        // a user actually wants to read more.
+    fn j_and_k_scroll_the_explanation_panel_while_a_question_is_pending() {
+        // 'j'/'k' are the explanation panel's own dedicated keys -- Up/Down
+        // (and so the mouse wheel, which decodes to the exact same keys
+        // with no pointer position attached) are reserved for the log
+        // instead, so the log stays reachable by wheel even while a
+        // question is pending; see `up_and_down_scroll_the_log_even_while_
+        // a_question_is_pending` for that half.
         let mut state = State::new(&names(&["a"]));
         let (tx, _rx) = mpsc::channel();
         state.question = Some(("proceed?".to_string(), String::new(), tx));
-        handle_key(&mut state, Key::Down, 80);
+        handle_key(&mut state, Key::Char('j'), 80);
         assert_eq!(state.modal_text_scroll, 1);
         handle_key(&mut state, Key::Char('j'), 80);
         assert_eq!(state.modal_text_scroll, 2);
-        handle_key(&mut state, Key::Up, 80);
+        handle_key(&mut state, Key::Char('k'), 80);
         assert_eq!(state.modal_text_scroll, 1);
         // It must not have touched the (unrelated, still-zero) log scroll.
         assert_eq!(state.log_scroll, 0);
+    }
+
+    #[test]
+    fn up_and_down_scroll_the_log_even_while_a_question_is_pending() {
+        // "scrollwheel should scroll log up and down, arrows too" -- the
+        // mouse wheel decodes as plain `Key::Up`/`Key::Down` with no pointer
+        // position attached (see `ui::input`'s own doc comment), so Up/Down
+        // must reach the log even while a question is pending, or the wheel
+        // (which can never produce 'j'/'k') would have no way to scroll it
+        // at all for as long as a question is showing.
+        let mut state = State::new(&names(&["a"]));
+        let (tx, _rx) = mpsc::channel();
+        state.question = Some(("proceed?".to_string(), String::new(), tx));
+        handle_key(&mut state, Key::Up, 80);
+        assert_eq!(state.log_scroll, 1);
+        handle_key(&mut state, Key::Down, 80);
+        assert_eq!(state.log_scroll, 0);
+        // It must not have touched the (unrelated, still-zero) explanation
+        // scroll, and the question must still be pending (Up/Down must not
+        // have been mistaken for an answer).
+        assert_eq!(state.modal_text_scroll, 0);
+        assert!(state.question.is_some());
     }
 
     #[test]
@@ -1484,6 +1530,19 @@ mod tests {
         // Two lines ("one", a blank separator) scrolled past.
         assert!(!scrolled_text.contains("one"));
         assert!(scrolled_text.contains("two"));
+    }
+
+    #[test]
+    fn scrolling_is_a_no_op_once_the_whole_explanation_already_fits() {
+        // "if text is all on screen, scrolling shouldn't be possible.
+        // Useless to scroll stuff off screen." A short explanation that
+        // already fits inside `explanation_rows` must not be pushed up out
+        // of view by any amount of scrolling.
+        let explanation = "one\ntwo";
+        let still = build_modal("q?", explanation, 40, 0, EXPLANATION_VISIBLE_LINES);
+        let over_scrolled = build_modal("q?", explanation, 40, 50, EXPLANATION_VISIBLE_LINES);
+        assert_eq!(still.lines, over_scrolled.lines);
+        assert!(over_scrolled.lines.iter().any(|l| l.contains("one")));
     }
 
     #[test]
