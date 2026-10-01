@@ -186,9 +186,11 @@ pub fn run(
             if matches!(state.step, Step::InstallOrUninstall) {
                 // No list pane to pin the sprite under on this screen --
                 // centered at the top instead, matching where the frame
-                // itself left room (see `install_or_uninstall_frame`).
+                // itself left room (see `install_or_uninstall_frame`). Row 2,
+                // not 1: a blank row above it first, so it doesn't start
+                // flush against the terminal's own top edge.
                 let col = cols.saturating_sub(mascot::WIDTH) / 2 + 1;
-                super::draw_mascot_at(1, col, color_mode, eyes.current(), unicode);
+                super::draw_mascot_at(2, col, color_mode, eyes.current(), unicode);
             } else {
                 super::draw_mascot(&layout, color_mode, eyes.current(), unicode);
             }
@@ -1078,8 +1080,11 @@ fn install_or_uninstall_frame(
         super::layout::compute(cols, rows, &[], color_capable, 1, hint_lines.len(), unicode);
     let margin = cols.saturating_sub(mascot::WIDTH) / 2;
     let indent = " ".repeat(margin);
+    // +1 leading blank (so the sprite doesn't start flush against the
+    // terminal's own top edge -- it used to "hug the ceiling") + the
+    // sprite's own height + 1 trailing blank before the question text.
     let mascot_rows = if layout.mascot_on {
-        mascot::HEIGHT + 1
+        mascot::HEIGHT + 2
     } else {
         0
     };
