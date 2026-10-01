@@ -1,41 +1,43 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! A graphical view of the install pipeline itself -- the actual per-skill
-//! copy loop (`install_selected_skills` in `main.rs`) and the one
-//! post-install step this screen also covers (the agent-worktree-permissions
-//! prompt) -- once the wizard/picker have already decided WHAT to install.
-//! Replaces plain `println!` lines and a blocking stdin-read `Confirms::ask`
-//! with a skill list colored by status, a progress bar, a scrollable log,
-//! and a modal Yes/No/All popup for a question -- the same graphical
-//! treatment `ui::wizard`/`ui::run_picker` already give every earlier step,
-//! so the whole flow stays one continuous screen instead of dropping back to
-//! a wall of scrolling plain text the moment the picker's own choices are
-//! confirmed.
-//!
-//! Scope boundary, deliberate: only `install_selected_skills` and
-//! `run_worktrees_permission_step` (the exact functions `main.rs`'s
-//! `run_interactive` calls right after the picker returns, and the one
-//! post-install prompt named explicitly) are wired through this screen.
-//! Every OTHER post-install step (MCP registration, planning,
-//! project-specifics, editor steering, agent identity, chat interrupts,
-//! agent profiles) still runs afterward, in its existing plain-text form,
-//! once this screen has already closed and restored the terminal -- folding
-//! those in too would mean threading a log callback through several more
-//! functions with many more print sites each, a separate, larger piece of
-//! work from what this screen already delivers.
+//! A graphical view of the WHOLE post-picker pipeline -- the actual
+//! per-skill copy loop (`install_selected_skills` in `main.rs`) and EVERY
+//! post-install step after it (worktrees permissions, planning,
+//! project-specifics, MCP registration, interactive-shell, editor steering,
+//! agent identity, chat interrupts, agent profiles) -- once the
+//! wizard/picker have already decided WHAT to install. Replaces plain
+//! `println!` lines and a blocking stdin-read `Confirms::ask` with a skill
+//! list colored by status, a progress bar, a scrollable log, and a modal
+//! Yes/No/All popup for a question -- the same graphical treatment
+//! `ui::wizard`/`ui::run_picker` already give every earlier step, so the
+//! whole flow stays one continuous screen from the moment the picker's own
+//! choices are confirmed to the moment everything is actually done,
+//! instead of dropping back to a wall of scrolling plain text partway
+//! through (every step used to print directly via `println!`/a
+//! non-bridged `Confirms::ask`, which either corrupted this screen's
+//! alternate-screen display if it ran while the screen was still open, or
+//! -- the shape this actually shipped as for a while -- ran only after the
+//! screen had already closed and restored the terminal, which is exactly
+//! the "rushed past in plain text" experience this screen exists to
+//! replace). `main.rs`'s own standalone `install` CLI subcommand (always
+//! headless, never through this screen) still calls the identical
+//! `run_remaining_post_install_steps`/`run_worktrees_permission_step`
+//! functions, just with a `PlainSink` -- one set of post-install steps,
+//! two ways of watching them run.
 //!
 //! There is no cancellation: the underlying install/permission work has no
 //! cancellation plumbing of its own (a half-applied file copy or permission
 //! grant cannot simply be abandoned mid-way), so this screen is
-//! deliberately read-only until the worker finishes -- scrolling the log and
-//! answering a question are the only interactive actions.
+//! deliberately read-only until the worker finishes -- scrolling the log,
+//! answering a question, and moving keyboard focus among a question's own
+//! buttons are the only interactive actions.
 
 use super::buttons::colorize_button;
 use super::input::{self, Key};
 use super::mascot::{self, ColorMode};
 use super::render::BorderSet;
 use super::terminal;
-use super::text::{pad, wrap};
+use super::text::{pad, pad_display, wrap};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
@@ -129,6 +131,15 @@ impl AskBridge {
 struct SkillRow {
     name: String,
     status: SkillRunStatus,
+    /// Whether this skill already had a destination on disk before this run
+    /// started -- known up front (the picker/wizard already answered this
+    /// for every selected skill), not something the run itself discovers,
+    /// so it never changes once a row is built. Drives both the `i`/`u`
+    /// marker prefix and the row's own color: yellow for a fresh install,
+    /// green for an update, the same colors `render.rs`'s own
+    /// "Install"/"Update" button-label distinction already uses this
+    /// session for the identical install-vs-update question.
+    already_installed: bool,
 }
 
 struct State {
@@ -136,21 +147,29 @@ struct State {
     log: Vec<String>,
     log_scroll: usize,
     question: Option<(String, Sender<Answer>)>,
+    /// Which of the modal's three buttons (Yes/No/All, left to right) has
+    /// keyboard focus -- reset to 0 ("Yes") whenever a new question
+    /// arrives, so answering always starts from the same, most common
+    /// choice rather than remembering wherever a previous question's
+    /// answer left it.
+    modal_focus: usize,
 }
 
 impl State {
-    fn new(names: &[String]) -> Self {
+    fn new(skills: &[(String, bool)]) -> Self {
         State {
-            skills: names
+            skills: skills
                 .iter()
-                .map(|n| SkillRow {
-                    name: n.clone(),
+                .map(|(name, already_installed)| SkillRow {
+                    name: name.clone(),
                     status: SkillRunStatus::Pending,
+                    already_installed: *already_installed,
                 })
                 .collect(),
             log: Vec::new(),
             log_scroll: 0,
             question: None,
+            modal_focus: 0,
         }
     }
 
@@ -173,7 +192,7 @@ impl State {
 /// against a `PlainSink` and no bridge -- the exact plain-text behavior this
 /// pipeline always had, since there is no terminal to draw a screen on.
 pub fn run<R: Send + 'static>(
-    skill_names: &[String],
+    skills: &[(String, bool)],
     work: impl FnOnce(&mut dyn Sink, Option<AskBridge>) -> R + Send + 'static,
 ) -> R {
     if !terminal::is_tty() {
@@ -194,7 +213,7 @@ pub fn run<R: Send + 'static>(
     let color_mode = mascot::detect_color_mode();
     let unicode = mascot::detect_utf8_capable();
     let key_rx = terminal::spawn_reader();
-    let mut state = State::new(skill_names);
+    let mut state = State::new(skills);
 
     let final_result = loop {
         while let Ok(event) = rx.try_recv() {
@@ -229,16 +248,45 @@ fn apply_event(state: &mut State, event: Event) {
             }
         }
         Event::Log(line) => state.log.push(line),
-        Event::Ask(prompt, reply) => state.question = Some((prompt, reply)),
+        Event::Ask(prompt, reply) => {
+            state.question = Some((prompt, reply));
+            state.modal_focus = 0;
+        }
+    }
+}
+
+/// The modal's three buttons, left to right -- `state.modal_focus`'s own
+/// index into this same order.
+fn modal_focus_answer(focus: usize) -> Answer {
+    match focus {
+        0 => Answer::Yes,
+        1 => Answer::No,
+        _ => Answer::All,
     }
 }
 
 fn handle_key(state: &mut State, key: Key, cols: usize) {
     if state.question.is_some() {
         let answer = match key {
-            Key::Char('y') | Key::Enter => Some(Answer::Yes),
-            Key::Char('n') | Key::Escape => Some(Answer::No),
+            // The letter shortcuts answer directly regardless of focus --
+            // muscle memory from before keyboard focus existed here, kept
+            // rather than removed now that arrow/Tab navigation also works.
+            Key::Char('y') => Some(Answer::Yes),
+            Key::Char('n') => Some(Answer::No),
             Key::Char('a') => Some(Answer::All),
+            Key::Escape => Some(Answer::No),
+            // Enter activates whichever button keyboard focus is currently
+            // on -- the same "focus moves, Enter activates" shape the
+            // skill picker's own DETAILS pane buttons already use.
+            Key::Enter => Some(modal_focus_answer(state.modal_focus)),
+            Key::Left | Key::Char('h') | Key::ShiftTab => {
+                state.modal_focus = state.modal_focus.saturating_sub(1);
+                None
+            }
+            Key::Right | Key::Char('l') | Key::Tab => {
+                state.modal_focus = (state.modal_focus + 1).min(2);
+                None
+            }
             Key::Click { col, row } => modal_click_answer(state, cols, col, row),
             _ => None,
         };
@@ -275,6 +323,13 @@ fn left_pane_width(state: &State) -> usize {
         + 6
 }
 
+/// How many lines of the right pane's own TOP section (see `render_frame`)
+/// come before the modal's own `lines[0]` -- the progress bar's own row,
+/// then one blank separator row. `modal_click_answer` and `render_frame`
+/// both need this to agree on where the modal's own rows actually land
+/// once it is no longer the only thing in the pane.
+const MODAL_TOP_OFFSET: usize = 2;
+
 /// Which button, if any, a click at `(col, row)` (1-based, exactly what
 /// `Key::Click` reports) landed on -- `None` while no question is pending,
 /// this function is only ever consulted from `handle_key`'s own
@@ -287,8 +342,9 @@ fn modal_click_answer(state: &State, cols: usize, col: u16, row: u16) -> Option<
     let left_w = left_pane_width(state);
     let right_w = cols.saturating_sub(left_w + 3);
     let modal = build_modal(prompt, right_w);
-    // title(row 1) + top border(row 2) + the button's own 0-based body row.
-    let button_abs_row = 2 + modal.button_row + 1;
+    // title(row 1) + top border(row 2) + the top section's own progress-bar
+    // and blank rows + the button's own 0-based row within the modal.
+    let button_abs_row = 2 + MODAL_TOP_OFFSET + modal.button_row + 1;
     if row as usize != button_abs_row {
         return None;
     }
@@ -314,7 +370,10 @@ fn render_frame(
     let b = BorderSet::for_unicode(unicode);
     let (done, total) = state.progress();
     let title = pad(&format!(" Installing -- {done}/{total} skills "), cols);
-    let hint = pad(" Up/Dn scroll log", cols);
+    let hint = pad(
+        " Up/Dn scroll log  Tab/Left/Right focus a question  Enter answer",
+        cols,
+    );
     let left_w = left_pane_width(state);
     let right_w = cols.saturating_sub(left_w + 3);
     let body_rows = rows.saturating_sub(4).max(1);
@@ -324,7 +383,7 @@ fn render_frame(
     out.push(format!(
         "{}{}{}{}{}",
         b.corner_tl,
-        pad_dash("SKILLS", left_w, b.horizontal),
+        pad_dash("UPDATING/INSTALLING SKILLS", left_w, b.horizontal),
         b.divider_top,
         pad_dash("PROGRESS", right_w, b.horizontal),
         b.corner_tr
@@ -335,10 +394,35 @@ fn render_frame(
         .iter()
         .map(|s| colorize_skill_row(s, left_w, color_mode))
         .collect();
-    let right_lines = match &state.question {
-        Some((prompt, _)) => modal_render_lines(prompt, right_w, color_mode),
-        None => progress_and_log_lines(state, right_w, done, total, unicode),
-    };
+    // The log is always visible, in the pane's own bottom half, below
+    // whatever is on top (the progress bar, and the question modal while
+    // one is pending) -- it used to be replaced outright by a pending
+    // question, which hid every line already logged the moment one came
+    // up. `top_rows`/`bottom_rows` split `body_rows` evenly; a modal taller
+    // than the top half is cut off the same way any other overflowing
+    // content here already is (the `.get(i)` fallback below), rather than
+    // stealing room from the log.
+    let top_rows = body_rows / 2;
+    let bottom_rows = body_rows - top_rows;
+    let top_lines = top_section_lines(state, right_w, done, total, unicode, color_mode);
+    let bottom_lines = bottom_log_lines(state, right_w);
+    let mut right_lines = Vec::with_capacity(body_rows);
+    for i in 0..top_rows {
+        right_lines.push(
+            top_lines
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| pad("", right_w)),
+        );
+    }
+    for i in 0..bottom_rows {
+        right_lines.push(
+            bottom_lines
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| pad("", right_w)),
+        );
+    }
 
     for i in 0..body_rows {
         let l = left_lines
@@ -373,23 +457,43 @@ fn pad_dash(label: &str, width: usize, fill: char) -> String {
     )
 }
 
-const DONE_COLOR: (u8, u8, u8) = (35, 140, 70); // green
-const RUNNING_COLOR: (u8, u8, u8) = (170, 150, 30); // yellow
-const SKIPPED_COLOR: (u8, u8, u8) = (150, 150, 150); // white/grey
+// Colors are by KIND (install vs. update), not by run-status -- see
+// `colorize_skill_row`'s own doc comment.
+const INSTALL_COLOR: (u8, u8, u8) = (170, 150, 30); // yellow: a fresh install
+const UPDATE_COLOR: (u8, u8, u8) = (35, 140, 70); // green: updating something already there
+const SKIPPED_COLOR: (u8, u8, u8) = (150, 150, 150); // grey: unconditional, regardless of kind
 
+/// `i`/`u` names what KIND of row this is (a fresh install or an update to
+/// something already there), ahead of the existing run-status marker
+/// (` `/`>`/`*`/`-`) that names WHERE this particular run is with it --
+/// "u * ai-text-editor" reads as "update, done". Shown regardless of
+/// status (even Pending), since the install-vs-update distinction is known
+/// up front and does not change as the run proceeds.
 fn colorize_skill_row(row: &SkillRow, width: usize, mode: ColorMode) -> String {
+    let kind_letter = if row.already_installed { 'u' } else { 'i' };
     let marker = match row.status {
-        SkillRunStatus::Pending => "  ",
-        SkillRunStatus::Running => "> ",
-        SkillRunStatus::Done => "* ",
-        SkillRunStatus::Skipped => "- ",
+        SkillRunStatus::Pending => ' ',
+        SkillRunStatus::Running => '>',
+        SkillRunStatus::Done => '*',
+        SkillRunStatus::Skipped => '-',
     };
-    let plain = pad(&format!("{marker}{}", row.name), width);
+    let plain = pad(&format!("{kind_letter} {marker} {}", row.name), width);
     match row.status {
         SkillRunStatus::Pending => plain,
-        SkillRunStatus::Running => colorize_button(mode, &plain, RUNNING_COLOR, false),
-        SkillRunStatus::Done => colorize_button(mode, &plain, DONE_COLOR, false),
         SkillRunStatus::Skipped => colorize_button(mode, &plain, SKIPPED_COLOR, false),
+        // Running and Done share the same install-vs-update coloring --
+        // yellow for a fresh install, green for an update -- rather than
+        // the OLD scheme (yellow only while running, green only once
+        // done): the kind of change a row represents does not change
+        // partway through it finishing.
+        SkillRunStatus::Running | SkillRunStatus::Done => {
+            let bg = if row.already_installed {
+                UPDATE_COLOR
+            } else {
+                INSTALL_COLOR
+            };
+            colorize_button(mode, &plain, bg, false)
+        }
     }
 }
 
@@ -405,18 +509,50 @@ fn progress_bar(done: usize, total: usize, width: usize, unicode: bool) -> Strin
     )
 }
 
-fn progress_and_log_lines(
+/// The right pane's own TOP section: the progress bar, then the question
+/// modal when one is pending -- see `render_frame`'s own doc comment for
+/// why this no longer also holds the log (it used to; the log is always in
+/// the BOTTOM section now, via `bottom_log_lines`, so it stays visible
+/// underneath a pending question instead of being replaced by it).
+fn top_section_lines(
     state: &State,
     width: usize,
     done: usize,
     total: usize,
     unicode: bool,
+    color_mode: ColorMode,
 ) -> Vec<String> {
-    let mut lines = Vec::new();
-    lines.push(pad(&progress_bar(done, total, width, unicode), width));
-    lines.push(pad("", width));
-    lines.push(pad("LOG", width));
-    let visible_log = state.log.iter().skip(state.log_scroll);
+    // `pad` measures by byte length; `progress_bar`'s own `fill_char` can be
+    // `█` (3 bytes, 1 display column) when `unicode` is set, which made
+    // `pad`'s truncation branch slice mid-character and panic -- reproduced
+    // live. `pad_display` measures by character count instead, matching
+    // `progress_bar`'s own `bar_width` arithmetic exactly (see `text::
+    // pad_display`'s own doc comment).
+    let mut lines = vec![pad_display(
+        &progress_bar(done, total, width, unicode),
+        width,
+    )];
+    if let Some((prompt, _)) = &state.question {
+        lines.push(pad("", width));
+        lines.extend(modal_render_lines(
+            prompt,
+            width,
+            color_mode,
+            state.modal_focus,
+        ));
+    }
+    lines
+}
+
+/// The right pane's own BOTTOM section: the cumulative install/permission
+/// log, newest entry first -- "the install output log should be ... under
+/// the yes no wizard, and ... cumulative, and newest at top." `log_scroll`
+/// skips from the front of this (now reversed) order, so scrolling DOWN
+/// still means "go further back in time", the same direction it always
+/// meant when the log read oldest-first.
+fn bottom_log_lines(state: &State, width: usize) -> Vec<String> {
+    let mut lines = vec![pad("LOG", width)];
+    let visible_log = state.log.iter().rev().skip(state.log_scroll);
     for line in visible_log {
         for wrapped in wrap(line, width) {
             lines.push(pad(&wrapped, width));
@@ -477,16 +613,22 @@ fn build_modal(prompt: &str, width: usize) -> ModalLayout {
     }
 }
 
+/// `focus`: the index (into `buttons`, left to right) of whichever button
+/// keyboard focus is currently on -- reverse video, the same "this is where
+/// input lands" treatment every other keyboard-focused control in this
+/// crate already gets, layered on top of (not replacing) each button's own
+/// resting background color.
 fn colorize_modal_buttons(
     plain_row: &str,
     buttons: &[(Answer, usize, usize); 3],
     width: usize,
     mode: ColorMode,
+    focus: usize,
 ) -> String {
     let chars: Vec<char> = plain_row.chars().collect();
     let mut out = String::new();
     let mut i = 0;
-    for (answer, start, end) in buttons {
+    for (index, (answer, start, end)) in buttons.iter().enumerate() {
         out.extend(chars[i..*start].iter());
         let seg: String = chars[*start..*end].iter().collect();
         let bg = match answer {
@@ -494,7 +636,7 @@ fn colorize_modal_buttons(
             Answer::No => MODAL_NO_BG,
             Answer::All => MODAL_ALL_BG,
         };
-        out.push_str(&colorize_button(mode, &seg, bg, false));
+        out.push_str(&colorize_button(mode, &seg, bg, index == focus));
         i = *end;
     }
     out.extend(chars[i..].iter());
@@ -504,7 +646,7 @@ fn colorize_modal_buttons(
     out
 }
 
-fn modal_render_lines(prompt: &str, width: usize, mode: ColorMode) -> Vec<String> {
+fn modal_render_lines(prompt: &str, width: usize, mode: ColorMode, focus: usize) -> Vec<String> {
     let modal = build_modal(prompt, width);
     modal
         .lines
@@ -512,7 +654,7 @@ fn modal_render_lines(prompt: &str, width: usize, mode: ColorMode) -> Vec<String
         .enumerate()
         .map(|(i, line)| {
             if i == modal.button_row {
-                colorize_modal_buttons(line, &modal.buttons, width, mode)
+                colorize_modal_buttons(line, &modal.buttons, width, mode, focus)
             } else {
                 pad(line, width)
             }
@@ -524,8 +666,11 @@ fn modal_render_lines(prompt: &str, width: usize, mode: ColorMode) -> Vec<String
 mod tests {
     use super::*;
 
-    fn names(n: &[&str]) -> Vec<String> {
-        n.iter().map(|s| s.to_string()).collect()
+    /// Every name a fresh install (`already_installed: false`) -- the
+    /// common case for most tests here, which care about run-status
+    /// mechanics, not the install-vs-update distinction specifically.
+    fn names(n: &[&str]) -> Vec<(String, bool)> {
+        n.iter().map(|s| (s.to_string(), false)).collect()
     }
 
     #[test]
@@ -590,6 +735,42 @@ mod tests {
     }
 
     #[test]
+    fn a_new_question_starts_keyboard_focus_on_yes() {
+        let mut state = State::new(&names(&["a"]));
+        state.modal_focus = 2;
+        let (tx, _rx) = mpsc::channel();
+        apply_event(&mut state, Event::Ask("proceed?".to_string(), tx));
+        assert_eq!(state.modal_focus, 0);
+    }
+
+    #[test]
+    fn right_and_tab_move_modal_focus_forward_left_moves_it_back() {
+        let mut state = State::new(&names(&["a"]));
+        let (tx, _rx) = mpsc::channel();
+        state.question = Some(("proceed?".to_string(), tx));
+        handle_key(&mut state, Key::Right, 80);
+        assert_eq!(state.modal_focus, 1);
+        handle_key(&mut state, Key::Tab, 80);
+        assert_eq!(state.modal_focus, 2);
+        // Already the last button: no further right to go to.
+        handle_key(&mut state, Key::Right, 80);
+        assert_eq!(state.modal_focus, 2);
+        handle_key(&mut state, Key::Left, 80);
+        assert_eq!(state.modal_focus, 1);
+    }
+
+    #[test]
+    fn enter_activates_whichever_button_has_keyboard_focus() {
+        let mut state = State::new(&names(&["a"]));
+        let (tx, rx) = mpsc::channel();
+        state.question = Some(("proceed?".to_string(), tx));
+        state.modal_focus = 1; // "No"
+        handle_key(&mut state, Key::Enter, 80);
+        assert!(state.question.is_none());
+        assert_eq!(rx.try_recv(), Ok(Answer::No));
+    }
+
+    #[test]
     fn clicking_the_no_button_answers_no() {
         let mut state = State::new(&names(&["a"]));
         let (tx, rx) = mpsc::channel();
@@ -603,7 +784,7 @@ mod tests {
         let modal = build_modal("Create the directory?", right_w);
         let (_, no_start, _) = modal.buttons[1];
         let col = (left_w + 3 + no_start + 1) as u16;
-        let row = (2 + modal.button_row + 1) as u16;
+        let row = (2 + MODAL_TOP_OFFSET + modal.button_row + 1) as u16;
         handle_key(&mut state, Key::Click { col, row }, cols);
         assert!(state.question.is_none());
         assert_eq!(rx.try_recv(), Ok(Answer::No));
@@ -665,14 +846,31 @@ mod tests {
     }
 
     #[test]
+    fn a_unicode_progress_bar_pads_without_panicking() {
+        // Reproduces a real crash: `█` is 3 bytes but 1 display column, and
+        // `pad`'s own byte-length truncation sliced mid-character --
+        // `thread 'main' panicked ... end byte index 84 is not a char
+        // boundary; it is inside '█'`. `top_section_lines` is the actual
+        // call site that panicked; `progress_bar` alone (the existing tests
+        // above) never reached `pad` at all.
+        let state = State::new(&names(&["a", "b", "c"]));
+        let lines = top_section_lines(&state, 40, 2, 3, true, ColorMode::None);
+        for line in &lines {
+            assert_eq!(line.chars().count(), 40, "line was: {line:?}");
+        }
+    }
+
+    #[test]
     fn colorize_skill_row_marks_each_status_distinctly() {
         let done = SkillRow {
             name: "a".to_string(),
             status: SkillRunStatus::Done,
+            already_installed: false,
         };
         let pending = SkillRow {
             name: "b".to_string(),
             status: SkillRunStatus::Pending,
+            already_installed: false,
         };
         let done_row = colorize_skill_row(&done, 20, ColorMode::TrueColor);
         let pending_row = colorize_skill_row(&pending, 20, ColorMode::TrueColor);
@@ -680,6 +878,32 @@ mod tests {
         assert!(!pending_row.contains("\x1b["));
         assert!(done_row.contains('a'));
         assert!(pending_row.contains('b'));
+    }
+
+    #[test]
+    fn colorize_skill_row_marks_install_yellow_and_update_green() {
+        let install = SkillRow {
+            name: "a".to_string(),
+            status: SkillRunStatus::Done,
+            already_installed: false,
+        };
+        let update = SkillRow {
+            name: "b".to_string(),
+            status: SkillRunStatus::Done,
+            already_installed: true,
+        };
+        let install_row = colorize_skill_row(&install, 20, ColorMode::TrueColor);
+        let update_row = colorize_skill_row(&update, 20, ColorMode::TrueColor);
+        assert!(install_row.contains("i * a"));
+        assert!(update_row.contains("u * b"));
+        assert!(install_row.contains(&format!(
+            "\x1b[48;2;{};{};{}m",
+            INSTALL_COLOR.0, INSTALL_COLOR.1, INSTALL_COLOR.2
+        )));
+        assert!(update_row.contains(&format!(
+            "\x1b[48;2;{};{};{}m",
+            UPDATE_COLOR.0, UPDATE_COLOR.1, UPDATE_COLOR.2
+        )));
     }
 
     #[test]
@@ -693,7 +917,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pending_question_replaces_the_log_with_the_modal() {
+    fn a_pending_question_shows_the_modal_in_the_top_section() {
         let mut state = State::new(&names(&["a"]));
         let (tx, _rx) = mpsc::channel();
         state.question = Some(("Create the directory?".to_string(), tx));
@@ -707,10 +931,51 @@ mod tests {
     }
 
     #[test]
+    fn the_log_stays_visible_underneath_a_pending_question() {
+        // "the install output log should be in the bottom half pane, under
+        // the yes no wizard" -- a pending question used to replace the log
+        // outright; now it sits in the pane's own top half, with the log
+        // still showing below it.
+        let mut state = State::new(&names(&["a"]));
+        state.log.push("installed a -> /tmp/x".to_string());
+        let (tx, _rx) = mpsc::channel();
+        state.question = Some(("Create the directory?".to_string(), tx));
+        let frame = render_frame(&state, 80, 24, ColorMode::None, false);
+        let joined = frame.join("\n");
+        assert!(joined.contains("Create the directory?"));
+        assert!(joined.contains("installed a -> /tmp/x"));
+    }
+
+    #[test]
     fn the_log_pane_shows_the_worker_s_log_lines() {
         let mut state = State::new(&names(&["a"]));
         state.log.push("installed a -> /tmp/x".to_string());
         let frame = render_frame(&state, 80, 24, ColorMode::None, false);
         assert!(frame.iter().any(|l| l.contains("installed a -> /tmp/x")));
+    }
+
+    #[test]
+    fn the_log_shows_newest_entries_first() {
+        let mut state = State::new(&names(&["a"]));
+        state.log.push("first".to_string());
+        state.log.push("second".to_string());
+        let lines = bottom_log_lines(&state, 40);
+        let first_idx = lines.iter().position(|l| l.contains("first")).unwrap();
+        let second_idx = lines.iter().position(|l| l.contains("second")).unwrap();
+        assert!(
+            second_idx < first_idx,
+            "the newer entry should come first: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn the_skills_header_is_renamed() {
+        // A short skill name like "a" clamps the left pane down to its own
+        // 18-column floor (`left_pane_width`'s `clamp(12, 30) + 6`), which
+        // truncates the full header -- checked as a prefix, the same
+        // substring any real, wider pane would also show in full.
+        let state = State::new(&names(&["a"]));
+        let frame = render_frame(&state, 80, 24, ColorMode::None, false);
+        assert!(frame[1].contains("UPDATING/INSTALL"));
     }
 }

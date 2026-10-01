@@ -925,6 +925,7 @@ fn run_mcp_registration_step(
     roots: &[(PathBuf, Option<String>)],
     source: &Path,
     skills: &[String],
+    sink: &mut dyn ui::progress::Sink,
 ) {
     let Some(home) = home_dir_opt() else { return };
     let mut announced = false;
@@ -940,8 +941,8 @@ fn run_mcp_registration_step(
                 continue;
             }
             if !announced {
-                println!();
-                println!("== MCP registration ==");
+                sink.log("");
+                sink.log("== MCP registration ==");
                 announced = true;
             }
             let dir = target.join(skill);
@@ -962,26 +963,26 @@ fn run_mcp_registration_step(
                         let path_str = path.to_string_lossy().to_string();
                         match mcp::register_for_kind(kind, skill, &path_str, &home) {
                             Ok(mcp::RegisterOutcome::Registered) => {
-                                println!("  {kind}: registered MCP server {skill}")
+                                sink.log(&format!("  {kind}: registered MCP server {skill}"))
                             }
                             Ok(mcp::RegisterOutcome::Manual) => {
                                 for line in mcp::manual_instructions(kind, skill, &path_str) {
-                                    println!("  {line}");
+                                    sink.log(&format!("  {line}"));
                                 }
                             }
-                            Err(e) => println!("  {kind}: {e}"),
+                            Err(e) => sink.log(&format!("  {kind}: {e}")),
                         }
                     }
-                    None => println!(
+                    None => sink.log(&format!(
                         "  {kind}: {skill} is in mcp mode but its adapter binary is missing from {}",
                         shared_dir.display()
-                    ),
+                    )),
                 }
             } else {
                 match mcp::unregister_for_kind(kind, skill, &shared_dir, &home) {
-                    Ok(true) => println!("  {kind}: removed MCP server {skill}"),
+                    Ok(true) => sink.log(&format!("  {kind}: removed MCP server {skill}")),
                     Ok(false) => {}
-                    Err(e) => println!("  {kind}: {e}"),
+                    Err(e) => sink.log(&format!("  {kind}: {e}")),
                 }
             }
         }
@@ -1009,14 +1010,9 @@ fn run_post_install_steps(
 
     // Worktrees permissions run for every install, whatever skills were
     // selected -- unlike everything else below, not gated on any
-    // particular skill being among them. The only post-install step
-    // `ui::progress`'s graphical screen also covers (see its own doc
-    // comment for the scope boundary), so it alone takes `sink`; every
-    // other step below still prints directly, unchanged -- see
-    // `run_remaining_post_install_steps`'s own doc comment for why it is a
-    // separate function rather than inlined here.
+    // particular skill being among them.
     run_worktrees_permission_step(&known_roots, confirms, &home, sink);
-    run_remaining_post_install_steps(roots, source, skills, confirms, &known_roots, &home);
+    run_remaining_post_install_steps(roots, source, skills, confirms, &known_roots, &home, sink);
 }
 
 /// Every root with a known, auto-editable agent kind (`claude`/`opencode`/
@@ -1038,12 +1034,11 @@ fn known_agent_roots(roots: &[(PathBuf, Option<String>)]) -> Option<Vec<(&Path, 
 }
 
 /// Everything `run_post_install_steps` does other than the worktrees step,
-/// factored out so `run_interactive`'s own graphical path can run it AFTER
-/// `ui::progress`'s screen has already closed and restored the terminal --
-/// every step here still prints directly with plain `println!`, which would
-/// corrupt that screen's alternate-screen display if it ran while the
-/// screen was still open the way the worktrees step (folded into that
-/// screen via `sink`) does not.
+/// factored out so both of its own callers (that function's own plain-CLI
+/// path, and `run_interactive`'s graphical one) share one list of steps
+/// rather than maintaining two. Every step takes `sink` now, the same as
+/// the worktrees step always has -- see `ui::progress`'s own module doc
+/// comment for why this no longer stops at just that one step.
 fn run_remaining_post_install_steps(
     roots: &[(PathBuf, Option<String>)],
     source: &Path,
@@ -1051,25 +1046,26 @@ fn run_remaining_post_install_steps(
     confirms: &mut Confirms,
     known_roots: &[(&Path, &str)],
     home: &Path,
+    sink: &mut dyn ui::progress::Sink,
 ) {
     if skills.iter().any(|s| s == "planning") {
-        run_planning_post_install(known_roots, home, confirms);
+        run_planning_post_install(known_roots, home, confirms, sink);
     }
     if skills.iter().any(|s| s == "project-specifics") {
-        run_project_specifics_post_install(known_roots, home, confirms);
+        run_project_specifics_post_install(known_roots, home, confirms, sink);
     }
-    run_mcp_registration_step(roots, source, skills);
+    run_mcp_registration_step(roots, source, skills, sink);
     if skills.iter().any(|s| s == "interactive-shell") {
-        run_interactive_shell_post_install(known_roots, source, home, confirms);
+        run_interactive_shell_post_install(known_roots, source, home, confirms, sink);
     }
     if skills.iter().any(|s| s == "ai-text-editor") {
-        run_editor_steering_and_gate_step(known_roots, source, home, confirms);
+        run_editor_steering_and_gate_step(known_roots, source, home, confirms, sink);
     }
-    run_agent_identity_post_install(known_roots, source, skills);
+    run_agent_identity_post_install(known_roots, source, skills, sink);
     if skills.iter().any(|s| s == "chat") {
-        run_chat_interrupt_plugin_post_install(known_roots, source);
+        run_chat_interrupt_plugin_post_install(known_roots, source, sink);
     }
-    run_profiles_post_install(known_roots, source, home);
+    run_profiles_post_install(known_roots, source, home, sink);
 }
 
 /// T102: installs every `manifest::PROFILES` entry into `home` for each
@@ -1088,7 +1084,12 @@ fn run_remaining_post_install_steps(
 /// a root's own path here joined the two, writing profiles under
 /// `~/.claude/skills/.claude/agents/` instead of `~/.claude/agents/`, where
 /// nothing -- Claude Code included -- ever reads them.
-fn run_profiles_post_install(roots: &[(&Path, &str)], source: &Path, home: &Path) {
+fn run_profiles_post_install(
+    roots: &[(&Path, &str)],
+    source: &Path,
+    home: &Path,
+    sink: &mut dyn ui::progress::Sink,
+) {
     if manifest::PROFILES.is_empty() {
         return;
     }
@@ -1104,9 +1105,9 @@ fn run_profiles_post_install(roots: &[(&Path, &str)], source: &Path, home: &Path
     if translators.is_empty() {
         return;
     }
-    println!();
-    println!("== agent profiles ==");
-    install_profiles_leniently(manifest::PROFILES, source, home, &translators);
+    sink.log("");
+    sink.log("== agent profiles ==");
+    install_profiles_leniently(manifest::PROFILES, source, home, &translators, sink);
 }
 
 /// Installs each of `profiles` into `home`, once per translator in
@@ -1120,32 +1121,36 @@ fn install_profiles_leniently(
     source: &Path,
     home: &Path,
     translators: &[&dyn profiles::ProfileTranslator],
+    sink: &mut dyn ui::progress::Sink,
 ) {
     for profile in profiles {
         let text = match std::fs::read_to_string(source.join(profile.source)) {
             Ok(text) => text,
             Err(e) => {
-                println!("{}: cannot read {}: {e}", profile.name, profile.source);
+                sink.log(&format!(
+                    "{}: cannot read {}: {e}",
+                    profile.name, profile.source
+                ));
                 continue;
             }
         };
         let spec = match profiles::ProfileSpec::from_json(&text) {
             Ok(spec) => spec,
             Err(e) => {
-                println!("{}: {e}", profile.name);
+                sink.log(&format!("{}: {e}", profile.name));
                 continue;
             }
         };
         for translator in translators {
             match profiles::install_profile(&spec, *translator, home) {
-                Ok(destination) => println!(
+                Ok(destination) => sink.log(&format!(
                     "Installed: {} (agent profile \"{}\" -- restart {} before it is available, \
                      since the profile registry is read once at session start)",
                     destination.display(),
                     spec.name,
                     translator.kind()
-                ),
-                Err(e) => println!("{}: {e}", spec.name),
+                )),
+                Err(e) => sink.log(&format!("{}: {e}", spec.name)),
             }
         }
     }
@@ -1163,15 +1168,20 @@ fn install_profiles_leniently(
 /// installs it exactly once. opencode/codex have no `SubagentStart`
 /// equivalent, so those roots get a plain statement that the guarantee is
 /// absent there instead of a silent no-op.
-fn run_agent_identity_post_install(roots: &[(&Path, &str)], source: &Path, skills: &[String]) {
+fn run_agent_identity_post_install(
+    roots: &[(&Path, &str)],
+    source: &Path,
+    skills: &[String],
+    sink: &mut dyn ui::progress::Sink,
+) {
     let session_dependent = skills
         .iter()
         .any(|s| matches!(s.as_str(), "chat" | "ai-text-editor" | "interactive-shell"));
     if !session_dependent {
         return;
     }
-    println!();
-    println!("== per-subagent identity (SubagentStart hook) ==");
+    sink.log("");
+    sink.log("== per-subagent identity (SubagentStart hook) ==");
     let claude_roots: Vec<&Path> = roots
         .iter()
         .filter(|(_, k)| *k == "claude")
@@ -1179,11 +1189,11 @@ fn run_agent_identity_post_install(roots: &[(&Path, &str)], source: &Path, skill
         .collect();
     for target in &claude_roots {
         match plugins::install_agent_identity_plugin_claude(source, target) {
-            Ok(destination) => println!(
+            Ok(destination) => sink.log(&format!(
                 "Installed: {} (injects AGENT_ID/AGENT_TYPE into each subagent's context)",
                 destination.display()
-            ),
-            Err(e) => println!("agent-identity-plugin: {e}"),
+            )),
+            Err(e) => sink.log(&format!("agent-identity-plugin: {e}")),
         }
     }
     let mut other_kinds: Vec<&str> = roots
@@ -1194,18 +1204,22 @@ fn run_agent_identity_post_install(roots: &[(&Path, &str)], source: &Path, skill
     other_kinds.sort_unstable();
     other_kinds.dedup();
     for kind in other_kinds {
-        println!(
+        sink.log(&format!(
             "  {kind}: SubagentStart is a Claude Code hook; {kind} has no equivalent measured \
              yet, so a subagent here still shares its parent's chat nick, editor tabs, and \
              interactive-shell socket unless another mechanism separates them."
-        );
+        ));
     }
 }
 
 /// A companion plugin for `chat`, Claude Code only (`PreToolUse` is a Claude
 /// Code hook): shows what chat-mcp's interrupt spool has queued at the agent's
 /// next tool call, without needing Claude Code's channels flag.
-fn run_chat_interrupt_plugin_post_install(roots: &[(&Path, &str)], source: &Path) {
+fn run_chat_interrupt_plugin_post_install(
+    roots: &[(&Path, &str)],
+    source: &Path,
+    sink: &mut dyn ui::progress::Sink,
+) {
     let claude_roots: Vec<&Path> = roots
         .iter()
         .filter(|(_, k)| *k == "claude")
@@ -1214,15 +1228,15 @@ fn run_chat_interrupt_plugin_post_install(roots: &[(&Path, &str)], source: &Path
     if claude_roots.is_empty() {
         return;
     }
-    println!();
-    println!("== chat interrupts (PreToolUse hook) ==");
+    sink.log("");
+    sink.log("== chat interrupts (PreToolUse hook) ==");
     for target in &claude_roots {
         match plugins::install_chat_interrupt_plugin_claude(source, target) {
-            Ok(destination) => println!(
+            Ok(destination) => sink.log(&format!(
                 "Installed: {} (shows queued chat interrupts at your next tool call)",
                 destination.display()
-            ),
-            Err(e) => println!("chat-interrupt-plugin: {e}"),
+            )),
+            Err(e) => sink.log(&format!("chat-interrupt-plugin: {e}")),
         }
     }
 }
@@ -1313,15 +1327,16 @@ fn run_project_specifics_post_install(
     roots: &[(&Path, &str)],
     home: &Path,
     confirms: &mut Confirms,
+    sink: &mut dyn ui::progress::Sink,
 ) {
-    println!();
-    println!("== project-specifics shared note directory ==");
+    sink.log("");
+    sink.log("== project-specifics shared note directory ==");
     let root = permissions::default_tsch_ai_skills_root(home);
     let root_str = root.to_string_lossy().to_string();
     if confirms.ask(&format!(
         "Create {root_str} as the shared project-notes directory?"
     )) {
-        let _ = ensure_dir(&root);
+        let _ = ensure_dir(&root, sink);
     }
     if !confirms.ask(&format!(
         "Grant the selected agents read/write on {root_str}, so a project-specifics note there \
@@ -1333,25 +1348,37 @@ fn run_project_specifics_post_install(
     for (_, kind) in roots {
         match *kind {
             "claude" => match permissions::claude_project_specifics_permissions(&root_str, home) {
-                Ok(outcome) => print_permission_outcome(
-                    "claude-code",
-                    "project-specifics permissions already present",
-                    outcome,
-                ),
-                Err(e) => println!("claude-code: {e}"),
+                Ok(outcome) => {
+                    for line in permission_outcome_lines(
+                        "claude-code",
+                        "project-specifics permissions already present",
+                        outcome,
+                    ) {
+                        sink.log(&line);
+                    }
+                }
+                Err(e) => sink.log(&format!("claude-code: {e}")),
             },
             "opencode" => {
                 match permissions::opencode_project_specifics_permissions(&root_str, home) {
-                    Ok(outcome) => print_opencode_outcome(
-                        "project-specifics permissions already present",
-                        outcome,
-                    ),
-                    Err(e) => println!("opencode: {e}"),
+                    Ok(outcome) => {
+                        for line in opencode_outcome_lines(
+                            "project-specifics permissions already present",
+                            outcome,
+                        ) {
+                            sink.log(&line);
+                        }
+                    }
+                    Err(e) => sink.log(&format!("opencode: {e}")),
                 }
             }
             "codex" => match permissions::codex_project_specifics_permissions(&root_str, home) {
-                Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
-                Err(e) => println!("codex: {e}"),
+                Ok(outcome) => {
+                    for line in codex_outcome_lines("writable_roots already present", outcome) {
+                        sink.log(&line);
+                    }
+                }
+                Err(e) => sink.log(&format!("codex: {e}")),
             },
             _ => {}
         }
@@ -1362,23 +1389,32 @@ fn run_project_specifics_post_install(
 /// directory-creation step in the installer's own post-install prompts
 /// does. Extracted so the actual mkdir behavior is unit-testable against an
 /// explicit, isolated path rather than only through the real
-/// `std::env::temp_dir()` a full install run resolves.
-fn ensure_dir(path: &Path) -> std::io::Result<()> {
+/// `std::env::temp_dir()` a full install run resolves. Reports through
+/// `sink` rather than `println!` directly, so it reads correctly whether
+/// `sink` is a `PlainSink` (unchanged stdout behavior) or the graphical
+/// progress screen's own channel-backed one -- see that module's own doc
+/// comment for why every post-install step now goes through it.
+fn ensure_dir(path: &Path, sink: &mut dyn ui::progress::Sink) -> std::io::Result<()> {
     let display = path.to_string_lossy();
     match std::fs::create_dir_all(path) {
         Ok(()) => {
-            println!("  Created {display}");
+            sink.log(&format!("  Created {display}"));
             Ok(())
         }
         Err(e) => {
-            println!("  cannot create {display}: {e}");
+            sink.log(&format!("  cannot create {display}: {e}"));
             Err(e)
         }
     }
 }
 
-fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mut Confirms) {
-    println!("== planning runtime permissions ==");
+fn run_planning_post_install(
+    roots: &[(&Path, &str)],
+    home: &Path,
+    confirms: &mut Confirms,
+    sink: &mut dyn ui::progress::Sink,
+) {
+    sink.log("== planning runtime permissions ==");
     let plans = plan_migration::default_root(home);
     let tmp = std::env::temp_dir().join("planning-agent");
     let plans_str = plans.to_string_lossy();
@@ -1386,7 +1422,7 @@ fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mu
     if confirms.ask(&format!(
         "Create {plans_str} as the global plans directory?"
     )) {
-        let _ = ensure_dir(&plans);
+        let _ = ensure_dir(&plans, sink);
     }
     if confirms.ask(&format!(
         "Grant the selected agents read/write on {plans_str} and {tmp_str}, and allow them to \
@@ -1402,7 +1438,7 @@ fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mu
         // already exist from prior use. Every other agent tolerates a
         // not-yet-created root fine, so creating it unconditionally here
         // is simplest rather than special-casing codex.
-        let _ = ensure_dir(&tmp);
+        let _ = ensure_dir(&tmp, sink);
         for (target, kind) in roots {
             let scripts = target.join("planning").join("scripts");
             let scripts = scripts.to_string_lossy();
@@ -1411,12 +1447,16 @@ fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mu
                     match permissions::claude_planning_permissions(
                         &scripts, &plans_str, &tmp_str, home,
                     ) {
-                        Ok(outcome) => print_permission_outcome(
-                            "claude-code",
-                            "permissions already present",
-                            outcome,
-                        ),
-                        Err(e) => println!("claude-code: {e}"),
+                        Ok(outcome) => {
+                            for line in permission_outcome_lines(
+                                "claude-code",
+                                "permissions already present",
+                                outcome,
+                            ) {
+                                sink.log(&line);
+                            }
+                        }
+                        Err(e) => sink.log(&format!("claude-code: {e}")),
                     }
                 }
                 "opencode" => {
@@ -1424,9 +1464,13 @@ fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mu
                         &scripts, &plans_str, &tmp_str, home,
                     ) {
                         Ok(outcome) => {
-                            print_opencode_outcome("permissions already present", outcome)
+                            for line in
+                                opencode_outcome_lines("permissions already present", outcome)
+                            {
+                                sink.log(&line);
+                            }
                         }
-                        Err(e) => println!("opencode: {e}"),
+                        Err(e) => sink.log(&format!("opencode: {e}")),
                     }
                 }
                 "codex" => {
@@ -1434,9 +1478,13 @@ fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mu
                         &scripts, &plans_str, &tmp_str, home,
                     ) {
                         Ok(outcome) => {
-                            print_codex_outcome("writable_roots already present", outcome)
+                            for line in
+                                codex_outcome_lines("writable_roots already present", outcome)
+                            {
+                                sink.log(&line);
+                            }
                         }
-                        Err(e) => println!("codex: {e}"),
+                        Err(e) => sink.log(&format!("codex: {e}")),
                     }
                 }
                 _ => {}
@@ -1447,13 +1495,16 @@ fn run_planning_post_install(roots: &[(&Path, &str)], home: &Path, confirms: &mu
     match plan_migration::migrate_legacy_plans(&target_paths, home) {
         Ok(outcome) => {
             for plan in &outcome.migrated {
-                println!("Migrated plan: -> {}", plan.display());
+                sink.log(&format!("Migrated plan: -> {}", plan.display()));
             }
             for (plan, reason) in &outcome.blocked {
-                println!("Plan migration blocked: {}: {reason}", plan.display());
+                sink.log(&format!(
+                    "Plan migration blocked: {}: {reason}",
+                    plan.display()
+                ));
             }
         }
-        Err(e) => println!("migrate-plans: {e}"),
+        Err(e) => sink.log(&format!("migrate-plans: {e}")),
     }
 }
 
@@ -1462,8 +1513,9 @@ fn run_interactive_shell_post_install(
     source: &Path,
     home: &Path,
     confirms: &mut Confirms,
+    sink: &mut dyn ui::progress::Sink,
 ) {
-    println!("== interactive-shell execution permission ==");
+    sink.log("== interactive-shell execution permission ==");
     let claude_roots: Vec<&Path> = roots
         .iter()
         .filter(|(_, k)| *k == "claude")
@@ -1487,38 +1539,42 @@ fn run_interactive_shell_post_install(
                     &bins.to_string_lossy(),
                     home,
                 ) {
-                    Ok(outcome) => print_permission_outcome(
-                        "claude-code",
-                        "interactive-shell grant already in place",
-                        outcome,
-                    ),
-                    Err(e) => println!("claude-code: {e}"),
+                    Ok(outcome) => {
+                        for line in permission_outcome_lines(
+                            "claude-code",
+                            "interactive-shell grant already in place",
+                            outcome,
+                        ) {
+                            sink.log(&line);
+                        }
+                    }
+                    Err(e) => sink.log(&format!("claude-code: {e}")),
                 }
             }
         } else {
-            println!("  Left unchanged. A refused wrapper call reads as a broken tool, so");
-            println!("  expect the skill to be skipped in favour of a headless command.");
+            sink.log("  Left unchanged. A refused wrapper call reads as a broken tool, so");
+            sink.log("  expect the skill to be skipped in favour of a headless command.");
         }
         for target in &claude_roots {
             match plugins::install_tui_hint_plugin_claude(source, target) {
-                Ok(destination) => println!("Installed: {}", destination.display()),
-                Err(e) => println!("tui-hint-plugin: {e}"),
+                Ok(destination) => sink.log(&format!("Installed: {}", destination.display())),
+                Err(e) => sink.log(&format!("tui-hint-plugin: {e}")),
             }
         }
     }
     if roots.iter().any(|(_, k)| *k == "opencode") {
         match plugins::install_tui_hint_plugin_opencode(source, home) {
             Ok(plugins::OpencodePluginOutcome::Registered) => {
-                println!("opencode: added the tui-hint-plugin to the plugin array")
+                sink.log("opencode: added the tui-hint-plugin to the plugin array")
             }
             Ok(plugins::OpencodePluginOutcome::AlreadyRegistered) => {
-                println!("opencode: tui-hint-plugin already registered")
+                sink.log("opencode: tui-hint-plugin already registered")
             }
             Ok(plugins::OpencodePluginOutcome::NotShipped) => {}
             Ok(plugins::OpencodePluginOutcome::NotStrictJson) => {
-                println!("opencode: config is not strict JSON; register tui-hint-plugin by hand")
+                sink.log("opencode: config is not strict JSON; register tui-hint-plugin by hand")
             }
-            Err(e) => println!("tui-hint-plugin: {e}"),
+            Err(e) => sink.log(&format!("tui-hint-plugin: {e}")),
         }
     }
 }
@@ -1532,6 +1588,7 @@ fn run_editor_steering_and_gate_step(
     source: &Path,
     home: &Path,
     confirms: &mut Confirms,
+    sink: &mut dyn ui::progress::Sink,
 ) {
     let claude_roots: Vec<&Path> = roots
         .iter()
@@ -1541,14 +1598,14 @@ fn run_editor_steering_and_gate_step(
     if claude_roots.is_empty() {
         return;
     }
-    run_editor_steering_step(home, confirms);
+    run_editor_steering_step(home, confirms, sink);
     for target in &claude_roots {
         match plugins::install_editor_gate_plugin(source, target) {
-            Ok(destination) => println!(
+            Ok(destination) => sink.log(&format!(
                 "Installed: {} (gates sed -i/perl -i/heredoc writes behind a minted token)",
                 destination.display()
-            ),
-            Err(e) => println!("editor-gate-plugin: {e}"),
+            )),
+            Err(e) => sink.log(&format!("editor-gate-plugin: {e}")),
         }
     }
 }
@@ -1563,62 +1620,71 @@ fn run_editor_steering_and_gate_step(
 /// explicit opposing instruction in the project's own CLAUDE.md/AGENTS.md.
 /// The two settings below are the only reliable way found to stop it --
 /// ordinary prompting does not.
-fn run_editor_steering_step(home: &Path, confirms: &mut Confirms) {
-    println!();
-    println!("== ai-text-editor tool steering ==");
-    println!(
+fn run_editor_steering_step(
+    home: &Path,
+    confirms: &mut Confirms,
+    sink: &mut dyn ui::progress::Sink,
+) {
+    sink.log("");
+    sink.log("== ai-text-editor tool steering ==");
+    sink.log(
         "  Claude Code regularly injects an instruction into the agent's own context, steering \
          it toward sed, heredocs, and short shell scripts instead of a real editor. It is not \
          something you asked for, and it is not visible in your own prompt or in \
          CLAUDE.md/AGENTS.md -- an explicit opposing instruction there does not reliably win: \
          this repeats often enough that it routinely overrides it. While it is active, the \
-         ai-text-editor MCP is usually skipped entirely, and these are what that costs:"
+         ai-text-editor MCP is usually skipped entirely, and these are what that costs:",
     );
-    println!(
+    sink.log(
         "    - an in-place sed rewrites the file and exits 0 whether or not the pattern \
-         matched, so a mistype is indistinguishable from success"
+         matched, so a mistype is indistinguishable from success",
     );
-    println!(
+    sink.log(
         "    - a script heredoc stacks the shell's escaping on top of the language's on top of \
-         the target file's syntax"
+         the target file's syntax",
     );
-    println!(
+    sink.log(
         "    - neither verifies what it replaces, while the editor's expected_text refuses on \
-         mismatch and its journal survives a git checkout"
+         mismatch and its journal survives a git checkout",
     );
-    println!(
+    sink.log(
         "  The only reliable way to stop it is one of the two settings below -- strongly \
-         recommended:"
+         recommended:",
     );
-    println!("    CLAUDE_CODE_THRIFTY_SONIC=false  the instruction is not injected at all");
-    println!(
+    sink.log("    CLAUDE_CODE_THRIFTY_SONIC=false  the instruction is not injected at all");
+    sink.log(
         "    CLAUDE_CODE_COZY_TEAPOT=relaxed  softer wording that leaves the choice to the \
-         agent, so the editor still competes"
+         agent, so the editor still competes",
     );
     if confirms.ask("Turn the instruction off (env CLAUDE_CODE_THRIFTY_SONIC=false)? [recommended]")
     {
-        apply_claude_env_setting("CLAUDE_CODE_THRIFTY_SONIC", "false", home);
+        apply_claude_env_setting("CLAUDE_CODE_THRIFTY_SONIC", "false", home, sink);
         return;
     }
     if confirms.ask("Soften it instead (env CLAUDE_CODE_COZY_TEAPOT=relaxed)?") {
-        apply_claude_env_setting("CLAUDE_CODE_COZY_TEAPOT", "relaxed", home);
+        apply_claude_env_setting("CLAUDE_CODE_COZY_TEAPOT", "relaxed", home, sink);
         return;
     }
-    println!("  Left unchanged. Expect the editor to be bypassed for sed and heredocs.");
+    sink.log("  Left unchanged. Expect the editor to be bypassed for sed and heredocs.");
 }
 
-fn apply_claude_env_setting(key: &str, value: &str, home: &Path) {
+fn apply_claude_env_setting(
+    key: &str,
+    value: &str,
+    home: &Path,
+    sink: &mut dyn ui::progress::Sink,
+) {
     match permissions::claude_env_setting(key, value, home) {
-        Ok(permissions::EnvSettingOutcome::NoConfigFile) => {
-            println!("  claude-code: no settings.json found; set env.{key} to \"{value}\" by hand")
-        }
+        Ok(permissions::EnvSettingOutcome::NoConfigFile) => sink.log(&format!(
+            "  claude-code: no settings.json found; set env.{key} to \"{value}\" by hand"
+        )),
         Ok(permissions::EnvSettingOutcome::AlreadySet) => {
-            println!("  claude-code: env.{key} is already \"{value}\"")
+            sink.log(&format!("  claude-code: env.{key} is already \"{value}\""))
         }
         Ok(permissions::EnvSettingOutcome::Set) => {
-            println!("  claude-code: set env.{key} to \"{value}\"")
+            sink.log(&format!("  claude-code: set env.{key} to \"{value}\""))
         }
-        Err(e) => println!("  claude-code: {e}"),
+        Err(e) => sink.log(&format!("  claude-code: {e}")),
     }
 }
 
@@ -2906,17 +2972,30 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
         }
         Some(selected) => {
             let names: Vec<String> = selected.iter().map(|(name, _)| name.clone()).collect();
+            // Whether each selected skill already has a destination on disk
+            // under the primary target (`target`, the same single-root
+            // simplification `SkillEntry.installed` already makes) --
+            // `ui::progress::run`'s own skill-list rows use this to tell an
+            // install from an update, known up front rather than something
+            // the run itself discovers.
+            let progress_skills: Vec<(String, bool)> = names
+                .iter()
+                .map(|name| {
+                    let installed = target.join(name).join("SKILL.md").is_file();
+                    (name.clone(), installed)
+                })
+                .collect();
             let mut picked = IntegrationSelection::default();
             for (name, mode) in &selected {
                 picked.per_skill.insert(name.clone(), mode.clone());
             }
             let home = home_dir_opt().ok_or("interactive: HOME is not set")?;
 
-            // The actual install loop, plus the one post-install step this
-            // screen also covers (worktrees permissions), run on a
+            // The actual install loop, plus EVERY post-install step (not
+            // just worktrees permissions -- see `ui::progress`'s own module
+            // doc comment for why this no longer stops there), run on a
             // background thread while `ui::progress::run` drives the
-            // graphical screen on this one -- see that module's own doc
-            // comment for the scope boundary. Everything captured here is
+            // graphical screen on this one. Everything captured here is
             // owned/cloned, never borrowed, since the closure must be
             // `'static` to cross the thread boundary.
             let source_for_thread = source.clone();
@@ -2924,9 +3003,9 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             let names_for_thread = names.clone();
             let home_for_thread = home.clone();
             let picked_for_thread = picked.clone();
-            let outcome: Result<(Vec<String>, Summary, bool), String> = ui::progress::run(
-                &names,
-                move |sink, bridge| -> Result<(Vec<String>, Summary, bool), String> {
+            let outcome: Result<Summary, String> = ui::progress::run(
+                &progress_skills,
+                move |sink, bridge| -> Result<Summary, String> {
                     let mut confirms = match bridge {
                         Some(bridge) => Confirms::with_bridge(yes, bridge),
                         None => Confirms::new(yes),
@@ -2957,28 +3036,20 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                             &home_for_thread,
                             sink,
                         );
+                        run_remaining_post_install_steps(
+                            &roots_for_thread,
+                            &source_for_thread,
+                            &installed_skills,
+                            &mut confirms,
+                            &known_roots,
+                            &home_for_thread,
+                            sink,
+                        );
                     }
-                    Ok((installed_skills, summary, confirms.yes))
+                    Ok(summary)
                 },
             );
-            let (installed_skills, summary, final_yes) = outcome?;
-
-            // The graphical screen has now closed and the terminal is
-            // restored; every OTHER post-install step still prints plainly,
-            // exactly as it always has -- `final_yes` carries an "a" (all)
-            // answer given during the worktrees step forward, so it is not
-            // asked again here.
-            let mut confirms = Confirms::new(final_yes);
-            if let Some(known_roots) = known_agent_roots(&roots) {
-                run_remaining_post_install_steps(
-                    &roots,
-                    &source,
-                    &installed_skills,
-                    &mut confirms,
-                    &known_roots,
-                    &home,
-                );
-            }
+            let summary = outcome?;
             let root_paths: Vec<PathBuf> = roots.iter().map(|(p, _)| p.clone()).collect();
             summary.print(&root_paths, yes);
             // A partial install cannot read as success in CI.
@@ -3008,7 +3079,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let target = root.path().join("planning-agent");
         assert!(!target.exists());
-        ensure_dir(&target).unwrap();
+        ensure_dir(&target, &mut ui::progress::PlainSink).unwrap();
         assert!(target.is_dir());
     }
 
@@ -3017,7 +3088,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let target = root.path().join("plans");
         std::fs::create_dir_all(&target).unwrap();
-        ensure_dir(&target).unwrap();
+        ensure_dir(&target, &mut ui::progress::PlainSink).unwrap();
         assert!(target.is_dir());
     }
 
@@ -3048,7 +3119,13 @@ mod tests {
         let translator: &dyn profiles::ProfileTranslator = &profiles::ClaudeTranslator;
         let translators = [translator];
 
-        install_profiles_leniently(&mixed, source.path(), home.path(), &translators);
+        install_profiles_leniently(
+            &mixed,
+            source.path(),
+            home.path(),
+            &translators,
+            &mut ui::progress::PlainSink,
+        );
 
         assert!(home.path().join(".claude/agents/chris.md").is_file());
     }
@@ -3083,7 +3160,12 @@ mod tests {
         std::fs::create_dir_all(&skill_root).unwrap();
         let roots = [(skill_root.as_path(), "claude")];
 
-        run_profiles_post_install(&roots, source.path(), home.path());
+        run_profiles_post_install(
+            &roots,
+            source.path(),
+            home.path(),
+            &mut ui::progress::PlainSink,
+        );
 
         assert!(
             home.path().join(".claude/agents/chris.md").is_file(),
