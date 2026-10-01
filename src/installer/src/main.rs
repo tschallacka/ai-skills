@@ -2843,6 +2843,30 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 .map(|s| s.description.to_string())
                 .unwrap_or_default();
             let destination = target.join(&name);
+            // One `installed`/`version_status` answer per SELECTED root
+            // (not just the first), since they are resolved independently
+            // and can genuinely differ -- an older install left on
+            // `opencode` while `claude` already got a newer one, say.
+            // `render.rs`'s STATUS section only shows this breakdown when
+            // more than one root was actually selected this run; `target`
+            // (roots[0]) still carries the single-root case below exactly
+            // as before.
+            let per_root: Vec<ui::model::SkillRootStatus> = roots
+                .iter()
+                .map(|(root, kind)| {
+                    let root_destination = root.join(&name);
+                    let root_installed = root_destination.join("SKILL.md").is_file();
+                    ui::model::SkillRootStatus {
+                        label: kind.clone().unwrap_or_else(|| root.display().to_string()),
+                        installed: root_installed,
+                        version_status: cli_mode::version_status(
+                            &source,
+                            &root_destination,
+                            root_installed,
+                        ),
+                    }
+                })
+                .collect();
             let installed = destination.join("SKILL.md").is_file();
             let version_status = cli_mode::version_status(&source, &destination, installed);
             let status = requirements::skill_status(&source, &name);
@@ -2861,6 +2885,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 offered_modes,
                 mode,
                 version_status,
+                per_root,
             }
         })
         .collect();

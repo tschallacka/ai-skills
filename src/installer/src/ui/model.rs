@@ -26,6 +26,30 @@ pub struct SkillEntry {
     /// `cli_mode::version_status`, and `render.rs`'s STATUS section shows it
     /// only when `installed` is true (see `VersionStatus::NotInstalled`'s
     /// own doc comment for why that case never needs its own display line).
+    /// This is specifically the FIRST selected root's own answer -- see
+    /// `per_root` for every selected root's own, which can differ (a skill
+    /// installed for `claude` can be a different version, or not installed
+    /// at all, under `opencode`).
+    pub version_status: VersionStatus,
+    /// `installed`/`version_status` broken out per selected root, in the
+    /// same order the run resolved them -- empty when `main.rs` built this
+    /// entry against only one target (nothing to break out), in which case
+    /// `render.rs`'s STATUS section shows the flat `installed`/
+    /// `version_status` pair above instead of this list. A root a skill
+    /// offers no real choice between -- most runs target exactly one -- so
+    /// the common case stays the plain two-line STATUS it always was.
+    pub per_root: Vec<SkillRootStatus>,
+}
+
+/// One selected root's own `installed`/`version_status` answer for a skill
+/// -- see `SkillEntry.per_root`. `label` is the root's own agent kind
+/// (`"claude"`/`"opencode"`/`"codex"`) when known, or its raw path
+/// otherwise (an explicit `--target` the run could not classify as a known
+/// agent still deserves a per-root line, just named by where it is rather
+/// than what it is).
+pub struct SkillRootStatus {
+    pub label: String,
+    pub installed: bool,
     pub version_status: VersionStatus,
 }
 
@@ -42,6 +66,16 @@ pub struct PickerState {
     pub scroll: usize,
     pub focus: Focus,
     pub info_scroll: usize,
+    /// Which DETAILS-pane control has keyboard focus, as `(row, col)` into
+    /// the pane's own focusable-control grid (`mod::info_focus_rows` builds
+    /// it fresh from `render::info_layout` each time, since which controls
+    /// exist -- ACTIONS, the mode toggle, the plugin buttons -- varies per
+    /// skill). `None` whenever `focus` is `Focus::List`, or right after a
+    /// plain click into the DETAILS text that landed on no control. Always
+    /// `Some` the moment `focus` becomes `Focus::Info` through keyboard
+    /// navigation (Tab or Right), since the plugin buttons row means the
+    /// grid is never empty -- `(0, 0)` is always a valid starting cell.
+    pub info_focus: Option<(usize, usize)>,
     pub message: Vec<String>,
     pub done: bool,
     pub confirmed: bool,
@@ -73,6 +107,7 @@ impl PickerState {
             scroll: 0,
             focus: Focus::List,
             info_scroll: 0,
+            info_focus: None,
             message: Vec::new(),
             done: false,
             confirmed: false,
@@ -166,6 +201,13 @@ impl PickerState {
             Focus::Info => Focus::List,
         };
         self.info_scroll = 0;
+        // Entering Info always starts keyboard focus at the pane's first
+        // control -- the plugin buttons row means that grid is never empty,
+        // so `(0, 0)` is always a valid cell to land on. Leaving it clears
+        // the focus rather than remembering it, so returning to Info later
+        // (by Tab or by Right) always starts predictably from the top
+        // rather than wherever a much earlier visit left off.
+        self.info_focus = (self.focus == Focus::Info).then_some((0, 0));
     }
 
     /// Scroll follows the cursor: never let the cursor run off either edge
@@ -353,6 +395,7 @@ mod tests {
                 offered_modes: Vec::new(),
                 mode: "skill".to_string(),
                 version_status: VersionStatus::NotInstalled,
+                per_root: Vec::new(),
             })
             .collect()
     }

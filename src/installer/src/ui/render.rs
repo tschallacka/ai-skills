@@ -91,6 +91,21 @@ fn version_status_word(status: crate::cli_mode::VersionStatus) -> Option<&'stati
     }
 }
 
+/// One `SkillRootStatus`'s own summary word, for the per-root STATUS
+/// breakdown -- unlike `version_status_word`, this always returns
+/// something: a root a skill is not installed on says so plainly rather
+/// than being left out of the list (silently dropping it would read as "no
+/// answer for this root" rather than "not installed here").
+fn root_status_word(installed: bool, version_status: crate::cli_mode::VersionStatus) -> String {
+    if !installed {
+        return "not installed".to_string();
+    }
+    match version_status_word(version_status) {
+        Some(word) => format!("installed, {word}"),
+        None => "installed".to_string(),
+    }
+}
+
 pub(crate) fn title_bar_text(state: &PickerState) -> String {
     format!(
         " AI-SKILLS INSTALLER  {}/{} installed  {} selected ",
@@ -256,6 +271,15 @@ pub(crate) fn hint_click_at(
         .and_then(|(seg, _)| seg.click)
 }
 
+/// The 0-based content-column span of a list row's own `[x]`/`[ ]` checkbox
+/// -- column 0 is the cursor marker (`>`/` `), 1..4 the checkbox glyph
+/// itself, the rest the skill's name. `mod::handle_key` uses this to toggle
+/// selection only when a click actually lands on the checkbox, rather than
+/// anywhere in the row: a click elsewhere still moves the cursor and focus
+/// there, but leaves what is checked alone, the same way clicking a skill's
+/// name to read about it in DETAILS should not also silently deselect it.
+pub(crate) const LIST_ROW_CHECKBOX_COLS: std::ops::Range<usize> = 1..4;
+
 /// The state suffix is appended after the name rather than inserted before
 /// it, so an Ok skill's row (the common case, and the only case in most
 /// existing frame-shape tests) renders byte-identical to before this state
@@ -379,13 +403,10 @@ fn build_info(state: &PickerState, width: usize, unicode: bool) -> (Vec<String>,
     }
     lines.push(pad("", width));
     lines.push(pad("STATUS", width));
-    lines.push(pad(
-        &format!(
-            "  installed      {}",
-            if skill.installed { "yes" } else { "no" }
-        ),
-        width,
-    ));
+    // A skill's own requirement state (the host either has `bash`/`gh`/etc.
+    // or it does not) is the same regardless of which root is being looked
+    // at, so it always gets exactly one line, ahead of whichever of the two
+    // shapes below follows it.
     lines.push(pad(
         &format!(
             "  state          {}",
@@ -397,10 +418,37 @@ fn build_info(state: &PickerState, width: usize, unicode: bool) -> (Vec<String>,
         ),
         width,
     ));
-    // Omitted for `NotInstalled`: with nothing on disk to compare against,
-    // a version line would just repeat "installed no" in different words.
-    if let Some(word) = version_status_word(skill.version_status) {
-        lines.push(pad(&format!("  version        {word}"), width));
+    if skill.per_root.len() > 1 {
+        // More than one root was selected this run, and a skill's own
+        // installed/version answer is resolved PER ROOT (`main.rs` computes
+        // one against each), so they can genuinely differ -- opencode
+        // running an older copy than claude, say. The flat two-line shape
+        // below would have to pick one root to speak for all of them,
+        // silently hiding that divergence; this says so explicitly instead.
+        for root in &skill.per_root {
+            lines.push(pad(
+                &format!(
+                    "  {:<14} {}",
+                    root.label,
+                    root_status_word(root.installed, root.version_status)
+                ),
+                width,
+            ));
+        }
+    } else {
+        lines.push(pad(
+            &format!(
+                "  installed      {}",
+                if skill.installed { "yes" } else { "no" }
+            ),
+            width,
+        ));
+        // Omitted for `NotInstalled`: with nothing on disk to compare
+        // against, a version line would just repeat "installed no" in
+        // different words.
+        if let Some(word) = version_status_word(skill.version_status) {
+            lines.push(pad(&format!("  version        {word}"), width));
+        }
     }
     // Every requirement this skill carries, except a tool this project
     // builds and installs itself (`is_self_provided`) -- shown here, that
@@ -496,7 +544,7 @@ fn build_info(state: &PickerState, width: usize, unicode: bool) -> (Vec<String>,
         lines.push(toggle_line);
     }
     lines.push(pad("", width));
-    let (install_this_line, install_this_range) = install_this_button_line(width);
+    let (install_this_line, install_this_range) = install_this_button_line(width, skill.installed);
     let install_this_row = lines.len();
     lines.push(install_this_line);
     let (all_quit_line, install_all_range, quit_range) = install_all_and_quit_line(width);
@@ -695,20 +743,31 @@ fn action_buttons_line(width: usize) -> (String, (usize, usize), (usize, usize))
     )
 }
 
-const INSTALL_THIS_LABEL: &str = "[ Install/update this skill ]";
+const INSTALL_THIS_LABEL: &str = "[ Install this skill ]";
+const UPDATE_THIS_LABEL: &str = "[ Update this skill ]";
 const INSTALL_ALL_LABEL: &str = "[ Install/update all ]";
 const QUIT_LABEL: &str = "[ Quit ]";
 
 /// The single-button "install/update this skill" row -- its own line
 /// (rather than sharing one with the pair below it) since the mockup this
 /// was built from gives it that weight, and because a narrow DETAILS pane
-/// that cannot fit `INSTALL_THIS_LABEL` next to anything else at least still
-/// fits it alone. Hand-padded for the same truncate-with-ellipsis reason
-/// `action_buttons_line` already documents.
-fn install_this_button_line(width: usize) -> (String, (usize, usize)) {
-    let end = INSTALL_THIS_LABEL.chars().count();
+/// that cannot fit either label next to anything else at least still fits
+/// it alone. The verb itself follows `installed`: "Install" when nothing is
+/// on disk yet, "Update" once it is -- `state.install_only_cursor` (the
+/// action this button fires) runs the same install either way, but the
+/// WORD should say what it will actually feel like to the person clicking
+/// it, not use one verb for both a fresh install and a reinstall of
+/// something already there. Hand-padded for the same truncate-with-ellipsis
+/// reason `action_buttons_line` already documents.
+fn install_this_button_line(width: usize, installed: bool) -> (String, (usize, usize)) {
+    let label = if installed {
+        UPDATE_THIS_LABEL
+    } else {
+        INSTALL_THIS_LABEL
+    };
+    let end = label.chars().count();
     let trailing = " ".repeat(width.saturating_sub(end));
-    (format!("{INSTALL_THIS_LABEL}{trailing}"), (0, end))
+    (format!("{label}{trailing}"), (0, end))
 }
 
 /// The bulk "install/update all" and "quit" buttons, side by side -- the
@@ -739,25 +798,47 @@ fn install_all_and_quit_line(width: usize) -> (String, (usize, usize), (usize, u
 /// table's own status cell gets colored text (green "ok", red "missing")
 /// rather than a background block, since it is a table value, not a
 /// control. Any other row passes through unchanged.
+///
+/// `info_focus` is `PickerState.info_focus`'s own `(row, col)` into the
+/// same focusable-control grid `mod::info_focus_rows` builds -- reverse
+/// video (via `colorize_button`'s own `focused` flag) marks whichever
+/// control it names, the same "this is where keyboard input lands" treatment
+/// the skill list's own cursor row already gets, since a button a person
+/// tabbed to but cannot SEE is not meaningfully navigable. Grid rows are
+/// counted here in the exact order `info_focus_rows` builds them (ACTIONS,
+/// then the mode toggle, then the plugin buttons' own two rows) -- the two
+/// must agree, or a focus a keypress moved would get drawn on the wrong row.
 fn colorize_info_row(
     plain: String,
     row_index: usize,
     info_layout: &InfoLayout,
     active_mode: &str,
     mode: ColorMode,
+    info_focus: Option<(usize, usize)>,
 ) -> String {
     if mode == ColorMode::None {
         return plain;
     }
+    let mut grid_row = 0;
     if let Some(actions) = &info_layout.actions {
         if actions.row == row_index {
-            return colorize_action_buttons_row(&plain, actions, mode);
+            let focused_col = info_focus.filter(|(r, _)| *r == grid_row).map(|(_, c)| c);
+            return colorize_action_buttons_row(&plain, actions, mode, focused_col);
         }
+        grid_row += 1;
     }
     if let Some(toggle) = &info_layout.mode_toggle {
         if toggle.row == row_index {
-            return colorize_mode_toggle_row(&plain, &toggle.segments, active_mode, mode);
+            let focused_col = info_focus.filter(|(r, _)| *r == grid_row).map(|(_, c)| c);
+            return colorize_mode_toggle_row(
+                &plain,
+                &toggle.segments,
+                active_mode,
+                mode,
+                focused_col,
+            );
         }
+        grid_row += 1;
     }
     if let Some(cell) = info_layout
         .status_cells
@@ -768,16 +849,20 @@ fn colorize_info_row(
     }
     if let Some(buttons) = &info_layout.plugin_buttons {
         if buttons.install_this_row == row_index {
+            let focused = info_focus == Some((grid_row, 0));
             return colorize_segment(
                 &plain,
                 buttons.install_this.0,
                 buttons.install_this.1,
                 INSTALL_THIS_BUTTON_BG,
                 mode,
+                focused,
             );
         }
+        grid_row += 1;
         if buttons.all_and_quit_row == row_index {
-            return colorize_install_all_and_quit_row(&plain, buttons, mode);
+            let focused_col = info_focus.filter(|(r, _)| *r == grid_row).map(|(_, c)| c);
+            return colorize_install_all_and_quit_row(&plain, buttons, mode, focused_col);
         }
     }
     plain
@@ -794,20 +879,25 @@ fn colorize_segment(
     end: usize,
     bg: (u8, u8, u8),
     mode: ColorMode,
+    focused: bool,
 ) -> String {
     let chars: Vec<char> = plain.chars().collect();
     let mut out = String::new();
     out.extend(chars[..start].iter());
     let seg: String = chars[start..end].iter().collect();
-    out.push_str(&colorize_button(mode, &seg, bg, false));
+    out.push_str(&colorize_button(mode, &seg, bg, focused));
     out.extend(chars[end..].iter());
     out
 }
 
+/// `focused_col`: `Some(0)` marks "Install dependencies", `Some(1)` marks
+/// "Check dependencies again" -- the column index `info_focus_rows` gives
+/// each within this row.
 fn colorize_action_buttons_row(
     plain: &str,
     actions: &ActionButtonsLayout,
     mode: ColorMode,
+    focused_col: Option<usize>,
 ) -> String {
     let chars: Vec<char> = plain.chars().collect();
     let mut out = String::new();
@@ -815,7 +905,12 @@ fn colorize_action_buttons_row(
     let dep_seg: String = chars[actions.dep_hint.0..actions.dep_hint.1]
         .iter()
         .collect();
-    out.push_str(&colorize_button(mode, &dep_seg, DEP_HINT_BUTTON_BG, false));
+    out.push_str(&colorize_button(
+        mode,
+        &dep_seg,
+        DEP_HINT_BUTTON_BG,
+        focused_col == Some(0),
+    ));
     out.extend(chars[actions.dep_hint.1..actions.check_again.0].iter());
     let chk_seg: String = chars[actions.check_again.0..actions.check_again.1]
         .iter()
@@ -824,16 +919,20 @@ fn colorize_action_buttons_row(
         mode,
         &chk_seg,
         CHECK_AGAIN_BUTTON_BG,
-        false,
+        focused_col == Some(1),
     ));
     out.extend(chars[actions.check_again.1..].iter());
     out
 }
 
+/// `focused_col`: `Some(0)` marks "Install/update all", `Some(1)` marks
+/// "Quit", the same column-index convention `colorize_action_buttons_row`
+/// uses for its own pair.
 fn colorize_install_all_and_quit_row(
     plain: &str,
     buttons: &PluginButtonsLayout,
     mode: ColorMode,
+    focused_col: Option<usize>,
 ) -> String {
     let chars: Vec<char> = plain.chars().collect();
     let mut out = String::new();
@@ -845,11 +944,16 @@ fn colorize_install_all_and_quit_row(
         mode,
         &all_seg,
         INSTALL_ALL_BUTTON_BG,
-        false,
+        focused_col == Some(0),
     ));
     out.extend(chars[buttons.install_all.1..buttons.quit.0].iter());
     let quit_seg: String = chars[buttons.quit.0..buttons.quit.1].iter().collect();
-    out.push_str(&colorize_button(mode, &quit_seg, QUIT_BUTTON_BG, false));
+    out.push_str(&colorize_button(
+        mode,
+        &quit_seg,
+        QUIT_BUTTON_BG,
+        focused_col == Some(1),
+    ));
     out.extend(chars[buttons.quit.1..].iter());
     out
 }
@@ -876,24 +980,31 @@ fn colorize_status_cell(
     out
 }
 
+/// `focused_col`: an index into `segments` -- the keyboard-focused segment
+/// gets reverse video regardless of whether it is also the ACTIVE mode;
+/// `colorize_button`'s own `focused` flag already wins outright over a
+/// background color, so an inactive-but-focused segment does not need its
+/// own background to look selected.
 fn colorize_mode_toggle_row(
     plain: &str,
     segments: &[(String, usize, usize)],
     active: &str,
     mode: ColorMode,
+    focused_col: Option<usize>,
 ) -> String {
     let chars: Vec<char> = plain.chars().collect();
     let mut out = String::new();
     let mut i = 0;
-    for (mode_name, start, end) in segments {
+    for (index, (mode_name, start, end)) in segments.iter().enumerate() {
         out.extend(chars[i..*start].iter());
         let seg_text: String = chars[*start..*end].iter().collect();
-        if mode_name == active {
+        let focused = focused_col == Some(index);
+        if mode_name == active || focused {
             out.push_str(&colorize_button(
                 mode,
                 &seg_text,
                 mode_active_bg(mode_name),
-                false,
+                focused,
             ));
         } else {
             out.push_str(&seg_text);
@@ -1082,8 +1193,14 @@ fn render_wide(state: &PickerState, layout: &Layout, color_mode: ColorMode, out:
             .get(info_index)
             .cloned()
             .unwrap_or_else(|| pad("", layout.right_w));
-        let info_cell =
-            colorize_info_row(info_cell, info_index, &info_meta, active_mode, color_mode);
+        let info_cell = colorize_info_row(
+            info_cell,
+            info_index,
+            &info_meta,
+            active_mode,
+            color_mode,
+            state.info_focus,
+        );
         out.push(format!(
             "{}{}{}{info_cell}{}",
             b.vertical,
@@ -1139,6 +1256,7 @@ fn render_narrow(
                 &info_meta,
                 active_mode,
                 color_mode,
+                state.info_focus,
             )
         } else if state.scroll + body < state.skills.len() {
             list_row(state, state.scroll + body, layout.left_w)
@@ -1177,6 +1295,7 @@ mod tests {
                 offered_modes: Vec::new(),
                 mode: "skill".to_string(),
                 version_status: crate::cli_mode::VersionStatus::NotInstalled,
+                per_root: Vec::new(),
             })
             .collect()
     }
@@ -1772,6 +1891,70 @@ mod tests {
     }
 
     #[test]
+    fn a_single_selected_root_still_shows_the_flat_installed_and_version_lines() {
+        use crate::ui::model::SkillRootStatus;
+        let mut list = skills(&["todo"]);
+        list[0].installed = true;
+        list[0].version_status = crate::cli_mode::VersionStatus::UpToDate;
+        list[0].per_root = vec![SkillRootStatus {
+            label: "claude".to_string(),
+            installed: true,
+            version_status: crate::cli_mode::VersionStatus::UpToDate,
+        }];
+        let state = PickerState::new(list);
+        let lines = info_lines(&state, 70, false);
+        assert!(lines.iter().any(|l| l.contains("installed      yes")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("version        up to date")));
+        assert!(!lines.iter().any(|l| l.contains("claude")));
+    }
+
+    #[test]
+    fn more_than_one_selected_root_breaks_out_each_roots_own_status() {
+        use crate::cli_mode::VersionStatus;
+        use crate::ui::model::SkillRootStatus;
+        let mut list = skills(&["todo"]);
+        list[0].per_root = vec![
+            SkillRootStatus {
+                label: "claude".to_string(),
+                installed: true,
+                version_status: VersionStatus::UpToDate,
+            },
+            SkillRootStatus {
+                label: "opencode".to_string(),
+                installed: true,
+                version_status: VersionStatus::WouldUpdate,
+            },
+            SkillRootStatus {
+                label: "codex".to_string(),
+                installed: false,
+                version_status: VersionStatus::NotInstalled,
+            },
+        ];
+        let state = PickerState::new(list);
+        let lines = info_lines(&state, 70, false);
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("claude") && l.contains("installed, up to date")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("opencode") && l.contains("installed, would update")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("codex") && l.contains("not installed")));
+        // The flat shape (a bare "installed"/"version" pair with no root
+        // name) must not also appear once the breakdown has taken over --
+        // checked as a line PREFIX, since `pad`'s own trailing spaces would
+        // otherwise make a plain `contains("installed ")` match the
+        // "codex" row's own "not installed" (itself followed by padding).
+        assert!(!lines
+            .iter()
+            .any(|l| l.trim_start().starts_with("installed ")));
+        assert!(!lines.iter().any(|l| l.trim_start().starts_with("version ")));
+    }
+
+    #[test]
     fn plugin_buttons_are_always_present_even_with_nothing_missing_and_no_modes() {
         // "todo" here has no requirements and no offered modes -- the case
         // where ACTIONS and INTEGRATION MODE both stay hidden -- yet the
@@ -1779,13 +1962,21 @@ mod tests {
         // conditional on this skill's own dependency state.
         let state = PickerState::new(skills(&["todo"]));
         let lines = info_lines(&state, 70, false);
-        assert!(lines
-            .iter()
-            .any(|l| l.contains("[ Install/update this skill ]")));
+        assert!(lines.iter().any(|l| l.contains("[ Install this skill ]")));
         assert!(lines.iter().any(|l| l.contains("[ Install/update all ]")));
         assert!(lines.iter().any(|l| l.contains("[ Quit ]")));
         let layout = info_layout(&state, 70, false);
         assert!(layout.plugin_buttons.is_some());
+    }
+
+    #[test]
+    fn the_install_this_button_says_update_once_the_skill_is_installed() {
+        let mut list = skills(&["todo"]);
+        list[0].installed = true;
+        let state = PickerState::new(list);
+        let lines = info_lines(&state, 70, false);
+        assert!(lines.iter().any(|l| l.contains("[ Update this skill ]")));
+        assert!(!lines.iter().any(|l| l.contains("Install this skill")));
     }
 
     #[test]
@@ -1800,7 +1991,7 @@ mod tests {
             .skip(buttons.install_this.0)
             .take(buttons.install_this.1 - buttons.install_this.0)
             .collect();
-        assert_eq!(this_slice, "[ Install/update this skill ]");
+        assert_eq!(this_slice, "[ Install this skill ]");
         let all_slice: String = lines[buttons.all_and_quit_row]
             .chars()
             .skip(buttons.install_all.0)
@@ -1822,7 +2013,7 @@ mod tests {
         let frame = render_frame(&state, &layout, ColorMode::TrueColor);
         let this_row = frame
             .iter()
-            .find(|l| l.contains("Install/update this skill") && l.contains("\x1b["))
+            .find(|l| l.contains("Install this skill") && l.contains("\x1b["))
             .expect("a colored install-this row");
         assert!(this_row.contains("\x1b[48;2;50;140;70m"));
         let all_quit_row = frame
@@ -1831,6 +2022,29 @@ mod tests {
             .expect("a colored install-all/quit row");
         assert!(all_quit_row.contains("\x1b[48;2;170;130;40m"));
         assert!(all_quit_row.contains("\x1b[48;2;150;50;50m"));
+    }
+
+    #[test]
+    fn the_keyboard_focused_plugin_button_is_reverse_video() {
+        let mut state = PickerState::new(skills(&["todo"]));
+        // Grid row 1 is the all-and-quit row for a skill with no ACTIONS
+        // and no mode toggle (plugin buttons are the only rows); column 1
+        // is "Quit".
+        state.info_focus = Some((1, 1));
+        let layout = layout_for(80, 24, &state, true);
+        let frame = render_frame(&state, &layout, ColorMode::TrueColor);
+        let quit_row = frame
+            .iter()
+            .find(|l| l.contains("Quit"))
+            .expect("the all-and-quit row");
+        assert!(
+            quit_row.contains("\x1b[7m[ Quit ]"),
+            "the focused Quit button should be reverse video: {quit_row:?}"
+        );
+        assert!(
+            !quit_row.contains("\x1b[7m[ Install/update all ]"),
+            "the unfocused Install/update all button should not be: {quit_row:?}"
+        );
     }
 
     #[test]

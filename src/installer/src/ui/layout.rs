@@ -112,8 +112,15 @@ pub enum ClickTarget {
     /// necessarily skill 0) -- the same thing `state.scroll + row` already
     /// means everywhere else `list_rows` is used, so a caller adds
     /// `state.scroll` to reach an absolute skill index, exactly as
-    /// `list_cell` does.
-    ListRow(usize),
+    /// `list_cell` does. `col` is the 0-based content column within the
+    /// row (past the pane's own leading border), matching what
+    /// `render::list_row` actually draws: column 0 is the cursor marker,
+    /// 1..4 the `[x]`/`[ ]` checkbox, the rest the skill's name -- needed so
+    /// a click can be tested against the checkbox specifically rather than
+    /// "landed somewhere in this row" (B388: clicking anywhere in the row
+    /// used to toggle selection, which fought with using a click to move
+    /// focus into DETAILS without changing what was checked).
+    ListRow { row: usize, col: usize },
     /// A cell inside the details/info pane (only reachable at all in a wide
     /// layout, or a narrow one currently showing it), given as the 0-based
     /// row and column WITHIN THE PANE'S OWN CONTENT -- `row` is relative to
@@ -169,7 +176,10 @@ pub fn hit_test(
                 col: col - 1,
             })
         } else if body_row < layout.list_rows {
-            Some(ClickTarget::ListRow(body_row))
+            Some(ClickTarget::ListRow {
+                row: body_row,
+                col: col - 1,
+            })
         } else {
             None
         };
@@ -183,7 +193,10 @@ pub fn hit_test(
     let divider = layout.left_w + 1;
     if col < divider {
         return if body_row < layout.list_rows {
-            Some(ClickTarget::ListRow(body_row))
+            Some(ClickTarget::ListRow {
+                row: body_row,
+                col: col - 1,
+            })
         } else {
             None
         };
@@ -312,12 +325,12 @@ mod tests {
         let layout = compute(80, 24, &["todo", "bug-report"], true, 1, 1, false);
         assert_eq!(
             hit_test(&layout, 1, false, 2, 3),
-            Some(ClickTarget::ListRow(0))
+            Some(ClickTarget::ListRow { row: 0, col: 0 })
         );
         // the last column still inside the list pane (left_w = 22)
         assert_eq!(
             hit_test(&layout, 1, false, 23, 3),
-            Some(ClickTarget::ListRow(0))
+            Some(ClickTarget::ListRow { row: 0, col: 21 })
         );
     }
 
@@ -380,7 +393,7 @@ mod tests {
         let layout = compute(80, 24, &["todo", "bug-report"], true, 1, 1, false);
         assert_eq!(
             hit_test(&layout, 1, false, 2, 4),
-            Some(ClickTarget::ListRow(1))
+            Some(ClickTarget::ListRow { row: 1, col: 0 })
         );
     }
 
@@ -391,7 +404,7 @@ mod tests {
         // Info once focus moves there -- narrow shows one pane at a time.
         assert_eq!(
             hit_test(&layout, 1, false, 2, 3),
-            Some(ClickTarget::ListRow(0))
+            Some(ClickTarget::ListRow { row: 0, col: 0 })
         );
         assert_eq!(
             hit_test(&layout, 1, true, 2, 3),

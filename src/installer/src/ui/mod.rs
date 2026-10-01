@@ -168,23 +168,64 @@ fn handle_key(
             }
             let info_focused = layout.narrow && state.focus == Focus::Info;
             match layout::hit_test(layout, title_rows, info_focused, col, row) {
-                Some(layout::ClickTarget::ListRow(body_row)) => {
+                Some(layout::ClickTarget::ListRow { row: body_row, col }) => {
                     let index = state.scroll + body_row;
                     if index < state.skills.len() {
                         state.cursor = index;
-                        state.toggle(index);
                         state.focus = Focus::List;
+                        if render::LIST_ROW_CHECKBOX_COLS.contains(&col) {
+                            state.toggle(index);
+                        }
                     }
                 }
                 Some(layout::ClickTarget::Info { row, col }) => {
                     state.focus = Focus::Info;
+                    // A plain click does not try to work out which grid
+                    // cell (if any) it landed on -- `(0, 0)` is always
+                    // valid, and a subsequent arrow key starting over from
+                    // the pane's first control is a minor wrinkle next to
+                    // the alternative of a second copy of the row-matching
+                    // `info_focus_rows` already does.
+                    state.info_focus = Some((0, 0));
                     handle_info_click(state, row + state.info_scroll, col, layout, source_root);
                 }
                 None => {}
             }
         }
-        Key::Up | Key::Char('k') => state.move_by(-1),
-        Key::Down | Key::Char('j') => state.move_by(1),
+        Key::Up | Key::Char('k') => {
+            if state.focus == Focus::Info {
+                let rows = info_focus_rows(state, layout);
+                move_info_focus_row(state, &rows, -1);
+            } else {
+                state.move_by(-1);
+            }
+        }
+        Key::Down | Key::Char('j') => {
+            if state.focus == Focus::Info {
+                let rows = info_focus_rows(state, layout);
+                move_info_focus_row(state, &rows, 1);
+            } else {
+                state.move_by(1);
+            }
+        }
+        // Right from the list enters DETAILS at its first control, the same
+        // destination Tab lands on -- a second way in for someone already
+        // reaching for arrow keys. From DETAILS, Right/Left move within the
+        // focused control's own row; Left at that row's first column exits
+        // back to the list, since there is nothing further left than it --
+        // the "natural" grid navigation the picker's own buttons needed.
+        Key::Right if state.focus == Focus::List => {
+            state.focus = Focus::Info;
+            state.info_focus = Some((0, 0));
+        }
+        Key::Right => {
+            let rows = info_focus_rows(state, layout);
+            move_info_focus_col(state, &rows, 1);
+        }
+        Key::Left if state.focus == Focus::Info => {
+            let rows = info_focus_rows(state, layout);
+            move_info_focus_col(state, &rows, -1);
+        }
         Key::PageUp => state.move_by(-(layout.body_rows as isize)),
         Key::PageDown => state.move_by(layout.body_rows as isize),
         Key::Home => state.go_home(),
@@ -199,7 +240,22 @@ fn handle_key(
                 .saturating_sub(layout.body_rows);
             state.go_end(max_scroll);
         }
-        Key::Enter | Key::Space => state.toggle(state.cursor),
+        // With a DETAILS control focused, Enter/Space activates it -- the
+        // same effect a click there already has, via the same
+        // `handle_info_click` dispatch. Otherwise unchanged: toggles the
+        // skill under the cursor, whichever pane holds focus.
+        Key::Enter | Key::Space => {
+            if state.focus == Focus::Info {
+                if let Some((row, col)) = state.info_focus {
+                    let rows = info_focus_rows(state, layout);
+                    if let Some(&(abs_row, abs_col)) = rows.get(row).and_then(|r| r.get(col)) {
+                        handle_info_click(state, abs_row, abs_col, layout, source_root);
+                    }
+                    return;
+                }
+            }
+            state.toggle(state.cursor);
+        }
         Key::Tab | Key::ShiftTab => state.toggle_focus(),
         Key::Char('a') => state.select_all(),
         Key::Char('n') => state.select_none(),
@@ -315,6 +371,93 @@ fn handle_info_click(
     }
 }
 
+/// The DETAILS pane's own keyboard-focusable controls, grouped into rows
+/// top to bottom in the same order `render::build_info` actually draws them
+/// (ACTIONS, then the mode toggle, then the plugin buttons -- each only
+/// present when `info_layout`'s own field for it is `Some`, except the
+/// plugin buttons, which always are). Each entry is the exact `(row, col)`
+/// `handle_info_click` would need to activate that control, reusing its
+/// existing dispatch instead of a second copy of the same `Some(...)`
+/// matching here. Row 0 having at least one entry is relied on elsewhere
+/// (`toggle_focus`, `Key::Right`'s own `(0, 0)`): the plugin buttons are
+/// unconditional, so this is never empty.
+fn info_focus_rows(state: &PickerState, layout: &layout::Layout) -> Vec<Vec<(usize, usize)>> {
+    let width = if layout.narrow {
+        layout.left_w
+    } else {
+        layout.right_w
+    };
+    let info_layout = render::info_layout(state, width, layout.unicode_borders);
+    let mut rows = Vec::new();
+    if let Some(actions) = &info_layout.actions {
+        rows.push(vec![
+            (actions.row, actions.dep_hint.0),
+            (actions.row, actions.check_again.0),
+        ]);
+    }
+    if let Some(toggle) = &info_layout.mode_toggle {
+        rows.push(
+            toggle
+                .segments
+                .iter()
+                .map(|(_, start, _)| (toggle.row, *start))
+                .collect(),
+        );
+    }
+    if let Some(buttons) = &info_layout.plugin_buttons {
+        rows.push(vec![(buttons.install_this_row, buttons.install_this.0)]);
+        rows.push(vec![
+            (buttons.all_and_quit_row, buttons.install_all.0),
+            (buttons.all_and_quit_row, buttons.quit.0),
+        ]);
+    }
+    rows
+}
+
+/// Up (`delta < 0`) or Down (`delta > 0`) within `info_focus_rows`: moves to
+/// the first column of the adjacent row, clamped to that row's own length
+/// (a shorter row than the one just left still gets a valid column rather
+/// than an out-of-bounds one). Staying at the top or bottom row on a step
+/// that would run past it is a deliberate no-op -- only `Left` (see
+/// `move_info_focus_col`) ever hands focus back to the skill list, so Up at
+/// the first row and Down at the last both simply stay put.
+fn move_info_focus_row(state: &mut PickerState, rows: &[Vec<(usize, usize)>], delta: isize) {
+    let Some((row, col)) = state.info_focus else {
+        return;
+    };
+    if rows.is_empty() {
+        return;
+    }
+    let new_row = (row as isize + delta).clamp(0, rows.len() as isize - 1) as usize;
+    let new_col = col.min(rows[new_row].len().saturating_sub(1));
+    state.info_focus = Some((new_row, new_col));
+}
+
+/// Left (`delta < 0`) or Right (`delta > 0`) within the CURRENT row only.
+/// Left at column 0 -- nothing further left than the row's own first
+/// control -- hands focus back to the skill list instead of staying put,
+/// the "when pressing left and there is nothing left, it should move back
+/// to the skills column" behavior. Right past a row's last column is a
+/// no-op: there is no pane further right to hand off to.
+fn move_info_focus_col(state: &mut PickerState, rows: &[Vec<(usize, usize)>], delta: isize) {
+    let Some((row, col)) = state.info_focus else {
+        return;
+    };
+    if delta < 0 {
+        if col == 0 {
+            state.focus = Focus::List;
+            state.info_focus = None;
+        } else {
+            state.info_focus = Some((row, col - 1));
+        }
+        return;
+    }
+    let max = rows.get(row).map_or(0, |r| r.len().saturating_sub(1));
+    if col < max {
+        state.info_focus = Some((row, col + 1));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +479,7 @@ mod tests {
                 offered_modes: Vec::new(),
                 mode: "skill".to_string(),
                 version_status: crate::cli_mode::VersionStatus::NotInstalled,
+                per_root: Vec::new(),
             })
             .collect()
     }
@@ -349,13 +493,36 @@ mod tests {
     }
 
     #[test]
-    fn clicking_a_list_row_moves_the_cursor_there_and_toggles_it() {
+    fn clicking_a_rows_checkbox_moves_the_cursor_there_and_toggles_it() {
         let mut state = PickerState::new(skills(&["todo", "bug-report"]));
         let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
         let layout = wide_layout(&names);
         let source = std::path::Path::new(".");
-        // Everything starts selected; clicking the second row deselects it
-        // and moves the cursor there in one action.
+        // Everything starts selected; clicking the second row's own `[x]`
+        // (absolute col 3 -- content col 1, the checkbox's own leading `[`)
+        // deselects it and moves the cursor there in one action.
+        handle_key(
+            &mut state,
+            Key::Click { col: 3, row: 4 },
+            &layout,
+            1,
+            1,
+            source,
+        );
+        assert_eq!(state.cursor, 1);
+        assert!(!state.selected[1]);
+        assert_eq!(state.focus, Focus::List);
+    }
+
+    #[test]
+    fn clicking_a_rows_name_moves_the_cursor_there_without_toggling() {
+        let mut state = PickerState::new(skills(&["todo", "bug-report"]));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        // col 2 is the cursor-marker column (content col 0), not the
+        // checkbox -- a click there should move focus to read about the
+        // skill without silently deselecting it.
         handle_key(
             &mut state,
             Key::Click { col: 2, row: 4 },
@@ -365,8 +532,22 @@ mod tests {
             source,
         );
         assert_eq!(state.cursor, 1);
-        assert!(!state.selected[1]);
+        assert!(state.selected[1], "a non-checkbox click must not toggle");
         assert_eq!(state.focus, Focus::List);
+
+        // Further right, over the skill's actual name text, is the same.
+        handle_key(
+            &mut state,
+            Key::Click { col: 10, row: 4 },
+            &layout,
+            1,
+            1,
+            source,
+        );
+        assert!(
+            state.selected[1],
+            "a click over the name must not toggle either"
+        );
     }
 
     #[test]
@@ -500,6 +681,116 @@ mod tests {
         handle_key(&mut state, key, &layout, 1, 1, source);
         assert!(state.done);
         assert!(!state.confirmed);
+    }
+
+    /// Exercises every row the DETAILS pane's focus grid can have at once --
+    /// ACTIONS (a missing requirement), the mode toggle (two offered
+    /// modes), then the always-present plugin-button rows -- so the
+    /// keyboard-navigation tests below see all four rows real screens do.
+    fn skill_with_every_focus_row(name: &str) -> Vec<SkillEntry> {
+        let mut list = skill_with_a_missing_requirement(name);
+        list[0].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
+        list[0].mode = "skill".to_string();
+        list
+    }
+
+    #[test]
+    fn right_from_the_list_focuses_info_at_its_first_control() {
+        let mut state = PickerState::new(skill_with_every_focus_row("todo"));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        handle_key(&mut state, Key::Right, &layout, 1, 1, source);
+        assert_eq!(state.focus, Focus::Info);
+        assert_eq!(state.info_focus, Some((0, 0)));
+    }
+
+    #[test]
+    fn down_in_details_moves_through_each_row_in_order() {
+        let mut state = PickerState::new(skill_with_every_focus_row("todo"));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        state.focus = Focus::Info;
+        state.info_focus = Some((0, 0));
+        // ACTIONS -> mode toggle -> install-this -> all/quit -> stays (4 rows)
+        for expected_row in [1, 2, 3, 3] {
+            handle_key(&mut state, Key::Down, &layout, 1, 1, source);
+            assert_eq!(state.info_focus, Some((expected_row, 0)));
+        }
+    }
+
+    #[test]
+    fn up_in_details_moves_back_up_through_each_row() {
+        let mut state = PickerState::new(skill_with_every_focus_row("todo"));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        state.focus = Focus::Info;
+        state.info_focus = Some((3, 0));
+        for expected_row in [2, 1, 0, 0] {
+            handle_key(&mut state, Key::Up, &layout, 1, 1, source);
+            assert_eq!(state.info_focus, Some((expected_row, 0)));
+        }
+    }
+
+    #[test]
+    fn right_then_left_moves_within_a_row_and_stays_in_details() {
+        let mut state = PickerState::new(skill_with_every_focus_row("todo"));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        state.focus = Focus::Info;
+        state.info_focus = Some((0, 0)); // ACTIONS row: dep_hint, check_again
+        handle_key(&mut state, Key::Right, &layout, 1, 1, source);
+        assert_eq!(state.info_focus, Some((0, 1)));
+        // Already the row's last column: no-op, still in DETAILS.
+        handle_key(&mut state, Key::Right, &layout, 1, 1, source);
+        assert_eq!(state.info_focus, Some((0, 1)));
+        assert_eq!(state.focus, Focus::Info);
+        handle_key(&mut state, Key::Left, &layout, 1, 1, source);
+        assert_eq!(state.info_focus, Some((0, 0)));
+        assert_eq!(state.focus, Focus::Info);
+    }
+
+    #[test]
+    fn left_at_a_rows_first_column_returns_focus_to_the_list() {
+        let mut state = PickerState::new(skill_with_every_focus_row("todo"));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        state.focus = Focus::Info;
+        state.info_focus = Some((2, 0)); // install-this row, only column
+        handle_key(&mut state, Key::Left, &layout, 1, 1, source);
+        assert_eq!(state.focus, Focus::List);
+        assert_eq!(state.info_focus, None);
+    }
+
+    #[test]
+    fn enter_on_a_keyboard_focused_control_activates_it() {
+        let mut state = PickerState::new(skill_with_every_focus_row("todo"));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        state.focus = Focus::Info;
+        state.info_focus = Some((3, 1)); // all_and_quit row, "Quit"
+        handle_key(&mut state, Key::Enter, &layout, 1, 1, source);
+        assert!(state.done);
+        assert!(!state.confirmed);
+    }
+
+    #[test]
+    fn tab_into_details_also_starts_focus_at_the_first_control() {
+        let mut state = PickerState::new(skill_with_every_focus_row("todo"));
+        let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+        let layout = wide_layout(&names);
+        let source = std::path::Path::new(".");
+        handle_key(&mut state, Key::Tab, &layout, 1, 1, source);
+        assert_eq!(state.focus, Focus::Info);
+        assert_eq!(state.info_focus, Some((0, 0)));
+        handle_key(&mut state, Key::Tab, &layout, 1, 1, source);
+        assert_eq!(state.focus, Focus::List);
+        assert_eq!(state.info_focus, None);
     }
 
     #[test]
