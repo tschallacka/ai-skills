@@ -135,10 +135,32 @@ pub fn resolve_server(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_BEACON_PORT);
-    let cands = discover_candidates(beacon_port, 3);
+    // B384: a single long `discover_candidates` call races a fixed
+    // wall-clock deadline against real scheduling latency on both ends --
+    // `announce_loop` (chat-server-rs) sends its first beacon the instant
+    // its own background thread actually gets a CPU quantum, and this
+    // process's own `recv_from` may not get to run again before ITS
+    // deadline has already elapsed. On a contended host (a shared CI
+    // runner packed tightly enough that either side's thread sits
+    // unscheduled for a second or more) that race can be lost with
+    // nothing wrong on the wire -- measured losing exactly this way on a
+    // Windows CI runner. Fixed the same way `chat-client-rs/tests/
+    // resolution.rs` already was for the identical mechanism: several
+    // short, independent attempts with a generous ceiling, rather than one
+    // long wait with no guarantee of overlapping a live thread's own
+    // schedule. This is a ceiling, not a sleep -- the common, uncontended
+    // case still returns on the first attempt, since `discover_candidates`
+    // itself returns the moment it has something.
+    let mut cands = Vec::new();
+    for _ in 0..10 {
+        cands = discover_candidates(beacon_port, 2);
+        if !cands.is_empty() {
+            break;
+        }
+    }
     if cands.is_empty() {
         eprintln!(
-            "chat-client-rs: no announce beacon received on UDP port {} within 3s",
+            "chat-client-rs: no announce beacon received on UDP port {} after several attempts",
             beacon_port
         );
     }

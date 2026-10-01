@@ -763,9 +763,9 @@ fn resolve(session_key: &str) -> Result<(String, String), String> {
     let server = chat_client_rs::resolve_server("", &session_server, &dir, false);
     if server.is_empty() {
         return Err(format!(
-            "no chat server found: nothing saved, nothing cached, and no announce beacon on UDP {} within 3s. \
-             Call start_server, which checks the beacon itself before starting one — \
-             a second server on another port splits the channel.",
+            "no chat server found: nothing saved, nothing cached, and no announce beacon on UDP {} \
+             after several attempts. Call start_server, which checks the beacon itself before \
+             starting one — a second server on another port splits the channel.",
             chat_client_rs::DEFAULT_BEACON_PORT
         ));
     }
@@ -956,6 +956,24 @@ fn drop_held(session_key: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Several short, independent `discover_candidates` attempts rather than one
+/// long wait -- the same B384 fix `chat_client_rs::resolve_server` and
+/// `chat-client-rs/tests/resolution.rs` already apply to the identical
+/// mechanism: a single fixed wall-clock deadline races real scheduling
+/// latency on both ends and can lose with nothing wrong on the wire, worse
+/// on a contended CI host. A ceiling, not a sleep -- the common,
+/// uncontended case still returns on the very first attempt.
+fn discover_with_retries(port: u16) -> Vec<String> {
+    let mut cands = Vec::new();
+    for _ in 0..10 {
+        cands = chat_client_rs::discover_candidates(port, 2);
+        if !cands.is_empty() {
+            return cands;
+        }
+    }
+    cands
+}
+
 /// Start a chat server, but only once the UDP beacon has had a chance to say
 /// one is already running: two servers on one machine split the channel, so
 /// this checks before it spawns, the same restraint the chat skill asks of a
@@ -963,7 +981,7 @@ fn drop_held(session_key: &str) -> bool {
 /// argument here that could widen the bind.
 fn start_server() -> Result<Value, String> {
     let port = beacon_port();
-    if let Some(server) = chat_client_rs::discover_candidates(port, 3).first() {
+    if let Some(server) = discover_with_retries(port).first() {
         return Ok(json!({
             "tool": "start_server",
             "started": false,
@@ -985,19 +1003,17 @@ fn start_server() -> Result<Value, String> {
         let mut child = child;
         let _ = child.wait();
     });
-    for _ in 0..3 {
-        if let Some(server) = chat_client_rs::discover_candidates(port, 2).first() {
-            return Ok(json!({
-                "tool": "start_server",
-                "started": true,
-                "server": server,
-                "pid": pid,
-                "note": "no other server answered the beacon, so a new one was started",
-            }));
-        }
+    if let Some(server) = discover_with_retries(port).first() {
+        return Ok(json!({
+            "tool": "start_server",
+            "started": true,
+            "server": server,
+            "pid": pid,
+            "note": "no other server answered the beacon, so a new one was started",
+        }));
     }
     Err(format!(
-        "started {} (pid {pid}) but it has not announced on UDP {port} within 6s; \
+        "started {} (pid {pid}) but it has not announced on UDP {port} after several attempts; \
          it may still be starting -- call discover again shortly",
         binary.display()
     ))

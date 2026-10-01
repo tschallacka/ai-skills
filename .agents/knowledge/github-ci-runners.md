@@ -187,3 +187,33 @@ the run was created, and its `aarch64-apple-darwin` leg at 07:41:35Z, 12 min
 macOS *runner*, not for registration, and it is one run's figure, not a
 guarantee. (The earlier version of this section said registration takes about
 15 minutes; that figure had no run behind it.)
+
+## The B384 mechanism is not macOS-specific: it hit `x86_64-pc-windows-msvc` too
+
+Measured 2026-10-01, run 36837882550 (commit `12b725b1`, `ci.yml`): `chat-mcp`'s
+`--test mcp_flow` failed four tests on the Windows MSVC leg --
+`distinct_session_overrides_get_their_own_nick_and_hold_separate_connections`,
+`the_agent_argument_is_an_alias_for_session` (both via `chat_client_rs::
+resolve_server`'s single `discover_candidates(port, 3)` call), and
+`start_server_spawns_one_when_nothing_answers_and_a_client_can_then_reach_it` /
+`start_server_finds_the_running_one_and_does_not_spawn_a_second` (via
+`chat-mcp`'s own `start_server`, which already retried 3×2s but still lost).
+Every Linux and macOS leg in the SAME run passed, including the identical
+test binary -- this was never about Windows networking specifically, it is
+`github-ci-runners.md`'s own already-documented mechanism (a fixed
+`SystemTime::now() + N` deadline racing real scheduling latency on both ends)
+showing up on whichever runner happens to be contended that day. Grounds the
+general claim above ("might also be a contentious CI runner") in an actual
+cross-platform recurrence, not a Windows-only theory.
+
+Fixed the same way as `chat-client-rs/tests/resolution.rs`'s own B384 fix,
+but this time in the PRODUCTION code every call site shares rather than only
+in a test: `chat_client_rs::resolve_server` and `chat-mcp`'s `start_server`
+both now retry `discover_candidates` as several short (2s) independent
+attempts (a ceiling, not a sleep -- the common case still returns on the
+first attempt) instead of one longer fixed wait. The lesson generalizes: any
+production code wrapping `discover_candidates`/`announce_loop`'s beacon
+exchange with a single fixed-deadline wait carries this same latent flake,
+not just test code -- check for it by name (`discover_candidates(`) rather
+than assuming the mechanism was test-only because the first instance found of
+it was.
