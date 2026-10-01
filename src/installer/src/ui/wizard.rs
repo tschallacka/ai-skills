@@ -400,8 +400,22 @@ fn handle_root_select(
 ) {
     if let Some(focused) = state.button_focus {
         match key {
-            Key::Left | Key::Right | Key::Char('h') | Key::Char('l') => {
-                state.button_focus = Some(1 - focused);
+            // Left at the first button ("Install now") hands focus back to
+            // the list -- there is nothing further left than it -- and
+            // Right at the last ("Cancel") is a no-op, since there is
+            // nothing further right to hand off to. `h`/`l` are the same
+            // vim-style synonyms Up/Down already have here (`k`/`j`).
+            Key::Left | Key::Char('h') => {
+                state.button_focus = if focused == 0 {
+                    None
+                } else {
+                    Some(focused - 1)
+                };
+            }
+            Key::Right | Key::Char('l') => {
+                if focused < 1 {
+                    state.button_focus = Some(focused + 1);
+                }
             }
             Key::Tab => {
                 state.button_focus = if focused == 1 {
@@ -445,7 +459,7 @@ fn handle_root_select(
         Key::Down | Key::Char('j') => {
             state.cursor = (state.cursor + 1).min(rows - 1);
         }
-        Key::Tab => {
+        Key::Tab | Key::Right | Key::Char('l') => {
             state.button_focus = Some(0);
         }
         Key::ShiftTab => {
@@ -630,8 +644,20 @@ fn handle_install_or_uninstall(state: &mut WizardState, key: Key) {
 fn handle_use_previous(state: &mut WizardState, key: Key) {
     if let Some(focused) = state.button_focus {
         match key {
-            Key::Left | Key::Right | Key::Char('h') | Key::Char('l') => {
-                state.button_focus = Some(1 - focused);
+            // See `handle_root_select`'s own identical arms: Left at the
+            // first button hands focus back to the list, Right at the last
+            // is a no-op.
+            Key::Left | Key::Char('h') => {
+                state.button_focus = if focused == 0 {
+                    None
+                } else {
+                    Some(focused - 1)
+                };
+            }
+            Key::Right | Key::Char('l') => {
+                if focused < 1 {
+                    state.button_focus = Some(focused + 1);
+                }
             }
             Key::Tab => {
                 state.button_focus = if focused == 1 {
@@ -690,7 +716,7 @@ fn handle_use_previous(state: &mut WizardState, key: Key) {
         Key::Down | Key::Char('j') => {
             state.use_previous_cursor = (state.use_previous_cursor + 1).min(rows - 1);
         }
-        Key::Tab => {
+        Key::Tab | Key::Right | Key::Char('l') => {
             state.button_focus = Some(0);
         }
         Key::ShiftTab => {
@@ -2014,6 +2040,30 @@ mod tests {
     }
 
     #[test]
+    fn right_from_the_list_enters_button_focus_at_the_first_button() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        assert_eq!(state.button_focus, None);
+        handle_root_select(&mut state, Key::Right, &no_prior_installs);
+        assert_eq!(state.button_focus, Some(0));
+    }
+
+    #[test]
+    fn left_at_the_first_button_returns_focus_to_the_list() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.button_focus = Some(0);
+        handle_root_select(&mut state, Key::Left, &no_prior_installs);
+        assert_eq!(state.button_focus, None);
+    }
+
+    #[test]
+    fn right_at_the_last_button_is_a_no_op() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.button_focus = Some(1);
+        handle_root_select(&mut state, Key::Right, &no_prior_installs);
+        assert_eq!(state.button_focus, Some(1));
+    }
+
+    #[test]
     fn up_from_a_focused_button_returns_focus_to_the_list() {
         let mut state = WizardState::new(roots(&["/a"]));
         state.button_focus = Some(1);
@@ -2276,6 +2326,32 @@ mod tests {
         assert_eq!(state.button_focus, Some(1));
         handle_use_previous(&mut state, Key::Tab);
         assert_eq!(state.button_focus, None);
+    }
+
+    #[test]
+    fn right_from_the_use_previous_list_enters_button_focus() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
+        handle_use_previous(&mut state, Key::Right);
+        assert_eq!(state.button_focus, Some(0));
+    }
+
+    #[test]
+    fn left_at_the_first_use_previous_button_returns_focus_to_the_list() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
+        state.button_focus = Some(0);
+        handle_use_previous(&mut state, Key::Left);
+        assert_eq!(state.button_focus, None);
+    }
+
+    #[test]
+    fn right_at_the_last_use_previous_button_is_a_no_op() {
+        let mut state = WizardState::new(roots(&["/a"]));
+        state.step = Step::UsePrevious;
+        state.button_focus = Some(1);
+        handle_use_previous(&mut state, Key::Right);
+        assert_eq!(state.button_focus, Some(1));
     }
 
     #[test]

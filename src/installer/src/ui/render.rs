@@ -21,7 +21,7 @@ use super::mascot::ColorMode;
 use super::model::{Focus, PickerState};
 #[cfg(test)]
 use super::text::is_precomposed_line;
-use super::text::{overflow, pad, wrap};
+use super::text::{overflow, pad, pad_display, wrap};
 use crate::requirements::SkillState;
 
 /// Both bars are chrome, not critical content: at a width where they don't
@@ -547,6 +547,21 @@ fn build_info(state: &PickerState, width: usize, unicode: bool) -> (Vec<String>,
     let (install_this_line, install_this_range) = install_this_button_line(width, skill.installed);
     let install_this_row = lines.len();
     lines.push(install_this_line);
+    // Its own section, separate from this one skill's own details above --
+    // "install/update all" and "quit" act on the WHOLE run (every selected
+    // skill, not just the one currently highlighted), so grouping them
+    // under the single skill's own name read as if they were about that
+    // skill alone.
+    lines.push(pad("", width));
+    lines.push(pad("ALL SELECTED SKILLS", width));
+    let selected_count = state.selected_count();
+    let explain = format!(
+        "All {selected_count} selected skill{} will be installed or updated.",
+        if selected_count == 1 { "" } else { "s" }
+    );
+    for line in wrap(&explain, text_width) {
+        lines.push(pad(&line, width));
+    }
     let (all_quit_line, install_all_range, quit_range) = install_all_and_quit_line(width);
     let all_and_quit_row = lines.len();
     lines.push(all_quit_line);
@@ -599,24 +614,6 @@ fn mode_toggle_line(modes: &[String], width: usize) -> (String, Vec<(String, usi
 /// table this module draws leaves the row out.
 fn is_self_provided(req: &crate::requirements::Requirement) -> bool {
     req.group.is_none() && req.tool == "rjq"
-}
-
-/// Like `text::pad`, but measured by displayed CHARACTER count rather than
-/// byte length -- safe for a line that may carry multi-byte UTF-8 (a
-/// Unicode box-drawing border), where `pad`'s own byte-length measurement
-/// would either miscount the padding needed or panic slicing mid-character
-/// on truncation (the exact hazard `wizard.rs`'s `is_precomposed_line`
-/// already documents for this same border-glyph reason). Never truncates
-/// with an ellipsis the way `pad` does: every caller here builds a line
-/// already known to be at most `width` characters, so overflow is not the
-/// case this needs to handle gracefully.
-fn pad_display(text: &str, width: usize) -> String {
-    let len = text.chars().count();
-    if len >= width {
-        text.chars().take(width).collect()
-    } else {
-        format!("{text}{}", " ".repeat(width - len))
-    }
 }
 
 /// One dependency table: a heading row spanning the full width, a column
@@ -1967,6 +1964,36 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("[ Quit ]")));
         let layout = info_layout(&state, 70, false);
         assert!(layout.plugin_buttons.is_some());
+    }
+
+    #[test]
+    fn the_bulk_actions_get_their_own_section_naming_the_selected_count() {
+        // Two skills, both selected (the default) -- the explanatory text
+        // names the count, not just "all of them", so a change in selection
+        // is visible here too, not only in the title bar.
+        let state = PickerState::new(skills(&["todo", "bug-report"]));
+        let lines = info_lines(&state, 70, false);
+        assert!(lines.iter().any(|l| l.contains("ALL SELECTED SKILLS")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("All 2 selected skills will be installed or updated.")));
+        // The section header must come AFTER "Install this skill" and
+        // BEFORE the all/quit row -- a reader scanning top to bottom should
+        // meet the per-skill button, then the section boundary, then the
+        // bulk actions, not have the two interleaved.
+        let this_idx = lines
+            .iter()
+            .position(|l| l.contains("[ Install this skill ]"))
+            .unwrap();
+        let header_idx = lines
+            .iter()
+            .position(|l| l.contains("ALL SELECTED SKILLS"))
+            .unwrap();
+        let all_quit_idx = lines
+            .iter()
+            .position(|l| l.contains("[ Install/update all ]"))
+            .unwrap();
+        assert!(this_idx < header_idx && header_idx < all_quit_idx);
     }
 
     #[test]

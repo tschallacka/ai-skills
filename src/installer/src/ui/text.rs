@@ -31,6 +31,28 @@ pub(crate) fn pad(text: &str, width: usize) -> String {
     format!("{text:<width$}")
 }
 
+/// Like `pad`, but measured by displayed CHARACTER count rather than byte
+/// length -- safe for a line that may carry multi-byte UTF-8 (a Unicode
+/// box-drawing border, a `progress_bar` fill character), where `pad`'s own
+/// byte-length measurement would either miscount the padding needed or
+/// panic slicing mid-character on truncation (the exact hazard
+/// `wizard.rs`'s `is_precomposed_line` already documents for this same
+/// glyph-width reason -- reproduced live: `progress_bar`'s `█` fill
+/// character, at 3 bytes but 1 display column, panicked exactly this way
+/// before `render.rs`'s dependency table and this caller both switched to
+/// this function). Never truncates with an ellipsis the way `pad` does:
+/// every caller here builds a line already known to be at most `width`
+/// characters, so overflow is not the case this needs to handle
+/// gracefully.
+pub(crate) fn pad_display(text: &str, width: usize) -> String {
+    let len = text.chars().count();
+    if len >= width {
+        text.chars().take(width).collect()
+    } else {
+        format!("{text}{}", " ".repeat(width - len))
+    }
+}
+
 /// Word-wraps to `width`, hyphenating a token wider than the pane. Never
 /// drops a byte of `text` -- wrapping only ever adds a line break (and, for
 /// an unbreakable token, a hyphen), unlike `pad`, which discards whatever
