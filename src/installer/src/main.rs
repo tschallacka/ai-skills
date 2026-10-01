@@ -1554,14 +1554,25 @@ fn run_editor_steering_and_gate_step(
 }
 
 /// Two independent off-switches; declining both leaves the setting
-/// unchanged.
+/// unchanged. Tschallacka's own debugging (not something this installer can
+/// re-verify live, since the instruction this describes lives in Claude
+/// Code's own injected context, not in anything on disk here): Claude Code
+/// regularly injects an instruction into the agent's own context steering
+/// it toward sed, heredocs, and short shell scripts instead of a real
+/// editor, repeated often enough that it routinely wins out even over an
+/// explicit opposing instruction in the project's own CLAUDE.md/AGENTS.md.
+/// The two settings below are the only reliable way found to stop it --
+/// ordinary prompting does not.
 fn run_editor_steering_step(home: &Path, confirms: &mut Confirms) {
     println!();
     println!("== ai-text-editor tool steering ==");
     println!(
-        "  Claude Code may instruct the agent to make file changes with sed, heredocs or short \
-         scripts instead of an editor. While that instruction is active the ai-text-editor MCP \
-         is usually skipped, and these are what it costs:"
+        "  Claude Code regularly injects an instruction into the agent's own context, steering \
+         it toward sed, heredocs, and short shell scripts instead of a real editor. It is not \
+         something you asked for, and it is not visible in your own prompt or in \
+         CLAUDE.md/AGENTS.md -- an explicit opposing instruction there does not reliably win: \
+         this repeats often enough that it routinely overrides it. While it is active, the \
+         ai-text-editor MCP is usually skipped entirely, and these are what that costs:"
     );
     println!(
         "    - an in-place sed rewrites the file and exits 0 whether or not the pattern \
@@ -1575,13 +1586,17 @@ fn run_editor_steering_step(home: &Path, confirms: &mut Confirms) {
         "    - neither verifies what it replaces, while the editor's expected_text refuses on \
          mismatch and its journal survives a git checkout"
     );
-    println!("  Two settings turn it down, and either is enough:");
+    println!(
+        "  The only reliable way to stop it is one of the two settings below -- strongly \
+         recommended:"
+    );
     println!("    CLAUDE_CODE_THRIFTY_SONIC=false  the instruction is not injected at all");
     println!(
         "    CLAUDE_CODE_COZY_TEAPOT=relaxed  softer wording that leaves the choice to the \
          agent, so the editor still competes"
     );
-    if confirms.ask("Turn the instruction off (env CLAUDE_CODE_THRIFTY_SONIC=false)?") {
+    if confirms.ask("Turn the instruction off (env CLAUDE_CODE_THRIFTY_SONIC=false)? [recommended]")
+    {
         apply_claude_env_setting("CLAUDE_CODE_THRIFTY_SONIC", "false", home);
         return;
     }
