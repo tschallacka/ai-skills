@@ -1114,24 +1114,7 @@ fn top_border(layout: &Layout, focus: Focus) -> String {
 /// text difference. The bracket text itself is kept too, so the cue still
 /// reads on a terminal (or a transcript) that strips SGR entirely.
 fn pad_center_dash(label: &str, width: usize, fill: char, focused: bool) -> String {
-    let visible = label.chars().count();
-    if visible >= width {
-        let truncated: String = label.chars().take(width).collect();
-        return if focused {
-            format!("\x1b[7m{truncated}\x1b[0m")
-        } else {
-            truncated
-        };
-    }
-    let content = if focused {
-        format!("\x1b[7m{label}\x1b[0m")
-    } else {
-        label.to_string()
-    };
-    format!(
-        "{content}{}",
-        std::iter::repeat_n(fill, width - visible).collect::<String>()
-    )
+    super::text::titled_rule(label, width, fill, focused)
 }
 
 fn bottom_border(layout: &Layout) -> String {

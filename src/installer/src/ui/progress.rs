@@ -60,7 +60,7 @@ use super::input::{self, Key};
 use super::mascot::{self, ColorMode};
 use super::render::BorderSet;
 use super::terminal;
-use super::text::{pad, pad_display, wrap};
+use super::text::{pad, pad_display, titled_rule, wrap};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
@@ -483,6 +483,15 @@ fn left_pane_width(state: &State) -> usize {
 /// once it is no longer the only thing in the pane.
 const MODAL_TOP_OFFSET: usize = 2;
 
+/// Blank columns between the right pane's borders and its content, on each
+/// side, so nothing in it sits flush against a border.
+const RIGHT_MARGIN: usize = 1;
+
+/// The right pane's content width once `RIGHT_MARGIN` is taken off both sides.
+fn right_content_width(right_w: usize) -> usize {
+    right_w.saturating_sub(2 * RIGHT_MARGIN)
+}
+
 /// Which button, if any, a click at `(col, row)` (1-based, exactly what
 /// `Key::Click` reports) landed on -- `None` while no question is pending,
 /// this function is only ever consulted from `handle_key`'s own
@@ -493,7 +502,7 @@ fn modal_click_answer(state: &State, cols: usize, col: u16, row: u16) -> Option<
         return None;
     }
     let left_w = left_pane_width(state);
-    let right_w = cols.saturating_sub(left_w + 3);
+    let width = right_content_width(cols.saturating_sub(left_w + 3));
     // The explanation panel's own row count never affects the button row's
     // position (it comes after the button row), so the exact value passed
     // here doesn't matter for this click-hotspot math -- `EXPLANATION_
@@ -501,9 +510,10 @@ fn modal_click_answer(state: &State, cols: usize, col: u16, row: u16) -> Option<
     let modal = build_modal(
         prompt,
         explanation,
-        right_w,
+        width,
         state.modal_text_scroll,
         EXPLANATION_VISIBLE_LINES,
+        '-',
     );
     // title(row 1) + top border(row 2) + the top section's own progress-bar
     // and blank rows + the button's own 0-based row within the modal.
@@ -511,7 +521,8 @@ fn modal_click_answer(state: &State, cols: usize, col: u16, row: u16) -> Option<
     if row as usize != button_abs_row {
         return None;
     }
-    let content_start_col = left_w + 3; // past the left border, pane, and divider
+    // Past the left border, pane, divider, and the right pane's own margin.
+    let content_start_col = left_w + 3 + RIGHT_MARGIN;
     if (col as usize) < content_start_col {
         return None;
     }
@@ -556,9 +567,9 @@ fn render_frame(
     out.push(format!(
         "{}{}{}{}{}",
         b.corner_tl,
-        pad_dash("UPDATING/INSTALLING SKILLS", left_w, b.horizontal),
+        titled_rule("UPDATING/INSTALLING SKILLS", left_w, b.horizontal, false),
         b.divider_top,
-        pad_dash("PROGRESS", right_w, b.horizontal),
+        titled_rule("PROGRESS", right_w, b.horizontal, false),
         b.corner_tr
     ));
 
@@ -583,26 +594,23 @@ fn render_frame(
     // unused; a modal or banner taller than what's left is cut off the same
     // way any other overflowing content here already is (the `.get(i)`
     // fallback below).
-    let bottom_rows = LOG_SECTION_ROWS.min(body_rows);
+    let inner_w = right_content_width(right_w);
+    let log_rows = log_content_rows(state, inner_w, body_rows);
+    let bottom_rows = (LOG_HEADER_ROWS + log_rows).min(body_rows);
     let top_rows = body_rows - bottom_rows;
-    let top_lines = top_section_lines(state, right_w, done, total, unicode, color_mode, top_rows);
-    let bottom_lines = bottom_log_lines(state, right_w);
+    let top_lines = top_section_lines(state, inner_w, done, total, unicode, color_mode, top_rows);
+    let bottom_lines = bottom_log_lines(state, inner_w, b.horizontal, log_rows);
+    let margin = " ".repeat(RIGHT_MARGIN);
+    let framed = |line: Option<&String>| -> String {
+        let content = line.cloned().unwrap_or_else(|| pad("", inner_w));
+        format!("{margin}{content}{margin}")
+    };
     let mut right_lines = Vec::with_capacity(body_rows);
     for i in 0..top_rows {
-        right_lines.push(
-            top_lines
-                .get(i)
-                .cloned()
-                .unwrap_or_else(|| pad("", right_w)),
-        );
+        right_lines.push(framed(top_lines.get(i)));
     }
     for i in 0..bottom_rows {
-        right_lines.push(
-            bottom_lines
-                .get(i)
-                .cloned()
-                .unwrap_or_else(|| pad("", right_w)),
-        );
+        right_lines.push(framed(bottom_lines.get(i)));
     }
 
     for i in 0..body_rows {
@@ -626,16 +634,6 @@ fn render_frame(
     ));
     out.push(hint);
     out
-}
-
-fn pad_dash(label: &str, width: usize, fill: char) -> String {
-    if label.len() >= width {
-        return label[..width.min(label.len())].to_string();
-    }
-    format!(
-        "{label}{}",
-        std::iter::repeat_n(fill, width - label.len()).collect::<String>()
-    )
 }
 
 // Colors are by KIND (install vs. update), not by run-status -- see
@@ -696,7 +694,58 @@ const DONE_GLYPH_BANG: [&str; 3] = [" # ", " # ", " # "];
 /// single plain centered line when `width`/`available_rows` can't fit the
 /// full block art (a narrow or very short terminal), rather than truncating
 /// the art into something unreadable.
-fn done_banner_lines(width: usize, available_rows: usize) -> Vec<String> {
+/// The mascot's own yellow (`fdc100`), so the banner reads as the same art.
+const DONE_YELLOW: (u8, u8, u8) = (0xfd, 0xc1, 0x00);
+
+/// The DONE! art as solid blocks in the mascot's style: each `#` of
+/// `done_banner_art` is one pixel, two columns wide like a mascot pixel when
+/// it fits, one when narrower, and a plain "DONE!" when even that does not.
+fn done_banner_lines(
+    width: usize,
+    available_rows: usize,
+    mode: ColorMode,
+    unicode: bool,
+) -> Vec<String> {
+    let art = done_banner_art(width, available_rows);
+    if art.len() == 1 {
+        return art;
+    }
+    for scale in [2, 1] {
+        let rows: Vec<String> = art
+            .iter()
+            .map(|r| {
+                r.chars()
+                    .flat_map(|c| std::iter::repeat_n(c, scale))
+                    .collect()
+            })
+            .collect();
+        if rows[0].chars().count() <= width {
+            return rows
+                .iter()
+                .map(|r| paint_banner_row(&pad(&center_text(r, width), width), mode, unicode))
+                .collect();
+        }
+    }
+    vec![pad(&center_text("DONE!", width), width)]
+}
+
+/// One centred, padded banner row with its `#` pixels drawn as solid
+/// yellow blocks; spaces stay blank, so the visible width is unchanged.
+fn paint_banner_row(plain: &str, mode: ColorMode, unicode: bool) -> String {
+    let glyph = if unicode { '\u{2588}' } else { '#' };
+    let pixels: String = plain
+        .chars()
+        .map(|c| if c == '#' { glyph } else { c })
+        .collect();
+    let color = mascot::fg_sgr(mode, DONE_YELLOW);
+    if color.is_empty() {
+        pixels
+    } else {
+        format!("{color}{pixels}\x1b[0m")
+    }
+}
+
+fn done_banner_art(width: usize, available_rows: usize) -> Vec<String> {
     let mut rows = [
         String::new(),
         String::new(),
@@ -727,9 +776,7 @@ fn done_banner_lines(width: usize, available_rows: usize) -> Vec<String> {
     if available_rows < rows.len() || banner_width > width {
         return vec![pad(&center_text("DONE!", width), width)];
     }
-    rows.into_iter()
-        .map(|r| pad(&center_text(&r, width), width))
-        .collect()
+    Vec::from(rows)
 }
 
 /// Centers `text` within `width` columns by left-padding with spaces --
@@ -789,7 +836,7 @@ fn top_section_lines(
     if state.done {
         lines.push(pad("", width));
         let remaining = available_rows.saturating_sub(lines.len());
-        let banner = done_banner_lines(width, remaining);
+        let banner = done_banner_lines(width, remaining, color_mode, unicode);
         let top_pad = remaining.saturating_sub(banner.len()) / 2;
         for _ in 0..top_pad {
             lines.push(pad("", width));
@@ -807,7 +854,10 @@ fn top_section_lines(
             prompt,
             explanation,
             width,
-            color_mode,
+            ModalLook {
+                mode: color_mode,
+                fill: BorderSet::for_unicode(unicode).horizontal,
+            },
             state.modal_focus,
             state.modal_text_scroll,
             explanation_rows,
@@ -823,8 +873,22 @@ fn top_section_lines(
 /// goes or the run finishes. "more log line space can be used there, 8
 /// lines".
 const LOG_CONTENT_ROWS: usize = 8;
-/// The log section's total height: its own header plus `LOG_CONTENT_ROWS`.
-const LOG_SECTION_ROWS: usize = 1 + LOG_CONTENT_ROWS;
+/// The log section's rows above its content: blank, separator, blank.
+const LOG_HEADER_ROWS: usize = 3;
+/// The fewest log lines shown when a pending question needs the room.
+const LOG_MIN_CONTENT_ROWS: usize = 3;
+
+/// The log keeps `LOG_CONTENT_ROWS` unless a pending question would then
+/// show fewer than two lines of its explanation; only then does it shrink.
+fn log_content_rows(state: &State, width: usize, body_rows: usize) -> usize {
+    let Some((prompt, _, _)) = &state.question else {
+        return LOG_CONTENT_ROWS;
+    };
+    let needed_top = MODAL_TOP_OFFSET + modal_overhead_lines(prompt, width) + 2;
+    body_rows
+        .saturating_sub(needed_top + LOG_HEADER_ROWS)
+        .clamp(LOG_MIN_CONTENT_ROWS, LOG_CONTENT_ROWS)
+}
 
 /// The right pane's own BOTTOM section: the cumulative install/permission
 /// log, in the order it actually happened -- oldest at the top, newest at
@@ -838,8 +902,12 @@ const LOG_SECTION_ROWS: usize = 1 + LOG_CONTENT_ROWS;
 /// already gets, rather than a plain padded label -- "ensure the log and
 /// this part have separate segments": a bare word gave the log no visible
 /// boundary from whatever sits above it.
-fn bottom_log_lines(state: &State, width: usize) -> Vec<String> {
-    let mut lines = vec![pad_dash("LOG", width, '-')];
+fn bottom_log_lines(state: &State, width: usize, fill: char, content_rows: usize) -> Vec<String> {
+    let mut lines = vec![
+        pad("", width),
+        titled_rule("LOG", width, fill, false),
+        pad("", width),
+    ];
     let wrapped: Vec<String> = state
         .log
         .iter()
@@ -848,14 +916,14 @@ fn bottom_log_lines(state: &State, width: usize) -> Vec<String> {
         .flat_map(|l| wrap(&l, width))
         .collect();
     let total = wrapped.len();
-    let max_scroll = total.saturating_sub(LOG_CONTENT_ROWS);
+    let max_scroll = total.saturating_sub(content_rows);
     let scroll = state.log_scroll.min(max_scroll);
     let end = total.saturating_sub(scroll);
-    let start = end.saturating_sub(LOG_CONTENT_ROWS);
+    let start = end.saturating_sub(content_rows);
     for line in &wrapped[start..end] {
         lines.push(pad(line, width));
     }
-    while lines.len() < LOG_SECTION_ROWS {
+    while lines.len() < LOG_HEADER_ROWS + content_rows {
         lines.push(pad("", width));
     }
     lines
@@ -924,9 +992,9 @@ fn wrap_explanation(explanation: &str, width: usize) -> Vec<String> {
 /// itself may actually use. Must stay in exact lockstep with `build_modal`'s
 /// own construction order below; a comment there points back here.
 fn modal_overhead_lines(prompt: &str, width: usize) -> usize {
-    // blank, "-- QUESTION --", blank, <wrapped prompt>, blank, <buttons>,
-    // blank, "WHY THIS IS ASKED" header -- then the explanation content.
-    wrap(prompt, width).len() + 7
+    // blank, QUESTION separator, blank, <wrapped prompt>, blank, <buttons>,
+    // blank, WHY THIS IS ASKED separator, blank -- then the explanation.
+    wrap(prompt, width).len() + 8
 }
 
 fn build_modal(
@@ -935,8 +1003,13 @@ fn build_modal(
     width: usize,
     text_scroll: usize,
     explanation_rows: usize,
+    fill: char,
 ) -> ModalLayout {
-    let mut lines = vec![String::new(), "-- QUESTION --".to_string(), String::new()];
+    let mut lines = vec![
+        String::new(),
+        titled_rule("QUESTION", width, fill, false),
+        String::new(),
+    ];
     lines.extend(wrap(prompt, width));
     lines.push(String::new());
 
@@ -965,7 +1038,13 @@ fn build_modal(
     // having one and others not. `modal_overhead_lines` counts every line
     // pushed above this point plus this header -- keep the two in sync.
     lines.push(String::new());
-    lines.push(pad_dash("WHY THIS IS ASKED -- j/k to scroll", width, '-'));
+    lines.push(titled_rule(
+        "WHY THIS IS ASKED -- j/k to scroll",
+        width,
+        fill,
+        false,
+    ));
+    lines.push(String::new());
     let wrapped = wrap_explanation(explanation, width);
     // Clamped against how much is actually left to reveal, not just the
     // explanation's own total length -- "if text is all on screen,
@@ -1023,16 +1102,31 @@ fn colorize_modal_buttons(
     out
 }
 
+/// How the modal is drawn: its button colors and its separators' line.
+#[derive(Clone, Copy)]
+struct ModalLook {
+    mode: ColorMode,
+    fill: char,
+}
+
 fn modal_render_lines(
     prompt: &str,
     explanation: &str,
     width: usize,
-    mode: ColorMode,
+    look: ModalLook,
     focus: usize,
     text_scroll: usize,
     explanation_rows: usize,
 ) -> Vec<String> {
-    let modal = build_modal(prompt, explanation, width, text_scroll, explanation_rows);
+    let ModalLook { mode, fill } = look;
+    let modal = build_modal(
+        prompt,
+        explanation,
+        width,
+        text_scroll,
+        explanation_rows,
+        fill,
+    );
     modal
         .lines
         .iter()
@@ -1240,25 +1334,47 @@ mod tests {
         let mut state = State::new(&names(&["a"]));
         let (tx, rx) = mpsc::channel();
         state.question = Some(("Create the directory?".to_string(), String::new(), tx));
-        let cols = 80;
-        // Find the exact click coordinates the same way a real click would
-        // be tested: recompute the modal layout and pick a column inside
-        // the "No" button's own span.
-        let left_w = left_pane_width(&state);
-        let right_w = cols - (left_w + 3);
-        let modal = build_modal(
-            "Create the directory?",
-            "",
-            right_w,
-            0,
-            EXPLANATION_VISIBLE_LINES,
+        let (cols, rows) = (80, 24);
+        // Clicked where the frame actually draws it, not where the layout
+        // math says it should be, so a moved button cannot pass unnoticed.
+        let frame = render_frame(&state, cols, rows, ColorMode::TrueColor, true);
+        let (row, col) = frame
+            .iter()
+            .enumerate()
+            .find_map(|(r, line)| {
+                let plain = strip_sgr(line);
+                let at = plain.find("[ No (n) ]")?;
+                Some((r + 1, plain[..at].chars().count() + 4))
+            })
+            .expect("the No button is on screen");
+        handle_key(
+            &mut state,
+            Key::Click {
+                col: col as u16,
+                row: row as u16,
+            },
+            cols,
         );
-        let (_, no_start, _) = modal.buttons[1];
-        let col = (left_w + 3 + no_start + 1) as u16;
-        let row = (2 + MODAL_TOP_OFFSET + modal.button_row + 1) as u16;
-        handle_key(&mut state, Key::Click { col, row }, cols);
         assert!(state.question.is_none());
         assert_eq!(rx.try_recv(), Ok(Answer::No));
+    }
+
+    /// `row` with its SGR escapes removed: what the terminal shows.
+    fn strip_sgr(row: &str) -> String {
+        let mut out = String::new();
+        let mut chars = row.chars();
+        while let Some(c) = chars.next() {
+            if c == '\u{1b}' {
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
     }
 
     #[test]
@@ -1416,14 +1532,14 @@ mod tests {
 
     #[test]
     fn the_done_banner_falls_back_to_a_plain_line_when_too_narrow() {
-        let lines = done_banner_lines(10, 10);
+        let lines = done_banner_lines(10, 10, ColorMode::None, false);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("DONE!"));
     }
 
     #[test]
     fn the_done_banner_is_centered_within_its_width() {
-        let lines = done_banner_lines(60, 10);
+        let lines = done_banner_lines(60, 10, ColorMode::None, false);
         assert_eq!(lines.len(), 5);
         for line in &lines {
             assert_eq!(line.chars().count(), 60);
@@ -1538,8 +1654,8 @@ mod tests {
     #[test]
     fn the_explanation_panel_is_windowed_by_its_own_scroll() {
         let explanation = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten";
-        let unscrolled = build_modal("q?", explanation, 40, 0, EXPLANATION_VISIBLE_LINES);
-        let scrolled = build_modal("q?", explanation, 40, 2, EXPLANATION_VISIBLE_LINES);
+        let unscrolled = build_modal("q?", explanation, 40, 0, EXPLANATION_VISIBLE_LINES, '-');
+        let scrolled = build_modal("q?", explanation, 40, 2, EXPLANATION_VISIBLE_LINES, '-');
         let unscrolled_text = unscrolled.lines.join("\n");
         let scrolled_text = scrolled.lines.join("\n");
         assert!(unscrolled_text.contains("one"));
@@ -1555,8 +1671,8 @@ mod tests {
         // already fits inside `explanation_rows` must not be pushed up out
         // of view by any amount of scrolling.
         let explanation = "one\ntwo";
-        let still = build_modal("q?", explanation, 40, 0, EXPLANATION_VISIBLE_LINES);
-        let over_scrolled = build_modal("q?", explanation, 40, 50, EXPLANATION_VISIBLE_LINES);
+        let still = build_modal("q?", explanation, 40, 0, EXPLANATION_VISIBLE_LINES, '-');
+        let over_scrolled = build_modal("q?", explanation, 40, 50, EXPLANATION_VISIBLE_LINES, '-');
         assert_eq!(still.lines, over_scrolled.lines);
         assert!(over_scrolled.lines.iter().any(|l| l.contains("one")));
     }
@@ -1579,13 +1695,51 @@ mod tests {
 
     #[test]
     fn the_log_header_is_a_dashed_rule_separating_it_from_the_section_above() {
-        // "ensure the log and this part have separate segments" -- a plain
-        // padded "LOG" label gave no visible boundary; the dashed rule
-        // matches the same `pad_dash` treatment every other section header
-        // in this screen already gets.
+        // The log's separator is the same titled rule as every other
+        // section's, with a blank line between it and what is above and
+        // below, and the title set in from the edge rather than flush.
         let state = State::new(&names(&["a"]));
-        let lines = bottom_log_lines(&state, 40);
-        assert_eq!(lines[0], format!("LOG{}", "-".repeat(37)));
+        let lines = bottom_log_lines(&state, 40, '-', LOG_CONTENT_ROWS);
+        assert_eq!(lines[0].trim(), "");
+        assert_eq!(lines[1], format!("--LOG{}", "-".repeat(35)));
+        assert_eq!(lines[2].trim(), "");
+    }
+
+    #[test]
+    fn the_done_banner_is_solid_yellow_blocks_like_the_mascot() {
+        let lines = done_banner_lines(100, 10, ColorMode::TrueColor, true);
+        assert_eq!(lines.len(), 5);
+        let yellow = mascot::fg_sgr(ColorMode::TrueColor, DONE_YELLOW);
+        for line in &lines {
+            assert!(line.starts_with(&yellow), "{line:?}");
+            assert!(!line.contains('#'), "{line:?}");
+            assert_eq!(strip_sgr(line).chars().count(), 100);
+        }
+        // Wide enough for two columns per pixel, like a mascot pixel.
+        assert!(strip_sgr(&lines[0]).contains(
+            "\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}"
+        ));
+        // Too narrow for that: one column per pixel, still solid.
+        let narrow = done_banner_lines(50, 10, ColorMode::TrueColor, true);
+        assert_eq!(narrow.len(), 5);
+        assert!(!strip_sgr(&narrow[0]).contains(&"\u{2588}".repeat(10)));
+    }
+
+    #[test]
+    fn every_section_separator_is_the_border_line_with_a_set_in_title() {
+        let mut state = State::new(&names(&["a"]));
+        let (tx, _rx) = mpsc::channel();
+        state.question = Some(("Grant access?".to_string(), "Because.".to_string(), tx));
+        let frame = render_frame(&state, 120, 40, ColorMode::None, true);
+        let joined = frame.join("\n");
+        for title in ["PROGRESS", "QUESTION", "WHY THIS IS ASKED", "LOG"] {
+            assert!(
+                joined.contains(&format!("\u{2500}\u{2500}{title}")),
+                "{title} is not set into a solid rule"
+            );
+        }
+        assert!(!joined.contains("-----"), "a dashed separator is left");
+        assert!(!joined.contains("\u{252c}PROGRESS"), "PROGRESS hugs the T");
     }
 
     #[test]
@@ -1604,7 +1758,7 @@ mod tests {
         let mut state = State::new(&names(&["a"]));
         state.log.push("first".to_string());
         state.log.push("second".to_string());
-        let lines = bottom_log_lines(&state, 40);
+        let lines = bottom_log_lines(&state, 40, '-', LOG_CONTENT_ROWS);
         let first_idx = lines.iter().position(|l| l.contains("first")).unwrap();
         let second_idx = lines.iter().position(|l| l.contains("second")).unwrap();
         assert!(
@@ -1622,8 +1776,8 @@ mod tests {
         for i in 0..20 {
             state.log.push(format!("line {i}"));
         }
-        let lines = bottom_log_lines(&state, 40);
-        assert_eq!(lines.len(), LOG_SECTION_ROWS);
+        let lines = bottom_log_lines(&state, 40, '-', LOG_CONTENT_ROWS);
+        assert_eq!(lines.len(), LOG_HEADER_ROWS + LOG_CONTENT_ROWS);
         assert!(lines.last().unwrap().contains("line 19"));
         assert!(!lines.iter().any(|l| l.contains("line 0 ")));
     }
@@ -1636,10 +1790,10 @@ mod tests {
         }
         handle_key(&mut state, Key::Up, 80);
         handle_key(&mut state, Key::Up, 80);
-        let scrolled_back = bottom_log_lines(&state, 40);
+        let scrolled_back = bottom_log_lines(&state, 40, '-', LOG_CONTENT_ROWS);
         assert!(scrolled_back.last().unwrap().contains("line 17"));
         handle_key(&mut state, Key::Down, 80);
-        let back_toward_tail = bottom_log_lines(&state, 40);
+        let back_toward_tail = bottom_log_lines(&state, 40, '-', LOG_CONTENT_ROWS);
         assert!(back_toward_tail.last().unwrap().contains("line 18"));
     }
 

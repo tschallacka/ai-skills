@@ -31,6 +31,25 @@ pub(crate) fn pad(text: &str, width: usize) -> String {
     format!("{text:<width$}")
 }
 
+/// Border characters drawn before a pane or section title, so a title never
+/// sits flush against a corner or a T-junction.
+pub(crate) const TITLE_LEAD: usize = 2;
+
+/// Exactly `width` columns of `fill` with `label` set in after `TITLE_LEAD`
+/// of them; `reverse` draws the label in reverse video (a focused pane).
+pub(crate) fn titled_rule(label: &str, width: usize, fill: char, reverse: bool) -> String {
+    let lead = TITLE_LEAD.min(width);
+    let label: String = label.chars().take(width - lead).collect();
+    let tail = width - lead - label.chars().count();
+    let shown = if reverse {
+        format!("\x1b[7m{label}\x1b[0m")
+    } else {
+        label
+    };
+    let line = |n| std::iter::repeat_n(fill, n).collect::<String>();
+    format!("{}{shown}{}", line(lead), line(tail))
+}
+
 /// Byte offset of the `n`th character of `text`, or its length when shorter.
 fn char_byte_index(text: &str, n: usize) -> usize {
     text.char_indices().nth(n).map_or(text.len(), |(i, _)| i)
@@ -180,6 +199,19 @@ mod tests {
             assert!(!line.contains("  "));
         }
         assert_eq!(lines.join(" "), "one two three four");
+    }
+
+    #[test]
+    fn a_title_never_hugs_the_corner_and_the_rule_fills_its_width() {
+        assert_eq!(
+            titled_rule("LOG", 10, '\u{2500}', false),
+            "\u{2500}\u{2500}LOG\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"
+        );
+        assert_eq!(titled_rule("A LONG TITLE", 6, '-', false), "--A LO");
+        assert_eq!(titled_rule("X", 1, '-', false), "-");
+        let focused = titled_rule("[SKILLS]", 20, '-', true);
+        assert!(focused.starts_with("--\x1b[7m[SKILLS]\x1b[0m"));
+        assert!(focused.ends_with(&"-".repeat(10)));
     }
 
     /// A 3-byte arrow straddling the cut point must not panic, and every
