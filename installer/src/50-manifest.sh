@@ -731,11 +731,29 @@ TODO.json
 ISHEOF
             ;;
         ci-failures)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv
             local file
             for file in "$SOURCE_ROOT/ci-failures/scripts/"*.sh; do
                 [ -f "$file" ] && printf '%s\n' "scripts/$(basename "$file")"
             done
+            # scripts/ci-failures.sh only execs this binary from the shared bin
+            # and has no shell fallback, so an install without it can only
+            # refuse. Host row only, existence-gated like todo's arm above.
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    skill_artifact_files ci-failures bin/x86_64-unknown-linux-musl/ci-failures ;;
+                Linux:aarch64|Linux:arm64)
+                    skill_artifact_files ci-failures bin/aarch64-unknown-linux-musl/ci-failures ;;
+                Darwin:x86_64)
+                    skill_artifact_files ci-failures bin/x86_64-apple-darwin/ci-failures ;;
+                Darwin:arm64)
+                    skill_artifact_files ci-failures bin/aarch64-apple-darwin/ci-failures ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    skill_artifact_files ci-failures bin/x86_64-pc-windows-msvc/ci-failures.exe ;;
+                *)
+                    printf 'skill_files: no ci-failures artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
             ;;
     esac
 }
