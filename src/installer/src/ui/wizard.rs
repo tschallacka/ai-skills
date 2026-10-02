@@ -1449,13 +1449,7 @@ fn two_pane_frame(
 /// `pub(crate)`): centers `label` inside `width` by right-padding with
 /// `fill`, or truncates it when `label` itself does not fit.
 fn pad_center(label: &str, width: usize, fill: char) -> String {
-    if label.len() >= width {
-        return label[..width.min(label.len())].to_string();
-    }
-    format!(
-        "{label}{}",
-        std::iter::repeat_n(fill, width - label.len()).collect::<String>()
-    )
+    super::text::titled_rule(label, width, fill, false)
 }
 
 #[cfg(test)]
