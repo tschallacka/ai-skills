@@ -22,7 +22,9 @@ export LC_ALL=C
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root_tests="$(cd "$tests_dir/../.." && pwd)"
 scripts="$repo_root_tests/planning/scripts"
-work="$(mktemp -d "${TMPDIR:-/tmp}/register-helpers.XXXXXX")"
+# No dot before the random part: a suffix starting "sh" made the path itself
+# read as a .sh script name in the B223 checks below.
+work="$(mktemp -d "${TMPDIR:-/tmp}/register-helpers-XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
 fail() { printf 'register-helpers: %s\n' "$1" >&2; FAILED=1; }
@@ -277,7 +279,9 @@ for tool in bug-add bug-update todo-add todo-update; do
         *"$tool"*) : ;;
         *) fail "$tool's refusal does not name itself: $out" ;;
     esac
-    case "$out" in
+    # The refusal quotes the absent register's path; only the rest of it is
+    # under test, so the path is taken out before looking for a script name.
+    case "${out//"$absent"/}" in
         *.sh*) fail "$tool's refusal names a .sh script: $out" ;;
         *) : ;;
     esac
