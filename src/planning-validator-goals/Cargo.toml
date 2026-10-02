@@ -12,6 +12,7 @@ name = "planning_validator_goals"
 path = "src/lib.rs"
 
 [dependencies]
+planning-table = { path = "../planning-table" }
 planning-validator-common = { path = "../planning-validator-common" }
 planning-validator-inventory = { path = "../planning-validator-inventory" }
 serde_json = { version = "1", features = ["preserve_order"] }

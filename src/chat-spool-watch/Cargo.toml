@@ -1,0 +1,19 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "chat-spool-watch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Watches the chat interrupt spool and says so when notices have gone unread for a while, so an idle agent can be woken"
+
+[lib]
+name = "chat_spool_watch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "chat-spool-watch"
+path = "src/main.rs"
+
+[dependencies]
+chat-proto = { path = "../chat-proto" }

@@ -57,6 +57,10 @@ echo "ci-scope: the selector does not exempt itself"
 check "the selector itself"    full .github/ci-scope.sh
 check "the subject mapper"     full .github/ci-subjects.sh
 check "its own tests"          full .github/tests/test-ci-scope.sh
+# The same self-protection, extended for the compiled binary this selector
+# now prefers: it lives under src/, not .github/, so the arm above alone
+# does not cover it.
+check "the compiled selector's own source" full src/ci-scope/src/main.rs
 
 echo "ci-scope: a push to an integration branch is exhaustive"
 # REGRESSION. On a push to master, HEAD is origin/master, so the merge base is
@@ -89,10 +93,13 @@ check "a doc-only change"      none README.md
 check "a skill-only change"    none chat/SKILL.md
 
 echo "ci-scope: a crate change narrows to that crate and its dependents"
-got="$("$scope_sh" --files-from /dev/stdin <<'EOF' | awk -F= '/^scope=/{print $2}'
-src/rjq/src/main.rs
-EOF
-)"
+# The list goes through a file, not /dev/stdin: ci-scope is a native program,
+# and on Windows the MSYS layer turns /dev/null into NUL for it but has no such
+# translation for /dev/stdin, so the binary saw an unreadable path and (by
+# design) fell back to scope=full.
+leaf_list="$work/leaf-files"
+printf '%s\n' 'src/rjq/src/main.rs' > "$leaf_list"
+got="$("$scope_sh" --files-from "$leaf_list" | awk -F= '/^scope=/{print $2}')"
 if [ "$got" = "selective" ]; then
     printf '  ok    a leaf crate is selective\n'
 else
@@ -134,6 +141,24 @@ if "$scope_sh" --nonsense >/dev/null 2>&1; then
     failures=$((failures + 1))
 else
     printf '  ok    an unknown flag is rejected\n'
+fi
+
+echo "ci-scope: no compiled binary falls back to the scope=full safe default"
+# AR-100: never mutate the real, shared planning/scripts/plan-core-lib.sh in
+# place -- copy ci-scope.sh into this test's own scratch work dir, whose
+# planning/scripts/ has no plan-core-lib.sh, so the wiring's own
+# [ -f .../plan-core-lib.sh ] check is false there with zero shared mutable
+# state touched.
+missing_binary_root="$work/missing-binary"
+mkdir -p "$missing_binary_root/.github" "$missing_binary_root/planning/scripts"
+cp "$scope_sh" "$missing_binary_root/.github/ci-scope.sh"
+got="$(cd "$missing_binary_root" && ./.github/ci-scope.sh --files-from /dev/null)"
+if grep -qF 'scope=full' <<<"$got" \
+    && grep -qF 'reason=ci-scope binary not found; run ./setup-dev-env.sh to build it' <<<"$got"; then
+    printf '  ok    a missing compiled binary falls back to scope=full\n'
+else
+    printf '  FAIL  a missing compiled binary should fall back to scope=full\n         got: %s\n' "$got"
+    failures=$((failures + 1))
 fi
 
 echo

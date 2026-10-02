@@ -21,14 +21,18 @@ plan_hoist_plan_dir() {
         esac
     done
     if [ -n "$hoisted" ]; then
-        local out=() i=1
+        # B83: named _hoist_out, not out -- shellcheck -x follows this source
+        # into every caller's namespace, and "local" does not scope its type
+        # inference, so a caller's own scalar named "out" was falsely flagged
+        # SC2178/SC2128 as if it were this function's array.
+        local _hoist_out=() i=1
         # PORTABILITY(empty-array-setu)
         for arg in ${rest[@]+"${rest[@]}"}; do
-            [ "$i" -ne "$position" ] || out+=("$hoisted")
-            out+=("$arg"); i=$((i + 1))
+            [ "$i" -ne "$position" ] || _hoist_out+=("$hoisted")
+            _hoist_out+=("$arg"); i=$((i + 1))
         done
-        [ "$i" -gt "$position" ] || out+=("$hoisted")
-        rest=(${out[@]+"${out[@]}"})
+        [ "$i" -gt "$position" ] || _hoist_out+=("$hoisted")
+        rest=(${_hoist_out[@]+"${_hoist_out[@]}"})
     fi
     # PORTABILITY(empty-array-setu)
     for arg in ${rest[@]+"${rest[@]}"}; do printf '%q ' "$arg"; done

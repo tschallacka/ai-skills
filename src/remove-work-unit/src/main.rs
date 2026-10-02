@@ -176,7 +176,20 @@ fn rebuild_plan_progress(plan: &Path) -> Result<(), String> {
     let completed = rows.iter().filter(|row| row.2 == "✅ completed").count() as i64;
     let total = rows.len() as i64;
     let percent = progress_percent(completed, total);
-    let mut output = format!("# Progress: {}\n\n**Overall progress:** `{}%  {}  100%` {}\n\n| Goalname | Description | Completion status |\n|---|---|---|\n", plan.file_name().unwrap().to_string_lossy(), percent, progress_bar(completed, total, 20), progress_icon(completed, percent));
+    // file_name() is None for a path that is exactly "." or ".." (or the
+    // filesystem root), which a caller can legitimately pass -- canonicalize
+    // resolves those to a real absolute path first (B338).
+    let plan_name = plan
+        .canonicalize()
+        .ok()
+        .and_then(|resolved| {
+            resolved
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+        .or_else(|| plan.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| ".".to_string());
+    let mut output = format!("# Progress: {plan_name}\n\n**Overall progress:** `{}%  {}  100%` {}\n\n| Goalname | Description | Completion status |\n|---|---|---|\n", percent, progress_bar(completed, total, 20), progress_icon(completed, percent));
     for (name, desc, status) in rows {
         output.push_str(&format!("| {name} | {desc} | {status} |\n"));
     }
@@ -201,6 +214,9 @@ fn main() {
             "--plan-dir" => {
                 index += 1;
                 plan = Some(args.get(index).cloned().unwrap_or_else(|| usage(64)));
+            }
+            value if value.starts_with("--plan-dir=") => {
+                plan = Some(value["--plan-dir=".len()..].to_string());
             }
             "--" => {
                 positional.extend(args.iter().skip(index + 1).cloned());

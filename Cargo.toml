@@ -23,6 +23,11 @@ unicode-normalization = "0.1"
 tempfile = "3"
 hmac = "0.12"
 getrandom = "0.3"
+ureq = { version = "2", default-features = false, features = ["rustls"] }
+tar = "0.4"
+flate2 = "1"
+toml = "0.8"
+serde_yml = "0.0.12"
 
 [profile.release]
 opt-level = "z"

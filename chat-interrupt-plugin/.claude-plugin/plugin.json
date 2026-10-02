@@ -1,0 +1,6 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "chat-interrupt",
+  "version": "0.1.0",
+  "description": "Shows, before a tool runs, the chat messages and timers the agent asked to be interrupted by (chat-mcp's interrupt rules and timers), so they reach an agent that is busy without Claude Code's channels flag."
+}

@@ -29,3 +29,20 @@ path = "src/bin/interactive-shell-fixture.rs"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# tcp.rs's nonce() needs this on every platform now: --tcp is an explicit
+# opt-in transport on Unix (alongside the default posix.rs socket transport),
+# not just Windows's only transport, so this moved out of the
+# cfg(windows)-only dependency set below.
+getrandom = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }

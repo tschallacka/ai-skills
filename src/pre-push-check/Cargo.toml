@@ -1,0 +1,9 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "pre-push-check"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+regex.workspace = true

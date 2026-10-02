@@ -5,7 +5,7 @@ use plan_overview::pages::{
 use plan_overview::plan::state::parse_state;
 
 fn state() -> plan_overview::plan::state::State {
-    parse_state(r#"{"identity":{"title":"Demo","uiAffected":"yes","reviewStatus":"approved","description":"d"},"goals":[],"steps":[{"goal":"","step":"test","unit":"W01","type":"test","target":"x","companion":"run command and inspect result","status":"passed","instructions":"i","criteria":"c"}],"edges":[],"testingMarks":[],"coverage":[{"outcome":"ship","units":"W01 W02 W03 W04 W05 W06 W07 W08"}],"findings":[{"id":"AR-1","item":"evidence","change":"correction","status":"open","workUnit":"W01","cycle":"current"}],"cycles":0,"reviewTarget":2,"generatedAt":"now","generatedBy":"test"}"#).unwrap()
+    parse_state(r#"{"identity":{"title":"Demo","uiAffected":"yes","reviewStatus":"approved","description":"d"},"goals":[],"steps":[{"goal":"","step":"test","unit":"W01","type":"test","target":"x","companion":"test-testing.md","testingProcedure":"run command and inspect result","status":"passed","instructions":"i","criteria":"c"}],"edges":[],"testingMarks":[],"coverage":[{"outcome":"ship","units":"W01 W02 W03 W04 W05 W06 W07 W08"}],"findings":[{"id":"AR-1","item":"evidence","change":"correction","status":"open","workUnit":"W01","cycle":"current"}],"cycles":0,"reviewTarget":2,"generatedAt":"now","generatedBy":"test"}"#).unwrap()
 }
 
 #[test]

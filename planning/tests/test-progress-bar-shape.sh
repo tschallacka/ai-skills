@@ -89,14 +89,14 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 # recompute_goal_bar <progress-file> : print "EXPECTED_PCT" and set rc nonzero on
-# mismatch. Hand-rolled parser mirrors update-progress.sh (goal=$2, status=$5).
+# mismatch. Hand-rolled parser recomputing each goal's bar from its rows
+# (goal=$2, status=$5).
 recompute_goal_bar() {
     local f="$1" expected=0 total=0 declared ep
     while IFS='|' read -r _ goal _ _ status; do
         goal_text="$(printf '%s' "${goal:-}" | sed 's/^ *//;s/ *$//')"
         status_text="$(printf '%s' "${status:-}" | sed 's/^ *//;s/ *$//')"
-        # Mirror update-progress.sh: skip header/separator rows AND rows whose
-        # status is a dash or empty (so the mirror matches the real parser).
+        # Skip header/separator rows AND rows whose status is a dash or empty.
         case "$goal_text" in
             'Goalname'|'---') continue ;;
         esac

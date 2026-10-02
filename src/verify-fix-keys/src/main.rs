@@ -154,10 +154,17 @@ fn main() {
         .join(&session)
         .join("secret");
     if !secret_file.is_file() {
+        // B112: a MISSING file, distinct from a per-claim key mismatch (the
+        // forged/stale-key case). The secret store is deliberately ephemeral
+        // (fresh per boot) while the mint-claim-verify protocol deliberately
+        // spans sessions, so an ordinary temp-directory eviction is the routine
+        // cause here, not a deliberate invalidation at approval -- and the
+        // message names the recovery rather than asking a leading question.
         die(
             format!(
-                "session secret missing: {} (was the session invalidated at approval?)",
-                secret_file.display()
+                "session secret missing: {}\nThis is an ordinary temp-directory eviction (reboot, tmpwatch, or anything\nelse clearing the scratch directory), not a sign the review was invalidated: the\nsecret store is designed to be fresh per boot, while the mint-claim-verify\nprotocol spans sessions.\nRecovery: re-mint fix keys for this plan --\n  mint-fix-keys.sh {}\nThis starts a NEW session and rewrites fix-keys.json, so every fixer must\nre-claim its keys in fixes.md; the prior claims and the audit trail of which\nsession claimed which key are lost.",
+                secret_file.display(),
+                plan.display()
             ),
             70,
         );

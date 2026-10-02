@@ -159,7 +159,13 @@ Ask the user, in this order:
 1. **"Do you want to turn this into a structured plan, or implement it as is?"**
    - **Structured plan** → hand off the brainstorm document to the planning
      skill, which creates the goal/step/resumable structure under
-     `.plans/<initiative>/`.
+     `.plans/<initiative>/`. **If the `planning` skill is not installed
+     here**, that hand-off is impossible — a minimal standalone plan
+     document next to the brainstorm document (goals, open questions, no
+     implementation) is an acceptable fallback, but say so explicitly:
+     state plainly that `planning` was unavailable and a lightweight
+     substitute was written instead, rather than silently proceeding as if
+     the real planning structure had been created.
    - **Implement as is** → implement directly from the brainstorm document.
 2. If they choose to implement and the work later leaves **potential bugs,
    undecided choices, or unverified risks**, offer the

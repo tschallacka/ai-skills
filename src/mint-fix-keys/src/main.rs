@@ -129,10 +129,32 @@ fn main() {
     {
         usage(0);
     }
-    if args.len() != 1 || args[0].starts_with('-') {
-        usage(64);
+    let mut plan_option = None;
+    let mut positional = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--plan-dir" => {
+                index += 1;
+                plan_option = args.get(index).cloned().unwrap_or_else(|| usage(64)).into();
+            }
+            value if value.starts_with("--plan-dir=") => {
+                plan_option = Some(value["--plan-dir=".len()..].to_string())
+            }
+            value if value.starts_with('-') => {
+                eprintln!("{COMMAND}: unknown option: {value}");
+                usage(64)
+            }
+            value => positional.push(value.to_string()),
+        }
+        index += 1;
     }
-    let plan = PathBuf::from(&args[0]);
+    let plan_arg = match (plan_option, positional.as_slice()) {
+        (Some(plan), []) => plan,
+        (None, [plan]) => plan.clone(),
+        _ => usage(64),
+    };
+    let plan = PathBuf::from(&plan_arg);
     if !plan.is_dir() {
         die(format!("Plan directory not found: {}", plan.display()), 66);
     }

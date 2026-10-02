@@ -23,9 +23,23 @@ fixture="$root/tests/fixtures/adversary-probe"
 [ -f "$fixture/FIXTURE-VERSION" ] || { echo "probe fixture missing: $fixture" >&2; exit 1; }
 
 # Current spec versions.
+#
+# generate-reviewer.sh's own bash body (T145 goal 27) is now a die-loudly
+# missing-binary stub; REVIEWER_PROFILE_VERSION only ever lived in that
+# deleted body, so the real source of truth is the compiled binary's own Rust
+# source, which embeds the same version literal in its own generated banner
+# text ("Reviewer profile contract: `X.Y.Z`") instead of a named variable.
 current_skill="$(sed -n 's/^REVIEWER_PROFILE_VERSION="\(.*\)"$/\1/p' "$root/scripts/generate-reviewer.sh" | head -1)"
-current_schema="$(sed -n 's/^context_schema_version=\([0-9]*\)$/\1/p' "$root/scripts/plan-context-lib.sh")"
-current_generator="$(sed -n 's/^context_generator_version=\([0-9]*\)$/\1/p' "$root/scripts/plan-context-lib.sh")"
+if [ -z "$current_skill" ]; then
+    current_skill="$(sed -n 's/.*Reviewer profile contract: `\([^`]*\)`.*/\1/p' \
+        "$root/../src/generate-reviewer/src/main.rs" | head -1)"
+fi
+# plan-context-lib.sh (T145 goal 29) is gone; context_schema_version and
+# context_generator_version now live only as Rust constants.
+current_schema="$(sed -n 's/^pub const CONTEXT_SCHEMA_VERSION: u8 = \([0-9]*\);$/\1/p' \
+    "$root/../src/plan-context-core/src/lib.rs" | head -1)"
+current_generator="$(sed -n 's/^pub const CONTEXT_GENERATOR_VERSION: u8 = \([0-9]*\);$/\1/p' \
+    "$root/../src/plan-context-core/src/lib.rs" | head -1)"
 [ -n "$current_skill" ] && [ -n "$current_schema" ] && [ -n "$current_generator" ] || {
     echo "could not resolve current planning/reader spec versions" >&2; exit 1
 }

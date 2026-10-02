@@ -1,32 +1,61 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# pre-push-check - the per-change gates from MAINTAINER.md section 4 and the
-# PR hygiene rules in AGENTS.md, in one command.
+# pre-push-check - the per-change gates and the PR hygiene rules in AGENTS.md,
+# in one command.
 #
-# Run it before every push. The change set is everything that differs from
-# master - the branch's commits plus the worktree and the index - and the fast,
-# mechanical gates are applied to that:
+# Run it before every push. It re-enters `nix develop` first, so without nix it
+# exits 69 and runs no gate, --help included (the `registers` branch is exempt,
+# see the paragraph after the gate list). The change set is everything that
+# differs from the merge base with origin/master (falling back to master, then
+# to the branch's upstream) - the branch's commits plus the worktree and the
+# index - and the gates run in this order:
+#   git fetch origin master  refreshes master before anything is measured, and
+#                           the base is resolved from what it fetched; a failed
+#                           fetch ends the run (PRE_PUSH_SKIP_FETCH=1 skips it,
+#                           for a throwaway clone or no network, and the change
+#                           set may then be stale)
+#   registers-branch guard  BUGS.json or TODO.json changed on any branch but
+#                           `registers` is refused and ends the run
+#                           (PRE_PUSH_ALLOW_REGISTERS=1 accepts changes already
+#                           in flight; never use it to file an entry)
 #   git diff --check        whitespace, in the worktree, the index and the
 #                           branch's committed diff
+#   PORTABILITY.md          regenerated unconditionally, so it always matches
+#                           what's about to be pushed (it is untracked)
 #   bash -n                 every changed shell script
 #   static shell gate       the changed scripts at warning severity, with -x so
 #                           `source=` resolves from disk. CI lints the whole
 #                           live set; see the note at that gate for why the
 #                           two agree and where they cannot
+#   static scans            a function newly over CODE-STYLE.md's 40-line cap,
+#                           and a construct PORTABILITY.md bans in a changed
+#                           script
 #   cargo fmt --check +     each crate under src/ touched by the change
 #   cargo test              (skipped with a note when no crate changed)
+#   cargo clippy            the whole workspace, --all-targets -D warnings,
+#                           whenever any crate changed
 #   register soundness      TODO.json and BUGS.json through reg_findings, the
 #                           shipped implementation: ids, statuses, severities,
 #                           priorities, parents, timestamps, reproductions,
 #                           mechanism-on-confirmed, verification-on-fixed
 #                           (needs rjq on PATH)
 #   npm package baseline    every pinned byte size in
-#                           npm-package-baseline.tsv against the working tree.
-#                           Not npm's file selection - the full
-#                           test-npm-package.sh still owns that
-# The registers update, the plan validator and the role-drift tests stay with
-# MAINTAINER.md section 4: they need judgement about what changed, which a
-# pre-push helper deliberately does not guess at.
+#                           planning/tests/fixtures/overview/npm-package-baseline.tsv
+#                           against the working tree. Not npm's file selection -
+#                           the full planning/tests/test-npm-package.sh still
+#                           owns that
+#   skill_files() check     tests/test-skill-files-manifest.sh
+#                           --declarations-only: a tracked skill file that
+#                           installer/src/50-manifest.sh's skill_files() does
+#                           not declare fails
+# On the `registers` branch none of the above runs, and neither does the nix
+# re-entry: the one gate is that every changed path is BUGS.json or TODO.json,
+# and anything else fails. The registers
+# workflow (.github/workflows/registers.yml) checks ids and parents when the
+# push lands.
+# The registers update, the plan validator and the role-drift tests are
+# deliberately left out of these gates: they need judgement about what
+# changed, which a pre-push helper does not guess at.
 #
 # Usage:
 #   pre-push-check.sh           the gates above
@@ -38,20 +67,45 @@
 # usage; 65 = not a git repository, or neither master nor an upstream resolves
 # and there is no branch diff to check; 69 = nix is needed to re-enter the
 # development shell and is not on PATH, so NO gate ran. 69 was undocumented,
-# and a caller that read only "non-zero" therefore reported a refusal for a run
-# that never started -- which is exactly what tests/test-register-branch-gate.sh
-# did on the macOS bash 3.2 leg, where there is no nix.
+# and a caller that read only "non-zero" therefore reported a refusal for a
+# run that never started, on a host with no nix.
 
 set -u
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# Exec into the compiled binary when one is present, falling through to the
+# bash implementation otherwise. This script takes no --plan-dir and does not
+# hoist one, so there is no hoist ordering to preserve; placed immediately
+# after both anchor lines above, before pre-push-check-lib.sh is sourced and
+# before the nix-shell re-exec below -- a wired invocation execs the compiled
+# binary before bash ever sources its own library or attempts its own
+# re-exec, and the compiled binary performs its own equivalent re-exec check
+# internally. pre-push-check.sh lives at the repository root itself, so the
+# relative path to plan-core-lib.sh crosses one directory level down.
+ppc_script_dir="$repo_root"
+source "$ppc_script_dir/planning/scripts/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present pre-push-check "$ppc_script_dir" "$@"
+unset ppc_script_dir
+
+# shellcheck source=pre-push-check-lib.sh
+source "$repo_root/pre-push-check-lib.sh"
+
 full=false
 
 # Git runs hooks with the caller's environment, which may provide a different
 # Cargo than the repository's pinned toolchain. Re-enter the flake once; the
-# marker prevents recursion inside the development shell.
-if [ -z "${AI_SKILLS_PREPUSH_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ]; then
+# marker prevents recursion inside the development shell. The `registers`
+# branch is exempt: its one gate needs only git, and its flake is the stale
+# master one, whose dev shell does not build on every host (B333).
+register_branch=registers
+current_branch="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+if [ -z "${AI_SKILLS_PREPUSH_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ] &&
+    [ "$current_branch" != "$register_branch" ]; then
     command -v nix >/dev/null 2>&1 || {
         printf '%s: nix develop .#default is required for Rust pre-push checks\n' "${0##*/}" >&2
         exit 69
@@ -96,21 +150,26 @@ note() { printf '  note  %s\n' "$1"; }
 #
 # The merge base rather than origin/master itself, so a master that has moved
 # ahead does not show its own commits as part of this branch's diff.
-base=""
-base_label=""
-for ref in origin/master master; do
-    if git rev-parse --verify "$ref" >/dev/null 2>&1; then
-        base="$(git merge-base "$ref" HEAD 2>/dev/null || printf '%s' "$ref")"
-        base_label="$ref"
-        break
+resolve_base() {
+    base=""
+    base_label=""
+    for ref in origin/master master; do
+        if git rev-parse --verify "$ref" >/dev/null 2>&1; then
+            base="$(git merge-base "$ref" HEAD 2>/dev/null || printf '%s' "$ref")"
+            base_label="$ref"
+            break
+        fi
+    done
+    if [ -z "$base" ]; then
+        base="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+        base_label="$base"
     fi
-done
-if [ -z "$base" ]; then
-    base="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
-    base_label="$base"
-fi
+}
 
 # ---- master is refreshed before anything is measured ------------------------
+# master is the branch every change set is measured against, so it comes first,
+# and the base is resolved from what the fetch brought in (resolve_base, below
+# the fetch): resolving first would measure against a stale origin/master.
 # Every gate below measures the change set against master. A master ref that is
 # behind the remote therefore makes already-merged work look like this branch's,
 # and the gates report on a change set that does not exist: a register commit
@@ -138,11 +197,40 @@ elif git rev-parse --git-dir >/dev/null 2>&1 && git remote get-url origin >/dev/
 else
     note "no origin remote; master cannot be refreshed and the change set may be stale"
 fi
+resolve_base
 
 changed() { # <pathspec-filter...> -> changed files matching the filter
     { [ -n "$base" ] && git diff --name-only "$base..HEAD"; git diff --name-only; git diff --cached --name-only; } \
         2>/dev/null | sort -u | grep "$@" || true
 }
+
+# ---- the registers branch: file scope only ----------------------------------
+# A push from `registers` carries register changes and nothing else, so this is
+# the only gate it runs: every changed path must be BUGS.json or TODO.json.
+# .github/workflows/registers.yml refuses the same thing before landing on
+# master, and checks ids and parents; this refuses it before the push leaves.
+if [ "$current_branch" = "$register_branch" ]; then
+    printf 'pre-push-check (base: %s; registers branch)\n' \
+        "${base_label:-no master or upstream; worktree only}"
+    stray="$(changed -v -E '^(BUGS|TODO)\.json$' || true)"
+    if [ -z "$stray" ]; then
+        files="$(changed -E '.' || true)"
+        if [ -z "$files" ]; then
+            note "nothing differs from master"
+        else
+            ok "only registers changed on the $register_branch branch ($(printf '%s\n' "$files" | tr '\n' ',' | sed 's/,$//; s/,/, /g'))"
+        fi
+        note "registers branch: no other gate runs; registers.yml checks ids and parents when it lands"
+        printf 'pre-push-check: PASS\n'
+        exit 0
+    fi
+    bad "the $register_branch branch may only change BUGS.json and TODO.json"
+    printf '%s\n' "$stray" | sed 's/^/    /'
+    note "register changes reach master without review, so anything else is refused"
+    note "put the other change on its own branch: git switch -c <name> from the commit before it"
+    printf 'pre-push-check: %s failure(s)\n' "$failures"
+    exit 1
+fi
 
 printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; worktree only}"
 
@@ -150,10 +238,9 @@ printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; workt
 # BUGS.json and TODO.json are append-mostly arrays, so two branches that both
 # file an entry both take the same next free id. Git does not see that: the
 # additions land at different array positions, it merges them textually with NO
-# conflict, and the result carries two unrelated entries under one id. That
-# happened for real on 2026-09-04 -- eight duplicate ids in one merge, invisible
-# until reg_findings ran -- and register-resolve.sh's advice in the textual case
-# is to take one side, which silently drops the other's entries.
+# conflict, and the result carries two unrelated entries under one id,
+# invisible until reg_findings ran -- and the resolvers' advice in the
+# textual case is to take one side, which silently drops the other's entries.
 #
 # The structural answer is a single writer: register entries are filed on the
 # `bugs` branch and nowhere else, so ids are allocated in one place and no merge
@@ -165,9 +252,7 @@ printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; workt
 # branch exists -- git refuses a ref and a ref directory of the same name, and
 # bugs/close-b95 is unmerged and checked out. Work branches use the `bug/`
 # prefix, so `registers` cannot collide with them either.
-register_branch=registers
 register_changes="$(changed -E '^(BUGS|TODO)\.json$' || true)"
-current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
 # PRE_PUSH_ALLOW_REGISTERS=1 is for transport, not authoring: the one-off
 # transition that introduces this rule while register work is already in
 # flight, and an integration branch that merges someone else's entries rather
@@ -183,7 +268,7 @@ if [ -n "$register_changes" ] && [ "$current_branch" != "$register_branch" ]; th
     printf '%s\n' "$register_changes" | sed 's/^/    /'
     note "branch: $current_branch"
     note "THE TARGET BRANCH IS: $register_branch"
-    note "  git switch $register_branch   (git switch -c $register_branch origin/master if it is not local yet)"
+    note "  git switch $register_branch   (git switch -c $register_branch origin/$register_branch if it is not local yet)"
     note "  then file the entry with the shipped tools -- bin/<triple>/bugs add ... or"
     note "  bin/<triple>/todo add ... -- and push; the entry reaches master from there"
     note "a fix's resolution keys (fix, verification, status) go the same way, after the"
@@ -206,6 +291,17 @@ else
     bad "whitespace errors: git diff --check"
 fi
 
+# ---- 1b. regenerate the portability catalogue ------------------------------
+# Unconditional, every run: PORTABILITY.md is untracked and cheap to rebuild,
+# so a push always leaves the working tree with a copy that actually matches
+# what just got pushed, rather than relying on whoever pushes to remember to
+# run generate-portability.sh by hand first.
+if "$repo_root/generate-portability.sh" >/dev/null 2>&1; then
+    ok "regenerated PORTABILITY.md"
+else
+    bad "generate-portability.sh failed; the portability catalogue may be stale"
+fi
+
 # ---- 2. syntax on changed shell scripts ------------------------------------
 sh_changed="$(changed '\.sh$')"
 if [ -n "$sh_changed" ]; then
@@ -219,149 +315,12 @@ else
     note "no changed shell scripts; bash -n skipped"
 fi
 
-# ---- 3. shellcheck on the scripts that differ from master ------------------
-# CI lints every live script in one invocation, naming the generated libraries
-# alongside them because a `source=` directive resolves only against files on
-# the linter's own command line — omit them and every variable a sourcing
-# script reads from them reports unassigned (SC2154).
-#
-# That invocation costs ~33s of a ~47s run and is paid in full whether the
-# change touches one script or none. Here the change set is what matters, so
-# only the scripts that differ from master are linted, with -x: shellcheck
-# then follows `source=` from disk instead of requiring the target on the
-# command line, which is what makes a per-file lint equivalent to the whole-set
-# one. Measured over all 317 live scripts, linted one at a time: 2 disagree
-# with the whole-set result without -x (plan-context-lib.sh,
-# test-portable-helpers.sh — both unresolved-source false positives), 0 with
-# it, and -x introduces no findings of its own. On this branch the gate drops
-# from 32,676ms to 454ms.
-#
-# The libraries are still built first: -x resolves them from disk, so they have
-# to exist. CI remains the authority on the full set — a change in one script
-# can in principle provoke a finding in an unchanged script that sources it,
-# and only the whole-set lint sees that.
-if [ -x planning/scripts/build-plan-libs.sh ]; then
-    planning/scripts/build-plan-libs.sh >/dev/null 2>&1 || true
-fi
-# Only scripts that still EXIST: a deletion is part of the change set, and
-# feeding a deleted path to shellcheck fails with "openBinaryFile: does not
-# exist" -- so removing a superseded script used to fail this gate, which is
-# precisely the shape that teaches people to bypass a gate rather than use it.
-changed_sh=""
-for _sh in $(changed -E '\.sh$'); do
-    [ -f "$_sh" ] && changed_sh="${changed_sh}${changed_sh:+
-}$_sh"
-done
-unset _sh
-if [ -z "$changed_sh" ]; then
-    note "no shell scripts differ from ${base_label:-the base}; shellcheck skipped (CI lints all)"
-elif command -v shellcheck >/dev/null 2>&1; then
-    # shellcheck disable=SC2086
-    if shellcheck -x -s bash --severity=warning $changed_sh >/dev/null 2>&1; then
-        ok "shellcheck -x --severity=warning ($(printf '%s\n' "$changed_sh" | wc -l | tr -d ' ') changed vs ${base_label:-base})"
-    else
-        bad "shellcheck findings at warning severity (CI gates on these)"
-        # shellcheck disable=SC2086
-        shellcheck -x -s bash --severity=warning $changed_sh 2>&1 | sed -n '1,40p' >&2
-    fi
-else
-    note "shellcheck not installed locally; CI still gates on it"
-fi
-
-# ---- 3b. the two static shell gates CI fails on, over the same changed set --
-# Both are pure static checks over shell source and both are CI-fatal, so the
-# cheap half of each belongs in the default gate rather than only in the suite.
-#
-# Scoped to $changed_sh, the list section 3 already built, so the cost is
-# proportional to the change.
-#
-# What each scoped form does and does NOT prove:
-#   - the cap check reports what THIS change is responsible for: a function
-#     newly over the 40-line cap, or an already over-cap one that grew. It is
-#     diffed against $base for exactly that reason -- flagging every over-cap
-#     function in a touched file would refuse any edit to a file that already
-#     contains one, which is how a gate teaches people to bypass it. It says
-#     nothing about the tree-wide COUNT, which is a ratchet (may shrink, never
-#     grow) and so a global property no per-file run can evaluate; CI keeps that.
-#   - the portability scan applies the real rules and allowlists to the changed
-#     files only, so it cannot see a construct introduced in a file the change
-#     did not name. CI remains the authority on the whole tree.
-if [ -z "$changed_sh" ]; then
-    note "no shell scripts differ from ${base_label:-the base}; cap and portability scans skipped"
-else
-    cap_test="$repo_root/planning/tests/test-function-length-ratchet.sh"
-    if [ -x "$cap_test" ]; then
-        # shellcheck disable=SC2086
-        if cap_out="$("$cap_test" --files --base "$base" $changed_sh 2>&1)"; then
-            ok "no function newly over the 40-line cap"
-        else
-            bad "this change puts a function over CODE-STYLE.md's 40-line cap"
-            printf '%s\n' "$cap_out" | sed -n '1,20p' >&2
-        fi
-    else
-        note "no $cap_test to check the function cap with"
-    fi
-
-    port_test="$repo_root/planning/tests/test-portability-contract.sh"
-    if [ -x "$port_test" ]; then
-        # shellcheck disable=SC2086
-        if port_out="$("$port_test" --files $changed_sh 2>&1)"; then
-            ok "no banned portability construct in the changed scripts"
-        else
-            bad "a changed script uses a construct PORTABILITY.md bans"
-            printf '%s\n' "$port_out" | sed -n '1,20p' >&2
-        fi
-    else
-        note "no $port_test to check portability constructs with"
-    fi
-fi
-
-# ---- 4. rust crates under src/ touched by the change -----------------------
-crates="$(for f in $(changed -E '^src/[^/]+/'); do
-    crate="${f#src/}"; crate="${crate%%/*}"
-    [ -n "$crate" ] && printf '%s\n' "$crate"
-done | LC_ALL=C sort -u)"
-if [ -n "$crates" ]; then
-    if ! command -v cargo >/dev/null 2>&1; then
-        note "src/ changed but cargo is not on PATH (nix develop); CI still runs fmt and test"
-    else
-        while IFS= read -r crate; do
-            m="src/$crate/Cargo.toml"
-            [ -f "$m" ] || continue
-            if cargo fmt --check --manifest-path "$m" >/dev/null 2>&1; then
-                ok "cargo fmt --check: $crate"
-            else
-                bad "cargo fmt --check: $crate (CI runs fmt before the build)"
-            fi
-            if cargo test --manifest-path "$m" >/dev/null 2>&1; then
-                ok "cargo test: $crate"
-            else
-                bad "cargo test: $crate"
-            fi
-        done <<EOF
-$crates
-EOF
-        # Workspace-wide, not per-crate: CI's own reasoning (native.yml's
-        # comment on the workspace gate) is that a per-crate pass misses a
-        # library change breaking a consumer selection did not name, and that
-        # was proven true here, not hypothetically -- three CI legs failed on
-        # exactly this (client.rs's `session_token_path.is_some()` then
-        # `.unwrap()`, `-D warnings` turning `unnecessary_unwrap` fatal) while
-        # this gate, running fmt and test only, stayed green. `-D warnings`
-        # matches CI's own flags so a local pass means the same thing CI's
-        # does, not a weaker guarantee with the same wording.
-        clippy_log="$(mktemp "${TMPDIR:-/tmp}/pre-push-clippy.XXXXXX")"
-        if cargo clippy --workspace --all-targets -- -D warnings >"$clippy_log" 2>&1; then
-            ok "cargo clippy --workspace -D warnings"
-        else
-            bad "cargo clippy --workspace -D warnings (CI gates on this too)"
-            sed -n '1,40p' "$clippy_log" >&2
-        fi
-        rm -f "$clippy_log"
-    fi
-else
-    note "no crates under src/ changed; rust gates skipped"
-fi
+# ---- 3, 3b, 4: shellcheck, static scans, and rust crates -------------------
+# Each gate lives in pre-push-check-lib.sh so this file stays under the
+# repo's size limit for a script.
+gate_shellcheck
+gate_static_scans
+gate_rust_crates
 
 # ---- 5. register soundness (needs rjq; skip quietly without it) ------------
 # This delegates to reg_findings rather than carrying its own expression. The
@@ -404,7 +363,7 @@ fi
 # no row to disagree with. The full test remains authoritative for the file set.
 #
 # An absent file is NOT drift. Six baseline rows name generated, untracked
-# artifacts (MAINTAINER.md 2.16) -- planning/REVIEWER.md and the five
+# artifacts (.agents/MAINTAINER.md 1.10) -- planning/REVIEWER.md and the five
 # plan-*-lib.sh -- which `npm pack` builds in its prepack and a fresh checkout
 # simply does not have. Counting those as failures made this gate red on a
 # clean clone, which is the same shape of uselessness as a gate that can never
@@ -454,7 +413,7 @@ if [ -x "$manifest_test" ]; then
     else
         bad "a skill file is tracked but not declared in skill_files()"
         printf '%s\n' "$manifest_out" | sed -n 's/^ *FAIL: /  /p'
-        note "add it to the right arm in installer/src/50-manifest.sh, then installer/build.sh"
+        note "add it to the right arm of skill_files() in installer/src/50-manifest.sh"
     fi
 else
     note "no $manifest_test to check skill declarations with"

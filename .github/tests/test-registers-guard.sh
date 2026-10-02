@@ -138,4 +138,34 @@ if ( cd "$work/badbase" && "$guard" --base refs/heads/definitely-not-a-ref >"$wo
 t_assert_eq 'an unresolvable base is refused' "$rc" '1'
 t_assert_contains 'the refusal says the base did not resolve' 'does not resolve' "$(cat "$work/out")"
 
+# ---- 8. --base must diff from the merge base, not the base's current tip --
+# registers-sync.yml refuses to fast-forward `registers` past master while an
+# entry is pending, so master routinely moves via ordinary PRs while a register
+# push is in flight. `--base` has to see only what changed ON registers since it
+# branched, or master's own unrelated commits read as "registers touched this",
+# and the guard refuses every pending entry until someone rebases by hand.
+repo="$work/realrepo"
+mkdir -p "$repo"
+( cd "$repo" && git init -q && git config user.email t@t && git config user.name t )
+fixture "$repo"
+( cd "$repo" && git add -A && git commit -q -m base )
+( cd "$repo" && git branch -q registers )
+# master moves on its own, touching a file the registers branch never sees.
+printf 'unrelated\n' > "$repo/README.md"
+( cd "$repo" && git add README.md && git commit -q -m 'unrelated master work' )
+# registers, meanwhile, only ever gained a register-only commit off the OLD tip.
+( cd "$repo" && git switch -q registers )
+python3 - "$repo/BUGS.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["bugs"].append({"id": "B3", "title": "filed while master moved on", "parent": None})
+json.dump(d, open(p, "w"), indent=2)
+PY
+( cd "$repo" && git add BUGS.json && git commit -q -m 'file B3' )
+rc=0
+( cd "$repo" && "$guard" --base master >"$work/out" 2>&1 ) || rc=$?
+t_assert_eq 'a pending entry is not refused for master moving on unrelated files' "$rc" '0'
+t_assert_contains 'it says it may merge' 'may merge' "$(cat "$work/out")"
+
 t_end 'test-registers-guard'

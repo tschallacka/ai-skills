@@ -1,0 +1,836 @@
+// MODE: DEV
+// PACKAGE: PROD
+//! Wire protocol between planning-client/planning-mcp and the planning-server
+//! daemon: one Request per connection line, one Response back (NDJSON, the
+//! same one-message-per-line shape ai-text-editor's own transport.rs uses).
+//!
+//! Two bounded reads, a growing set of guarded writes (three of them --
+//! UpdateWorkUnit/RemoveWorkUnit/UpdatePlanContent -- generic wire shapes
+//! covering several CLI modes each, rather than one Request variant per
+//! flag), and one read-only validator. Every guarded Request carries the
+//! PlanRevision (as its hex string) the caller last observed for the
+//! document it targets; the server checks it against the document's current
+//! on-disk hash before applying any write (see revision.rs).
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "op")]
+pub enum Request {
+    /// Any of plan-context.sh's own resolvable document ids: plan, review,
+    /// goal:<goal>, step:<goal>/<step>, unit:<WNN>, inventory, coverage,
+    /// progress, goal-progress:<goal>, adversarial-review, stories, bugs,
+    /// fixes, fix-keys, approval.
+    ReadPlanDocument {
+        plan_dir: String,
+        document_id: String,
+        view: Option<String>,
+    },
+    /// Sugar for ReadPlanDocument's own unit:<WNN> case.
+    ReadWorkUnit { plan_dir: String, unit_id: String },
+    UpdateStep {
+        plan_dir: String,
+        goal: String,
+        step: String,
+        status: String,
+        revision: String,
+    },
+    AddWorkUnit {
+        plan_dir: String,
+        id: String,
+        unit_type: String,
+        file: String,
+        scope: String,
+        subscope: String,
+        change: String,
+        depends_on: String,
+        goal: String,
+        step: String,
+        revision: String,
+    },
+    /// The flexible positional/flag mix update-work-unit itself takes
+    /// (`args`, verbatim, after `plan_dir` and `unit_id`) rather than one
+    /// field per flag: `--scope`/`--file`/`--type`/`--depends-on`/
+    /// `--description`, the two-positional shorthand, or `--goal`/`--step`
+    /// to move the unit are all the same guarded write against the same
+    /// file, so nothing is gained by giving each its own Request shape.
+    /// Guards work-unit-inventory.md only, matching AddWorkUnit's own
+    /// documented MVP simplification: a move also rewrites the unit's step
+    /// file and both goals' progress trackers, and those are not separately
+    /// guarded here.
+    UpdateWorkUnit {
+        plan_dir: String,
+        unit_id: String,
+        args: Vec<String>,
+        revision: String,
+    },
+    /// Guards work-unit-inventory.md, the same simplification as
+    /// UpdateWorkUnit/AddWorkUnit -- the cascade also rewrites coverage
+    /// rows, the owning goal's roster, the step file and its testing twin,
+    /// and rebuilds both progress trackers, none of which are separately
+    /// guarded here.
+    RemoveWorkUnit {
+        plan_dir: String,
+        unit_id: String,
+        confirm_cascade: bool,
+        revision: String,
+    },
+    /// One generic wire shape for every update-plan-content mode except
+    /// review-status/testing-requirement (which predate this and keep their
+    /// own dedicated variants): `mode` is the long flag name without its
+    /// leading `--` (e.g. "description-paragraph", "title",
+    /// "decomposition-review"), and `args` is the rest of that mode's own
+    /// positional arguments, verbatim and in CLI order, after `plan_dir`.
+    /// The guard target is resolved from `mode`/`args` the same way
+    /// update-plan-content's own `document_path` resolves its write target
+    /// (see handlers::update_plan_content_target) -- eighteen modes would
+    /// otherwise mean eighteen near-identical Request variants and handler
+    /// functions for what is, underneath, one guarded subprocess call with
+    /// a different flag and argument list each time.
+    UpdatePlanContent {
+        plan_dir: String,
+        mode: String,
+        args: Vec<String>,
+        revision: String,
+    },
+    SetReviewStatus {
+        plan_dir: String,
+        status: String,
+        revision: String,
+    },
+    SetTestingRequirement {
+        plan_dir: String,
+        goal: String,
+        required: bool,
+        rationale: String,
+        revision: String,
+    },
+    /// Unguarded: create-adversarial-review itself refuses outright when
+    /// adversarial-review.md already exists (exit 73), so this can never
+    /// lose a concurrent write the way an overwrite could -- the file
+    /// either does not exist yet (nothing to guard against) or the call
+    /// fails cleanly with no write at all.
+    CreateAdversarialReview { plan_dir: String },
+    /// `args`, verbatim, after `plan_dir`: `--file`/`--cycle`/`--check`, or
+    /// `--set-rationale <text>` as its own standalone mode (no CSV/findings
+    /// involved) that stamps the Verdict's own Rationale line with the
+    /// review cycle it describes, so a later archived cycle moving past
+    /// that stamp can be flagged by validate-plan (T56). Guards
+    /// adversarial-review.md.
+    UpdateAdversarialReview {
+        plan_dir: String,
+        args: Vec<String>,
+        revision: String,
+    },
+    /// `args`, verbatim, after `plan_dir` and `finding_id`: the finding and
+    /// resolution text, plus `--status`/`--work-unit`. Guards
+    /// adversarial-review.md; re-minting fix-keys.json when `--work-unit`
+    /// is given is not separately guarded (the same MVP simplification as
+    /// AddWorkUnit's own secondary file).
+    AddAdversarialFinding {
+        plan_dir: String,
+        finding_id: String,
+        args: Vec<String>,
+        revision: String,
+    },
+    /// `args`, verbatim, after `plan_dir` and `finding_id`:
+    /// `--status`/`--claimed-by`. Guards adversarial-review.md.
+    ResolveFinding {
+        plan_dir: String,
+        finding_id: String,
+        args: Vec<String>,
+        revision: String,
+    },
+    /// Unguarded: mint-fix-keys fully regenerates fix-keys.json from the
+    /// plan's current findings every time rather than applying an
+    /// incremental edit, so a revision guard against its OWN previous
+    /// bytes would not protect anything a plain re-run does not already
+    /// risk -- two concurrent mints simply leave the later write standing,
+    /// exactly as running the CLI twice back to back would.
+    MintFixKeys { plan_dir: String },
+    /// Read-only, unguarded, like ValidatePlan: verifies fixes.md's claims
+    /// against fix-keys.json and reports pass/fail plus the full report.
+    VerifyFixKeys {
+        plan_dir: String,
+        claimed_by: Option<String>,
+    },
+    /// Unguarded: fixes.md is an append-only audit trail that may not exist
+    /// yet at all before the first claim (the same "nothing to guard
+    /// against yet" gap AddWorkUnit's own new step file already carries,
+    /// documented rather than worked around with a new bootstrap
+    /// mechanism this crate's guard does not otherwise need).
+    AddFixClaim {
+        plan_dir: String,
+        finding_id: String,
+        work_unit: String,
+        key: String,
+    },
+    /// Guards work-unit-inventory.md (coverage rows live in the same file
+    /// as work-unit rows).
+    AddCoverage {
+        plan_dir: String,
+        required_outcome: String,
+        work_units: String,
+        notes: String,
+        replace: bool,
+        revision: String,
+    },
+    /// Guards work-unit-inventory.md.
+    RemoveCoverage {
+        plan_dir: String,
+        required_outcome: String,
+        revision: String,
+    },
+    /// Unguarded: create-work-unit-inventory itself refuses outright when
+    /// work-unit-inventory.md already exists, the same "nothing to lose"
+    /// shape as CreateAdversarialReview.
+    CreateWorkUnitInventory { plan_dir: String },
+    /// Unguarded: create-plan-progress itself refuses outright when
+    /// progress.md already exists, the same "nothing to lose" shape as
+    /// CreateAdversarialReview.
+    CreatePlanProgress { plan_dir: String },
+    /// Guards progress.md.
+    UpdatePlanProgress {
+        plan_dir: String,
+        goal: String,
+        status: String,
+        revision: String,
+    },
+    /// Unguarded: rebuild-plan-progress fully regenerates progress.md from
+    /// the goals' own progress files every time, the same "a guard against
+    /// its own previous bytes protects nothing a plain re-run does not
+    /// already risk" reasoning as MintFixKeys.
+    RebuildPlanProgress { plan_dir: String },
+    /// Unguarded: create-plan itself refuses outright when the target
+    /// directory already exists (exit 73), the same "nothing to lose"
+    /// shape as CreateAdversarialReview. create-plan's own first argument
+    /// also accepts a bare name (no path separator), resolved under the
+    /// plans root -- the compiled binary itself never prompts (that is
+    /// plan-root.sh's own wrapper behavior, a different program this crate
+    /// never calls), but this wire operation always requires an explicit
+    /// `plan_dir` regardless, the same convention every other operation in
+    /// this crate already uses, rather than resolving that ambiguity here.
+    CreatePlan { plan_dir: String, title: String },
+    /// Deletes the whole plan directory tree; remove-plan itself has no
+    /// confirmation flag at all. `confirm` is an adapter-level gate (not a
+    /// CLI flag remove-plan reads): the handler refuses before ever
+    /// running the binary unless it is true, so a caller cannot delete a
+    /// plan by a single unconfirmed tool call the way it could with every
+    /// other tool in this crate.
+    RemovePlan { plan_dir: String, confirm: bool },
+    /// Bulk-removes completed plans under the plans root (no single
+    /// plan_dir; this addresses the whole root, unlike every other
+    /// operation here). `list_only` runs cleanup-plans' own `--list` (read-
+    /// only, reports which plans it considers complete) and needs no
+    /// confirmation. The real removal mode needs BOTH `confirm: true` (the
+    /// same adapter-level gate RemovePlan uses, refused before running
+    /// anything) and, once confirmed, is run with `--yes` so
+    /// cleanup-plans' own interactive prompt -- which would otherwise
+    /// block forever with no terminal on the other end -- is never reached.
+    CleanupPlans {
+        list_only: bool,
+        plan_names: Vec<String>,
+        confirm: bool,
+    },
+    /// Guards progress.md: add-goal both creates the new goal's own
+    /// directory (goal.md + steps/, refused outright if it already exists,
+    /// nothing to guard there) and rewrites progress.md to add the goal's
+    /// row -- progress.md is the one guardable target, the same
+    /// "guard the one file that already exists" shape as AddWorkUnit's own
+    /// inventory-only guard.
+    AddGoal {
+        plan_dir: String,
+        goal_name: String,
+        title: String,
+        outcome: String,
+        revision: String,
+    },
+    /// Read-only: resolves a project's plan-storage root (plan-root's own
+    /// `project-root` subcommand). `resolve` -- plan-root's OTHER
+    /// subcommand -- is deliberately not wired: on a project's first use it
+    /// reads stdin interactively to ask where plans should live, and
+    /// run_command inherits this adapter's own stdin unchanged, which in an
+    /// MCP-stdio context is the JSON-RPC channel itself -- a real hang (or
+    /// worse, a corrupted read of a future request) rather than a
+    /// hypothetical one.
+    PlanRoot { directory: Option<String> },
+    /// Read-only: `mode` is register-read's own subcommand
+    /// (show/list/report/count/next-id), `args` its trailing arguments
+    /// (an id for show, flags for list/report/count). `file` is REQUIRED
+    /// here rather than optional: register-read falls back to the
+    /// `BUGS_JSON`/`TODO_JSON` env vars or a bare `BUGS.json`/`TODO.json`
+    /// relative to its own cwd when omitted, and this crate has no
+    /// reliable way to guarantee either from an MCP server's own working
+    /// directory -- the same "two different TODO.json files exist, cd into
+    /// the right worktree first" footgun this repo's own contributors already
+    /// hit, sidestepped here by simply always requiring an explicit path.
+    RegisterRead {
+        kind: String,
+        mode: String,
+        args: Vec<String>,
+        file: String,
+    },
+    /// Unguarded: add-planning-bug's own doc comment says it plainly --
+    /// "Appends to <plan-directory>/planning-bugs.json, creating it on
+    /// first use" -- the same "nothing to guard against yet before the
+    /// first write" gap AddFixClaim's own fixes.md already carries.
+    AddPlanningBug {
+        plan_dir: String,
+        id: String,
+        title: String,
+        reproduce: String,
+        observed: String,
+        expected: String,
+        args: Vec<String>,
+    },
+    /// Guards plan-description.md: create-ui-validation both inserts the
+    /// "## UI validation" section into the description (refused if that
+    /// section, or either target artifact, already exists) and creates
+    /// ui-user-stories.md and bugs.md fresh -- plan-description.md is the
+    /// one file that already exists, the same "guard the one file that
+    /// already exists" shape as AddGoal's own progress.md guard.
+    CreateUiValidation {
+        plan_dir: String,
+        browser_target: String,
+        revision: String,
+    },
+    /// Guards ui-user-stories.md: add-ui-story both inserts the story's row
+    /// there (refused if the id already exists) and creates a fresh
+    /// per-story browser run cache under ui-story-runs/ -- the story table
+    /// is the one guardable target, the same shape as AddGoal's own
+    /// progress.md guard. Only the flag form is wired here; the binary's
+    /// positional form is a deprecated compatibility shim for existing
+    /// callers.
+    AddUiStory {
+        plan_dir: String,
+        id: String,
+        persona: String,
+        actions: String,
+        interaction: String,
+        expected: String,
+        work_units: String,
+        revision: String,
+    },
+    /// Guards ui-user-stories.md: rewrites a story row's own "Related work
+    /// units" column to the given comma-separated ids, each of which must
+    /// already appear in work-unit-inventory.md.
+    AddUiStoryLinks {
+        plan_dir: String,
+        id: String,
+        work_units: String,
+        revision: String,
+    },
+    /// Guards ui-user-stories.md: rewrites the named fields of a story's own
+    /// row (any subset; at least one required), and, when a run result
+    /// (status and/or evidence) is recorded AND the row's own cache column
+    /// still points at the standard ui-story-runs/<id>.md path, also mirrors
+    /// Status/Evidence into that per-story cache file -- not separately
+    /// guarded, the same "cascading secondary file" simplification as
+    /// AddWorkUnit's own step file.
+    UpdateUiStory {
+        plan_dir: String,
+        id: String,
+        persona: Option<String>,
+        actions: Option<String>,
+        interaction: Option<String>,
+        expected: Option<String>,
+        status: Option<String>,
+        evidence: Option<String>,
+        revision: String,
+    },
+    /// Guards the per-story cache file itself (ui-story-runs/<id>.md, which
+    /// must already exist): configure-ui-story-cache fully regenerates it
+    /// wholesale every run, the same "guard the file that is about to be
+    /// wholly replaced" shape RemoveCoverage/UpdatePlanProgress already use
+    /// for a guarded rewrite rather than an incremental edit.
+    ConfigureUiStoryCache {
+        plan_dir: String,
+        id: String,
+        starting_state: String,
+        input: String,
+        target: String,
+        readiness: String,
+        max_wait: String,
+        revision: String,
+    },
+    /// Unguarded: create-ui-story-run-cache itself refuses outright when the
+    /// target cache file already exists, the same "nothing to lose" shape as
+    /// CreateAdversarialReview. Exists as its own operation because
+    /// AddUiStory already creates this file as a side effect; this is the
+    /// standalone recreate-if-missing path (e.g. after a manual deletion).
+    CreateUiStoryRunCache { plan_dir: String, id: String },
+    /// Read-only: a register file's (TODO.json/BUGS.json) raw content and
+    /// its PlanRevision hash. Unlike a plan document there is no
+    /// plan-context document id for these files -- register-read serves
+    /// bounded QUERIES (show/list/report/count/next-id), never a whole
+    /// guardable snapshot -- so AddTodo/UpdateTodo/AddBug/UpdateBug's own
+    /// auto-read convenience needs its own read path, and this is it.
+    ReadRegisterFile { file: String },
+    /// Guards `file` directly: `file` names the exact TODO.json to operate
+    /// on and is also what gets set as the `TODO_JSON` env var for the
+    /// subprocess, never read from this adapter's own cwd or ambient
+    /// environment -- the same "two different TODO.json files exist, never
+    /// guess which one" rule RegisterRead already established. todo-add
+    /// requires the caller's own `--id` (unlike bug-add, it mints nothing),
+    /// so a plain revision-bearing Written is enough to report back.
+    AddTodo {
+        file: String,
+        id: String,
+        title: String,
+        parent: Option<String>,
+        priority: Option<String>,
+        status: Option<String>,
+        blocked_on: Option<String>,
+        detail: Option<String>,
+        refs: Vec<String>,
+        revision: String,
+    },
+    /// Guards `file` directly, the same TODO_JSON-injection shape as AddTodo.
+    UpdateTodo {
+        file: String,
+        id: String,
+        status: Option<String>,
+        priority: Option<String>,
+        note: Option<String>,
+        detail: Option<String>,
+        blocked_on: Option<String>,
+        revision: String,
+    },
+    /// Guards `file` directly (BUGS_JSON is injected the same way AddTodo
+    /// injects TODO_JSON). bug-add mints its own B<N> id and takes no id
+    /// argument at all -- WrittenWithId reports the minted id back, read
+    /// from the newly-written file's own last `bugs[]` entry (bug-add
+    /// always pushes, never sorts, so a fresh entry is always last) rather
+    /// than parsed out of the subprocess's own stdout text.
+    AddBug {
+        file: String,
+        title: String,
+        reproduce: String,
+        observed: String,
+        expected: String,
+        severity: Option<String>,
+        priority: Option<String>,
+        status: Option<String>,
+        mechanism: Option<String>,
+        parent: Option<String>,
+        found_by: Option<String>,
+        surfaces: Option<String>,
+        revision: String,
+    },
+    /// Guards `file` directly, the same BUGS_JSON-injection shape as AddBug.
+    UpdateBug {
+        file: String,
+        id: String,
+        status: Option<String>,
+        fix: Option<String>,
+        verification: Option<String>,
+        reason: Option<String>,
+        priority: Option<String>,
+        mechanism: Option<String>,
+        append_note: Option<String>,
+        revision: String,
+    },
+    /// Read-only: no revision at all, since it applies no write.
+    ValidatePlan { plan_dir: String, complete: bool },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "status")]
+pub enum Response {
+    /// A successful bounded read: the view text and the revision it was
+    /// read at (so a subsequent guarded write can submit it as its own
+    /// `revision` field without a second round trip).
+    Document { content: String, revision: String },
+    /// A successful guarded write: the new revision the write produced.
+    Written { revision: String },
+    /// A successful guarded write that also mints its own identity the
+    /// caller could not have supplied (bug-add's self-assigned B<N> id):
+    /// `revision` guards the next write, `id` is what to reference this
+    /// entry by afterward.
+    WrittenWithId { revision: String, id: String },
+    /// ValidatePlan's own result: pass/fail plus the full report text.
+    Validated { passed: bool, report: String },
+    /// A guarded write refused because `revision` no longer matches what is
+    /// on disk -- re-read and retry with `actual`.
+    Stale { expected: String, actual: String },
+    /// Any other refusal (bad usage, missing file, and the like), with a
+    /// message meant to be shown to the caller as-is.
+    Error { message: String },
+    /// This Request variant has no handler yet (present only until W79
+    /// lands each real handler; proves the dispatch loop itself is correct
+    /// independent of any operation's own logic).
+    Unimplemented,
+}
+
+pub fn encode_response(response: &Response) -> String {
+    serde_json::to_string(response).unwrap_or_else(|error| {
+        serde_json::to_string(&Response::Error {
+            message: format!("could not encode response: {error}"),
+        })
+        .expect("Response::Error always encodes")
+    })
+}
+
+pub fn decode_request(line: &str) -> Result<Request, String> {
+    serde_json::from_str(line).map_err(|error| format!("malformed request: {error}"))
+}
+
+pub fn encode_request(request: &Request) -> String {
+    serde_json::to_string(request).expect("Request always encodes")
+}
+
+pub fn decode_response(line: &str) -> Result<Response, String> {
+    serde_json::from_str(line).map_err(|error| format!("malformed response: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_read_request_round_trips_through_json() {
+        let request = Request::ReadPlanDocument {
+            plan_dir: "/plans/demo".to_string(),
+            document_id: "goal:01-example".to_string(),
+            view: Some("full".to_string()),
+        };
+        let encoded = encode_request(&request);
+        let decoded = decode_request(&encoded).unwrap();
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn the_generic_write_requests_round_trip_through_json() {
+        let requests = [
+            Request::UpdateWorkUnit {
+                plan_dir: "/plans/demo".to_string(),
+                unit_id: "W05".to_string(),
+                args: vec!["--scope".to_string(), "new scope".to_string()],
+                revision: "abc".to_string(),
+            },
+            Request::RemoveWorkUnit {
+                plan_dir: "/plans/demo".to_string(),
+                unit_id: "W05".to_string(),
+                confirm_cascade: true,
+                revision: "abc".to_string(),
+            },
+            Request::UpdatePlanContent {
+                plan_dir: "/plans/demo".to_string(),
+                mode: "title".to_string(),
+                args: vec!["goal:01-example".to_string(), "New title".to_string()],
+                revision: "abc".to_string(),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_adversarial_review_workflow_requests_round_trip_through_json() {
+        let requests = [
+            Request::CreateAdversarialReview {
+                plan_dir: "/plans/demo".to_string(),
+            },
+            Request::UpdateAdversarialReview {
+                plan_dir: "/plans/demo".to_string(),
+                args: vec!["--cycle".to_string(), "2".to_string()],
+                revision: "abc".to_string(),
+            },
+            Request::AddAdversarialFinding {
+                plan_dir: "/plans/demo".to_string(),
+                finding_id: "AR-01".to_string(),
+                args: vec!["missing".to_string(), "add it".to_string()],
+                revision: "abc".to_string(),
+            },
+            Request::ResolveFinding {
+                plan_dir: "/plans/demo".to_string(),
+                finding_id: "AR-01".to_string(),
+                args: vec!["--status".to_string(), "resolved".to_string()],
+                revision: "abc".to_string(),
+            },
+            Request::MintFixKeys {
+                plan_dir: "/plans/demo".to_string(),
+            },
+            Request::VerifyFixKeys {
+                plan_dir: "/plans/demo".to_string(),
+                claimed_by: Some("session-1".to_string()),
+            },
+            Request::AddFixClaim {
+                plan_dir: "/plans/demo".to_string(),
+                finding_id: "AR-01".to_string(),
+                work_unit: "W01".to_string(),
+                key: "a".repeat(64),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_coverage_and_progress_requests_round_trip_through_json() {
+        let requests = [
+            Request::AddCoverage {
+                plan_dir: "/plans/demo".to_string(),
+                required_outcome: "It works".to_string(),
+                work_units: "W01,W02".to_string(),
+                notes: "verified manually".to_string(),
+                replace: false,
+                revision: "abc".to_string(),
+            },
+            Request::RemoveCoverage {
+                plan_dir: "/plans/demo".to_string(),
+                required_outcome: "It works".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::CreateWorkUnitInventory {
+                plan_dir: "/plans/demo".to_string(),
+            },
+            Request::CreatePlanProgress {
+                plan_dir: "/plans/demo".to_string(),
+            },
+            Request::UpdatePlanProgress {
+                plan_dir: "/plans/demo".to_string(),
+                goal: "01-demo".to_string(),
+                status: "in-progress".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::RebuildPlanProgress {
+                plan_dir: "/plans/demo".to_string(),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_plan_lifecycle_requests_round_trip_through_json() {
+        let requests = [
+            Request::CreatePlan {
+                plan_dir: "/plans/demo".to_string(),
+                title: "Demo plan".to_string(),
+            },
+            Request::RemovePlan {
+                plan_dir: "/plans/demo".to_string(),
+                confirm: true,
+            },
+            Request::CleanupPlans {
+                list_only: true,
+                plan_names: vec!["demo".to_string()],
+                confirm: false,
+            },
+            Request::AddGoal {
+                plan_dir: "/plans/demo".to_string(),
+                goal_name: "02-next".to_string(),
+                title: "Next goal".to_string(),
+                outcome: "Next outcome".to_string(),
+                revision: "abc".to_string(),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_root_register_and_planning_bug_requests_round_trip_through_json() {
+        let requests = [
+            Request::PlanRoot {
+                directory: Some("/repo".to_string()),
+            },
+            Request::PlanRoot { directory: None },
+            Request::RegisterRead {
+                kind: "bug".to_string(),
+                mode: "show".to_string(),
+                args: vec!["B123".to_string()],
+                file: "/repo/BUGS.json".to_string(),
+            },
+            Request::AddPlanningBug {
+                plan_dir: "/plans/demo".to_string(),
+                id: "PB-01".to_string(),
+                title: "It breaks".to_string(),
+                reproduce: "run it".to_string(),
+                observed: "it broke".to_string(),
+                expected: "it should not".to_string(),
+                args: vec!["--severity".to_string(), "major".to_string()],
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_ui_story_requests_round_trip_through_json() {
+        let requests = [
+            Request::CreateUiValidation {
+                plan_dir: "/plans/demo".to_string(),
+                browser_target: "chromium headless".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::AddUiStory {
+                plan_dir: "/plans/demo".to_string(),
+                id: "US-01".to_string(),
+                persona: "a first-time visitor".to_string(),
+                actions: "click Sign up".to_string(),
+                interaction: "the button depresses".to_string(),
+                expected: "the signup form appears".to_string(),
+                work_units: "W01,W02".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::AddUiStoryLinks {
+                plan_dir: "/plans/demo".to_string(),
+                id: "US-01".to_string(),
+                work_units: "W01".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::UpdateUiStory {
+                plan_dir: "/plans/demo".to_string(),
+                id: "US-01".to_string(),
+                persona: None,
+                actions: None,
+                interaction: None,
+                expected: None,
+                status: Some("✅ passed".to_string()),
+                evidence: Some("clicked it".to_string()),
+                revision: "abc".to_string(),
+            },
+            Request::ConfigureUiStoryCache {
+                plan_dir: "/plans/demo".to_string(),
+                id: "US-01".to_string(),
+                starting_state: "logged out on /".to_string(),
+                input: "click Sign up".to_string(),
+                target: "#signup-button".to_string(),
+                readiness: "the form is visible".to_string(),
+                max_wait: "5s".to_string(),
+                revision: "abc".to_string(),
+            },
+            Request::CreateUiStoryRunCache {
+                plan_dir: "/plans/demo".to_string(),
+                id: "US-02".to_string(),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn the_todo_and_bug_register_requests_round_trip_through_json() {
+        let requests = [
+            Request::ReadRegisterFile {
+                file: "/repo/TODO.json".to_string(),
+            },
+            Request::AddTodo {
+                file: "/repo/TODO.json".to_string(),
+                id: "T45".to_string(),
+                title: "Do the thing".to_string(),
+                parent: Some("T44".to_string()),
+                priority: Some("high".to_string()),
+                status: None,
+                blocked_on: None,
+                detail: Some("some detail".to_string()),
+                refs: vec!["src/x.rs".to_string()],
+                revision: "abc".to_string(),
+            },
+            Request::UpdateTodo {
+                file: "/repo/TODO.json".to_string(),
+                id: "T45".to_string(),
+                status: Some("done".to_string()),
+                priority: None,
+                note: None,
+                detail: None,
+                blocked_on: None,
+                revision: "abc".to_string(),
+            },
+            Request::AddBug {
+                file: "/repo/BUGS.json".to_string(),
+                title: "It breaks".to_string(),
+                reproduce: "run it".to_string(),
+                observed: "it broke".to_string(),
+                expected: "it should not".to_string(),
+                severity: Some("major".to_string()),
+                priority: None,
+                status: None,
+                mechanism: None,
+                parent: None,
+                found_by: Some("session-1".to_string()),
+                surfaces: None,
+                revision: "abc".to_string(),
+            },
+            Request::UpdateBug {
+                file: "/repo/BUGS.json".to_string(),
+                id: "B12".to_string(),
+                status: Some("fixed".to_string()),
+                fix: Some("changed x".to_string()),
+                verification: Some("re-ran the repro".to_string()),
+                reason: None,
+                priority: None,
+                mechanism: None,
+                append_note: None,
+                revision: "abc".to_string(),
+            },
+        ];
+        for request in requests {
+            let encoded = encode_request(&request);
+            assert_eq!(decode_request(&encoded).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn a_malformed_line_is_refused_by_name_not_a_panic() {
+        let result = decode_request("not json at all");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_response_round_trips_through_json() {
+        let response = Response::Written {
+            revision: "abc123".to_string(),
+        };
+        let encoded = encode_response(&response);
+        assert_eq!(decode_response(&encoded).unwrap(), response);
+    }
+
+    #[test]
+    fn every_response_variant_encodes_and_is_stable_shaped() {
+        let responses = [
+            Response::Document {
+                content: "text".into(),
+                revision: "abc".into(),
+            },
+            Response::Written {
+                revision: "def".into(),
+            },
+            Response::WrittenWithId {
+                revision: "def".into(),
+                id: "B12".into(),
+            },
+            Response::Validated {
+                passed: true,
+                report: "ok".into(),
+            },
+            Response::Stale {
+                expected: "a".into(),
+                actual: "b".into(),
+            },
+            Response::Error {
+                message: "bad".into(),
+            },
+            Response::Unimplemented,
+        ];
+        for response in responses {
+            let text = encode_response(&response);
+            assert!(!text.is_empty());
+            assert!(!text.contains('\n'), "encoded response must be one line");
+        }
+    }
+}

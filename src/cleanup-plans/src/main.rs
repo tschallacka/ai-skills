@@ -6,6 +6,19 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// `remove-plan` sits next to this binary (the wrapper execs both from the
+/// same bin directory), and nothing puts that directory on $PATH, so a bare
+/// `Command::new("remove-plan")` failed with ENOENT on any machine whose PATH
+/// did not happen to contain it. Fall back to the bare name only when this
+/// binary's own directory cannot be read.
+fn remove_plan_binary() -> PathBuf {
+    env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("remove-plan")))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("remove-plan"))
+}
+
 fn usage(code: i32) -> ! {
     println!("Usage: cleanup-plans.sh [-l|--list] [<plan-name> ...] [-y|--yes]");
     println!("       cleanup-plans.sh --help");
@@ -155,7 +168,7 @@ fn main() {
         }
     }
     for p in &targets {
-        let status = Command::new("remove-plan")
+        let status = Command::new(remove_plan_binary())
             .arg(p)
             .status()
             .unwrap_or_else(|e| die(e.to_string(), 73));

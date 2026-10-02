@@ -203,10 +203,27 @@ the host's platform. The rules:
 - `tests/test-shipped-binaries.sh` validates the registry and cross-checks it
   against what is actually on disk. A declared-but-unbuilt row is legal; a
   built-but-undeclared binary is not.
-- Every target's binary ships in the npm package, because we do not know who or
-  what pulls it.
-- `install.sh` is **generated**. Never hand-edit it; run `bash
-  installer/build.sh` and confirm the diff is only what you intended.
+- Every target's binary ships in the npm package: `.github/workflows/
+  release-npm.yml`'s `build` job cross/natively builds every shipping skill for
+  all five targets, its `assemble` job gathers them into one npm package and
+  dry-run verifies it, and its `publish` job actually runs `npm publish` --
+  gated behind the `npm-publish` environment's required-reviewer approval, and
+  reachable only from a real `release: published` trigger, never a maintainer
+  running `npm publish` locally.
+- `<skill>/bin/<target triple>/<binary>` names where the artifact ships FROM
+  (the source tree, a release tarball, the npm package) -- not where the
+  installer puts it. T72 retired the per-skill install destination: every
+  skill's binaries now land in one shared location on the target machine,
+  `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/`, flat (no triple
+  subdirectory -- an install only ever writes its own host's binaries there).
+  See `src/installer/src/shared_bin.rs`'s doc comment for the mechanism, and
+  a skill's own `SKILL.md` for the path an agent actually invokes.
+- The installer itself is a compiled Rust binary (`src/installer/`), not a
+  generated file; change its behavior in `src/installer/src/*.rs` and rebuild
+  (`cargo build --release -p installer`), same as any other crate here.
+  `installer/src/50-manifest.sh` is the one surviving bash fragment of the
+  retired install.sh — see git history — and is edited directly, not
+  regenerated.
 
 ## 7. CI gates, in the order they should fail
 

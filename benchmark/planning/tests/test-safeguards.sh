@@ -238,7 +238,24 @@ mkdir -p "$watchdog_bin"
 # The launch PATH carries only what the launcher and the watchdog use, so
 # `command -v timeout` fails exactly as it does on stock macOS.
 for watchdog_tool in ps awk tr sleep; do
-    ln -s "$(command -v "$watchdog_tool")" "$watchdog_bin/$watchdog_tool"
+    watchdog_tool_path="$(command -v "$watchdog_tool")"
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+            # `ln -s` makes a shortcut a native loader cannot open on Windows
+            # (MSYS), and an MSYS program finds its DLLs beside itself, so the
+            # tool is copied together with the MSYS libraries it loads (`ldd`
+            # names them; the Windows system DLLs it lists are found anyway).
+            [ ! -f "$watchdog_tool_path.exe" ] || watchdog_tool_path="$watchdog_tool_path.exe"
+            cp -f "$watchdog_tool_path" "$watchdog_bin/$watchdog_tool.exe"
+            ldd "$watchdog_tool_path" 2>/dev/null | awk '/=>/ { print $3 }' |
+                while read -r watchdog_dll; do
+                    case "$watchdog_dll" in
+                        /usr/*|/bin/*|/mingw*|/ucrt*|/clang*) cp -f "$watchdog_dll" "$watchdog_bin/" ;;
+                    esac
+                done
+            ;;
+        *) ln -s "$watchdog_tool_path" "$watchdog_bin/$watchdog_tool" ;;
+    esac
 done
 cat > "$watchdog_probe/slow-agent" <<'AGENT'
 sleep 300 &

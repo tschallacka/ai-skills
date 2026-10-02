@@ -210,6 +210,15 @@ if "$script_dir/verify-fix-keys.sh" "$plan_b" 2>"$temporary_root/verify-stale.lo
     fail 'verify passed with an invalidated (stale) session secret'
 fi
 grep -Fq 'session secret missing' "$temporary_root/verify-stale.log" || fail 'stale session not reported'
+# B112: an evicted secret is not a sign of a deliberate invalidation, and the
+# refusal must name the recovery command rather than ask a leading question.
+if grep -Fq 'was the session invalidated at approval?' "$temporary_root/verify-stale.log"; then
+    fail 'the refusal still blames approval-time invalidation for an ordinary eviction'
+fi
+grep -Fq 'temp-directory eviction' "$temporary_root/verify-stale.log" \
+    || fail 'the refusal does not name ordinary temp-directory eviction as the likely cause'
+grep -Fq 'mint-fix-keys.sh' "$temporary_root/verify-stale.log" \
+    || fail 'the refusal does not name the recovery command'
 rm -f "$plan_b/fix-keys.json"
 "$script_dir/verify-fix-keys.sh" "$plan_b" >/dev/null 2>&1 \
     || fail 'verify rejected an ungated plan (no fix-keys.json)'
@@ -246,16 +255,20 @@ if printf 'ID,Missing,Required,Status\nAR-11,a,b,✅ resolved\n' | \
     "$script_dir/update-adversarial-review.sh" "$plan_c" >/dev/null 2>&1; then
     fail 'update-adversarial-review.sh accepted a 4-column CSV'
 fi
-grep -Fq 'plan_render_csv_table 5' "$script_dir/update-adversarial-review.sh" \
-    || fail 'update-adversarial-review.sh does not call plan_render_csv_table 5'
-grep -Fq 'plan_render_csv_table 4' "$script_dir/update-adversarial-review.sh" \
-    && fail 'update-adversarial-review.sh still calls plan_render_csv_table 4'
-grep -Fq 'Required plan change, Status, Work unit' "$script_dir/update-adversarial-review.sh" \
-    || fail 'update-adversarial-review.sh strings do not list the 5-column format'
-grep -Fq 'Required plan change, Status)' "$script_dir/update-adversarial-review.sh" \
-    && fail 'a 4-column column list remains in update-adversarial-review.sh'
-grep -Fqi 'optional' "$script_dir/update-adversarial-review.sh" \
-    && fail 'update-adversarial-review.sh still describes the work unit column as optional'
+# The renderer is compiled now, so the script text says nothing: what has to hold
+# is what the command tells a caller. Its help lists the 5-column format, no
+# 4-column list survives, and the work unit column is not called optional.
+uar_help="$("$script_dir/update-adversarial-review.sh" --help 2>&1)"
+case "$uar_help" in
+    *'Required plan change, Status, Work unit'*) ;;
+    *) fail 'update-adversarial-review.sh help does not list the 5-column format' ;;
+esac
+case "$uar_help" in
+    *'Required plan change, Status)'*) fail 'a 4-column column list remains in update-adversarial-review.sh help' ;;
+esac
+case "$uar_help" in
+    *ptional*) fail 'update-adversarial-review.sh help still describes the work unit column as optional' ;;
+esac
 
 plan_c2="$temporary_root/plan-c2"
 seed_gated_plan "$plan_c2" test-session-c

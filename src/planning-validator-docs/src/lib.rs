@@ -1,9 +1,9 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! Document-level validation passes formerly provided by
-//! `validate-plan-docs-lib.sh`.
+//! Document-level validation passes.
 
 use planning_validator_common::{get_single_field, require_heading, Findings};
+use regex::Regex;
 use std::path::{Path, PathBuf};
 
 pub const REQUIRED_PLAN_HEADINGS: &[&str] = &[
@@ -27,7 +27,7 @@ pub struct DocumentState {
     pub plan_docs: Vec<PathBuf>,
 }
 
-/// Return the shell pass's status code while recording ordinary missing-input
+/// Returns a process status code while recording ordinary missing-input
 /// findings in the shared accumulator.
 pub fn validate_existence(plan: &Path, findings: &mut Findings) -> i32 {
     if !plan.is_dir() {
@@ -48,7 +48,7 @@ pub fn validate_existence(plan: &Path, findings: &mut Findings) -> i32 {
 }
 
 /// Check the marker used to retire old plans. `None` means validation may
-/// continue; `Some(65)` is the hard refusal used by the shell entry point.
+/// continue; `Some(65)` is a hard refusal.
 pub fn validate_obsolete(plan: &Path, script_name: &str) -> Option<i32> {
     let marker = plan.join("OBSOLETE");
     if !marker.is_file() {
@@ -74,8 +74,8 @@ pub fn validate_obsolete(plan: &Path, script_name: &str) -> Option<i32> {
     Some(65)
 }
 
-/// Detect duplicate numeric step prefixes within each goal and report the
-/// same collision description consumed by the shell pass.
+/// Detect duplicate numeric step prefixes within each goal and report a
+/// collision description for each.
 pub fn validate_step_numbers(plan: &Path, findings: &mut Findings) {
     let Ok(goals) = std::fs::read_dir(plan) else {
         return;
@@ -90,6 +90,12 @@ pub fn validate_step_numbers(plan: &Path, findings: &mut Findings) {
             let Some(name) = step.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
+            // A testing companion shares its step's number by design (B335) --
+            // exclude it before counting rather than reporting it as a
+            // collision.
+            if name.ends_with("-testing.md") {
+                continue;
+            }
             let Some((number, _)) = name.split_once('-') else {
                 continue;
             };
@@ -156,6 +162,11 @@ pub fn validate_plan_documents(
                     && (line.contains("💤 open") || line.contains("⏳ in progress"))
             }) {
                 findings.fail("Adversarial review has unresolved findings");
+            }
+            if rationale_staleness(&review_text, &plan.join("adversarial-review-history.md"))
+                == Some(true)
+            {
+                findings.fail("Verdict rationale is stale: at least one more review cycle has been archived since it was written (T56 -- run update-adversarial-review.sh --set-rationale again after reviewing the latest cycle)");
             }
         } else if std::fs::read_to_string(&description)
             .map(|text| text.lines().any(|line| line == "- Status: ✅ approved"))
@@ -231,6 +242,7 @@ pub fn validate_plan_documents(
         plan_docs.extend(steps);
     }
     plan_docs.push(inventory);
+    validate_hardening(&plan_docs, findings);
     DocumentState {
         ui_affected,
         review_approved,
@@ -238,10 +250,151 @@ pub fn validate_plan_documents(
     }
 }
 
+/// Whether the Verdict's own "- Rationale cycle: N" stamp (written by
+/// update-adversarial-review's own `--set-rationale`, T56) has fallen
+/// behind the archive. `cycle_number` below mirrors that same binary's own
+/// function exactly: `max(archived "## Cycle N") + 1`, the number the
+/// CURRENT (not yet archived) findings table would get if archived right
+/// now -- the same value a rationale is stamped with at write time. A
+/// rationale is stale when a FRESH `cycle_number` computed now no longer
+/// equals the stamp: at least one more review cycle has landed and been
+/// archived since the rationale was written, so it may no longer describe
+/// the findings actually in front of the reader.
+///
+/// `None` when no stamp is present at all -- a plan written before this
+/// check existed, or a rationale someone hand-edited outside
+/// `--set-rationale` -- so this never retroactively fails older plans; it
+/// can only compare a stamp that is actually there.
+fn rationale_staleness(review_text: &str, history: &Path) -> Option<bool> {
+    let stamped: i64 = review_text.lines().find_map(|line| {
+        line.strip_prefix("- Rationale cycle: ")?
+            .trim()
+            .parse()
+            .ok()
+    })?;
+    Some(cycle_number(history) > stamped)
+}
+
+/// Mirrors update-adversarial-review's own `cycle_number(history, None)`
+/// exactly (see that function's own doc comment for why the two must stay
+/// byte-for-byte in agreement rather than merely "similar"). Duplicated
+/// here rather than shared through a new crate: it is 8 lines, pure, and
+/// keyed to the `## Cycle N` archive heading format, a stable convention
+/// already load-bearing elsewhere in this same document family.
+fn cycle_number(history: &Path) -> i64 {
+    std::fs::read_to_string(history)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.strip_prefix("## Cycle ")?.parse::<i64>().ok())
+        .max()
+        .unwrap_or(0)
+        + 1
+}
+
+/// Hardens every plan document against hand-edit damage:
+/// helper-flag-shaped text, duplicate paragraph labels, and shell-variable
+/// path fragments.
+fn validate_hardening(plan_docs: &[PathBuf], findings: &mut Findings) {
+    let swallowed_flag = swallowed_flag_regex();
+    let label_line = paragraph_label_regex();
+    for doc in plan_docs {
+        if !doc.is_file() {
+            continue;
+        }
+        let name = doc
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let Ok(text) = std::fs::read_to_string(doc) else {
+            continue;
+        };
+        if swallowed_flag.is_match(&text) {
+            findings.fail(format!("{name} contains helper-flag-shaped text (-p N.N: etc.); mutate plan documents through the helpers, never by hand"));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for line in text.lines() {
+            if label_line.is_match(line) && !seen.insert(line.to_owned()) {
+                findings.fail(format!(
+                    "{name} has duplicate paragraph label {line}; renumber through the helpers"
+                ));
+                break;
+            }
+        }
+        if text.contains("$script_dir/") || text.contains("$PLANNING_SKILL_DIR/") {
+            findings.fail(format!(
+                "{name} contains a shell-variable path fragment; bind file paths to the plan, not to script internals"
+            ));
+        }
+    }
+}
+
+fn swallowed_flag_regex() -> &'static Regex {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(^|[[:space:]])-(p|dp|gp|sp|rp|tp|ia|ib)[[:space:]]+[0-9]+\.[0-9]+[[:space:]]*:",
+        )
+        .expect("swallowed-flag regex is a fixed literal")
+    })
+}
+
+fn paragraph_label_regex() -> &'static Regex {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^§ [0-9]+\.[0-9]+$").expect("paragraph-label regex is a fixed literal")
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::validate_obsolete;
+    use super::{
+        rationale_staleness, validate_hardening, validate_obsolete, validate_step_numbers,
+    };
+    use planning_validator_common::Findings;
     use std::fs;
+
+    fn scratch_history(name: &str, content: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "validator-docs-rationale-{name}-{}.md",
+            std::process::id()
+        ));
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn rationale_staleness_is_none_with_no_stamp_at_all() {
+        // Pre-existing content from before T56 shipped, or a rationale
+        // someone hand-edited outside --set-rationale: nothing to compare,
+        // so this must never retroactively flag an older plan.
+        let history = scratch_history("no-stamp", "\n## Cycle 1\n\nrow\n");
+        let review = "## Verdict\n\n- Status: `✅ approved`\n- Rationale: no findings remain.\n";
+        assert_eq!(rationale_staleness(review, &history), None);
+        let _ = fs::remove_file(history);
+    }
+
+    #[test]
+    fn rationale_staleness_is_false_when_the_stamp_matches_the_current_cycle() {
+        let history = scratch_history("fresh", "\n## Cycle 1\n\nrow\n");
+        // cycle_number(history) here is 2 (max archived + 1) -- the same
+        // value --set-rationale would have stamped if it ran right now.
+        let review =
+            "## Verdict\n\n- Status: `✅ approved`\n- Rationale: current.\n- Rationale cycle: 2\n";
+        assert_eq!(rationale_staleness(review, &history), Some(false));
+        let _ = fs::remove_file(history);
+    }
+
+    #[test]
+    fn rationale_staleness_is_true_once_a_later_cycle_has_been_archived() {
+        let history = scratch_history("stale", "\n## Cycle 1\n\nrow\n\n## Cycle 2\n\nrow\n");
+        // Stamped for cycle 2, but a THIRD cycle's worth of archiving has
+        // happened since (cycle_number(history) is now 3): the rationale
+        // describes findings that have since been superseded.
+        let review =
+            "## Verdict\n\n- Status: `✅ approved`\n- Rationale: old.\n- Rationale cycle: 2\n";
+        assert_eq!(rationale_staleness(review, &history), Some(true));
+        let _ = fs::remove_file(history);
+    }
 
     #[test]
     fn obsolete_marker_returns_the_shell_refusal_code() {
@@ -250,5 +403,93 @@ mod tests {
         fs::write(root.join("OBSOLETE"), "replaced-by: newer-plan\n").unwrap();
         assert_eq!(validate_obsolete(&root, "validate-plan.sh"), Some(65));
         let _ = fs::remove_dir_all(root);
+    }
+
+    fn scratch_plan(name: &str, steps: &[&str]) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "validator-docs-step-numbers-{name}-{}",
+            std::process::id()
+        ));
+        let steps_dir = root.join("01-goal").join("steps");
+        let _ = fs::create_dir_all(&steps_dir);
+        for step in steps {
+            fs::write(steps_dir.join(step), "").unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn a_step_and_its_own_testing_companion_are_not_flagged_as_duplicates() {
+        let root = scratch_plan("companion", &["01-step-foo.md", "01-step-foo-testing.md"]);
+        let mut findings = Findings::default();
+        validate_step_numbers(&root, &mut findings);
+        assert_eq!(findings.errors, 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn two_genuinely_different_steps_sharing_a_number_are_still_flagged() {
+        let root = scratch_plan("collision", &["01-step-foo.md", "01-step-bar.md"]);
+        let mut findings = Findings::default();
+        validate_step_numbers(&root, &mut findings);
+        assert_eq!(findings.errors, 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn scratch_doc(name: &str, content: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "validator-docs-hardening-{name}-{}.md",
+            std::process::id()
+        ));
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn helper_flag_shaped_text_pasted_into_prose_is_flagged() {
+        let doc = scratch_doc(
+            "flag-shaped",
+            "§ 5.9\nrun update-plan-content.sh -dp 2.3: x\n",
+        );
+        let mut findings = Findings::default();
+        validate_hardening(std::slice::from_ref(&doc), &mut findings);
+        assert_eq!(findings.errors, 1);
+        let _ = fs::remove_file(doc);
+    }
+
+    #[test]
+    fn ordinary_prose_mentioning_a_paragraph_label_is_not_flagged() {
+        let doc = scratch_doc(
+            "ordinary",
+            "§ 5.1\nRun the migration and check the output.\n",
+        );
+        let mut findings = Findings::default();
+        validate_hardening(std::slice::from_ref(&doc), &mut findings);
+        assert_eq!(findings.errors, 0);
+        let _ = fs::remove_file(doc);
+    }
+
+    #[test]
+    fn a_duplicate_paragraph_label_is_flagged() {
+        let doc = scratch_doc(
+            "duplicate-label",
+            "§ 2.1\nfirst\n\n§ 2.1\nrepeated by mistake\n",
+        );
+        let mut findings = Findings::default();
+        validate_hardening(std::slice::from_ref(&doc), &mut findings);
+        assert_eq!(findings.errors, 1);
+        let _ = fs::remove_file(doc);
+    }
+
+    #[test]
+    fn a_shell_variable_path_fragment_is_flagged() {
+        let doc = scratch_doc(
+            "shell-path",
+            "§ 5.1\nSee $script_dir/validate-plan.sh for the logic.\n",
+        );
+        let mut findings = Findings::default();
+        validate_hardening(std::slice::from_ref(&doc), &mut findings);
+        assert_eq!(findings.errors, 1);
+        let _ = fs::remove_file(doc);
     }
 }

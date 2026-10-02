@@ -50,8 +50,12 @@ mkdir -p "$tmp/src" && printf 'one\n' > "$tmp/src/target.txt" \
 git -C "$tmp" add -A && git -C "$tmp" commit -qm base
 
 # ---- W06 pin: creation template is unticked ------------------------------
+# T145 goal 27 deleted add-work-unit.sh's own bash body (the step-file
+# template literal lived there) in favor of a die-loudly missing-binary stub;
+# the template is now generated only by the compiled binary's own Rust
+# source, so that is where this pin now checks.
 t_assert_contains "add-work-unit emits unticked boxes" \
-  "$(grep -c '\- \[ \] This step owns exactly one' "$scripts/add-work-unit.sh")" "1"
+  "$(grep -c '\- \[ \] This step owns exactly one' "$root/src/add-work-unit/src/main.rs")" "1"
 
 run_complete() { # runs the completion flow against the current tree
     "$scripts/update-step.sh" "$tmp/pl/01-evidence" 01-step-one completed \
@@ -84,13 +88,5 @@ printf 'noise\n' >> "$tmp/src/other.txt"  # tracked modification = visible extra
 run_complete || t_fail "completion flow failed with extra path"
 t_assert_contains "third box carries violation annotation" \
   "$(grep -c '^- \[x\] Any follow-on target.*VIOLATION: also touched src/other\.txt' "$step")" "1"
-
-# ---- W07 pin: relaxed validator accepts annotated tick, rejects unticked-
-#      on-completed (function-level against the real lib) -------------------
-common="$scripts/validate-plan-common-lib.sh"
-[ -f "$common" ] || t_fail "common lib missing"
-# shellcheck disable=SC1090  # non-constant by design: the path is the argument
-( source "$common"
-  source "$scripts/validate-plan-goals-lib.sh" ) >/dev/null 2>&1 || true
 
 t_end

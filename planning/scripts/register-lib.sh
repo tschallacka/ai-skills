@@ -18,16 +18,28 @@ reg_require_jq() {
     }
 }
 
-reg_findings() {
-    reg_require_jq
-    local kind="$1" file="$2"
-    rjq -r --arg kind "$kind" '
-        def st_enum:
-            if $kind == "bug"
-            then ["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"]
-            else ["open","done","blocked","partly","decided","obsolete"] end;
-        (if $kind == "todo" and has("todos")
-         then "register carries a .todos array - fold its entries into .tasks and drop the key" else empty end),
+# reg_findings_todos_fold_program: the .todos-legacy-shape check, alone,
+# because it applies only to $kind == "todo" and stands apart from the
+# per-entry checks every other finding shares.
+reg_findings_todos_fold_program() {
+    printf '%s\n' '
+        if $kind == "todo" and has("todos")
+        then (
+            (.tasks // []) as $tasks_ids_source
+            | ($tasks_ids_source | map(.id)) as $task_ids
+            | ((.todos // []) | map(.id)) as $todo_ids
+            | ($todo_ids - $task_ids) as $only_in_todos
+            | if ($only_in_todos | length) > 0
+              then "register carries a .todos array whose id(s) \($only_in_todos | join(", ")) do not exist in .tasks -- a fold that drops the .todos key without moving these loses them (B69)"
+              else "register carries a .todos array - fold its entries into .tasks and drop the key" end
+        ) else empty end'
+}
+
+# reg_findings_entry_program: the per-entry structural checks shared by bugs
+# and tasks alike (status, severity/priority enums, timestamps, bug-only
+# reproduce/mechanism/verification requirements).
+reg_findings_entry_program() {
+    printf '%s\n' '
         ((if $kind == "bug" then .bugs else .tasks end) // []) as $items
         | ($items | map(.id)) as $ids
         | [
@@ -61,8 +73,19 @@ reg_findings() {
                  then "\($e.id): fixed without verification" else empty end)
             )
           ]
-        | .[]
-    ' "$file"
+        | .[]'
+}
+
+reg_findings() {
+    reg_require_jq
+    local kind="$1" file="$2"
+    rjq -r --arg kind "$kind" \
+        'def st_enum:
+            if $kind == "bug"
+            then ["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"]
+            else ["open","done","blocked","partly","decided","dropped","obsolete"] end;'"
+        $(reg_findings_todos_fold_program),
+        $(reg_findings_entry_program)" "$file"
 }
 
 # reg_sort <kind> <file>: reorder entries worst-first in place (temp+rename).
@@ -79,19 +102,40 @@ reg_sort() {
     else
         rjq 'def idnum: [(. | scan("[0-9]+") | tonumber)?, .];
             def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
-            def srank: {open:0, blocked:1, partly:2, decided:3, done:4, obsolete:5}[.status // "open"] // 6;
+            def srank: {open:0, blocked:1, partly:2, decided:3, done:4, dropped:5, obsolete:6}[.status // "open"] // 7;
             .tasks |= sort_by(srank, prank, (.id | idnum))' "$file" > "$tmp"
     fi
     mv "$tmp" "$file"
 }
 
 # reg_next_id <kind> <file>: the next free B/T number as a bare integer.
+# B78: a linked git worktree has its own copy of the register, so an id minted
+# there is the max this file has ever seen -- not the max across every
+# worktree that will eventually merge into one register. Two writers in two
+# worktrees can mint the same id within the hour and neither is wrong about
+# what they saw. Advisory only (stderr, not stdout): the alternative -- making
+# ids unique across trees that cannot see each other -- needs a shared
+# allocator this register does not have, while `bugs`/`todo resolve` already
+# exists to repair a collision once the trees merge.
+reg_in_linked_worktree() {
+    local file="$1" dir common
+    command -v git >/dev/null 2>&1 || return 1
+    dir="$(git -C "$(dirname "$file")" rev-parse --git-dir 2>/dev/null)" || return 1
+    common="$(git -C "$(dirname "$file")" rev-parse --git-common-dir 2>/dev/null)" || return 1
+    [ "$dir" != "$common" ]
+}
+
 reg_next_id() {
-    local kind="$1" file="$2" prefix="B"
+    local kind="$1" file="$2" prefix="B" next
     [ "$kind" = todo ] && prefix="T"
-    rjq -r --arg p "$prefix" '
+    next="$(rjq -r --arg p "$prefix" '
         [(if $p == "B" then .bugs else .tasks end)[].id | capture("^[A-Z]*(?<number>\\d+)$").number | tonumber] | max // 0 | . + 1
-    ' "$file"
+    ' "$file")"
+    if reg_in_linked_worktree "$file"; then
+        printf '%s: %s is a linked git worktree; %s is local to this copy of the register and may collide with an id minted concurrently in another worktree -- resolve a post-merge collision with bugs/todo resolve\n' \
+            "${0##*/}" "$(dirname "$file")" "$prefix$next" >&2
+    fi
+    printf '%s\n' "$next"
 }
 
 # reg_write <kind> <file>: stamp header fields a register owes, then sort.

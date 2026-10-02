@@ -96,8 +96,18 @@ Hand your findings to a **separate agent with a fresh start and fresh view**
   `ROLE_ID=alex` and have it load its scoped role docs and voice via
   `ROLE_ID=alex bash <PLANNING_SKILL_DIR>/scripts/role-context.sh alex`.
   It traces every proposed fix to a concrete observed defect, never
-  best-practice boilerplate; it reports its persona id in its output. A spawn
-  that cannot resolve ROLE_ID=alex fails closed and must be respawned.
+  best-practice boilerplate; it reports its persona id in its output.
+  **This depends on the `planning` skill being installed alongside this
+  one** (`role-context.sh` lives under planning's own scripts directory, not
+  this skill's). Two different failures need two different responses, and
+  conflating them is the mistake to avoid: if `role-context.sh` genuinely
+  does not exist at all (planning isn't installed here), that is permanent
+  for this environment — respawning changes nothing, so the spawned agent
+  should say so explicitly and continue as a plain, unpersonaed independent
+  solutions reviewer rather than loop. If the script exists but the
+  `ROLE_ID=alex` resolution itself fails (a transient error, a broken
+  persona registry), *that* is the case that fails closed and must be
+  respawned.
 - **Load no other skill.** Its starting prompt must include verbatim: "Do not
   load any skill on your own. Use only the skills explicitly named in this
   starting prompt; do not infer a skill from file names, directories, or paths
@@ -128,8 +138,13 @@ reviews from its fresh view without self-loading skills from path clues:
   `ROLE_ID=christoph` and have it load its scoped role docs and voice via
   `ROLE_ID=christoph bash <PLANNING_SKILL_DIR>/scripts/role-context.sh christoph`.
   It points out real weaknesses specifically without courtesy padding; it
-  reports its persona id in its output. A spawn that cannot resolve
-  ROLE_ID=christoph fails closed and must be respawned.
+  reports its persona id in its output. Same dependency and the same
+  distinction as Phase 2's alex spawn above: `role-context.sh` not existing
+  at all (planning not installed) means continue as a plain, unpersonaed
+  critical-feedback reviewer and say so — don't respawn, since nothing about
+  a respawn changes that outcome. Only a genuine `ROLE_ID=christoph`
+  resolution failure with the script actually present fails closed and
+  needs a respawn.
 
 - Does each proposed fix actually fix the stated bug without breaking anything
   else (regressions, behavior changes, `set -e` traps, process semantics)?

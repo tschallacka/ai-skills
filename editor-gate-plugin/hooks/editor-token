@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# MODE: PROD
+# editor-token -- mint a single-use token that lets one in-place shell edit
+# past the editor gate (pre-tool-use-bash.sh). A token cannot be minted
+# blind: you must say why the ai-text-editor MCP/skill cannot do this
+# particular job, and name the exact command the token will authorise. The
+# token is bound to that command's normalized text, expires in 120 seconds,
+# and is consumed on first use -- it cannot be banked, reused, or moved onto
+# a different command.
+#
+# This does not verify that the justification is true. It makes the claim
+# explicit, attributable (audit.log) and logged, so a reflex is
+# distinguishable from a decision.
+#
+#   editor-token --why 'the same rename across 40 files; the editor edits one tab' \
+#                --command '<the exact command you intend to run>'
+#
+# Prints the prefix to paste in front of that command.
+set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=editor-gate-plugin/hooks/lib.sh
+source "$script_dir/lib.sh"
+editor_gate_mint "$@"

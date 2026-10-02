@@ -132,7 +132,20 @@ fn main() {
     }
     fs::write(&description, modified).unwrap_or_else(|error| die(error.to_string(), 64));
     replace_ui_field(&description);
-    let plan_name = plan.file_name().unwrap().to_string_lossy();
+    // file_name() is None for a path that is exactly "." or ".." (or the
+    // filesystem root), which a caller can legitimately pass -- canonicalize
+    // resolves those to a real absolute path first, matching what bash's
+    // basename already did unconditionally (AR-12).
+    let plan_name = plan
+        .canonicalize()
+        .ok()
+        .and_then(|resolved| {
+            resolved
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+        .or_else(|| plan.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| ".".to_string());
     let story_text = format!("# UI user stories: {plan_name}\n\n| ID | Persona / precondition | Browser actions | Interaction evidence | Expected observable result | Status | Evidence | Related work units | Run cache |\n|---|---|---|---|---|---|---|---|---|\n");
     let bug_text = format!("# UI bugs: {plan_name}\n\n| ID | Story | Severity | Reproduction/evidence | Investigation goal | Fix goal | Retest story | Status |\n|---|---|---|---|---|---|---|---|\n");
     fs::write(&stories, story_text).unwrap_or_else(|error| die(error.to_string(), 64));

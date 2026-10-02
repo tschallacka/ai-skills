@@ -1,5 +1,6 @@
 // MODE: DEV
 // PACKAGE: PROD
+use planning_table::table_cell;
 use std::fs;
 use std::path::Path;
 
@@ -38,15 +39,6 @@ pub fn status_label(status: &str) -> Option<&'static str> {
         "completed" => Some("✅ completed"),
         _ => None,
     }
-}
-
-pub fn table_cell(row: &str, column: usize) -> String {
-    row.split('|')
-        .nth(column.saturating_sub(1))
-        .unwrap_or_default()
-        .trim()
-        .trim_matches('`')
-        .to_string()
 }
 
 pub fn count_progress_rows(path: &Path, status_column: usize) -> Result<(usize, usize), String> {

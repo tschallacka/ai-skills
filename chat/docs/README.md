@@ -16,6 +16,9 @@ and a rust client to send, read deltas, or tail.
   server certificate (TOFU), and sends / reads a delta since an id / tails.
 - **Additive history.** A standard client never sends it; an agent asks for the
   messages after id N via `FETCH #chan N`.
+- **IRCv3 message-tags.** The rust client negotiates it automatically; once
+  negotiated, a tailed message carries its real id inline, so the cursor
+  advances the instant it arrives instead of on a periodic poll.
 - **UDP discovery.** The server broadcasts a beacon so clients find it instead
   of hard-coding an address.
 
@@ -23,8 +26,9 @@ and a rust client to send, read deltas, or tail.
 
 > `chat-client-rs tail --chan '#deploys' --nick me` — with `--server` left off,
 > the client finds an announcing server by itself.
-> Nothing announcing? `bin/<target-triple>/chat-server-rs &` — no environment
-> variables; it binds loopback, announces itself there, and prints the address.
+> Nothing announcing? `"${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-server-rs" &`
+> — no environment variables; it binds loopback, announces itself there, and
+> prints the address.
 > Hand that `127.0.0.1:<port>` to whoever wants to watch from an IRC client on
 > this machine.
 > `chat-client-rs send --chan '#deploys' --nick me --text "smoke tests green, promoting"`.

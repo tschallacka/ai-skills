@@ -11,9 +11,13 @@ Every figure here comes from a run's own log, named so it can be re-read.
 
 Both macOS legs — the default-bash one and the bash 3.2 portability floor — run
 that image (run 33871455553). **Do not reason about "the Intel macOS runner"**:
-there is not one on `macos-latest`. `x86_64-apple-darwin` appears in this repo
-only as a *cross-compilation target*, built on the same arm64 host, so a leg
-named for it is not evidence of an Intel machine.
+there is not one on `macos-latest`. The shell-suite legs (`test`, `test-bash32`)
+run only on `macos-latest`, so every shell test that ran on macOS ran on arm64.
+Intel is a separate runner, `macos-15-intel`, which `ci.yml`'s `native` job,
+`render-artifacts.yml` and `release-installer.yml` use to build and run
+`x86_64-apple-darwin` natively. A leg named `x86_64-apple-darwin` is therefore
+evidence of an Intel machine for the crates, and of nothing for the shell suite.
+Re-checked against the workflow files on 2026-09-21.
 
 ## The macOS runner is ~150x slower than a developer machine, not 2x
 
@@ -106,6 +110,53 @@ perfectly, shortcut bar and all. Open the file by its **bare name** from inside
 its directory rather than widening the predicate — widening it would hide that
 the assertion depended on the temp directory's length.
 
+## Simulating "the runner pauses for other tenants": SIGSTOP, not CPU load
+
+Measured 2026-09-29 while diagnosing B384 (`chat-client-rs`'s
+`the_beacon_carries_a_connectable_host_never_bare_localhost`, which failed
+twice on `macos-latest`'s default-bash shard with "expected 'GOT:hello', got
+'GOT:'" — a UDP beacon the server genuinely sent, that the client's own
+`discover` never reported catching). The obvious way to test "is this a
+scheduling-pressure bug" is to load the CPU and see if it reproduces. That is
+the wrong tool for this shape of failure:
+
+| method | runs | reproduced |
+|---|---|---|
+| 8× `yes >/dev/null` on a 4-core box | 5 | 0/5 |
+| 64× `yes >/dev/null` on the same box | 5 | 0/5 |
+| `kill -STOP` the client mid-listen for longer than its own `--wait` window, then `-CONT` | 3 | 3/3 |
+
+Ordinary CPU contention is exactly what a fair scheduler (Linux CFS) is built
+to arbitrate; a process still gets turns, just smaller ones, and a short-lived
+test process is rarely starved long enough to matter. "The VPS pauses for
+other tenants" is a **hypervisor-level** freeze — the whole guest, scheduler
+included, stops running for a stretch — and the only local approximation of
+that is stopping the actual process, not competing with it. `SIGSTOP`/
+`SIGCONT` on the specific process under test is that approximation: cheap,
+exact about which window it freezes, and it reproduced the real failure on
+the first design that targeted the right mechanism (a fixed wall-clock
+deadline — `SystemTime::now() + Duration`, not an iteration count) rather than
+"the test is occasionally slow".
+
+**What it means:** a datagram (or any buffered I/O) arriving while a process
+is stopped is not lost — the kernel still buffers it — but a **wall-clock
+deadline computed before the freeze** does not move, so the process can wake
+up, check `SystemTime::now() < deadline`, find it already false, and exit
+having never read what was waiting for it the whole time. An iteration-count
+budget (`for _ in 0..N { sleep }`, `github-ci-runners.md`'s own "a readiness
+budget is a ceiling, not a sleep" above) does not have this failure mode: a
+frozen process just resumes counting from where it left off. A fixed
+deadline measured against real time does. Fixed in
+`src/chat-client-rs/tests/resolution.rs` (several short independent attempts
+instead of one long wait — see the commit that closed B384); the same
+technique (freeze the specific process, not the CPU) is worth trying before
+concluding any other CI-only flake with a real-time wait in it "just needs a
+bigger number" or "is a platform relay bug" (B386, `test-bootstrap-piped-
+stdin.sh`, still open as of this writing, is the next candidate — its own
+wait loop is iteration-count-based like the safe case above, so the exact
+B384 mechanism does not obviously transfer, but the SIGSTOP technique itself
+is untried there).
+
 ## Reading a failing run's logs
 
 `gh run view` refuses while a run is in progress. The per-job API does not, so
@@ -121,8 +172,48 @@ because CI logs carry terminal colour codes. Strip them with
 
 ## Do not push while a run is queued
 
-The workflow's concurrency group cancels the older run, and registration on
-these runners takes ~15 minutes, so a push inside that window destroys the
-result you were waiting for. It has cost this repository a Darwin errno it then
-had to re-derive by controlled intervention, and both macOS suite legs twice
-over. Batch the work, or wait.
+The workflow's concurrency group cancels the older run when the same ref is
+pushed again (`.agents/MAINTAINER.md` 1.11), so a push while the run you need is
+still going destroys its result. It has cost this repository a Darwin errno it
+then had to re-derive by controlled intervention, and both macOS suite legs
+twice over. Batch the work, or wait.
+
+**How long a run waits before its macOS legs start**, measured 2026-09-21 on
+run 35573178188 (commit `a3a5df90`, `ci.yml`): the run was created at 07:29:11Z
+and its first job (`shellcheck`, ubuntu) started 3 s later, so a run registers
+at once. Its `x86_64-apple-darwin` leg started at 07:40:26Z, 11 min 15 s after
+the run was created, and its `aarch64-apple-darwin` leg at 07:41:35Z, 12 min
+24 s after; the Linux legs had started within seconds. So the wait is for a
+macOS *runner*, not for registration, and it is one run's figure, not a
+guarantee. (The earlier version of this section said registration takes about
+15 minutes; that figure had no run behind it.)
+
+## The B384 mechanism is not macOS-specific: it hit `x86_64-pc-windows-msvc` too
+
+Measured 2026-10-01, run 36837882550 (commit `12b725b1`, `ci.yml`): `chat-mcp`'s
+`--test mcp_flow` failed four tests on the Windows MSVC leg --
+`distinct_session_overrides_get_their_own_nick_and_hold_separate_connections`,
+`the_agent_argument_is_an_alias_for_session` (both via `chat_client_rs::
+resolve_server`'s single `discover_candidates(port, 3)` call), and
+`start_server_spawns_one_when_nothing_answers_and_a_client_can_then_reach_it` /
+`start_server_finds_the_running_one_and_does_not_spawn_a_second` (via
+`chat-mcp`'s own `start_server`, which already retried 3×2s but still lost).
+Every Linux and macOS leg in the SAME run passed, including the identical
+test binary -- this was never about Windows networking specifically, it is
+`github-ci-runners.md`'s own already-documented mechanism (a fixed
+`SystemTime::now() + N` deadline racing real scheduling latency on both ends)
+showing up on whichever runner happens to be contended that day. Grounds the
+general claim above ("might also be a contentious CI runner") in an actual
+cross-platform recurrence, not a Windows-only theory.
+
+Fixed the same way as `chat-client-rs/tests/resolution.rs`'s own B384 fix,
+but this time in the PRODUCTION code every call site shares rather than only
+in a test: `chat_client_rs::resolve_server` and `chat-mcp`'s `start_server`
+both now retry `discover_candidates` as several short (2s) independent
+attempts (a ceiling, not a sleep -- the common case still returns on the
+first attempt) instead of one longer fixed wait. The lesson generalizes: any
+production code wrapping `discover_candidates`/`announce_loop`'s beacon
+exchange with a single fixed-deadline wait carries this same latent flake,
+not just test code -- check for it by name (`discover_candidates(`) rather
+than assuming the mechanism was test-only because the first instance found of
+it was.

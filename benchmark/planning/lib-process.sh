@@ -73,6 +73,37 @@ SHIM
     done
 }
 
+# "<pid> <ppid>" for every live process. procps answers `ps -eo pid=,ppid=`.
+# The ps that ships with MSYS2/Cygwin (Git for Windows' bash) takes no -o at all
+# and prints a table instead -- an optional flag column, then PID and PPID --
+# so every walk of the process tree used to fail there with "unknown option".
+process_pairs() {
+    # $OSTYPE, not `uname`: the watchdog runs with a PATH that holds nothing but
+    # ps, awk, tr and sleep.
+    case "${OSTYPE:-}" in
+        msys*|cygwin*|win32*)
+            ps -e 2>/dev/null | awk '
+                NR > 1 {
+                    i = ($1 ~ /^[0-9]+$/) ? 1 : 2
+                    if ($i ~ /^[0-9]+$/ && $(i + 1) ~ /^[0-9]+$/) print $i, $(i + 1)
+                }'
+            ;;
+        *)
+            ps -eo pid=,ppid= 2>/dev/null
+            ;;
+    esac
+}
+
+# One `ps`-style description line for a pid: pid, ppid, command name and
+# arguments where procps can report them, whatever the table shows elsewhere.
+process_describe() {
+    local pid="$1"
+    case "${OSTYPE:-}" in
+        msys*|cygwin*|win32*) ps -p "$pid" 2>/dev/null | awk 'NR > 1' ;;
+        *) ps -p "$pid" -o pid=,ppid=,comm=,args= 2>/dev/null ;;
+    esac
+}
+
 process_descendants() {
     local pid="$1" child
     [ "$pid" -gt 0 ] 2>/dev/null || return 0
@@ -80,7 +111,7 @@ process_descendants() {
         [ -n "$child" ] || continue
         printf '%s\n' "$child"
         process_descendants "$child"
-    done < <(ps -eo pid=,ppid= 2>/dev/null | awk -v parent="$pid" '$2 == parent { print $1 }')
+    done < <(process_pairs | awk -v parent="$pid" '$2 == parent { print $1 }')
 }
 
 kill_process_tree() {
@@ -93,7 +124,7 @@ kill_process_tree() {
         while read -r child; do
             [ -n "$child" ] || continue
             kill_process_tree "$child" "$signal"
-        done < <(ps -eo pid=,ppid= | awk -v parent="$pid" '$2 == parent {print $1}')
+        done < <(process_pairs | awk -v parent="$pid" '$2 == parent {print $1}')
     fi
     kill -"$signal" "$pid" 2>/dev/null || true
 }
@@ -126,10 +157,10 @@ process_audit() {
         while IFS="$(printf '\t')" read -r role pid ppid started output preview; do
             [ -n "${pid:-}" ] || continue
             {
-                ps -p "$pid" -o pid=,ppid=,comm=,args= 2>/dev/null || true
+                process_describe "$pid" || true
                 while read -r child; do
                     [ -n "$child" ] || continue
-                    ps -p "$child" -o pid=,ppid=,comm=,args= 2>/dev/null || true
+                    process_describe "$child" || true
                 done <<DESCENDANTS
 $(process_descendants "$pid")
 DESCENDANTS

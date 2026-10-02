@@ -38,6 +38,7 @@ pub struct Sides {
     pub theirs: Register,
     pub ours_label: String,
     pub theirs_label: String,
+    pub in_rebase: bool,
 }
 
 pub enum Contest {
@@ -97,6 +98,38 @@ pub enum SidesError {
     Unparsable { side: &'static str, why: String },
 }
 
+/// B151: `git rebase` (and cherry-pick, and revert) replay one commit at a time
+/// through the same `:2`/`:3` index stages a merge uses, but neither stage names
+/// a branch tip while that is happening -- `ours` is HEAD mid-replay, about to
+/// move again, and `theirs` is the commit currently being applied. `MERGE_HEAD`
+/// exists only for a real merge, so its absence together with a rebase state
+/// directory is what tells the two apart; `.git/rebase-merge` and
+/// `.git/rebase-apply` are the two forms git itself has used for this across
+/// versions, both checked because which one a given rebase uses is not this
+/// tool's business to predict.
+pub fn in_rebase() -> bool {
+    let git_dir = Command::new("git")
+        .args(["rev-parse", "--git-path", "rebase-merge"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|s| s.trim().to_string());
+    if let Some(path) = git_dir {
+        if std::path::Path::new(&path).is_dir() {
+            return true;
+        }
+    }
+    let apply_dir = Command::new("git")
+        .args(["rev-parse", "--git-path", "rebase-apply"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|s| s.trim().to_string());
+    apply_dir.is_some_and(|path| std::path::Path::new(&path).is_dir())
+}
+
 pub fn read_sides(path: &str) -> Result<Sides, SidesError> {
     if !is_conflicted(path) {
         return Err(SidesError::NotConflicted);
@@ -121,6 +154,7 @@ pub fn read_sides(path: &str) -> Result<Sides, SidesError> {
         theirs: parse(&theirs_text, "theirs")?,
         ours_label: label("HEAD", "HEAD"),
         theirs_label: label("MERGE_HEAD", "MERGE_HEAD"),
+        in_rebase: in_rebase(),
     })
 }
 

@@ -23,7 +23,7 @@ verification that fails without the fix.
 ## Quick start
 
 > File a bug: checkout fails with exit 73 when the target dir is a symlink.
-> Repro: `install.sh --target ~/current` twice.
+> Repro: `installer install --all --target ~/current` twice.
 > Close B31 as fixed — fix abc123, verified by the macOS CI leg going green.
 
 ## Good to know

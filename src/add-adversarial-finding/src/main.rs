@@ -3,7 +3,9 @@
 use planning_core::{git_snapshot, require_safe_value};
 use std::env;
 use std::fs;
+use std::io::{self, Write};
 use std::path::PathBuf;
+use std::process::Command;
 
 const COMMAND: &str = "add-adversarial-finding.sh";
 
@@ -165,8 +167,27 @@ fn main() {
     }
     fs::write(&review, output).unwrap_or_else(|error| die(error.to_string(), 64));
     if work_unit != "N/A" {
-        // The fix-key re-mint is a separate Rust command and is wired here
-        // once that command is migrated; ungated findings have no key output.
+        // Re-mint so the newly gated row gets a fix key, with the minter's
+        // own chatter kept off this command's one-line stdout result.
+        let minter = env::current_exe()
+            .ok()
+            .and_then(|path| {
+                path.parent()
+                    .map(|parent| parent.join(planning_core::exe_name("mint-fix-keys")))
+            })
+            .unwrap_or_else(|| PathBuf::from("mint-fix-keys"));
+        let result = Command::new(minter)
+            .arg(&plan)
+            .output()
+            .unwrap_or_else(|error| die(error.to_string(), 64));
+        io::stderr().write_all(&result.stdout).ok();
+        io::stderr().write_all(&result.stderr).ok();
+        if !result.status.success() {
+            die(
+                "fix-key re-mint failed; see the diagnostics above",
+                result.status.code().unwrap_or(1),
+            );
+        }
     }
     println!("Added {finding_id}");
 }

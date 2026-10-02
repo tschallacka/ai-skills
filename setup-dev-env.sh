@@ -2,13 +2,13 @@
 # MODE: DEV
 # setup-dev-env.sh — build the crates under src/ into a working local tree.
 #
-# A fresh clone carries Rust source but almost no binaries: only one artifact is
-# committed, and the skills look for compiled helpers that are not there. The
-# suite still passes, because every one of them degrades honestly — which is
-# exactly what hides the fact that the compiled path is never being exercised.
-# This builds each crate for THIS machine into one bin/<target triple> at the
-# repository root, which is where the skills look, so a local tree runs the same
-# code a target does.
+# A fresh clone carries Rust source but no binaries: nothing machine-produced is
+# committed, and the skills look for compiled helpers that are not there.
+# run-tests.sh is a shim over the compiled run-tests and exits 69 without it, so
+# an unbuilt tree cannot run the suite at all. This builds each binary listed by
+# --list for THIS machine into one bin/<target triple> at the repository root,
+# which is where the skills look, so a local tree runs the same code a target
+# does.
 #
 # It also builds the generated shell artifacts a clean checkout lacks — the five
 # plan-*-lib.sh that planning/scripts/*.sh source, and planning/REVIEWER.md — on
@@ -25,6 +25,13 @@
 # a release does (installer/build-release.sh) and what CI does per runner; a
 # development tree needs the one it can actually execute.
 #
+# A run leaves .setup-dev-env.started at the moment it begins building and
+# .setup-dev-env.finished, carrying the same run token, only if every crate
+# below built (B156: a run killed partway -- OOM, ^C, a crash -- otherwise
+# leaves an unlabelled partial tree indistinguishable from a finished one).
+# run-tests.sh and lib-test.sh's t_begin both refuse to run against a tree
+# where .started exists without a matching .finished.
+#
 # Exit codes: 64 = bad usage; 69 = nix is missing (see the message it prints);
 # 70 = a crate failed to build.
 
@@ -32,6 +39,35 @@ set -euo pipefail
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# Exec into the compiled binary when one is present, falling through to this
+# script's own bash implementation otherwise. Placed immediately after
+# repo_root is computed and BEFORE setup-dev-env-lib.sh is sourced -- as early
+# as structurally possible, since the compiled binary re-derives everything
+# itself, including its own nix-shell entry, and needs nothing bash would
+# otherwise compute first. setup-dev-env.sh already declares
+# `set -euo pipefail` above, so no call-site `set +e` fix is needed here.
+# setup-dev-env.sh lives at the repository root itself, one level shallower
+# than planning/scripts, so the relative path to plan-core-lib.sh crosses one
+# directory level down.
+sde_script_dir="$repo_root"
+# plan-core-lib.sh is generated (gitignored), so it does not exist on a
+# genuinely fresh checkout -- guard the source+exec on it already being
+# present, unconditionally falling through to this script's own bash
+# implementation (which itself builds plan-core-lib.sh, among other things)
+# when it is not.
+if [ -f "$sde_script_dir/planning/scripts/plan-core-lib.sh" ]; then
+    source "$sde_script_dir/planning/scripts/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present setup-dev-env "$sde_script_dir" "$@"
+fi
+unset sde_script_dir
+
+# shellcheck source=setup-dev-env-lib.sh
+source "$repo_root/setup-dev-env-lib.sh"
+
 mode=build
 
 usage() {
@@ -84,138 +120,6 @@ NONIX
     exit 69
 }
 
-# The host's Rust target triple, using the same five-row house list the skills
-# resolve against at runtime (rust-development-guidelines.md section 4). A
-# machine outside the list has no row to build and is refused by name.
-host_triple() {
-    local os arch
-    os="$(uname -s 2>/dev/null || printf 'unknown')"
-    arch="$(uname -m 2>/dev/null || printf 'unknown')"
-    case "$os" in
-        Linux)
-            case "$arch" in
-                x86_64|amd64) printf 'x86_64-unknown-linux-musl\n' ;;
-                aarch64|arm64) printf 'aarch64-unknown-linux-musl\n' ;;
-                *) return 1 ;;
-            esac
-            ;;
-        Darwin)
-            case "$arch" in
-                x86_64) printf 'x86_64-apple-darwin\n' ;;
-                arm64|aarch64) printf 'aarch64-apple-darwin\n' ;;
-                *) return 1 ;;
-            esac
-            ;;
-        MINGW*|MSYS*|CYGWIN*)
-            case "$arch" in
-                x86_64|amd64) printf 'x86_64-pc-windows-msvc\n' ;;
-                *) return 1 ;;
-            esac
-            ;;
-        *) return 1 ;;
-    esac
-}
-
-# What to build: <crate> <binary>. Everything lands in ONE bin/<triple> at the
-# repository root. Planning commands also get a second, untracked copy beside
-# their shell oracle as scripts/<binary>; that is the extensionless command
-# layout users invoke after the migration. rjq alone was a hard requirement of
-# planning, todo and bug-report, so a per-skill layout means the same binary
-# copied three times -- or, as it was, shipped by one skill and missing from the
-# other two, which the installer then refuses to install. todo and bug-report no
-# longer declare rjq at all: their own binaries replaced every rjq call, so only
-# planning still needs it.
-#
-# The register skills are the exception, and not by preference: skill_files()
-# promises bin/<triple>/<binary> RELATIVE TO THE SKILL, so the installer looks
-# in bug-report/bin/<triple>/ and todo/bin/<triple>/. Those get a per-skill copy
-# as well, matching CI's "Place the compiled register rungs" step. T72 replaces
-# both paths with one shared bin and this exception goes with it.
-#
-# chat-proto is a library the two chat crates depend on and produces no binary,
-# so it is absent here and built as a dependency of theirs.
-plan() {
-    plan_primary
-    plan_secondary
-    cat <<'PLAN'
-ai-text-editor	ai-text-editor
-ai-text-editor	ai-text-editor-server
-ai-text-editor-mcp	ai-text-editor-mcp
-PLAN
-}
-
-plan_primary() {
-    cat <<'PLAN'
-add-adversarial-finding	add-adversarial-finding
-add-coverage	add-coverage
-add-fix-claim	add-fix-claim
-add-goal	add-goal
-add-planning-bug	add-planning-bug
-add-ui-story	add-ui-story
-add-ui-story-links	add-ui-story-links
-add-work-unit	add-work-unit
-chat-client-rs	chat-client-rs
-chat-mcp	chat-mcp
-chat-server-rs	chat-server-rs
-configure-ui-story-cache	configure-ui-story-cache
-create-adversarial-review	create-adversarial-review
-create-plan	create-plan
-create-plan-progress	create-plan-progress
-update-plan-progress	update-plan-progress
-rebuild-plan-progress	rebuild-plan-progress
-register-read	register-read
-register-command	register-command
-register-rebuild	register-rebuild
-plan-mutate	plan-mutate
-todo-add	todo-add
-todo-update	todo-update
-bug-add	bug-add
-bug-update	bug-update
-supervision-frame	supervision-frame
-generate-reviewer	generate-reviewer
-cleanup-plans	cleanup-plans
-verify-target	verify-target
-update-step	update-step
-verify-fix-keys	verify-fix-keys
-update-work-unit	update-work-unit
-validate-plan	validate-plan
-run-adversary-probe	run-adversary-probe
-update-plan-content	update-plan-content
-monitor-read	monitor-read
-create-progress	create-progress
-create-step-testing	create-step-testing
-create-ui-story-run-cache	create-ui-story-run-cache
-create-ui-validation	create-ui-validation
-create-work-unit-inventory	create-work-unit-inventory
-PLAN
-}
-
-plan_secondary() {
-    cat <<'PLAN'
-mint-fix-keys	mint-fix-keys
-plan-crypt	plan-crypt
-plan-env	plan-env
-plan-content	plan-content
-plan-context-wrapper	plan-context-wrapper
-plan-context	plan-context
-role-context	role-context
-plan-overview	plan-overview
-plan-overview	overview-state
-plan-root	plan-root
-remove-coverage	remove-coverage
-remove-plan	remove-plan
-remove-work-unit	remove-work-unit
-resolve-finding	resolve-finding
-tony-the-pony	tony-the-pony
-update-adversarial-review	update-adversarial-review
-update-progress	update-progress
-update-ui-story	update-ui-story
-rjq	rjq
-bug-report	bugs
-todo	todo
-PLAN
-}
-
 triple="$(host_triple)" || {
     printf '%s: no house target covers %s:%s; nothing to build here\n' \
         "${0##*/}" "$(uname -s)" "$(uname -m)" >&2
@@ -232,14 +136,14 @@ if [ "$mode" = list ] || [ "$mode" = check ]; then
         if [ "$mode" = check ]; then
             state=$([ -x "$repo_root/$dest" ] && echo present || echo MISSING)
             printf '  %-16s -> %-52s %s\n' "$crate" "$dest" "$state"
-            if [ -f "$repo_root/planning/scripts/$binary.sh" ]; then
+            if stages_into_planning_scripts "$binary"; then
                 sibling="planning/scripts/$binary$exe"
                 state=$([ -x "$repo_root/$sibling" ] && echo present || echo MISSING)
                 printf '  %-16s -> %-52s %s\n' "$crate" "$sibling" "$state"
             fi
         else
             printf '  %-16s -> %s\n' "$crate" "$dest"
-            if [ -f "$repo_root/planning/scripts/$binary.sh" ]; then
+            if stages_into_planning_scripts "$binary"; then
                 printf '  %-16s -> %s\n' "$crate" "planning/scripts/$binary$exe"
             fi
         fi
@@ -260,11 +164,25 @@ fi
 # itself failing for one crate, which is not a per-crate condition.
 #
 # --list and --check return above this point, so they still cost no nix at all.
+check_stray_src_dirs
+
 if [ -z "${SETUP_DEV_ENV_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ]; then
     require_nix
     exec nix develop "$repo_root" --command env \
         SETUP_DEV_ENV_IN_NIX=1 "$repo_root/${0##*/}" "$@"
 fi
+
+# B156: a run killed partway (OOM, ^C, a crash) leaves some binaries built and
+# others not, and nothing said so -- a suite run afterwards saw whatever
+# partial state was left and could not tell it apart from a genuinely finished
+# tree. .started carries a token unique to this run; .finished carries the
+# same token only once every crate below built. run-tests.sh and lib-test.sh
+# (t_begin) both refuse when .started exists without a .finished naming this
+# exact run, rather than guessing the tree is fine.
+dev_env_token="$$.$(date -u +%s)"
+started_marker="$repo_root/.setup-dev-env.started"
+finished_marker="$repo_root/.setup-dev-env.finished"
+printf '%s\n' "$dev_env_token" > "$started_marker"
 
 printf 'setup-dev-env: building for %s\n\n' "$triple"
 built=0 failed=''
@@ -283,24 +201,38 @@ while IFS="$(printf '\t')" read -r crate binary; do
         cp "$repo_root/target/$triple/release/$binary$exe" "$dest_dir/$binary$exe"
         chmod +x "$dest_dir/$binary$exe"
         printf 'ok -> bin/%s/%s%s\n' "$triple" "$binary" "$exe"
-        if [ -f "$repo_root/planning/scripts/$binary.sh" ]; then
+        if stages_into_planning_scripts "$binary"; then
             cp "$repo_root/target/$triple/release/$binary$exe" \
                 "$repo_root/planning/scripts/$binary$exe"
             chmod +x "$repo_root/planning/scripts/$binary$exe"
             printf '   -> planning/scripts/%s%s\n' "$binary" "$exe"
         fi
-        # The register skills resolve their tool at <skill>/bin/<triple>/, which
+        # bug-report and todo resolve their tool at <skill>/bin/<triple>/, which
         # is what skill_files() promises and what CI's "Place the compiled
-        # register rungs" step does. Without this copy the shared bin/ above is
-        # the only one, and test-register-schemas fails four assertions on a
-        # tree built the documented way. T72 folds both into one shared bin.
+        # register rungs" step does; interactive-shell's binaries.tsv resolves
+        # the same way (B291). Without this copy the shared bin/ above is the
+        # only one, and a dev-tree install ships the skill with no binaries at
+        # all even though setup-dev-env reported them built. T72 folds all of
+        # these into one shared bin.
+        #
+        # interactive-shell-mcp is its own crate (a separate package
+        # depending on interactive-shell as a library, exactly like
+        # ai-text-editor-mcp depends on ai-text-editor) but is not its own
+        # skill -- integration.tsv gates it into the interactive-shell
+        # SKILL's mcp-mode install, so its compiled binary has to land in
+        # THAT skill's bin/<triple>/, not a nonexistent
+        # interactive-shell-mcp/ skill directory.
+        skill_dir_for_crate="$crate"
         case "$crate" in
-            bug-report|todo)
-                skill_dir="$repo_root/$crate/bin/$triple"
+            interactive-shell-mcp) skill_dir_for_crate=interactive-shell ;;
+        esac
+        case "$crate" in
+            bug-report|todo|interactive-shell|interactive-shell-mcp)
+                skill_dir="$repo_root/$skill_dir_for_crate/bin/$triple"
                 mkdir -p "$skill_dir"
                 cp "$repo_root/target/$triple/release/$binary$exe" "$skill_dir/$binary$exe"
                 chmod +x "$skill_dir/$binary$exe"
-                printf '   -> %s/bin/%s/%s%s\n' "$crate" "$triple" "$binary" "$exe"
+                printf '   -> %s/bin/%s/%s%s\n' "$skill_dir_for_crate" "$triple" "$binary" "$exe"
                 ;;
         esac
         built=$((built + 1))
@@ -315,17 +247,16 @@ EOF
 rm -f "$repo_root/.setup-dev-env.log"
 
 # The generated shell artifacts, on the same build-if-missing terms as the
-# crates above. They are never committed (MAINTAINER.md section 2.16), and a
-# fresh clone therefore has none of them — which is the same gap this script
-# exists to close: planning/scripts/*.sh `source` the five plan-*-lib.sh files,
+# crates above. They are never committed, and a fresh clone therefore has
+# none of them — which is the same gap this script exists to close:
+# planning/scripts/*.sh `source` the five plan-*-lib.sh files,
 # so a freshly cloned tree cannot run a planning helper at all until they are
 # built. Doing it here means "I ran setup-dev-env.sh" is enough to have a
 # working tree, rather than being enough only for the compiled half.
 #
-# Staleness is deliberately not detected here, exactly as run-tests.sh's
-# bootstrap_generated has it: regenerating unconditionally would let this script
-# mask drift the tests are there to find. Missing is built, present is left
-# alone.
+# Staleness is deliberately not detected here: regenerating unconditionally
+# would let this script mask drift the tests are there to find. Missing is
+# built, present is left alone.
 generated=0
 for lib in plan-core-lib.sh plan-crypt-lib.sh plan-document-lib.sh plan-progress-lib.sh plan-table-lib.sh; do
     if [ ! -f "$repo_root/planning/scripts/$lib" ]; then
@@ -346,6 +277,15 @@ if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then
         printf 'setup-dev-env: generate-reviewer.sh failed; the reviewer contract is missing\n' >&2
     fi
 fi
+# PORTABILITY.md is untracked (.agents/MAINTAINER.md 1.10), cheap to rebuild,
+# and unlike the artifacts above it is a live catalogue rather than a
+# load-bearing dependency -- regenerated unconditionally, every run, so it is
+# never more than one setup-dev-env.sh away from matching the tree exactly.
+if "$repo_root/generate-portability.sh" >/dev/null 2>&1; then
+    printf 'setup-dev-env: regenerated PORTABILITY.md\n'
+else
+    printf 'setup-dev-env: generate-portability.sh failed; the portability catalogue may be stale\n' >&2
+fi
 [ "$generated" -eq 0 ] && printf 'setup-dev-env: generated artifacts already present\n'
 
 # Wire the repo's pre-push gate (./pre-push-check.sh) as the pre-push hook.
@@ -363,6 +303,12 @@ if [ -n "$failed" ]; then
     printf 'failed:%s\n' "$failed" >&2
     exit 70
 fi
+
+# Reached only once every crate above built: the tree is complete, so record
+# this run's own token as finished. A crate failure exits above and never
+# reaches this line, so .finished then still names an OLDER run (or does not
+# exist at all) -- exactly the mismatch the dirty check is looking for.
+printf '%s\n' "$dev_env_token" > "$finished_marker"
 
 # plan_bin_dir finds this directory on its own, so nothing needs configuring for
 # the skills themselves. The export line is for a human's own shell.

@@ -12,5 +12,6 @@ name = "plan-content"
 path = "src/main.rs"
 
 [dependencies]
+planning-document = { path = "../planning-document" }
 planning-map = { path = "../planning-map" }
 planning-table = { path = "../planning-table" }

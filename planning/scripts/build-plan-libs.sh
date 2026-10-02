@@ -4,11 +4,10 @@
 # shipped libraries.
 #
 # One function per file is the maintainable form: a change touches one file, a
-# review diff shows one function, and a test can source a single function without
-# pulling in the rest. Sourcing 47 files at runtime is not: measured at 2.6x the
-# cost of one file, paid on every helper invocation. So the split is the source
-# and the concatenation is what ships, the same arrangement installer/build.sh
-# uses for install.sh.
+# review diff shows one function, and a test can source a single function
+# without pulling in the rest. Sourcing every file at runtime costs more than
+# sourcing the concatenation, so the split is the source and the
+# concatenation is what ships.
 #
 # Usage:
 #   build-plan-libs.sh                  # write the libraries (prod target)
@@ -38,6 +37,31 @@
 
 set -euo pipefail
 export LC_ALL=C
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# Exec into the compiled binary when one is present, falling through to the
+# bash implementation otherwise. This script takes no --plan-dir and does not
+# hoist one, so there is no hoist ordering to preserve; placed immediately
+# after both anchor lines above.
+#
+# Self-referential bootstrap hazard, unique to this script: plan-core-lib.sh
+# is one of the five files THIS script's own job is to generate, so on a
+# genuinely fresh clone (none of the five plan-*-lib.sh files exist yet)
+# sourcing it unconditionally fails outright under set -e, before this
+# script ever reaches the bash implementation that would have generated it.
+# Guard the whole block on the file already existing -- when it does not,
+# skip straight to the bash implementation below (which is exactly the
+# fresh-clone bootstrap path and produces plan-core-lib.sh among its five
+# outputs); a later invocation, once it exists, uses the normal exec
+# preference.
+bpl_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$bpl_script_dir/plan-core-lib.sh" ]; then
+    source "$bpl_script_dir/plan-core-lib.sh"
+    plan_exec_compiled_binary_if_present build-plan-libs "$bpl_script_dir" "$@"
+fi
+unset bpl_script_dir
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 lib_root="$script_dir/lib"
@@ -108,16 +132,9 @@ member_is_dev_only() { # <path>
     return 1
 }
 
-# Emitted once per library rather than once per source file.
-emit_library() { # <group>
-    local group="$1" spec output purpose member first=1
-    spec="$(group_output "$group")" || {
-        printf '%s: unknown group: %s\n' "${0##*/}" "$group" >&2
-        exit 65
-    }
-    output="${spec%%	*}"
-    purpose="${spec#*	}"
-
+emit_library_header() { # <group> <purpose>
+    local group="$1" purpose="$2" upper
+    upper="$(printf '%s' "$group" | tr '[:lower:]' '[:upper:]')"
     printf '#!/usr/bin/env bash\n'
     # The end user receives this file, so MODE: PROD. No PACKAGE: that axis is
     # for what a compiler consumes, and this is what a compiler produced.
@@ -134,9 +151,15 @@ emit_library() { # <group>
     # which would otherwise re-run 00-state.sh and drop the registered temp
     # files. `return` is legal here because the file is only ever sourced.
     printf '\n'
-    printf '[ -z "${PLAN_%s_LIB_LOADED:-}" ] || return 0\n' "$(printf '%s' "$group" | tr '[:lower:]' '[:upper:]')"
-    printf 'PLAN_%s_LIB_LOADED=1\n' "$(printf '%s' "$group" | tr '[:lower:]' '[:upper:]')"
+    printf '[ -z "${PLAN_%s_LIB_LOADED:-}" ] || return 0\n' "$upper"
+    printf 'PLAN_%s_LIB_LOADED=1\n' "$upper"
+}
 
+# Sets EMIT_LIBRARY_MEMBERS_FOUND=0 once at least one member is emitted, so
+# the caller can tell an empty group apart from a normal one.
+emit_library_members() { # <group>
+    local group="$1" member
+    EMIT_LIBRARY_MEMBERS_FOUND=1
     for member in "$lib_root/$group"/*.sh; do
         [ -f "$member" ] || continue
         if [ "$target" = prod ] && member_is_dev_only "$member"; then
@@ -154,9 +177,23 @@ emit_library() { # <group>
             -e '/^# MODE: DEV$/d' -e '/^# MODE: PROD$/d' \
             -e '/^# PACKAGE: DEV$/d' -e '/^# PACKAGE: PROD$/d' "$member" \
             | awk 'NF || printed { print; printed = 1 }'
-        first=0
+        EMIT_LIBRARY_MEMBERS_FOUND=0
     done
-    [ "$first" -eq 0 ] || {
+}
+
+# Emitted once per library rather than once per source file.
+emit_library() { # <group>
+    local group="$1" spec output purpose
+    spec="$(group_output "$group")" || {
+        printf '%s: unknown group: %s\n' "${0##*/}" "$group" >&2
+        exit 65
+    }
+    output="${spec%%	*}"
+    purpose="${spec#*	}"
+
+    emit_library_header "$group" "$purpose"
+    emit_library_members "$group"
+    [ "$EMIT_LIBRARY_MEMBERS_FOUND" -eq 0 ] || {
         printf '%s: group %s has no source files\n' "${0##*/}" "$group" >&2
         exit 65
     }

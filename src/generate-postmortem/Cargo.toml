@@ -1,0 +1,11 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "generate-postmortem"
+version = "0.1.0"
+edition = "2021"
+description = "Render a per-cycle cost/findings postmortem from a plan's adversarial-review-history.md"
+license = "MIT"
+
+[dev-dependencies]
+tempfile = { workspace = true }

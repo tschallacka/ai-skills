@@ -94,13 +94,20 @@ t_assert_eq 'safe value accepts text that merely looks like a substitution' \
 # ── plan_atomic_write: content, mode, and no leftover temp ──────────────────
 printf 'first\n' > "$work/target"
 chmod 640 "$work/target"
+# NTFS has no permission bits: chmod is a no-op there and stat keeps saying
+# 644. What survives the replacement is then the mode the file already had, so
+# that is what is compared (on unix it is the 640 just set).
+expected_mode=640
+if t_is_windows; then
+    expected_mode="$(t_stat_mode "$work/target")"
+fi
 unit plan_atomic_write.sh plan_die.sh plan_track_tmp.sh plan_stat_probe.sh 00-state.sh -- \
     "printf 'second\n' | plan_atomic_write '$work/target'" >/dev/null 2>&1
 t_assert_eq 'atomic write replaces the content' "$(cat "$work/target")" 'second'
 # Read the mode through the probe rather than a raw stat: the GNU and BSD forms
 # are what plan_stat_mode exists to hide, and PORTABILITY.md bans naming them.
 t_assert_eq 'atomic write keeps the mode' \
-    "$(unit plan_stat_probe.sh -- "plan_stat_mode '$work/target'")" '640'
+    "$(unit plan_stat_probe.sh -- "plan_stat_mode '$work/target'")" "$expected_mode"
 t_assert_eq 'atomic write leaves no temp beside the target' \
     "$(find "$work" -name '.target.*' | wc -l | tr -d ' ')" '0'
 t_assert_eq 'atomic write refuses a missing directory' \
@@ -138,10 +145,14 @@ t_assert_eq 'decode leaves text without escapes alone' \
 
 # ── plan_resolve_symlink: a chain, without readlink -f ──────────────────────
 printf 'real\n' > "$work/real.md"
-ln -sf "$work/real.md" "$work/link1.md"
-ln -sf "$work/link1.md" "$work/link2.md"
-t_assert_eq 'resolve follows a two-hop chain' \
-    "$(unit plan_resolve_symlink.sh -- "plan_resolve_symlink '$work/link2.md'")" "$work/real.md"
+# A chain needs real links; Git for Windows copies the target unless it is told
+# not to, and then there is no chain to follow (t_enable_symlinks says which).
+if t_enable_symlinks; then
+    ln -sf "$work/real.md" "$work/link1.md"
+    ln -sf "$work/link1.md" "$work/link2.md"
+    t_assert_eq 'resolve follows a two-hop chain' \
+        "$(unit plan_resolve_symlink.sh -- "plan_resolve_symlink '$work/link2.md'")" "$work/real.md"
+fi
 t_assert_eq 'resolve returns a plain file unchanged' \
     "$(unit plan_resolve_symlink.sh -- "plan_resolve_symlink '$work/real.md'")" "$work/real.md"
 
@@ -149,7 +160,7 @@ t_assert_eq 'resolve returns a plain file unchanged' \
 t_assert_eq 'the probe defines a mode reader' \
     "$(unit plan_stat_probe.sh -- 'declare -F plan_stat_mode >/dev/null && printf yes')" 'yes'
 t_assert_eq 'the mode reader prints octal digits' \
-    "$(unit plan_stat_probe.sh -- "plan_stat_mode '$work/target'")" '640'
+    "$(unit plan_stat_probe.sh -- "plan_stat_mode '$work/target'")" "$expected_mode"
 
 # ── planning_tmpdir: honours the override, defaults otherwise ──────────────
 t_assert_eq 'tmpdir sits under TMPDIR' \

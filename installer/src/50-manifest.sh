@@ -1,5 +1,4 @@
 # MODE: DEV
-# PACKAGE: PROD
 # ---------------------------------------------------------------
 # 9. Per-skill file manifest
 # ---------------------------------------------------------------
@@ -39,40 +38,25 @@ version_marker_content() {
 skill_artifact_files() {
     local skill="$1" relative
     shift
+    # --dev-build is a strict opt-in mode: source_file() already checks BOTH
+    # the repo-root dev build and the shipped location for a bin/ row, and
+    # dies naming --dev-build when neither has it (B108's whole point -- a
+    # developer asking for the dev build wants that told loudly, not a
+    # skill that quietly installed without its binary). Gating existence
+    # here too, against the shipped location alone, would omit the row
+    # before source_file() ever got to check the dev-build root or die --
+    # exactly what B317 caused it to do. Skip the gate under --dev-build and
+    # let that existing check own it; keep gating for the default path,
+    # where a missing binary should degrade the skill rather than abort the
+    # whole install (B317's own reason for existing).
+    if [ "${DEV_BUILD:-0}" -eq 1 ]; then
+        printf '%s\n' "$@"
+        return 0
+    fi
     for relative in "$@"; do
         [ -f "$SOURCE_ROOT/$skill/$relative" ] && printf '%s\n' "$relative"
     done
     return 0
-}
-
-# skill_unsupported_here <skill>
-#
-# Prints why this machine cannot run the skill and returns 0 when that is the
-# case; returns 1 for a skill this platform supports.
-#
-# Every other skill is text plus, at most, a binary that exists for all five
-# release targets, so "can I install this here" never had to be asked before.
-# interactive-shell is the first that cannot exist on a platform we otherwise
-# support: its wrapper allocates the PTY through libc (openpty, TIOCSCTTY,
-# TIOCSWINSZ), sets up a session and a process group, and kills that group by
-# negative pid. binaries.tsv therefore declares no Windows row.
-#
-# Without this gate skill_files() falls through to its `*)` arm on Git Bash,
-# MSYS2 or Cygwin and returns 69. install.sh runs under `set -euo pipefail` and
-# assigns that in `files="$(skill_files ...)"`, so the whole installer dies
-# mid-loop -- taking every skill that had not been reached yet with it. The
-# `*)` arm stays as the backstop for a genuinely unknown platform, which is a
-# different answer from "this platform is known and this skill is not for it".
-#
-# Windows support is wanted, through Cygwin, MSYS2 and native ConPTY; it is
-# queued as T84a/T84b/T84c, and when it lands the row here goes away with it.
-skill_unsupported_here() {
-    case "$1:$(uname -s)" in
-        interactive-shell:MINGW*|interactive-shell:MSYS*|interactive-shell:CYGWIN*|interactive-shell:Windows*)
-            printf 'no Windows build exists; the PTY wrapper is POSIX-only (see interactive-shell/binaries.tsv)\n'
-            return 0 ;;
-    esac
-    return 1
 }
 
 # skill_files <skill> [package]
@@ -98,6 +82,10 @@ skill_files() {
             planning)
             cat <<'EOF'
 SKILL.md
+parts/part-1.md
+parts/part-2.md
+parts/part-3.md
+parts/part-4.md
 docs/README.md
 REVIEWER.md
 binaries.tsv
@@ -158,14 +146,11 @@ scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
 scripts/plan-content.sh
 scripts/overview-state.sh
-scripts/plan-content-diff-lib.sh
-scripts/plan-context-lib.sh
 scripts/plan-context.sh
 scripts/plan-context-wrapper.sh
 scripts/plan-env.sh
 scripts/plan-mutate.sh
 scripts/plan-root.sh
-scripts/plan-reconcile-lib.sh
 scripts/role-context.sh
 scripts/monitor-read.sh
 scripts/supervision-frame.sh
@@ -184,21 +169,14 @@ scripts/mint-fix-keys.sh
 scripts/verify-fix-keys.sh
 scripts/verify-target.sh
 scripts/generate-reviewer.sh
+scripts/generate-postmortem.sh
+scripts/verify-skill-load.sh
 scripts/update-plan-progress.sh
 scripts/update-progress.sh
 scripts/update-step.sh
 scripts/validate-plan.sh
-scripts/validate-plan-common-lib.sh
-scripts/validate-plan-docs-lib.sh
-scripts/validate-plan-placeholders-lib.sh
-scripts/validate-plan-stale-lib.sh
-scripts/validate-plan-inventory-lib.sh
-scripts/validate-plan-ui-lib.sh
-scripts/validate-plan-goals-lib.sh
-scripts/validate-plan-serve-lib.sh
-scripts/validate-plan-commands-lib.sh
-scripts/validate-plan-propagation-lib.sh
-scripts/validate-plan-comparisons-lib.sh
+scripts/validate-plan-stale-wording.awk
+scripts/validate-plan-countable-enumeration.awk
 scripts/remove-plan.sh
 scripts/cleanup-plans.sh
 scripts/run-adversary-probe.sh
@@ -220,6 +198,7 @@ scripts/create-step-testing
 scripts/create-ui-story-run-cache
 scripts/create-ui-validation
 scripts/create-work-unit-inventory
+scripts/generate-postmortem
 scripts/generate-reviewer
 scripts/mint-fix-keys
 scripts/monitor-read
@@ -233,6 +212,7 @@ scripts/plan-root
 scripts/rebuild-plan-progress
 scripts/register-command
 scripts/register-read
+scripts/register-rebuild
 scripts/remove-coverage
 scripts/remove-plan
 scripts/remove-work-unit
@@ -253,15 +233,20 @@ scripts/verify-target
 EOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/rjq' ;;
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/rjq'
+                    skill_artifact_files planning bin/x86_64-unknown-linux-musl/plan-crypt ;;
                 Linux:aarch64|Linux:arm64)
-                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/rjq' ;;
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/rjq'
+                    skill_artifact_files planning bin/aarch64-unknown-linux-musl/plan-crypt ;;
                 Darwin:x86_64)
-                    printf '%s\n' 'bin/x86_64-apple-darwin/rjq' ;;
+                    printf '%s\n' 'bin/x86_64-apple-darwin/rjq'
+                    skill_artifact_files planning bin/x86_64-apple-darwin/plan-crypt ;;
                 Darwin:arm64)
-                    printf '%s\n' 'bin/aarch64-apple-darwin/rjq' ;;
+                    printf '%s\n' 'bin/aarch64-apple-darwin/rjq'
+                    skill_artifact_files planning bin/aarch64-apple-darwin/plan-crypt ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/rjq.exe' ;;
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/rjq.exe'
+                    skill_artifact_files planning bin/x86_64-pc-windows-msvc/plan-crypt.exe ;;
                 *)
                     printf 'skill_files: no rjq artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
@@ -272,6 +257,8 @@ EOF
 ARCHITECTURE.md
 MAINTAINER.md
 PACKAGE-MAP.tsv
+skill-source.txt
+scripts/generate-skill-docs.sh
 scripts/build-plan-libs.sh
 scripts/lib/core/00-state.sh
 scripts/lib/core/plan_atomic_write.sh
@@ -367,6 +354,7 @@ tests/fixtures/progress-shape/02-goal-b/progress.md
 tests/fixtures/progress-shape/02-goal-b/steps/01-step-b.md
 tests/fixtures/progress-shape/02-goal-b/steps/02-step-b2.md
 tests/fixtures/progress-shape/progress.md
+tests/lib-script-stub.sh
 tests/lib-test.sh
 tests/test-add-fix-claim.sh
 tests/test-add-planning-bug.sh
@@ -378,6 +366,7 @@ tests/test-adversarial-review-preamble.sh
 tests/test-adversary-probe-fixture.sh
 tests/test-artifact-comparisons.sh
 tests/test-blast-radius.sh
+tests/test-ci-failures-contract.sh
 tests/test-comment-format.sh
 tests/test-context-id-suggestions.sh
 tests/test-context-json-control-chars.sh
@@ -390,22 +379,32 @@ tests/test-discovery-unit-target.sh
 tests/test-document-id-parity.sh
 tests/test-document-sections.sh
 tests/test-duplication-ratchet.sh
+tests/test-exec-compiled-binary-preference.sh
 tests/test-fix-keys.sh
 tests/test-flag-coverage.sh
 tests/test-flag-form-equivalence.sh
 tests/test-function-length-ratchet.sh
 tests/test-goal-testing-row.sh
+tests/test-handoff-ordering-gate.sh
 tests/test-inner-shell-consistency.sh
 tests/test-install-ui.sh
 tests/test-installer-any-of.sh
+tests/test-installer-appprofiles.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
+tests/test-installer-busy-binary.sh
+tests/test-installer-codex-permissions.sh
 tests/test-installer-dependencies.sh
+tests/test-installer-dev-build.sh
+tests/test-installer-editor-gate-plugin.sh
 tests/test-installer-editor-steering.sh
+tests/test-installer-integration-carryover.sh
 tests/test-installer-integration-mode.sh
 tests/test-installer-interactive-shell-permission.sh
 tests/test-installer-manifest.sh
 tests/test-installer-mcp-registration.sh
+tests/test-installer-multi-root-refusal.sh
+tests/test-installer-tui-hint-plugin.sh
 tests/test-installer-noninteractive.sh
 tests/test-installer-opencode-permissions.sh
 tests/test-installer-skill-selection.sh
@@ -451,12 +450,12 @@ tests/test-report18-regressions.sh
 tests/test-report20-regressions.sh
 tests/test-reviewer-projection.sh
 tests/test-register-helpers.sh
-tests/test-register-resolve.sh
 tests/test-register-read.sh
 tests/test-resolve-finding.sh
 tests/test-validate-gates.sh
 tests/test-skill-provenance.sh
 tests/test-skill-file-length.sh
+tests/test-skill-docs-generation.sh
 tests/test-gate-caps.sh
 tests/test-atomicity-flow.sh
 tests/test-plan-data-lib.sh
@@ -467,29 +466,24 @@ tests/test-platform-selection.sh
 tests/test-npm-package.sh
 tests/test-overview-fixtures.sh
 scripts/register-lib.sh
-scripts/register-resolve.sh
-scripts/register-rebuild.sh
 tests/test-plan-crypt.sh
-tests/test-plan-freshness.sh
 tests/test-roster-cross-reference.sh
 tests/test-runtime-dependencies.sh
 tests/test-self-hosted-plan.sh
-tests/test-sha256-fallbacks.sh
-tests/test-stale-sweep.sh
 tests/test-step-atomicity-reset.sh
 tests/test-step-testing-reminder.sh
 tests/test-step-testing-sections.sh
 tests/test-supervision-frame.sh
 tests/test-target-path-validation.sh
 tests/test-target-reachability-gate.sh
-tests/test-ui-prohibition-scope.sh
 tests/test-validation-readiness-summary.sh
 tests/test-verifier-reach-memo.sh
 tests/test-voice-artifact-drift.sh
 tests/test-workspace-copy-excludes-build-trees.sh
+tests/test-worktree-id-collision-warning.sh
 EOF
             ;;
-        project-specificies)
+        project-specifics)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         resource-limited-testing)
@@ -514,24 +508,35 @@ EOF
         text-etiquette)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
+        question-etiquette)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
+        www)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
         todo)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
-                schema.1.4.2.json schema.2.0.0-alpha.1.json
+                schema.1.4.2.json schema.2.0.0-alpha.1.json schema.2.0.0-alpha.2.json \
+                schema.2.0.0-alpha.3.json
             # The queue's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its queue instead of being told
-            # to hand-edit JSON. Only the host's row is emitted, the way
-            # bug-report, planning and chat do it.
+            # to hand-edit JSON. Only the host's row is emitted, existence-gated
+            # through skill_artifact_files (B317): a raw printf of the path
+            # named a `cp` source that a fresh checkout's own binary had not
+            # been built for, and install_skill's copy loop has no guard of its
+            # own -- under set -e that one missing file killed every skill still
+            # queued behind it, not just this one.
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/todo' ;;
+                    skill_artifact_files todo bin/x86_64-unknown-linux-musl/todo ;;
                 Linux:aarch64|Linux:arm64)
-                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/todo' ;;
+                    skill_artifact_files todo bin/aarch64-unknown-linux-musl/todo ;;
                 Darwin:x86_64)
-                    printf '%s\n' 'bin/x86_64-apple-darwin/todo' ;;
+                    skill_artifact_files todo bin/x86_64-apple-darwin/todo ;;
                 Darwin:arm64)
-                    printf '%s\n' 'bin/aarch64-apple-darwin/todo' ;;
+                    skill_artifact_files todo bin/aarch64-apple-darwin/todo ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/todo.exe' ;;
+                    skill_artifact_files todo bin/x86_64-pc-windows-msvc/todo.exe ;;
                 *)
                     printf 'skill_files: no todo artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
@@ -539,22 +544,24 @@ EOF
             ;;
         bug-report)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
-                schema.1.4.2.json schema.2.0.0-alpha.1.json
+                schema.1.4.2.json schema.2.0.0-alpha.1.json schema.2.0.0-alpha.2.json \
+                schema.2.0.0-alpha.3.json
             # The register's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its register instead of being
-            # told to hand-edit JSON. Only the host's row is emitted, the way
-            # planning and chat do it.
+            # told to hand-edit JSON. Only the host's row is emitted,
+            # existence-gated through skill_artifact_files (B317): see todo's
+            # arm above for why a raw printf of the path is not safe here.
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/bugs' ;;
+                    skill_artifact_files bug-report bin/x86_64-unknown-linux-musl/bugs ;;
                 Linux:aarch64|Linux:arm64)
-                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/bugs' ;;
+                    skill_artifact_files bug-report bin/aarch64-unknown-linux-musl/bugs ;;
                 Darwin:x86_64)
-                    printf '%s\n' 'bin/x86_64-apple-darwin/bugs' ;;
+                    skill_artifact_files bug-report bin/x86_64-apple-darwin/bugs ;;
                 Darwin:arm64)
-                    printf '%s\n' 'bin/aarch64-apple-darwin/bugs' ;;
+                    skill_artifact_files bug-report bin/aarch64-apple-darwin/bugs ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/bugs.exe' ;;
+                    skill_artifact_files bug-report bin/x86_64-pc-windows-msvc/bugs.exe ;;
                 *)
                     printf 'skill_files: no bugs artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
@@ -596,33 +603,31 @@ EDITOR_EOF
             cat <<'CHATEOF'
 SKILL.md
 docs/README.md
+docs/interrupts.md
 requires.tsv
 binaries.tsv
 integration.tsv
 CHATEOF
+            # Existence-gated through skill_artifact_files (B317): a fresh
+            # checkout with none of chat's three binaries built used to name
+            # them anyway, and install_skill's `cp` of the first one killed the
+            # whole install under set -e, taking every skill queued after chat
+            # down with it.
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/chat-server-rs' 'bin/x86_64-unknown-linux-musl/chat-client-rs' 'bin/x86_64-unknown-linux-musl/chat-mcp' ;;
+                    skill_artifact_files chat bin/x86_64-unknown-linux-musl/chat-server-rs bin/x86_64-unknown-linux-musl/chat-client-rs bin/x86_64-unknown-linux-musl/chat-mcp bin/x86_64-unknown-linux-musl/chat-spool-watch ;;
                 Linux:aarch64|Linux:arm64)
-                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/chat-server-rs' 'bin/aarch64-unknown-linux-musl/chat-client-rs' 'bin/aarch64-unknown-linux-musl/chat-mcp' ;;
+                    skill_artifact_files chat bin/aarch64-unknown-linux-musl/chat-server-rs bin/aarch64-unknown-linux-musl/chat-client-rs bin/aarch64-unknown-linux-musl/chat-mcp bin/aarch64-unknown-linux-musl/chat-spool-watch ;;
                 Darwin:x86_64)
-                    printf '%s\n' 'bin/x86_64-apple-darwin/chat-server-rs' 'bin/x86_64-apple-darwin/chat-client-rs' 'bin/x86_64-apple-darwin/chat-mcp' ;;
+                    skill_artifact_files chat bin/x86_64-apple-darwin/chat-server-rs bin/x86_64-apple-darwin/chat-client-rs bin/x86_64-apple-darwin/chat-mcp bin/x86_64-apple-darwin/chat-spool-watch ;;
                 Darwin:arm64)
-                    printf '%s\n' 'bin/aarch64-apple-darwin/chat-server-rs' 'bin/aarch64-apple-darwin/chat-client-rs' 'bin/aarch64-apple-darwin/chat-mcp' ;;
+                    skill_artifact_files chat bin/aarch64-apple-darwin/chat-server-rs bin/aarch64-apple-darwin/chat-client-rs bin/aarch64-apple-darwin/chat-mcp bin/aarch64-apple-darwin/chat-spool-watch ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/chat-server-rs.exe' 'bin/x86_64-pc-windows-msvc/chat-client-rs.exe' 'bin/x86_64-pc-windows-msvc/chat-mcp.exe' ;;
+                    skill_artifact_files chat bin/x86_64-pc-windows-msvc/chat-server-rs.exe bin/x86_64-pc-windows-msvc/chat-client-rs.exe bin/x86_64-pc-windows-msvc/chat-mcp.exe bin/x86_64-pc-windows-msvc/chat-spool-watch.exe ;;
                 *)
                     printf 'skill_files: no chat artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
             esac
-            [ "$package" = dev ] || return 0
-            cat <<'CHATEOF'
-tests/test-chat.sh
-tests/test-chat-resolution.sh
-tests/test-chat-broadcast-stall.sh
-tests/test-chat-descriptor-leak.sh
-tests/test-chat-owner-socket.sh
-CHATEOF
             ;;
         interactive-shell)
             cat <<'ISHEOF'
@@ -631,26 +636,151 @@ agents/openai.yaml
 docs/README.md
 requires.tsv
 binaries.tsv
+integration.tsv
+appprofiles/FORMAT.md
+appprofiles/alsamixer.md
+appprofiles/atop.md
+appprofiles/bluetoothctl.md
+appprofiles/chsh.md
+appprofiles/cryptsetup.md
+appprofiles/dialog.md
+appprofiles/dig.md
+appprofiles/dpkg-reconfigure.md
+appprofiles/ed.md
+appprofiles/emacs.md
+appprofiles/ex.md
+appprofiles/expect.md
+appprofiles/gdb.md
+appprofiles/git-add-patch.md
+appprofiles/git-bisect.md
+appprofiles/git-subtree.md
+appprofiles/gpg.md
+appprofiles/htop.md
+appprofiles/info.md
+appprofiles/iotop.md
+appprofiles/iptraf.md
+appprofiles/iostat.md
+appprofiles/journalctl.md
+appprofiles/less.md
+appprofiles/lldb.md
+appprofiles/lynx.md
+appprofiles/man.md
+appprofiles/mc.md
+appprofiles/mcedit.md
+appprofiles/mtr.md
+appprofiles/nano.md
+appprofiles/ncdu.md
+appprofiles/nmon.md
+appprofiles/nslookup.md
+appprofiles/openssl.md
+appprofiles/passwd.md
+appprofiles/pg.md
+appprofiles/powertop.md
+appprofiles/pydoc.md
+appprofiles/read.md
+appprofiles/redis-cli.md
+appprofiles/rsync.md
+appprofiles/screen.md
+appprofiles/sdiff.md
+appprofiles/select.md
+appprofiles/socat.md
+appprofiles/ssh.md
+appprofiles/ssh-keygen.md
+appprofiles/su.md
+appprofiles/sudo.md
+appprofiles/supervisorctl.md
+appprofiles/talk.md
+appprofiles/tcpdump.md
+appprofiles/telnet.md
+appprofiles/tmux.md
+appprofiles/top.md
+appprofiles/varnishadm.md
+appprofiles/vi.md
+appprofiles/vmstat.md
+appprofiles/watch.md
+appprofiles/whiptail.md
+appprofiles/write.md
 ISHEOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    skill_artifact_files interactive-shell bin/x86_64-unknown-linux-musl/interactive-shell bin/x86_64-unknown-linux-musl/interactive-shell-input ;;
+                    skill_artifact_files interactive-shell bin/x86_64-unknown-linux-musl/interactive-shell bin/x86_64-unknown-linux-musl/interactive-shell-input bin/x86_64-unknown-linux-musl/interactive-shell-mcp ;;
                 Linux:aarch64|Linux:arm64)
-                    skill_artifact_files interactive-shell bin/aarch64-unknown-linux-musl/interactive-shell bin/aarch64-unknown-linux-musl/interactive-shell-input ;;
+                    skill_artifact_files interactive-shell bin/aarch64-unknown-linux-musl/interactive-shell bin/aarch64-unknown-linux-musl/interactive-shell-input bin/aarch64-unknown-linux-musl/interactive-shell-mcp ;;
                 Darwin:x86_64)
-                    skill_artifact_files interactive-shell bin/x86_64-apple-darwin/interactive-shell bin/x86_64-apple-darwin/interactive-shell-input ;;
+                    skill_artifact_files interactive-shell bin/x86_64-apple-darwin/interactive-shell bin/x86_64-apple-darwin/interactive-shell-input bin/x86_64-apple-darwin/interactive-shell-mcp ;;
                 Darwin:arm64)
-                    skill_artifact_files interactive-shell bin/aarch64-apple-darwin/interactive-shell bin/aarch64-apple-darwin/interactive-shell-input ;;
+                    skill_artifact_files interactive-shell bin/aarch64-apple-darwin/interactive-shell bin/aarch64-apple-darwin/interactive-shell-input bin/aarch64-apple-darwin/interactive-shell-mcp ;;
+                MINGW*:x86_64|Windows*:x86_64|MINGW*:amd64|Windows*:amd64)
+                    skill_artifact_files interactive-shell bin/x86_64-pc-windows-msvc/interactive-shell.exe bin/x86_64-pc-windows-msvc/interactive-shell-input.exe bin/x86_64-pc-windows-msvc/interactive-shell-mcp.exe ;;
+                # T70/AR-33: T84 shipped real Cygwin-native and MSYS2-native
+                # builds (interactive-shell/binaries.tsv's own x86_64-pc-cygwin
+                # rows, CI-proven by ci.yml's cygwin/msys2 legs) distinct from
+                # the MSVC build above -- linked against cygwin1.dll or
+                # msys-2.0.dll respectively, not an MSVC binary -- so CYGWIN*/
+                # MSYS* route to them instead of falling into the MINGW*/
+                # Windows* arm the way they used to.
+                CYGWIN*:x86_64|CYGWIN*:amd64|MSYS*:x86_64|MSYS*:amd64)
+                    skill_artifact_files interactive-shell bin/x86_64-pc-cygwin/interactive-shell.exe bin/x86_64-pc-cygwin/interactive-shell-input.exe bin/x86_64-pc-cygwin/interactive-shell-mcp.exe ;;
                 *)
                     printf 'skill_files: no interactive-shell artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
             esac
             [ "$package" = dev ] || return 0
             cat <<'ISHEOF'
-tests/test-interactive-shell.sh
-tests/test-interactive-shell-exploration.sh
 TODO.json
 ISHEOF
+            ;;
+        ci-failures)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            local file
+            for file in "$SOURCE_ROOT/ci-failures/scripts/"*.sh; do
+                [ -f "$file" ] && printf '%s\n' "scripts/$(basename "$file")"
+            done
+            ;;
+    esac
+}
+
+# profile_files <profile> -- T102's own declaration, parallel to skill_files()
+# but keyed by profile name rather than skill name: a profile lives under
+# .agents/profiles/, not under any skill directory, and installer/src/main.rs
+# reads its JSON directly rather than copying a directory tree. A hand list
+# for the same reason skill_files() is one -- tests/test-profile-files-manifest.sh
+# is what notices a tracked profile file nobody declared, or a declared file
+# that does not exist.
+profile_files() {
+    case "$1" in
+        nitpicker)
+            printf '%s\n' nitpicker.json
+            ;;
+        benny)
+            printf '%s\n' benny.json
+            ;;
+        chris)
+            printf '%s\n' chris.json
+            ;;
+        christian)
+            printf '%s\n' christian.json
+            ;;
+        christoph)
+            printf '%s\n' christoph.json
+            ;;
+        dana)
+            printf '%s\n' dana.json
+            ;;
+        frank)
+            printf '%s\n' frank.json
+            ;;
+        maintainer)
+            printf '%s\n' maintainer.json
+            ;;
+        installer)
+            printf '%s\n' installer.json
+            ;;
+        oracle)
+            printf '%s\n' oracle.json
+            ;;
+        eve)
+            printf '%s\n' eve.json
             ;;
     esac
 }
@@ -659,6 +789,34 @@ ISHEOF
 # variables it reads and the writers that set them: the picker calls it too
 # (T95), and install-ui.sh does not source this part.
 
+# Which mode's binary is already on disk at DESTINATION, or empty when there
+# is none (a first install) -- signal 1 of the two T109 names (the other,
+# an agent config already pointing at this skill's mcp binary, is left for a
+# follow-up; the destination signal alone is what a headless `--all` update
+# needs to stop tearing down a live mode it was never told to leave).
+#
+# More than one mode's binary present is a half-finished earlier switch --
+# remove_stale_integration_binaries only ever cleans up what the CURRENT
+# mode's answer says to remove, so it cannot itself have caused this -- and
+# it is reported rather than guessed at, on stderr so a caller capturing the
+# mode itself is not corrupted by the warning.
+integration_installed_mode() { # <skill> <destination> -> mode, or empty
+    local skill="$1" destination="$2" path mode found=''
+    for path in "$destination"/bin/*/*; do
+        [ -f "$path" ] || continue
+        mode="$(integration_binary_mode "$skill" "${path##*/}")"
+        [ -n "$mode" ] || continue
+        if [ -n "$found" ] && [ "$found" != "$mode" ]; then
+            printf '%s: %s has binaries for both %s and %s modes; a previous switch may be unfinished. Pass --integration to say which mode to keep.\n' \
+                "${0##*/}" "$destination" "$found" "$mode" >&2
+            printf ''
+            return 0
+        fi
+        found="$mode"
+    done
+    printf '%s\n' "$found"
+}
+
 # Does this file belong in the mode this skill is being installed in?
 #
 # Only artifacts under bin/ carry a mode; everything else -- SKILL.md, the
@@ -666,15 +824,24 @@ ISHEOF
 # skill directory and not a lone binary. A skill that declares no
 # integration.tsv has no arm in the generated table, its lookup is empty, and
 # every file is allowed: the flag is a no-op for it rather than an error.
+#
+# `mode` is the answer install_skill() already resolved once, up front, and
+# every one of its calls passes it in: integration_mode_for detects from
+# whatever is CURRENTLY on disk at the destination, and this same function is
+# what remove_stale_integration_binaries uses to decide what to delete FROM
+# that disk -- recomputing per call would let the answer change mid-loop as
+# soon as the first stale binary is removed. A caller with no resolved mode
+# yet (the picker, T95) omits it and gets the old explicit-or-default answer.
 integration_file_allowed() {
-    local skill="$1" relative="$2" declared
+    local skill="$1" relative="$2" mode="${3:-}" declared
     case "$relative" in
         bin/*) : ;;
         *) return 0 ;;
     esac
     declared="$(integration_binary_mode "$skill" "${relative##*/}")"
     [ -n "$declared" ] || return 0
-    [ "$declared" = "$(integration_mode_for "$skill")" ]
+    [ -n "$mode" ] || mode="$(integration_mode_for "$skill")"
+    [ "$declared" = "$mode" ]
 }
 
 # A skill switching integration mode (mcp -> skill or back) leaves the
@@ -687,11 +854,11 @@ integration_file_allowed() {
 # list of triples or binary names to fall out of date the next platform this
 # grows to support.
 remove_stale_integration_binaries() {
-    local skill="$1" destination="$2" files="$3" relative physical
+    local skill="$1" destination="$2" files="$3" mode="${4:-}" relative physical
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         case "$relative" in bin/*) : ;; *) continue ;; esac
-        if integration_file_allowed "$skill" "$relative"; then
+        if integration_file_allowed "$skill" "$relative" "$mode"; then
             continue
         fi
         physical="$(platform_relative_path "$skill" "$relative")"
@@ -711,21 +878,60 @@ EOF
 source_file() {
     local skill="$1"
     local relative="$2"
-    printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$(platform_relative_path "$skill" "$relative")"
+    local physical
+    physical="$(platform_relative_path "$skill" "$relative")"
+    if [ "$DEV_BUILD" -eq 1 ]; then
+        case "$relative" in
+            bin/*)
+                if [ -f "$SOURCE_ROOT/$physical" ]; then
+                    printf '%s/%s\n' "$SOURCE_ROOT" "$physical"
+                    return
+                fi
+                [ -f "$SOURCE_ROOT/$skill/$physical" ] || die \
+                    "--dev-build: no build of $skill/$relative in $SOURCE_ROOT/bin/ or $SOURCE_ROOT/$skill/bin/ -- run ./setup-dev-env.sh, or drop --dev-build to use the shipped binary"
+                ;;
+        esac
+    fi
+    printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$physical"
+}
+
+# True when --dev-build is set, this row is a binary, and its source resolved
+# to the repo-root dev build directory rather than the skill's shipped one --
+# so a caller can name which tree an installed binary actually came from
+# (T108: two locations silently disagreeing cost an hour to notice).
+source_is_dev_build() {
+    local skill="$1" relative="$2" physical
+    [ "$DEV_BUILD" -eq 1 ] || return 1
+    case "$relative" in
+        bin/*) ;;
+        *) return 1 ;;
+    esac
+    physical="$(platform_relative_path "$skill" "$relative")"
+    [ -f "$SOURCE_ROOT/$physical" ]
 }
 
 # Manifest entries keep the command name users invoke, without a platform
 # suffix. Windows still needs the executable suffix on disk. Only generated
 # planning commands use this logical-name rule; ordinary files and shell
 # helpers retain their manifest path exactly.
+#
+# A command is a name with no extension of its own. Everything else under
+# planning/scripts -- a .sh helper, a .awk program, a data file -- is a plain
+# file that already has its real name, and must not gain a ".exe": on Windows
+# the release builder went looking for validate-plan-countable-enumeration.awk.exe.
 platform_relative_path() {
     local skill="$1"
     local relative="$2"
+    local base="${relative##*/}"
     case "$skill:$relative" in
-        planning:scripts/*.sh) : ;;
         planning:scripts/*)
-            case "$(uname -s)" in
-                MINGW*|MSYS*|CYGWIN*|Windows*) relative="$relative.exe" ;;
+            case "$base" in
+                *.*) ;;
+                *)
+                    case "$(uname -s)" in
+                        MINGW*|MSYS*|CYGWIN*|Windows*) relative="$relative.exe" ;;
+                    esac
+                    ;;
             esac
             ;;
     esac

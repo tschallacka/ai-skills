@@ -2,6 +2,7 @@
 // PACKAGE: PROD
 //! Goal and step validation formerly provided by `validate-plan-goals-lib.sh`.
 
+use planning_table::table_cell;
 use planning_validator_common::Findings;
 use planning_validator_inventory::{Inventory, Unit};
 use serde_json::Value;
@@ -323,7 +324,10 @@ fn validate_size(
             .find(|unit| ids.contains(&unit.id))
             .map(|unit| unit.kind.as_str())
             .unwrap_or("");
-        if !matches!(kind, "docs" | "config" | "discovery" | "verification") {
+        if !matches!(
+            kind,
+            "docs" | "config" | "discovery" | "verification" | "relocation"
+        ) {
             findings.fail(format!(
                 "{goal} has one {kind} work unit; add its test/proof or merge it into its demonstrable outcome"
             ));
@@ -349,18 +353,35 @@ fn validate_yes_no_tables(
 ) {
     for section in yes_no_sections(text) {
         if !registry.sections.contains(&section) {
-            findings.fail(format!("{} has a hand-written yes/no table under '{}'; only registered goal sections may carry one", file.display(), section));
+            let registered_list = if registry.sections.is_empty() {
+                "none".to_owned()
+            } else {
+                registry
+                    .sections
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            findings.fail(format!("{} has a hand-written yes/no table under '{}'; only {registered_list} may carry one. Rebuild that section through update-plan-content.sh -gs (or -gp for the one paragraph, -tr for the testing requirement), never by hand", file.display(), section));
         }
     }
 }
 
 fn validate_atomicity(plan: &Path, unit: &Unit, file: &Path, text: &str, findings: &mut Findings) {
+    // Column-exact match (Stepname is column 3, Completion status is column
+    // 5), not a substring scan across the whole line -- a step's own
+    // Description cell can legitimately contain the word "completed" in
+    // prose while its actual status is still incomplete (B335-adjacent gap,
+    // found alongside it in goal 4 of planning-skill-rustify).
     let completed = fs::read_to_string(plan.join(&unit.goal).join("progress.md"))
         .ok()
         .is_some_and(|progress| {
-            progress
-                .lines()
-                .any(|line| line.contains(&unit.step) && line.contains("completed"))
+            progress.lines().any(|line| {
+                line.starts_with('|')
+                    && table_cell(line, 3) == unit.step
+                    && table_cell(line, 5).contains("completed")
+            })
         });
     for sentence in [
         "This step owns exactly one inventory work unit.",
@@ -511,5 +532,82 @@ mod tests {
     fn recognizes_numbered_steps() {
         assert!(is_numbered_step("02-step-build.md"));
         assert!(!is_numbered_step("step-build.md"));
+    }
+
+    fn relocation_unit(id: &str) -> Unit {
+        Unit {
+            id: id.to_string(),
+            kind: "relocation".to_string(),
+            file: "old/data/".to_string(),
+            scope: "new/data/".to_string(),
+            subscope: "N/A".to_string(),
+            intended: "Move it".to_string(),
+            depends: "—".to_string(),
+            goal: "01-goal".to_string(),
+            step: "01-step-a".to_string(),
+        }
+    }
+
+    /// A goal with a single relocation unit is size-exception eligible,
+    /// exactly like docs, config, discovery, and verification -- a single
+    /// wholesale move is as standalone an outcome as a single config change.
+    #[test]
+    fn a_single_relocation_unit_goal_is_allowed_with_the_size_exception_marker() {
+        let root =
+            std::env::temp_dir().join(format!("validator-goals-relocation-{}", std::process::id()));
+        let _ = fs::create_dir_all(&root);
+        let file = root.join("goal.md");
+        fs::write(
+            &file,
+            "# Goal\n\n## Goal-size exception\n\nOne wholesale relocation is the whole outcome.\n",
+        )
+        .unwrap();
+        let unit = relocation_unit("W01");
+        let mut inventory = Inventory::default();
+        inventory.units.push(unit);
+        let mut findings = Findings::default();
+        validate_size(
+            &file,
+            "01-goal",
+            &["W01".to_string()],
+            &inventory,
+            &mut findings,
+        );
+        assert_eq!(
+            findings.errors, 0,
+            "a single relocation unit with the exception marker should pass: {:?}",
+            findings.messages
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// The exception is conditional on the marker, not automatic just because
+    /// the kind is relocation -- the same rule every other exception-eligible
+    /// kind already follows.
+    #[test]
+    fn a_single_relocation_unit_goal_without_the_marker_still_fails() {
+        let root = std::env::temp_dir().join(format!(
+            "validator-goals-relocation-no-marker-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&root);
+        let file = root.join("goal.md");
+        fs::write(&file, "# Goal\n\nNo exception section here.\n").unwrap();
+        let unit = relocation_unit("W01");
+        let mut inventory = Inventory::default();
+        inventory.units.push(unit);
+        let mut findings = Findings::default();
+        validate_size(
+            &file,
+            "01-goal",
+            &["W01".to_string()],
+            &inventory,
+            &mut findings,
+        );
+        assert!(findings
+            .messages
+            .iter()
+            .any(|message| message.text.contains("Missing '## Goal-size exception'")));
+        let _ = fs::remove_dir_all(root);
     }
 }

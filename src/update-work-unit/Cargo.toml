@@ -9,5 +9,7 @@ license = "MIT"
 
 [dependencies]
 planning-core = { path = "../planning-core" }
+planning-document = { path = "../planning-document" }
 planning-inventory = { path = "../planning-inventory" }
 planning-progress = { path = "../planning-progress" }
+planning-table = { path = "../planning-table" }

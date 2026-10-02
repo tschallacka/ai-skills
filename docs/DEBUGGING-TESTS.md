@@ -144,6 +144,11 @@ called from three places says which call it is.
 - `docs/TESTING-PROTOCOL.md` — the interactive-shell testing protocol.
 - `.agents/MAINTAINER.md` §1.8 — one EXIT trap, process-wide. The evidence dump
   extends the single cleanup rather than installing a second handler.
-- `BUGS.json` B268 — a skipped test is still reported as `PASS`, so a green
-  summary does not yet prove every test ran. Read a suite's raw output, not
-  only its summary, when a leg's result is surprising.
+- `BUGS.json` B268 (fixed) — a test that skips whole via `t_skip` is reported
+  `SKIP`, not `PASS`, and the runner's summary counts it under Skipped. A green
+  run can still hide two things: `UNCONFIGURED` items (a test gated on
+  `PLANNING_CONTEXT_CACHE`, or a crate when `cargo` is missing) are counted
+  apart from Passed, and a test that skips one check inside itself and goes on
+  to assert still prints `PASS`. When a leg's result is surprising, read the
+  Skipped and Unconfigured counts and lists and the raw output, not only the
+  pass count; `.agents/MAINTAINER.md` 1.12 is the fuller statement.

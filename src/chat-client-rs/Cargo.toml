@@ -22,3 +22,11 @@ rustls-pki-types = { version = "1", features = ["std"] }
 # No webpki-roots: TOFU pins the server cert directly.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# T111: the control connection's loopback-TCP arm (Windows has no unix
+# socket) proves its shared secret via an HMAC challenge/response rather than
+# sending it in the clear -- the same primitives ai-text-editor's own TCP
+# fallback uses.
+base64 = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+getrandom = { workspace = true }

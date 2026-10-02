@@ -1,0 +1,29 @@
+# MODE: PROD
+# Which artifacts belong to which integration mode.
+#
+# A skill that offers more than one way to be driven declares it here, and
+# `install.sh --integration <skill>=<mode>` picks one without a prompt, so an
+# agent can choose its own interface headlessly.
+#
+# The rule is deliberately narrow: a binary named below installs ONLY in its
+# mode, and every file not named installs in every mode. So SKILL.md, the
+# docs and the two prebuilt binaries below are never mode-dependent, and a
+# skill with no integration.tsv at all has one mode and is unaffected by the
+# flag.
+#
+# `skill` is the default, because it is the interface that needs no client
+# configuration and no running server -- an agent drives the two binaries
+# below directly, exactly as SKILL.md/docs/README.md describe. `mcp` is
+# opt-in: its tools are listed in every session that configures the server,
+# so it is worth choosing rather than assuming.
+#
+# interactive-shell itself is deliberately UNLISTED, not `skill`-only: BOTH
+# modes need it. In skill mode it is the PTY wrapper an agent starts
+# directly; in mcp mode interactive-shell-mcp's own `start` tool spawns it
+# as a child (resolved as a sibling of its own binary, mirroring
+# ai-text-editor-mcp's server autostart) -- listing it as `skill`-only would
+# ship an mcp-only install whose `start` tool could never actually launch a
+# session.
+mode	binary	why
+skill	interactive-shell-input	CLI input client the skill's own instructions drive directly
+mcp	interactive-shell-mcp	MCP bridge an agent calls as typed tools instead

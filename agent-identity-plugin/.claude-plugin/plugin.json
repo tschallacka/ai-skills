@@ -1,0 +1,6 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "agent-identity",
+  "version": "0.1.0",
+  "description": "Injects each subagent's own id and type into its context at SubagentStart, and instructs it to declare that id on every ai-text-editor and interactive-shell call, so per-agent tab/socket/session state cannot be silently shared between a parent and its subagents."
+}

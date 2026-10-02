@@ -3,7 +3,6 @@
 # Coverage-gap tests (report: adversarial test-coverage audit).
 #
 # Covers behavior that the other suite misses:
-#   - plan-reconcile-lib.sh: plan_rewrite_owned_work_units / plan_rebuild_goal_progress
 #   - remove-plan.sh + cleanup-plans.sh (removal, git-history clear, --yes/list)
 #   - create-work-unit-inventory.sh (create / 73 / 66)
 #   - validate-plan.sh --no-propagation
@@ -29,36 +28,6 @@ expect_grep() {
     local file="$1" pattern="$2" label="$3"
     if grep -qE "$pattern" "$file"; then pass=$((pass+1)); echo "PASS: $label"; else fail=$((fail+1)); echo "FAIL: $label (pattern '$pattern' not found in $file)"; fi
 }
-
-# ---- plan-reconcile-lib.sh: rewrite_owned_work_units + rebuild_goal_progress ----
-plan="$tmp/reconcile"
-"$scripts/create-plan.sh" "$plan" reconcile >/dev/null
-"$scripts/add-goal.sh" "$plan" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$plan" --id W01 --type source --file a.php \
-    --scope 'A::x' --subscope N/A --change 'change A' \
-    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
-"$scripts/add-work-unit.sh" "$plan" --id W02 --type source --file b.php \
-    --scope 'B::x' --subscope N/A --change 'change B' \
-    --depends-on W01 --goal 01-g --step 02-step-b >/dev/null
-"$scripts/update-plan-content.sh" --testing-requirement "$plan" 01-g no 'research' >/dev/null
-goal_file="$plan/01-g/goal.md"
-# Directly exercise the reconcile lib (the shared engine) rather than only via add-work-unit.
-# shellcheck disable=SC1091
-source "$scripts/plan-document-lib.sh"
-source "$scripts/plan-reconcile-lib.sh"
-# Rebuild owned work units from a hand-set inventory; assert both units appear and
-# the testing-requirement row is preserved.
-plan_rewrite_owned_work_units "$goal_file" "$plan/work-unit-inventory.md" 01-g
-expect_grep "$goal_file" '`W01` — change A' 'reconcile: rewrite keeps W01'
-expect_grep "$goal_file" '`W02` — change B' 'reconcile: rewrite keeps W02'
-expect_grep "$goal_file" '\| no \|' 'reconcile: testing-requirement row preserved'
-# Per-goal progress is created on demand (a goal whose tracker never existed).
-if [ ! -f "$plan/01-g/progress.md" ]; then
-    plan_rebuild_goal_progress "$scripts" "$plan/01-g" 01-g
-fi
-[ -f "$plan/01-g/progress.md" ] && { pass=$((pass+1)); echo "PASS: reconcile: per-goal progress created"; } \
-    || { fail=$((fail+1)); echo "FAIL: reconcile: per-goal progress not created"; }
-expect_grep "$plan/01-g/progress.md" '01-step-a' 'reconcile: progress has step row'
 
 # ---- create-work-unit-inventory.sh ----
 scaffold="$tmp/scaffold"

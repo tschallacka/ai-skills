@@ -1,4 +1,4 @@
-<!-- MODE: PROD -->
+<!-- MODE: DEV -->
 # Style & evidence contract
 
 **Audience: agents and maintainers.** The repo-wide contract for how documents

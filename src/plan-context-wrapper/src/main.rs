@@ -21,7 +21,7 @@ fn context_reader_from(
         return path.to_path_buf();
     }
     if let Some(parent) = executable.parent() {
-        let binary = parent.join("plan-context");
+        let binary = parent.join(planning_core::exe_name("plan-context"));
         if binary.is_file() {
             return binary;
         }
@@ -61,13 +61,16 @@ fn main() -> ExitCode {
     }
 
     let reader = context_reader();
-    let mut command = Command::new("bash");
+    // Bash gets the file paths with slashes: MSYS converts `C:/x` for an
+    // argument and mangles `C:\x`. The reader is run by name from bash, so a
+    // Windows `.sh` script path works there too.
+    let mut command = Command::new(planning_core::bash_program());
     command
         .arg("-c")
         .arg("set -euo pipefail; source \"$1\"; shift; reader=\"$1\"; shift; exec \"$reader\" \"$@\"")
         .arg("plan-context-wrapper")
-        .arg(&variables_file)
-        .arg(&reader)
+        .arg(planning_core::for_bash(&variables_file))
+        .arg(planning_core::for_bash(&reader))
         .arg(first_reader_arg);
     command.args(args);
     match command.status() {

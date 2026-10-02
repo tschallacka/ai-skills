@@ -15,6 +15,7 @@
 
 mod cli;
 mod clock;
+mod dedupe;
 mod migrate;
 mod mutate;
 mod query;
@@ -39,8 +40,10 @@ Usage:
            [--severity major] [--priority normal] [--status reported]
            [--mechanism M] [--parent B37] [--found-by W] [--surfaces a,b]
            [--fix F] [--verification V]   (closure evidence; required with --status fixed)
+           [--notes N]   (an initial note, e.g. not locally reproduced yet;
+                          `update --append-note` adds one later)
   bugs update <ID> [--title T] [--status S] [--fix F] [--verification V]
-                   [--reason R] [--priority P] [--mechanism M]
+                   [--reason R] [--priority P] [--severity S] [--mechanism M]
                    [--append-note N]
   bugs show <ID>
   bugs list [--status S] [--priority P] [--severity S] [--parent ID]
@@ -51,6 +54,7 @@ Usage:
   bugs next-id
   bugs check
   bugs fmt
+  bugs dedupe    collapse duplicate ids a rebase left, closed beats open
   bugs migrate
   bugs resolve [<side>:<old-id>:<new-id> ...]   resolve a merge conflict
   bugs --help
@@ -87,6 +91,7 @@ const FLAGS: &[&str] = &[
     "fix",
     "verification",
     "reason",
+    "notes",
     "append-note",
     "surface",
     "since",
@@ -122,12 +127,13 @@ fn fail<T>(message: impl Into<String>, code: u8) -> Result<T, Failure> {
 }
 
 fn run(argv: &[String]) -> Result<ExitCode, Failure> {
-    match argv.first().map(String::as_str) {
-        None | Some("--help") | Some("-h") => {
-            print!("{USAGE}");
-            return Ok(ExitCode::SUCCESS);
-        }
-        _ => {}
+    // Checked anywhere in argv, not just as the first token: `bugs add
+    // --help` used to fall through to cli::parse and refuse with "unknown
+    // option: --help" instead of showing usage, since only a bare `bugs`
+    // (or `bugs --help` with nothing else) ever reached this check before.
+    if argv.is_empty() || argv.iter().any(|a| a == "--help" || a == "-h") {
+        print!("{USAGE}");
+        return Ok(ExitCode::SUCCESS);
     }
 
     let mut args = match cli::parse(argv, FLAGS) {
@@ -192,6 +198,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Failure> {
             Ok(ExitCode::SUCCESS)
         }
         "resolve" => resolve_command(&path, &args),
+        "dedupe" => dedupe_command(&path),
         "migrate" => migrate_command(&path),
         other => fail(format!("unknown command: {other}"), EX_USAGE),
     }
@@ -242,6 +249,7 @@ fn add(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
         surfaces: args.list("surfaces"),
         fix: args.flag("fix").map(str::to_string),
         verification: args.flag("verification").map(str::to_string),
+        notes: args.flag("notes").map(str::to_string),
     };
 
     match mutate::add(&mut register, new) {
@@ -269,6 +277,7 @@ fn update(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
         title: args.flag("title").map(str::to_string),
         status: opt_enum(args.flag("status"), "--status", register::STATUSES)?,
         priority: opt_enum(args.flag("priority"), "--priority", register::PRIORITIES)?,
+        severity: opt_enum(args.flag("severity"), "--severity", register::SEVERITIES)?,
         fix: args.flag("fix").map(str::to_string),
         verification: args.flag("verification").map(str::to_string),
         mechanism: args.flag("mechanism").map(str::to_string),
@@ -339,6 +348,37 @@ fn check(path: &str) -> Result<ExitCode, Failure> {
     Ok(ExitCode::from(1))
 }
 
+/// Collapse duplicate ids a rebase left behind (no git conflict involved --
+/// see dedupe.rs for why this is a separate path from `resolve`).
+fn dedupe_command(path: &str) -> Result<ExitCode, Failure> {
+    let register = read(path)?;
+    let outcome = dedupe::dedupe(&register);
+
+    if outcome.kept.is_empty() && outcome.ambiguous.is_empty() {
+        println!("no duplicate ids in {path}; nothing to dedupe");
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    if !outcome.ambiguous.is_empty() {
+        eprintln!("bugs: these duplicate ids do not resolve on their own:");
+        for problem in &outcome.ambiguous {
+            eprintln!("    {}:", problem.id);
+            for line in &problem.summary {
+                eprintln!("      {line}");
+            }
+        }
+        eprintln!("bugs: pick the right one by hand, then re-run — nothing was written");
+        return fail("refusing to guess at an ambiguous duplicate", EX_DATAERR);
+    }
+
+    let resolved = outcome.register.expect("no ambiguity means a result");
+    write(path, &resolved)?;
+    for note in &outcome.kept {
+        println!("{note}");
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 /// Resolve an id collision in a conflicted register.
 ///
 /// Prints the resolved register to stdout and the confirmation to stderr, so
@@ -392,10 +432,22 @@ fn resolve_command(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
         }
     }
     if unsound {
-        eprintln!("bugs: fix that side on its own branch first — no renaming can make a");
-        eprintln!(
-            "      register sound that was already unsound, and merging it carries the fault in."
-        );
+        if sides.in_rebase {
+            // B151: under a merge, "fix that side on its own branch" names a
+            // real action -- under a rebase neither side is a branch tip, ours
+            // is HEAD mid-replay and theirs is the commit currently being
+            // applied, so that instruction has no referent.
+            eprintln!("bugs: this file is conflicted mid-rebase, where 'ours' and 'theirs' name");
+            eprintln!("      commits being replayed, not branch tips -- there is no branch to go");
+            eprintln!("      fix. Defer this file to the commit whose register is already sound");
+            eprintln!("      (skip it here and let that commit's own fix carry forward), or");
+            eprintln!("      resolve the id collision in this file now and continue the rebase.");
+        } else {
+            eprintln!("bugs: fix that side on its own branch first — no renaming can make a");
+            eprintln!(
+                "      register sound that was already unsound, and merging it carries the fault in."
+            );
+        }
         return fail("refusing to resolve into an unsound register", EX_DATAERR);
     }
 
@@ -767,5 +819,66 @@ mod tests {
         );
         std::env::remove_var("BUGS_JSON");
         assert_eq!(resolve_path(None), "BUGS.json");
+    }
+
+    fn scratch_path(tag: &str) -> String {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "bug-report-test-{tag}-{}-{}.json",
+            std::process::id(),
+            clock::now().replace([':', '-', '.'], "")
+        ));
+        path.to_string_lossy().into_owned()
+    }
+
+    /// B(bugs-add-help): `bugs add --help` used to fall through to
+    /// cli::parse and refuse with "unknown option: --help", since the old
+    /// check only looked at argv[0] -- only a bare `bugs` or `bugs --help`
+    /// (nothing else) ever showed usage.
+    #[test]
+    fn help_is_recognized_after_a_subcommand_too() {
+        assert!(run(&["add".to_string(), "--help".to_string()]).is_ok());
+        assert!(run(&["update".to_string(), "--help".to_string()]).is_ok());
+        assert!(run(&["add".to_string(), "-h".to_string()]).is_ok());
+    }
+
+    /// B(bugs-add-notes): `add` had no way to attach an initial note --
+    /// the field exists on Bug, but NewBug never carried it, so the only
+    /// path was a guessed, undocumented `--notes` flag (refused) or a
+    /// separate `update --append-note` call after the fact.
+    #[test]
+    fn add_accepts_an_initial_note() {
+        let path = scratch_path("add-notes");
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"skill":"bug-report","skill_version":"{}","comment":"t","bugs":[]}}"#,
+                migrate::SUPPORTED
+            ),
+        )
+        .unwrap();
+        let status = run(&[
+            "add".to_string(),
+            "--file".to_string(),
+            path.clone(),
+            "--title".to_string(),
+            "t".to_string(),
+            "--reproduce".to_string(),
+            "r".to_string(),
+            "--observed".to_string(),
+            "o".to_string(),
+            "--expected".to_string(),
+            "e".to_string(),
+            "--notes".to_string(),
+            "not locally reproduced yet".to_string(),
+        ]);
+        assert!(
+            status.is_ok(),
+            "{}",
+            status.err().map(|f| f.message).unwrap_or_default()
+        );
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("not locally reproduced yet"));
+        std::fs::remove_file(&path).ok();
     }
 }

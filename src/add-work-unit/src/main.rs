@@ -11,7 +11,7 @@ const COMMAND: &str = "add-work-unit.sh";
 
 fn usage(code: i32) -> ! {
     println!(
-        "Usage: {COMMAND} [--plan-dir] <plan-directory> [--repo-root DIR] --id <WNN> --type <type> --file <path|N/A>\n           --scope <scope> --subscope <subscope|N/A> --change <intended change>\n           --depends-on <WNN,...|--> --goal <NN-name> --step <NN-step-name>\n       {COMMAND} --help\n\nTypes: source markup style test config docs data generated discovery verification"
+        "Usage: {COMMAND} [--plan-dir] <plan-directory> [--repo-root DIR] --id <WNN> --type <type> --file <path|N/A>\n           --scope <scope> --subscope <subscope|N/A> --change <intended change>\n           --depends-on <WNN,...|--> --goal <NN-name> --step <NN-step-name>\n       {COMMAND} --help\n\nTypes: source markup style test config docs data generated discovery verification relocation\n\nrelocation is the one type whose --file may name a directory (ending in /):\nthe source path moved wholesale, contents unchanged; --scope names the\ndestination path."
     );
     std::process::exit(code)
 }
@@ -69,6 +69,7 @@ fn insert_owned(goal: &str, unit: &str, intended: &str) -> Result<String, &'stat
     }
     let lines: Vec<&str> = goal.lines().collect();
     let mut max = 0usize;
+    let mut found = false;
     let mut in_owned = false;
     let mut testing = None;
     for (index, line) in lines.iter().enumerate() {
@@ -85,10 +86,14 @@ fn insert_owned(goal: &str, unit: &str, intended: &str) -> Result<String, &'stat
                 .and_then(|value| value.parse().ok())
             {
                 max = max.max(number);
+                found = true;
             }
         }
     }
-    let Some(testing_index) = testing else {
+    // A roster whose `## Owned work units` heading survives but whose numbered
+    // paragraphs are gone is unusable: appending would invent `§ 9.1` under a
+    // section nothing else recognises. Refuse before any of the three writes.
+    let Some(testing_index) = testing.filter(|_| found) else {
         return Err("Goal has no numbered Owned work units section");
     };
     let mut insertion = testing_index;
@@ -222,7 +227,20 @@ fn make_plan_progress(plan: &Path) -> Result<(), String> {
     } else {
         "💤"
     };
-    let mut output = format!("# Progress: {}\n\n**Overall progress:** `{percent}%  {bar}  100%` {icon}\n\n| Goalname | Description | Completion status |\n|---|---|---|\n", plan.file_name().unwrap().to_string_lossy());
+    // file_name() is None for a path that is exactly "." or ".." (or the
+    // filesystem root), which a caller can legitimately pass -- canonicalize
+    // resolves those to a real absolute path first (B338).
+    let plan_name = plan
+        .canonicalize()
+        .ok()
+        .and_then(|resolved| {
+            resolved
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+        .or_else(|| plan.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| ".".to_string());
+    let mut output = format!("# Progress: {plan_name}\n\n**Overall progress:** `{percent}%  {bar}  100%` {icon}\n\n| Goalname | Description | Completion status |\n|---|---|---|\n");
     for (name, description, status) in goals {
         output.push_str(&format!("| {name} | {description} | {status} |\n"));
     }
@@ -325,6 +343,7 @@ fn main() {
             | "generated"
             | "discovery"
             | "verification"
+            | "relocation"
     ) {
         die(format!("Unsupported work-unit type: {unit_type}"), 64)
     }
@@ -360,9 +379,15 @@ fn main() {
             64,
         )
     }
-    if unit_file.contains('*') || unit_file.ends_with('/') {
+    if unit_file.contains('*') || (unit_file.ends_with('/') && unit_type != "relocation") {
         die(
-            "File must be one concrete file, not a glob or directory",
+            "File must be one concrete file, not a glob or directory (only relocation may name a directory)",
+            64,
+        )
+    }
+    if unit_type == "relocation" && scope == "N/A" {
+        die(
+            "A relocation work unit must name its destination as --scope",
             64,
         )
     }
@@ -370,7 +395,15 @@ fn main() {
         if !Path::new(&root).is_dir() {
             die(format!("repository root not found: {root}"), 66)
         }
-        if !matches!(
+        if unit_type == "relocation" {
+            let source = Path::new(&root).join(unit_file.trim_end_matches('/'));
+            if !source.exists() {
+                die(
+                    format!("Source path does not exist under --repo-root: {unit_file}"),
+                    66,
+                )
+            }
+        } else if !matches!(
             unit_type.as_str(),
             "discovery" | "verification" | "generated"
         ) && !matches!(scope.as_str(), "N/A")

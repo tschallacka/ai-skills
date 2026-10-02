@@ -1,10 +1,11 @@
 // MODE: DEV
+#![cfg(unix)]
+use interactive_shell_core::ClientStream;
 use serde_json::Value;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, PoisonError};
@@ -14,13 +15,9 @@ use std::time::Duration;
 /// How many 10ms polls a readiness wait is allowed: 3000, so thirty seconds.
 ///
 /// These loops were `0..100`, a ONE second budget, which is ample on a Linux
-/// runner and far too tight on the macOS one. In run 33793295763, 17 of 19
-/// tests here failed on it while the binary and its socket were both fine:
-/// `signal_cleanup_removes_socket` created and removed a socket successfully
-/// and `malformed_cli_arguments_do_not_panic` ran the CLI, so neither bind nor
-/// the executable was at fault. The macOS runner is a shared, oversubscribed
-/// VPS that pauses for other tenants, so a readiness budget has to cover the
-/// worst scheduling delay rather than the typical one.
+/// runner and far too tight on the macOS one. The macOS runner is a shared,
+/// oversubscribed VPS that pauses for other tenants, so a readiness budget
+/// has to cover the worst scheduling delay rather than the typical one.
 ///
 /// It is a CEILING, not a sleep: every loop returns the moment its condition
 /// holds, so a healthy run is no slower than it was. Only a genuine failure
@@ -39,12 +36,10 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 // makes the failure read as a missing socket rather than an expired child.
 //
 // These were 30 seconds, which is generous on a workstation and a bet on the
-// macOS runner. Measured 2026-09-04: this suite takes 1.05s here and 151.94s
-// on the aarch64-apple-darwin leg -- about 150x -- and
-// `cli_text_preserves_spaces_and_input_help_is_available` duly lost the bet,
-// reporting `socket present: false` with ENOENT because `sleep 30` had ended
-// and the wrapper had cleaned up behind it. See
-// .agents/knowledge/github-ci-runners.md.
+// macOS runner. A shared macOS CI runner needed a longer fixture value than
+// that original 30s: a fixture can outlive the socket-readiness wait on a
+// slow enough leg, and the failure then reads as a missing socket rather
+// than an expired child.
 //
 // 600 costs a healthy run nothing: every test that needs its wrapper gone
 // either kills it or asserts against its exit, so nothing waits out the
@@ -59,9 +54,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Where a wrapper's stderr is kept, inside the test's own directory.
 ///
 /// It was `Stdio::null()`. That is why a wrapper that failed before it could
-/// bind produced seventeen "socket did not appear" panics on the macOS runner
-/// and not one line saying what went wrong -- the diagnosis had to be guessed
-/// at from which tests failed. A FILE and not a pipe, because the wrapper
+/// bind produced only a "socket did not appear" panic and not one line saying
+/// what went wrong -- the diagnosis had to be guessed at from which tests
+/// failed. A FILE and not a pipe, because the wrapper
 /// outlives the assertion and a pipe nobody drains blocks it once the buffer
 /// fills; opened for append so several wrappers in one directory accumulate
 /// rather than truncating each other.
@@ -120,6 +115,38 @@ fn start_binary(binary: &str, dir: &Path, command: &[&str], idle: &str) -> Child
         .unwrap()
 }
 
+/// Like `start`, but with `--tcp`: the discovery file at `dir/socket` ends up
+/// holding a port+nonce instead of being a real Unix socket special file, and
+/// `connect_socket`/`request`/`request_all` need no changes to reach it --
+/// `connect_in_directory` (lib.rs) auto-detects which transport is actually
+/// there.
+fn start_tcp(dir: &Path, command: &[&str], idle: &str) -> Child {
+    Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "--tcp",
+            "--cols",
+            "20",
+            "--rows",
+            "4",
+            "--idle-timeout",
+            idle,
+            "--",
+        ])
+        .args(command)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(stderr_path(dir))
+                .unwrap(),
+        ))
+        .spawn()
+        .unwrap()
+}
+
 fn start_fixture(dir: &Path, idle: &str) -> Child {
     start_binary(
         env!("CARGO_BIN_EXE_interactive-shell"),
@@ -153,9 +180,9 @@ fn wait_for_socket(dir: &Path) {
 
 /// Poll `observe` until the screen carries `needle`, and return that snapshot.
 ///
-/// SKILL.md states the contract this exists to honour: an ack means the WRAPPER
-/// accepted the input, never that the program acted on it, so a state change is
-/// confirmed against the next screen. Text typed at a `sleep` appears only
+/// An ack means the WRAPPER accepted the input, never that the program acted
+/// on it, so a state change is confirmed against the next screen. Text typed
+/// at a `sleep` appears only
 /// because the tty line discipline echoes it, which means it has to travel
 /// input -> pty master -> echo -> the wrapper's read loop -> the screen model
 /// before any observe can see it. A single observe straight after the ack is
@@ -220,7 +247,7 @@ fn wait_until_gone(dir: &Path, needle: &str) {
 /// indication of which request, which socket, or what the wrapper had said on
 /// its way out. `code: 104` is also Linux-only; macOS numbers ECONNRESET 54,
 /// so the number in a CI log is not even stable across the legs.
-fn exchange(dir: &Path, stream: &mut UnixStream, body: &str) -> String {
+fn exchange(dir: &Path, stream: &mut ClientStream, body: &str) -> String {
     stream.write_all(body.as_bytes()).unwrap_or_else(|error| {
         panic!("sending {body:?} failed: {error}\n{}", wrapper_stderr(dir))
     });
@@ -247,35 +274,29 @@ fn exchange(dir: &Path, stream: &mut UnixStream, body: &str) -> String {
 ///
 /// NOT `UnixStream::connect(dir.join("socket"))`. That is an absolute address,
 /// and sun_path caps a Unix socket address at 104 bytes. On macOS $TMPDIR is a
-/// per-user `/var/folders/<2>/<28>/T/` path, run-tests.sh adds its own scratch
-/// directory and each test names its own, so the address arrives at ~110 bytes
-/// and every connect fails with "path must be shorter than SUN_LEN". The
-/// library already answers this with `connect_in_directory`, whose other half
-/// is `bind_in_directory`; its own doc comment says both ends have to be
-/// relative or the shorter one just moves the failure. The tests are the third
-/// end of that rule and were still connecting absolutely.
+/// per-user, deeply nested path, and the scratch directory each test creates
+/// pushes the address past that cap, so every connect fails with "path must
+/// be shorter than SUN_LEN". The library already answers this with
+/// `connect_in_directory`, whose other half is `bind_in_directory`: both ends
+/// have to be relative or the shorter one just moves the failure. The tests
+/// are the third end of that rule and were still connecting absolutely.
 ///
-/// Reproduced on Linux by lengthening $TMPDIR alone -- 8 passed, 11 failed, the
-/// same eleven as the macOS legs, with `exists=true` printed beside the SUN_LEN
-/// error. The socket was present and connectable by name the whole time.
 /// WHY THE LOCK. `connect_in_directory` gets its relative address by moving the
 /// process into the directory with `fchdir`, and the cwd is per PROCESS, not per
 /// thread. The wrapper is single-threaded so it pays nothing for that; this
-/// binary runs nineteen tests as threads in one process, so an unguarded move
-/// lets one test's connect run while another test's cwd is in force. Measured,
-/// not feared: connecting by name with no lock failed 3 runs out of 3 with
-/// `Connection reset by peer`, and passed with `--test-threads=1`. The same
+/// binary runs its tests as threads in one process, so an unguarded move lets
+/// one test's connect run while another test's cwd is in force. The same
 /// hazard is why `the_socket_is_bound_by_name_inside_the_held_directory` and its
 /// sibling are serialised in the library's own unit tests.
 ///
 /// The lock covers the move and nothing else -- `exchange` reads and writes
-/// after it is released -- so the suite still finishes in about a second.
+/// after it is released -- so the suite still finishes quickly.
 /// A poisoned lock is recovered rather than propagated: the poison would come
-/// from some other test's panic, and turning that into eighteen further
-/// failures hides the one that matters.
+/// from some other test's panic, and propagating it would hide the failure
+/// that actually matters.
 static CWD_LOCK: Mutex<()> = Mutex::new(());
 
-fn connect_socket(dir: &Path) -> Result<UnixStream, String> {
+fn connect_socket(dir: &Path) -> Result<ClientStream, String> {
     let _guard = CWD_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
     interactive_shell_core::connect_in_directory(&dir.join("socket"))
 }
@@ -301,6 +322,31 @@ fn unreachable_socket(dir: &Path, last_error: &str) -> String {
         },
         wrapper_stderr(dir)
     )
+}
+
+/// Retries the connect itself, the way `request` does, but hands back the
+/// raw stream for a caller that must control the write timing (a late-body
+/// test, say) rather than sending one body immediately.
+///
+/// `wait_for_socket`'s file-`exists()` check is not the same claim as "the
+/// server is listening": on the macOS runner the wrapper can `bind()` the
+/// path -- so the file is there -- before its accept loop is actually
+/// polling that listener, and a loaded runner can widen that gap enough for
+/// the very first client connect to be refused (measured: "Connection
+/// refused (os error 61)" immediately after `wait_for_socket` returned).
+/// Retrying the connect itself is the only check that actually observes
+/// "up and listening", so every caller that opens its own socket uses this
+/// instead of a single `connect_socket(&dir).expect(..)`.
+fn connect_socket_retrying(dir: &Path) -> ClientStream {
+    let mut last_error = String::new();
+    for _ in 0..READY_POLLS {
+        match connect_socket(dir) {
+            Ok(stream) => return stream,
+            Err(error) => last_error = error,
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    panic!("{}", unreachable_socket(dir, &last_error))
 }
 
 fn request(dir: &Path, body: &str) -> Value {
@@ -649,17 +695,14 @@ fn view_is_compact_numbered_and_supports_rows_and_deltas() {
     let dir = temp_dir("view");
     let mut child = start(
         &dir,
-        // Driven by input, NOT by a timer. It was
-        // `printf ONE; sleep .1; printf '\\rTWO'; sleep 1`, which rewrites row 1
-        // a tenth of a second after start, whatever the test is doing -- so the
-        // two `view` assertions below only hold while the test outruns that
-        // sleep. On x86_64-apple-darwin it did not: the range assertion saw
-        // `001 [001-003] TWO` (reproduced locally by inserting a 300ms sleep
-        // before the range view), which read as "row 2 is missing" and is
-        // really "row 1 has already moved on". `read` makes the screen change
-        // exactly when this test sends a line and never before; `stty -echo`
-        // keeps that line off the screen, and the trailing `read` parks the
-        // shell until shutdown so no second timer can end it early.
+        // Driven by input, NOT by a timer. A timer-based rewrite races this
+        // test's own assertions, and a slow-enough runner can see row 1
+        // already moved on where a fast one still sees it fresh -- which
+        // reads as "row 2 is missing" when it is really "row 1 changed
+        // first". `read` makes the screen change exactly when this test
+        // sends a line and never before; `stty -echo` keeps that line off
+        // the screen, and the trailing `read` parks the shell until
+        // shutdown so no second timer can end it early.
         &[
             "sh",
             "-c",
@@ -765,6 +808,108 @@ fn rgbview_preserves_styles_without_json_wrapping() {
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(text.contains("\x1b[0;31mRED"));
     assert!(!text.contains("\"event\""));
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
+}
+
+// T152, end to end over the REAL wrapper binary and socket protocol (not just
+// the unit-tested Screen): a standalone absolute-cursor-positioning write
+// (CUP, `ESC[r;cH`) issued SEPARATELY from the child's main `\r\n`-joined
+// frame -- the installer wizard's mascot-overlay shape the ticket was filed
+// against -- must show up in `view`. The overlay text here is deliberately
+// real multi-byte UTF-8 (U+2500 BOX DRAWINGS LIGHT HORIZONTAL, `\342\224\200`
+// in octal), not plain ASCII: plain-ASCII CUP overlays already worked before
+// this fix, so an ASCII-only fixture here would not have caught the actual
+// regression (Screen::byte's Ground state silently dropped every byte
+// outside 0x20..=0x7e, including a whole multi-byte glyph, before it ever
+// reached a row).
+#[test]
+fn a_standalone_cup_addressed_overlay_of_a_unicode_glyph_reaches_view_over_the_socket() {
+    let dir = temp_dir("overlay");
+    let mut child = start(
+        &dir,
+        &[
+            "sh",
+            "-c",
+            "printf 'MAIN\\r\\n\\033[3;3H\\342\\224\\200\\342\\224\\200TAIL'; sleep 600",
+        ],
+        "600",
+    );
+    let _ = request_all(
+        &dir,
+        r#"{"v":1,"op":"wait","contains":"MAIN"}
+"#,
+    );
+    let snapshot = wait_for_rows(&dir, "\u{2500}\u{2500}TAIL");
+    // The row's own two untouched leading blank cells (cols 1-2, before the
+    // CUP-addressed write at col 3) stay part of its text -- `snapshot`/
+    // `view`/`rgbview` only trim the trailing blanks off a row, never the
+    // leading ones.
+    assert_eq!(
+        snapshot["rows"]["2"], "  \u{2500}\u{2500}TAIL",
+        "the overlay row never carried its box-drawing glyphs: {snapshot}"
+    );
+    let view = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "view",
+            "3",
+        ])
+        .output()
+        .unwrap();
+    assert!(view.status.success());
+    assert_eq!(
+        String::from_utf8(view.stdout).unwrap(),
+        "terminal=20x4\n003 [003-008]   \u{2500}\u{2500}TAIL\n"
+    );
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
+}
+
+// B142: the markup mode over the real socket, not just the unit-tested
+// Screen::markup -- proves the CLI wiring (dispatch, row filtering, the
+// "markup" event name the CLI's response printer looks for) round-trips.
+#[test]
+fn markup_reports_a_verified_link_over_the_socket() {
+    let dir = temp_dir("markup");
+    let mut child = start(
+        &dir,
+        &[
+            "sh",
+            "-c",
+            "printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; sleep 600",
+        ],
+        "600",
+    );
+    let _ = request_all(
+        &dir,
+        r#"{"v":1,"op":"wait","contains":"LINK"}
+"#,
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "markup",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("<a href=\"https://example.test\">LINK</a>"),
+        "markup did not report the verified link: {text:?}"
+    );
     let _ = request(
         &dir,
         r#"{"v":1,"op":"shutdown"}
@@ -1013,10 +1158,7 @@ fn observe_drops_osc8_elements_after_their_cells_are_erased() {
             "sh",
             "-c",
             // Input-driven, like the view test: the erase happens when this
-            // test asks for it. It was `sleep 0.2; printf '\\033[2J'; sleep 2`
-            // read by a blind `thread::sleep(500ms)`, which is a bet on both
-            // ends -- too early and the erase has not run, too late and the
-            // fixture has exited and taken the socket with it.
+            // test asks for it, not on a timer racing the assertion.
             "stty -echo; printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; read _go; printf '\\033[2J'; read _park",
         ],
         "600",
@@ -1074,30 +1216,26 @@ fn malformed_cli_arguments_do_not_panic() {
 
 /// A request whose body arrives after the connect is still served.
 ///
-/// This is the macOS failure of run 33890018179 turned into a test. The
-/// listener is non-blocking so the run loop can poll it between reads of the
-/// pty master, and BSD copies that O_NONBLOCK onto the socket `accept()`
-/// returns while Linux does not. So on macOS the wrapper's first read of a
-/// request that had not yet arrived returned EAGAIN, client() failed, the
-/// connection was dropped, and the caller's input never reached the program:
+/// This is a macOS-specific failure turned into a test. The listener is
+/// non-blocking so the run loop can poll it between reads of the pty master,
+/// and BSD copies that O_NONBLOCK onto the socket `accept()` returns while
+/// Linux does not. So on macOS the wrapper's first read of a request that had
+/// not yet arrived returned EAGAIN, client() failed, the connection was
+/// dropped, and the caller's input never reached the program:
 ///
 ///     interactive-shell client: Resource temporarily unavailable (os error 35)
 ///
 /// 35 is EAGAIN on macOS and 11 on Linux, so even the errno differs by leg.
 ///
 /// The delay is what makes the mechanism reachable on either platform. Without
-/// it the request is always already buffered by the time the wrapper reads, so
-/// the defect is invisible on a fast machine: injecting `set_nonblocking(true)`
-/// alone left all 19 tests passing here, and only the pause reproduced CI.
-/// Measured all three ways -- bug+delay fails with EAGAIN, fix+delay passes,
-/// bug without the delay passes, which is why Linux never saw it. One test pays
-/// the 150ms rather than every exchange in this file.
+/// it the request is always already buffered by the time the wrapper reads,
+/// so the defect is invisible on a fast machine. One test pays the delay
+/// rather than every exchange in this file.
 #[test]
 fn a_request_body_that_arrives_late_is_still_served() {
     let dir = temp_dir("late-body");
     let mut child = start(&dir, &["sh", "-c", "sleep 600"], "600");
-    wait_for_socket(&dir);
-    let mut stream = connect_socket(&dir).expect("the socket must accept a connection");
+    let mut stream = connect_socket_retrying(&dir);
     thread::sleep(Duration::from_millis(150));
     let reply = exchange(&dir, &mut stream, "{\"v\":1,\"op\":\"observe\"}\n");
     assert!(
@@ -1107,7 +1245,7 @@ fn a_request_body_that_arrives_late_is_still_served() {
     );
     // Reaped, not just killed: clippy::zombie_processes is denied here, and a
     // fixture parked for 600 seconds is exactly the one worth not leaving
-    // behind on a runner that may go on to run another 200 tests.
+    // behind on a runner that goes on to run more tests.
     child.kill().ok();
     child.wait().ok();
 }
@@ -1230,4 +1368,183 @@ fn long_input_and_descendants_are_handled() {
         thread::sleep(POLL_INTERVAL);
     }
     panic!("descendant survived wrapper cleanup");
+}
+
+/// `--tcp` end to end: a real `interactive-shell --tcp` server, a real
+/// `connect_in_directory` connect through the crate's own auto-detection
+/// (never told which transport is in play), and positive proof it actually
+/// went over TCP rather than happening to also work by falling back to a
+/// Unix socket -- the discovery file at `dir/socket` must parse as a bare
+/// `<port>\n<hex nonce>\n`, which a real bound Unix socket special file
+/// cannot (opening one as a plain file fails fast, confirmed directly against
+/// this host).
+#[test]
+fn tcp_transport_serves_screen_events_over_a_discovery_file() {
+    let dir = temp_dir("tcp-events");
+    let mut child = start_tcp(
+        &dir,
+        &["sh", "-c", "stty size; printf first; sleep 1"],
+        "600",
+    );
+    wait_for_socket(&dir);
+    let discovery = fs::read_to_string(dir.join("socket")).unwrap_or_else(|error| {
+        panic!(
+            "discovery file unreadable: {error}\n{}",
+            wrapper_stderr(&dir)
+        )
+    });
+    let mut lines = discovery.lines();
+    let port: u16 = lines
+        .next()
+        .unwrap_or_else(|| panic!("discovery file has no port line: {discovery:?}"))
+        .parse()
+        .unwrap_or_else(|error| {
+            panic!("discovery file port did not parse: {error}\n{discovery:?}")
+        });
+    assert!(port > 0, "an ephemeral TCP port must never be 0");
+    assert!(
+        lines.next().is_some_and(|nonce| nonce.len() == 64),
+        "discovery file nonce should be 64 hex characters: {discovery:?}"
+    );
+
+    let ack = request(
+        &dir,
+        r#"{"v":1,"op":"key","key":"ENTER"}
+"#,
+    );
+    assert_eq!(ack["event"], "ack");
+    let mut output = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut output)
+        .unwrap();
+    let status = child.wait().unwrap();
+    assert!(status.success());
+    assert!(output
+        .lines()
+        .any(|line| line.contains("\"event\":\"screen\"")));
+    assert!(output
+        .lines()
+        .any(|line| line.contains("\"event\":\"lifecycle\"")));
+}
+
+/// A `--tcp` session's own restart (via `--session`, with no `--tcp` repeated)
+/// stays on TCP: the saved session file remembers `use_tcp`, matching how it
+/// already remembers socket/command/dimensions.
+#[test]
+fn session_file_remembers_tcp_transport_across_a_restart() {
+    let state = temp_dir("tcp-session-state");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .env("INTERACTIVE_SHELL_AGENT", "tcp-session-agent")
+        .args([
+            "--session",
+            "tcp-resume-case",
+            "--tcp",
+            "--cols",
+            "20",
+            "--rows",
+            "4",
+            "--idle-timeout",
+            "600",
+            "--",
+            "sh",
+            "-c",
+            "printf SESSION_READY; sleep 600",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let session_file = state.join("sessions/tcp-resume-case.json");
+    for _ in 0..READY_POLLS {
+        if session_file.exists() {
+            break;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    assert!(session_file.exists());
+    let session: Value = serde_json::from_str(&fs::read_to_string(&session_file).unwrap()).unwrap();
+    assert_eq!(session["use_tcp"], true);
+    let socket = PathBuf::from(session["socket"].as_str().unwrap());
+    let input = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args([
+            "--session",
+            "tcp-resume-case",
+            "wait",
+            "SESSION_READY",
+            "30000",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        input.status.success(),
+        "session wait failed: {}\n{}",
+        String::from_utf8_lossy(&input.stderr).trim_end(),
+        wrapper_stderr(socket.parent().unwrap())
+    );
+    assert!(String::from_utf8_lossy(&input.stdout).contains("\"matched\":true"));
+    let shutdown = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args(["--session", "tcp-resume-case", "shutdown"])
+        .output()
+        .unwrap();
+    assert!(shutdown.status.success());
+    child.wait().unwrap();
+
+    // Restarted with NO --tcp repeated: the saved session file alone must
+    // carry the transport choice forward.
+    let mut restarted = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args(["--session", "tcp-resume-case"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    for _ in 0..READY_POLLS {
+        if socket.exists() {
+            break;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    assert!(socket.exists());
+    let discovery = fs::read_to_string(&socket).unwrap_or_else(|error| {
+        panic!(
+            "resumed session's socket path did not parse as a TCP discovery file: {error}\n{}",
+            wrapper_stderr(socket.parent().unwrap())
+        )
+    });
+    assert!(
+        discovery
+            .lines()
+            .next()
+            .is_some_and(|port| port.parse::<u16>().is_ok()),
+        "resumed session did not use TCP: {discovery:?}"
+    );
+    let resumed = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args([
+            "--session",
+            "tcp-resume-case",
+            "wait",
+            "SESSION_READY",
+            "30000",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        resumed.status.success(),
+        "wait on the resumed TCP session failed: {}\n{}",
+        String::from_utf8_lossy(&resumed.stderr),
+        wrapper_stderr(socket.parent().unwrap())
+    );
+    assert!(String::from_utf8_lossy(&resumed.stdout).contains("\"matched\":true"));
+    let _ = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args(["--session", "tcp-resume-case", "shutdown"])
+        .output();
+    restarted.wait().unwrap();
 }

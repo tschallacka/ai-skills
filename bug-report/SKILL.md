@@ -18,12 +18,17 @@ impression.
 
 ## The file
 
-`BUGS.json` at the root of whatever holds the defect.
+`BUGS.json` at the root of whatever holds the defect. **If it does not exist
+yet**, `bugs` will not create it for you — write it yourself first, as the
+skeleton below with an empty `bugs` array and `skill_version` copied exactly
+as shown (this is the one supported way to bootstrap a fresh register; a
+stale or invented version number is refused by name on the very next
+command).
 
 ```json
 {
   "skill": "bug-report",
-  "skill_version": "1.4.2",
+  "skill_version": "2.0.0-alpha.1",
   "comment": "Defects found in <subject>, with reproduction and verification.",
   "bugs": [
     {
@@ -109,6 +114,13 @@ It prints the id it allocated. `--title`, `--reproduce`, `--observed` and
 `--expected` are required and the command refuses without them: a defect nobody
 can reproduce is a rumour, and one with no stated expectation is an opinion.
 
+Pass `--notes "..."` to `add` for an initial note (e.g. "not locally
+reproduced yet"). A note added later — after the fact, once something new is
+learned — goes through `bugs update <ID> --append-note "..."` instead, which
+appends rather than replacing. There is no `--help` on `add`/`update`
+specifically; `bugs --help` (or `-h`, anywhere in the command line) always
+shows the full usage.
+
 ### Prose from a file, not the shell
 
 `--reproduce`, `--observed`, `--expected`, `--mechanism`, `--fix` and
@@ -134,28 +146,19 @@ none of them.
 
 ### Where `bugs` is
 
-Under a **per-triple** directory — `bin/<target-triple>/bugs`, at the skill root
-when installed and at the repository root in a development tree, e.g.
-`bin/x86_64-unknown-linux-musl/bugs`. There is no unsuffixed `bin/bugs`, and
-nothing puts it on `PATH` for you, so every `bugs …` line below is written for a
-shell that can already find it. Resolve it once and use that:
+Under one shared location every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/bugs`. Nothing puts it
+on `PATH` for you, so every `bugs …` line below is written for a shell that
+can already find it there:
 
 ```sh
-triple="$(uname -s):$(uname -m)"
-case "$triple" in
-    Linux:x86_64|Linux:amd64)   triple=x86_64-unknown-linux-musl ;;
-    Linux:aarch64|Linux:arm64)  triple=aarch64-unknown-linux-musl ;;
-    Darwin:x86_64)              triple=x86_64-apple-darwin ;;
-    Darwin:arm64)               triple=aarch64-apple-darwin ;;
-    MINGW*|MSYS*|CYGWIN*)       triple=x86_64-pc-windows-msvc ;;
-esac
-bugs="$PWD/bin/$triple/bugs"          # a development tree
-[ -x "$bugs" ] || bugs="<skill root>/bin/$triple/bugs"
+bugs="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/bugs"
 ```
 
-`./setup-dev-env.sh` prints the `export PATH=` line for this host, which is the
-one thing that makes a bare `bugs` work. Failing that, build it with
-`cargo build --release --manifest-path src/bug-report/Cargo.toml`.
+In a development tree that has run `./setup-dev-env.sh`, the same binary is
+also at `bin/<target-triple>/bugs` under the repository root, and that
+script prints the `export PATH=` line for this host. Failing both, build it
+with `cargo build --release --manifest-path src/bug-report/Cargo.toml`.
 
 The vocabulary is fixed and the binary will not accept anything outside it:
 
@@ -244,6 +247,20 @@ bugs next-id
 An absent filter matches everything rather than matching the empty string, so
 `list` with no flags is the whole register and not an empty one.
 
+## Reserving an id for another writer
+
+Telling a worker "take B80 and B81" and then continuing to file your own
+entries is not a reservation (B86): `next-id` only sees ids that already exist
+in the file, so nothing stops you from minting B80 yourself an hour later,
+and nothing about the register's own soundness check can catch it -- each
+copy stays internally consistent even though the two entries collide. A
+reservation with no artifact is not a reservation.
+
+If an id must be held for someone else, `add` the entry now, even minimally,
+so the id is real and `next-id` skips past it the same way it does for any
+other filed bug. Handing off a bare number in chat and filing your own
+entries in the meantime reintroduces exactly this hazard.
+
 ## Keeping the file in priority order
 
 Nothing to do: every write re-sorts. The order is priority, then severity, then
@@ -310,10 +327,15 @@ evidence a closure owes.
 
 `planning/scripts/register-lib.sh`'s `reg_findings` is the shell oracle for the
 same rules, kept for the tests that compare the two. It tests membership with
-`index(...)` and an `as $e` binding, never jq's `IN/1`: `rjq` does not implement
-`IN/1` and exits 5 having printed nothing, and an empty findings string is the
-sound case — so an `IN/1` check reported every register sound. `A | index(B)`
-also evaluates `B` against `A`, so a bare `index(.status)` looks `.status` up on
+`index(...)` and an `as $e` binding rather than jq's `IN/1` — `rjq` now
+implements `IN/1` and `IN/2` (T85, ported from jq's own `builtin.jq`), but the
+oracle deliberately keeps its own independent expression of the rule rather
+than switching to it, since the two are compared against each other. An
+earlier version of this paragraph said `rjq` does not implement `IN/1` and
+exits 5 having printed nothing on a membership check, so an empty findings
+string read as a sound register without the check ever running; that trap is
+now closed, but a new hand-rolled check still has to get `A | index(B)` right:
+it evaluates `B` against `A`, so a bare `index(.status)` looks `.status` up on
 the array and dies with "cannot index". Anything editing that oracle keeps both
 properties.
 
@@ -350,6 +372,24 @@ It reads both clean sides out of the git index, so it works mid-conflict with
 nothing checked out. It follows a rename into `parent`, reports ids left in prose
 rather than rewriting them, refuses a register whose own side is already unsound,
 and writes nothing until the token it printed comes back.
+
+### Duplicate ids with no conflict marker
+
+A rebase can carry the same entry twice with no textual collision at all — two
+array elements, one id, nothing for git to flag. `check` reports it as
+`duplicate ids: …`; fixing it used to mean hand-editing the JSON, which is how
+a register once silently reopened an already-fixed entry by keeping its
+still-open duplicate instead.
+
+```sh
+bugs dedupe
+```
+
+Closed always beats open: a closure carries its own evidence, an open entry
+never does, so there is no case where the open duplicate is the more informed
+copy. Two entries that disagree any other way (two different closed
+resolutions, say) are refused and printed side by side rather than guessed at,
+and nothing is written until every duplicate in the file resolves.
 
 ## When not to use this
 

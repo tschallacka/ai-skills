@@ -1,0 +1,6 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "editor-gate",
+  "version": "0.1.0",
+  "description": "Hard-gates in-place shell edits (sed -i, perl -i, a scripted or heredoc write) behind a minted, single-use token, and gives a soft reminder on Edit/Write that the ai-text-editor MCP/skill journals and verifies what it replaces."
+}

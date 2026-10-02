@@ -21,8 +21,9 @@ t_begin
 work="$(mktemp -d "${TMPDIR:-/tmp}/lib-table.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-# The renderer needs the decoder, the fatal path and the temp registry.
-renderer='table/plan_render_csv_table.sh core/plan_die.sh core/plan_decode_escaped_newlines.sh core/00-state.sh'
+# The renderer needs the decoder, the fatal path, the temp registry, and its
+# own awk-program and error-dispatch siblings.
+renderer='table/plan_render_csv_table.sh table/plan_render_csv_table_awk.sh table/plan_render_csv_table_die.sh core/plan_die.sh core/plan_decode_escaped_newlines.sh core/00-state.sh'
 
 unit() { # <group/file>... -- <expression>
     local files=() f prelude=''

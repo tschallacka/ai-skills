@@ -49,14 +49,26 @@
         # uses and mis-detects: it decided strsignal() was absent, so siglist.h
         # defined it as a macro that then collided with glibc's declaration
         # ("expected identifier or '(' before 'char'").
-        CFLAGS = "-O2 -w -std=gnu89 -Wno-implicit-function-declaration";
+        #
+        # -fcommon (B333): bash 3.2 declares the termcap global PC as a
+        # tentative definition in both its bundled readline (lib/readline/
+        # terminal.c) and its bundled termcap (lib/termcap/termcap.c) -- fine
+        # under -fcommon, the default every compiler had when bash 3.2 shipped
+        # in 2007, where both merge into one common symbol. clang 11 and gcc 10
+        # switched the default to -fno-common, so each tentative definition
+        # becomes a strong one and the link sees two definitions of _PC
+        # ("duplicate symbol '_PC'"). Surfaced on aarch64-darwin, whose stdenv
+        # clang is new enough to default to -fno-common; verified by building
+        # bash 3.2.57 out of tree with only this flag added.
+        CFLAGS = "-O2 -w -std=gnu89 -Wno-implicit-function-declaration -fcommon";
 
         # Build tools that the Makefile compiles itself (mkbuiltins, mksyntax)
-        # do not pick up CFLAGS, so -std=gnu89 also goes on CC. Via
-        # makeFlagsArray, not makeFlags: nix word-splits makeFlags entries, which
-        # would hand make `-std=gnu89` as its own flag and it exits with usage.
+        # do not pick up CFLAGS, so -std=gnu89 (and -fcommon, B333) also go on
+        # CC. Via makeFlagsArray, not makeFlags: nix word-splits makeFlags
+        # entries, which would hand make `-std=gnu89` as its own flag and it
+        # exits with usage.
         preBuild = ''
-          makeFlagsArray+=("CC=cc -std=gnu89 -w -Wno-implicit-function-declaration")
+          makeFlagsArray+=("CC=cc -std=gnu89 -w -Wno-implicit-function-declaration -fcommon")
         '';
         configureFlags = [ "--without-bash-malloc" ];
 
@@ -197,9 +209,12 @@
               # broadcast -- it FETCH-polls and discards PRIVMSG -- so an
               # `openssl s_client` speaking the wire by hand is the only thing
               # in the repository that proves a broadcast reaches a subscriber
-              # (chat/tests/test-chat-broadcast-stall.sh). Undeclared, that
-              # assertion ran only while some other package's closure happened
-              # to put openssl on PATH, and skipped silently otherwise (B272).
+              # (src/chat-server-rs/tests/resource_robustness.rs and
+              # message_tags.rs, migrated from chat/tests/test-chat-broadcast-stall.sh
+              # and test-chat-cap-negotiation.sh in T145 goal 25). Undeclared,
+              # that assertion ran only while some other package's closure
+              # happened to put openssl on PATH, and skipped silently
+              # otherwise (B272).
               #
               # This does not reopen the digest chain it was once excluded for:
               # plan-crypt owns digests, and no shipped script calls openssl any
@@ -239,7 +254,7 @@
               echo "Portability checks:"
               echo "  ./run-tests.sh                    # your bash"
               echo "  bash32-run-tests                  # the floor"
-              echo "  shellcheck -s bash --severity=error \$(git ls-files '*.sh' | grep -v '^benchmark/results/')"
+              echo "  ./pre-push-check.sh               # the gates, shellcheck at warning severity included"
             '';
           };
 

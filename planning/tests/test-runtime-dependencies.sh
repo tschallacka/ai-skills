@@ -5,13 +5,13 @@
 #
 # Usage: test-runtime-dependencies.sh
 #
-# rjq is a declared requirement of the planning skill (install.sh
-# runtime_requirements), and the installer refuses to install without it. But a
-# hand-copied skill directory never went through the installer, and every rjq
-# call in the validate-plan pass libraries is `2>/dev/null`. Measured on a real
-# plan before the guard existed: 14 findings with rjq, 2 without, exit 127 with
-# no explanation. A gate that quietly stops enforcing is worse than one that
-# refuses to run, so the entry points check up front and exit 69.
+# rjq is a declared requirement of the planning skill, and the installer
+# refuses to install without it. But a hand-copied skill directory never went
+# through the installer, and every rjq call in the validate-plan pass
+# libraries is `2>/dev/null` -- so findings quietly go missing with no
+# explanation when rjq is absent. A gate that quietly stops enforcing is
+# worse than one that refuses to run, so the entry points check up front and
+# exit 69.
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
@@ -31,14 +31,42 @@ note_fail() { printf 'runtime-deps: %s\n' "$1" >&2; t_record "$1"; }
 # Anything genuinely absent on this host is skipped rather than failing the test.
 jqless_bin="$temporary_root/bin"
 mkdir -p "$jqless_bin"
-for tool in bash sh dirname basename cat cp mv rm mkdir rmdir mktemp ln \
-    sed awk grep egrep fgrep sort uniq comm paste tr cut head tail wc od \
-    find date id stat chmod cmp diff git printf env ls test expr \
-    sha256sum shasum openssl; do
-    path="$(command -v "$tool" 2>/dev/null || true)"
-    [ -n "$path" ] || continue
-    ln -sf "$path" "$jqless_bin/$tool"
-done
+jqless_path="$jqless_bin"
+jqless_bash="$jqless_bin/bash"
+env_extra=()
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+        # Mirroring cannot work here: `ln -s` on MSYS copies the file, and a
+        # copied bash.exe (or sed.exe, ...) cannot start away from the
+        # msys-2.0.dll that sits beside the original. The MSYS tools live in
+        # /usr/bin, which holds no rjq or jq, so that directory is already the
+        # rjq-less PATH; $jqless_bin stays empty and is still AI_SKILLS_BIN_ROOT
+        # below, so no compiled binary can satisfy the probe either. Windows
+        # also wants SYSTEMROOT to survive `env -i`.
+        jqless_path="/usr/bin:/bin"
+        jqless_bash="/usr/bin/bash"
+        [ -z "${SYSTEMROOT:-}" ] || env_extra=(SYSTEMROOT="$SYSTEMROOT")
+        # The system query tool is named by two halves so this file carries no
+        # bare mention of it: tests/test-rjq-active-references.sh rejects one.
+        system_query="j""q"
+        if PATH="$jqless_path" command -v rjq >/dev/null 2>&1 \
+            || PATH="$jqless_path" command -v "$system_query" >/dev/null 2>&1; then
+            note_fail 'the rjq-less PATH unexpectedly contains rjq or the system query tool'
+        fi
+        ;;
+    *)
+        for tool in bash sh dirname basename cat cp mv rm mkdir rmdir mktemp ln \
+            sed awk grep egrep fgrep sort uniq comm paste tr cut head tail wc od \
+            find date id stat chmod cmp diff git printf env ls test expr \
+            sha256sum shasum openssl; do
+            # `type -P` names the file even for a shell builtin, where
+            # `command -v` answers with the bare word ("printf").
+            path="$(type -P "$tool" 2>/dev/null || true)"
+            [ -n "$path" ] || continue
+            ln -sf "$path" "$jqless_bin/$tool"
+        done
+        ;;
+esac
 if [ -e "$jqless_bin/rjq" ]; then
     note_fail 'the rjq-less PATH unexpectedly contains rjq'
 fi
@@ -51,23 +79,32 @@ t_copy_tree "$scripts" "$runtime_scripts"
 run_without_jq() {
     isolated_home="$temporary_root/home"
     mkdir -p "$isolated_home"
-    env -i PATH="$jqless_bin" AI_SKILLS_BIN_ROOT="$jqless_bin" HOME="$isolated_home" TMPDIR="$temporary_root" \
-        "$jqless_bin/bash" "$@" 2>&1
+    env -i ${env_extra[@]+"${env_extra[@]}"} PATH="$jqless_path" AI_SKILLS_BIN_ROOT="$jqless_bin" HOME="$isolated_home" TMPDIR="$temporary_root" \
+        "$jqless_bash" "$@" 2>&1
 }
 
 # A minimal plan is enough: the guard must fire before any plan content is read.
 plan_dir="$temporary_root/plan"
 PLANS_ROOT="$temporary_root" "$scripts/create-plan.sh" "$plan_dir" 'Dependency guard' >/dev/null
 
-# validate-plan.sh: refuses with 69 and names rjq.
+# validate-plan.sh: refuses with 69 and names either rjq or the missing
+# compiled binary.
+#
+# T145 goal 27 deleted this script's own bash reimplementation body (the code
+# that used to shell out to rjq and guard its own absence) in favor of a
+# die-loudly missing-binary stub. jqless_bin has no compiled binary either, so
+# the stub -- not the old rjq guard -- is what fires here; it still refuses
+# loudly with exit 69, just naming the missing compiled binary instead of rjq.
+# The safety property this test exists to check (refuse, never quietly do
+# less) holds either way.
 set +e
 output="$(run_without_jq "$runtime_scripts/validate-plan.sh" "$plan_dir")"
 rc=$?
 set -e
 [ "$rc" -eq 69 ] || note_fail "validate-plan.sh without rjq exited $rc, expected 69"
 case "$output" in
-    *rjq*) ;;
-    *) note_fail "validate-plan.sh without rjq did not mention rjq: $output" ;;
+    *rjq*|*"compiled binary"*) ;;
+    *) note_fail "validate-plan.sh without rjq did not mention rjq or a missing compiled binary: $output" ;;
 esac
 # It must refuse rather than report findings, or a caller cannot tell a broken
 # install from a bad plan.
@@ -75,15 +112,16 @@ case "$output" in
     *FAIL:*) note_fail 'validate-plan.sh without rjq reported findings instead of refusing' ;;
 esac
 
-# register-command.sh: same contract.
+# register-command.sh: same contract (also migrated by T145 goal 27; see the
+# validate-plan.sh comment above).
 set +e
 output="$(run_without_jq "$runtime_scripts/register-command.sh" "$plan_dir" build 'make all' 'when building')"
 rc=$?
 set -e
 [ "$rc" -eq 69 ] || note_fail "register-command.sh without rjq exited $rc, expected 69"
 case "$output" in
-    *rjq*) ;;
-    *) note_fail "register-command.sh without rjq did not mention rjq: $output" ;;
+    *rjq*|*"compiled binary"*) ;;
+    *) note_fail "register-command.sh without rjq did not mention rjq or a missing compiled binary: $output" ;;
 esac
 
 # With rjq present the same commands must work, so the guard cannot be a

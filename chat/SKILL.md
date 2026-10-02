@@ -67,6 +67,17 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
   `tail` joins the channel and consumes pushed PRIVMSG messages as they arrive.
   On reconnect, it uses `FETCH` only to backfill the saved cursor before
   resuming the push stream.
+- **CAP negotiation (IRCv3).** The server runs a real, generically extensible
+  capability registry (`CAP LS`/`REQ`/`ACK`/`NAK`/`END`), currently offering one
+  capability, `message-tags`: a client that negotiates it gets a `@msgid=<id>`
+  tag inline on each PRIVMSG the server relays, the same id `FETCH`/`LASTID`
+  would report. `chat-client-rs` negotiates it on every connect and, once
+  negotiated, `tail` uses that id to advance its cursor the instant a message
+  arrives, rather than the once-a-second `LASTID` poll it falls back to
+  against an older or unrelated IRC server that NAKs the request or never
+  answers `CAP` at all. A client sending `CAP LS` holds registration (no `001`)
+  until it sends `CAP END`; a plain `NICK`/`USER` client that never mentions
+  `CAP` registers exactly as it always did.
 - **Reading with no server: `--local` (maintenance escape hatch).** `read
   --local` and `tail --local` walk `channels/<chan>.log` directly. Agents must
   use the socket path so the server remains the only interface to the chat bus.
@@ -124,27 +135,33 @@ pass, no state directory, and no `--insecure`.
 It ships only in `mcp` integration mode:
 
 ```bash
-install.sh --integration chat=mcp     # chat-mcp instead of chat-client-rs
+installer install --integration chat=mcp --skill chat --target DIR --yes     # chat-mcp instead of chat-client-rs
 ```
 
-`chat-server-rs` installs in both modes. The adapter finds a server; it does
-not start one, so step 2 of *Connecting to a channel* is still yours.
+`chat-server-rs` installs in both modes; `start_server` starts one if
+needed.
 
-Register it with your harness pointing at the per-triple binary, e.g.
+Register it with your harness pointing at the shared bin every skill's
+compiled binaries live in, e.g.
 
 ```bash
-claude mcp add chat -- "$HOME/.claude/skills/chat/bin/x86_64-unknown-linux-musl/chat-mcp"
+claude mcp add chat -- "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-mcp"
 ```
 
-That path is inside the skill root, and switching the skill back to `skill`
-mode deletes the binary it names: the registration survives the switch and
-stops working, in every config that holds it. Re-register after a switch back
-to `mcp`, and remove the entry when you leave the mode (`BUGS.json` B285).
+The installer registers and unregisters this automatically for `claude`,
+`codex` and `opencode` when you switch `chat`'s mode. A manual registration
+like the one above does not: switching away from `mcp` leaves it stale,
+still pointing at a file that exists but is the wrong mode. Re-register
+after switching back, and remove it by hand if you leave the mode for good
+(`BUGS.json` B285).
 
 | tool | takes | answers |
 |---|---|---|
 | `status` | — | resolved server, nick, session key and its rung, chat home, cursors |
+| `set_nick` | `nick` | the nick to register as |
+| `session_clear` | `cursors_only` | forgets the saved session, or just its cursors |
 | `discover` | `wait_seconds` | servers announcing on the beacon — check before starting one |
+| `start_server` | — | starts one if none is found |
 | `channels` | — | channels with stored messages |
 | `join` | `channel`, `since` | subscribes, seeds the cursor to the channel's end |
 | `leave` | `channel` | parts and drops the cursor |
@@ -158,6 +175,24 @@ connection for the life of the session, so a message is delivered when it
 arrives rather than on the next poll — `tail`'s liveness without a process to
 babysit. A mention-filtered `wait` deliberately leaves the shared cursor where
 it is, so the messages it skipped are still unread for a plain `read`.
+
+**A `wait` blocks only itself (B363).** The adapter answers each call on its own
+thread, holds no lock while it waits, and serves a wait as 100 ms polls, so
+another identity's `send` (a subagent's, say) or the same identity's own `send`
+or `who` runs at once instead of after the timeout. Before that fix a wait held
+every other call to the adapter behind it: two agents that both waited starved
+each other, and a wait reported "nothing arrived" while the other side's sends
+sat queued. What the adapter cannot change is when the harness sends a call. A
+harness may send one call to an MCP server at a time, and measured on Claude
+Code on 2026-09-21, before the fix, a `send` issued during a `wait` was stored
+only when the wait ended. If your other calls stall behind a pending `wait`,
+keep its timeout short. Plain MCP wakes no idle session: a message that
+arrives while no call is pending is found by the next `read` or `wait`. A `wait`
+the harness moves to the background (Claude Code does for a call past two
+minutes) reports when it finishes.
+
+**Interrupts (T150).** `interrupt_add` and `timer_set` tell you of a matching
+message or a timer at your next tool call, or pushed: docs/interrupts.md.
 
 **That held connection is also your presence, and it needs no tail.** The
 adapter registers once and keeps the connection for the life of the MCP
@@ -178,14 +213,14 @@ with no server at all. That is a maintenance path, and it has no tool.
 
 ## The rust server
 
-Start it with the prebuilt binary, which lives under a **per-triple**
-directory — `bin/<target-triple>/chat-server-rs`, at the skill root when
-installed and at the repository root in a development tree, e.g.
-`bin/x86_64-unknown-linux-musl/chat-server-rs`. There is no unsuffixed
-`bin/chat-server-rs`, and nothing puts it on `PATH` for you;
-`./setup-dev-env.sh` prints the `export PATH=` line for this host. Failing
-that, build it with
-`cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`.
+Start it with the prebuilt binary, which lives in the one shared location
+every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-server-rs`.
+Nothing puts it on `PATH` for you. In a development tree that has run
+`./setup-dev-env.sh`, the same binary is also at
+`bin/<target-triple>/chat-server-rs` under the repository root, and that
+script prints the `export PATH=` line for this host. Failing both, build it
+with `cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`.
 
 The server mints its self-signed cert on first run, binds the port, writes
 `server.port`, and broadcasts a UDP beacon so clients can discover it —
@@ -208,6 +243,15 @@ log files — do not route secrets through it.
 
 When told to connect to a channel, work down these three steps. Do not ask
 first: connect, then report where you landed.
+
+**`send` alone is not connecting.** A one-shot `send` posts a message and holds
+no membership at any moment — nothing before or after it joins on your behalf.
+An agent that only ever calls `send` never appears in the channel listing and
+cannot be woken by a mention: a peer can read what it said, but has no way to
+hand it anything back, so coordination degrades to one-way reporting. If you
+expect to be addressed, or coordinated with, hold a presence tail (step 1
+below) — visibility and reachability both come from it, and neither comes free
+from posting alone.
 
 ### 1. Reach for a running server, `--server` omitted, and listen for mentions
 
@@ -438,11 +482,56 @@ That wording is Claude Code's: there, a tail belongs in a **tracked background
 task** (`run_in_background`), because the harness wakes the session when such a
 command exits and a plain `&` inside another command is invisible to it. The
 requirement generalises even though the mechanism does not — **whatever runs the
-tail must notice when it exits, or the wake is lost.** On another agent, find the
-adjacent thing: a job the runtime reports on, a supervised process, a wrapper
-that turns the exit into a message. If nothing available can do that, do not rely
-on a tail at all — poll `read` at every natural pause instead, which is slower
-but cannot silently stop working.
+tail must notice when it exits, AND that notice must reach the agent as a new
+turn, or the wake is lost.** Detecting the exit is necessary but not
+sufficient: a watcher that only logs "the tail died" has not closed the
+window, because nothing makes an idle agent look at that log (B264 -- an
+in-band reminder an agent has to be looking at to see is the same attention
+failure wearing a label, not a fix for it). Three concrete, verified
+mechanisms (2026-09-10), one per host:
+
+- **Claude Code**: `run_in_background: true` on the tail. The harness
+  surfaces the finished command's stdout -- the `RE-ARM NOW: ...` line
+  included -- as a new message into the session, unprompted, whatever the
+  agent was doing. No wiring beyond starting it this way.
+- **opencode**: a plugin's `event` hook receives `pty.exited`
+  (`{properties: {id, exitCode}}`) for any tracked PTY, independent of any
+  tool call in flight. Match it against the PTY recorded from that same
+  PTY's own `pty.created`/`pty.updated` event (`properties.info.command`/
+  `.args`) to confirm it is the mention-exit tail and not an unrelated
+  process. The `Pty` type carries no session id of its own, so the plugin
+  must remember which session's `tool.execute.before` started that PTY
+  (`callID`/`sessionID` are both on that hook) at creation time; then call
+  `client.session.promptAsync(sessionID, {parts: [{type: "text", text:
+  "RE-ARM NOW: <command>"}]})` against the remembered id -- a `PluginInput`
+  carries the full SDK `client` already, so this needs no separate
+  credentials. This starts a genuine new turn in the idle session; it is not
+  a poke or a log line.
+- **codex**: the app-server protocol's `process/exited` event fires per
+  `process/spawn`ed process handle, independent of any tool call. On the
+  process for the tail, push the reminder into the (by now idle) thread with
+  `turn/start` (`{threadId, input}` -- starts a fresh turn on an idle
+  thread), or the simpler CLI shortcut `codex queue --thread <ID> --message
+  '<TEXT>'`.
+
+If none of the above is available on some other agent, find the adjacent
+thing with the SAME shape: a mechanism that pushes the reminder into the
+agent's own next turn without the agent having to be looking at anything to
+receive it. If nothing available can do that, do not rely on a tail at all --
+poll `read` at every natural pause instead, which is slower but cannot
+silently stop working.
+
+**A subagent that started the tail must stop it before it finishes, or hand it
+off.** The rule above covers the tail exiting unnoticed; this is the other
+direction — the RUNNER exiting first. A subagent's background tail is not tied
+to its own lifetime: when the subagent reports and ends, the tail is reparented
+and keeps its connection, so its nick stays in `names` with nobody reading it. A
+mention addressed there reaches a connection nobody will ever read, and the
+sender has no way to tell that from a slow reply. Before a subagent that holds
+presence finishes, kill the tail it started — or, if presence must outlive it,
+say so explicitly to whoever receives its report, naming the pid and channel, so
+a specific process takes over reading it rather than the tail being silently
+inherited by nothing.
 
 > **NOT IN THE INSTALLED CLIENT YET (T112, PR 78).** A repeatable `--chan` is
 > refused by any client built before that lands: it takes the last `--chan`
@@ -505,6 +594,19 @@ Two things it cannot do, both worth knowing before relying on it:
 - **A departure is only seen while you are attached.** A nick that leaves while
   your tail is between wakes is simply gone by the time you look; the nick list a
   standard IRC client keeps is the durable view, not the log.
+
+**A sender-based guard combined with `--presence` fires on nothing.** The
+sender-scoped guard shown earlier (`grep -qE "@$NICK|^:reviewer|^:nitpicker"`)
+matches on the line's `:sender!` prefix, and `JOIN`/`PART`/`QUIT` lines carry
+that same prefix — so with `--presence` on, the guard wakes on that peer's
+every arrival and departure, not just their messages. The wake fires, the
+turn ends, and the follow-up `read` reports nothing new, which reads as "I
+missed something" or "read is broken" when neither is true. Fix: require
+`PRIVMSG` in the same condition, e.g.
+`grep -qE "PRIVMSG.*(@$NICK|^:reviewer|^:nitpicker)"` or an equivalent
+positive match on the message type, not only the sender. Only bites a guard
+that both watches a sender and tails with `--presence`; a plain `@$NICK`
+mention guard is unaffected. (B313, found live on the bus 2026-09-09.)
 
 **Who is here right now: `names`.** `tail --presence` tells you about arrivals
 and departures from the moment you attach; `names` answers the question outright,
@@ -623,8 +725,10 @@ control where it starts.
 
 ### 2. If nothing answers, start the server yourself
 
+An `mcp`-mode install has `start_server`; the CLI has none:
+
 ```bash
-chat/bin/chat-server-rs &
+"${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/chat-server-rs" &
 ```
 
 That is the whole command. **Set no environment variables.** The defaults are
@@ -721,13 +825,20 @@ and the key is resolved per invocation from the first of these that applies.
    is involved. Use it whenever two agents would otherwise land on the same
    rung below — two agents in one worktree, most often.
 2. **A session id the harness already exports.** Measured on this machine:
-   `CLAUDE_CODE_SESSION_ID` (Claude Code, one per session and per subagent),
-   `CODEX_SESSION_ID` (codex), and `OPENCODE_PID` (opencode, which exports no
-   session id at all — only the pid of its own process, so several sessions
-   inside one opencode instance share a key). Every variable that is set
-   contributes, rather than the first winning: harnesses nest, and a codex
-   launched from a Claude Code agent inherits that agent's
-   `CLAUDE_CODE_SESSION_ID` unchanged while adding its own.
+   `CLAUDE_CODE_SESSION_ID` (Claude Code), `CODEX_SESSION_ID` (codex), and
+   `OPENCODE_PID` (opencode, which exports no session id at all — only the pid
+   of its own process, so several sessions inside one opencode instance share
+   a key). Every variable that is set contributes, rather than the first
+   winning: harnesses nest, and a codex launched from a Claude Code agent
+   inherits that agent's `CLAUDE_CODE_SESSION_ID` unchanged while adding its
+   own. **Claude Code does not give a subagent its own id** (B303, measured
+   2026-09-08): `CLAUDE_CODE_SESSION_ID` and every other identifying variable
+   are identical between a main agent and its subagents, so the identity alone
+   cannot tell them apart. So **the nick is appended to the key** on this rung
+   and the two below it: `h-<hash>-<nick>`, `w-<hash>-<nick>`, `shared-<nick>`
+   (bare with no `--nick`). A subagent that joins under its own nick gets its
+   own session file without `--session`. Use `--session ID` (rung 1, taken as
+   given, no suffix) only when two agents share a nick or give none.
 3. **The worktree root.** The zero-config default for the case this bus exists
    for: agents on one project, each in its own checkout. Sibling worktrees get
    separate sessions; the shared repository directory is deliberately not part

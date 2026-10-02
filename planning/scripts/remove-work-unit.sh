@@ -24,117 +24,19 @@
 # sourced plan-inventory-lib row/split helpers
 
 set -euo pipefail
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=planning/scripts/plan-document-lib.sh
-source "$script_dir/plan-document-lib.sh"
-# Accept --plan-dir as a synonym for the positional plan directory: the
-# bounded reader takes the flag, so a reader who learned it there is not
-# refused here.
-eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 
-export LC_ALL=C
+# ─────────────────────────────────────────────────────────────────────────────
+# Compiled-binary preference
+# ─────────────────────────────────────────────────────────────────────────────
+# See plan_exec_compiled_binary_if_present's own doc comment
+# (planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh) for the
+# exec-vs-fall-through mechanism. Placed before this script's own
+# plan_hoist_plan_dir call below: that call rewrites a --plan-dir flag into a
+# positional argument, and the compiled binary must receive the caller's true
+# original argv, not the already-hoisted form.
+rwu_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$rwu_script_dir/plan-core-lib.sh"
+plan_exec_compiled_binary_if_present remove-work-unit "$rwu_script_dir" "$@"
+unset rwu_script_dir
 
-source "$script_dir/plan-reconcile-lib.sh"
-
-usage() {
-    local rc="${1:-64}"
-    cat <<USAGE
-Usage: ${0##*/} [--plan-dir] <plan-directory> <WNN> [--confirm-cascade]
-       ${0##*/} --help
-
-Removes the inventory row, the id from coverage rows, the goal's Owned work
-units section, the step file and its -testing companion, and rebuilds the goal
-and plan progress trackers (which resets completion statuses — re-apply them
-with update-step.sh).
-
-Refuses without --confirm-cascade when other work units list this one in their
-Depends-on column; the flag prunes those links.
-USAGE
-    exit "$rc"
-}
-
-# A flag loop, not a filtered_args pre-scan: on bash 3.2 expanding a
-# possibly-empty "${array[@]}" is an unbound-variable abort under `set -u`, so
-# a no-argument invocation would crash instead of printing usage.
-plan_dir=""
-unit=""
-confirm_cascade=false
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        -h|--help) usage 0 ;;
-        --confirm-cascade) confirm_cascade=true; shift ;;
-        --) shift; break ;;
-        -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
-        *)
-            if [ -z "$plan_dir" ]; then
-                plan_dir="$1"
-            elif [ -z "$unit" ]; then
-                unit="$1"
-            else
-                usage
-            fi
-            shift
-            ;;
-    esac
-done
-if [ -z "$plan_dir" ] || [ -z "$unit" ]; then
-    usage
-fi
-
-plan_require_directory "$plan_dir"
-plan_git_snapshot "$plan_dir"
-[[ "$unit" =~ ^W[0-9][0-9]+$ ]] || plan_die "invalid work-unit id '$unit' — must be WNN (e.g. W01, W02)" 64
-inventory="$plan_dir/work-unit-inventory.md"
-[ -f "$inventory" ] || plan_die "work-unit inventory not found: $inventory (the plan appears incomplete)" 66
-
-# Locate the inventory row.
-goal=''; step=''
-if plan_inventory_row "$inventory" "$unit"; then
-    goal="$plan_inventory_goal"; step="$plan_inventory_step"
-fi
-[ -n "$goal" ] && [ -n "$step" ] || plan_die "work unit $unit not found in $inventory — nothing to remove (check the id)" 66
-
-goal_file="$plan_dir/$goal/goal.md"
-step_file="$plan_dir/$goal/steps/$step.md"
-testing_file="$plan_dir/$goal/steps/$step-testing.md"
-[ -f "$goal_file" ] || plan_die "goal file missing for $unit: $goal_file (goal '$goal' exists in the inventory but not on disk)" 65
-[ -f "$step_file" ] || plan_die "step file missing for $unit: $step_file (rerun add-work-unit.sh to recreate it, then remove again)" 65
-
-# Cascade guard: refuse when other units' Depends-on lists reference this unit,
-# unless the caller accepted the cascade explicitly.
-dependents=""; newline=$'\n'
-while IFS= read -r row; do
-    plan_inventory_split "$row"
-    [ "$plan_inventory_id" != "$unit" ] || continue
-    case ",${plan_inventory_depends// /}," in
-        *",$unit,"*) dependents="${dependents:+$dependents$newline}$plan_inventory_id" ;;
-    esac
-done < <(plan_inventory_rows "$inventory")
-if [ -n "$dependents" ]; then
-    if [ "$confirm_cascade" = false ]; then
-        plan_die "refusing to remove $unit: $(printf '%s' "$dependents" | tr '\n' ' ') still list it in Depends-on; rerun with --confirm-cascade to prune those links (and restore them after a re-add with update-work-unit.sh --depends-on)" 73
-    fi
-fi
-
-plan_prune_work_unit "$inventory" "$unit"
-
-# One line per pruned edge, after the prune rather than before it: the
-# coverage-row drop reports the same way ("row dropped"), and a caller that has
-# to restore these links needs each edge named, not a collective count. Stated
-# as fact, because a notice printed ahead of the mutation is a promise that a
-# later failure turns into a lie.
-if [ -n "$dependents" ]; then
-    printf '%s\n' "$dependents" | while IFS= read -r dependent; do
-        [ -n "$dependent" ] || continue
-        printf 'plan: pruned Depends-on %s from %s\n' "$unit" "$dependent" >&2
-    done
-    printf 'plan: restore pruned links with update-work-unit.sh --depends-on\n' >&2
-fi
-plan_rewrite_owned_work_units "$goal_file" "$inventory" "$goal"
-rm -f "$step_file" "$testing_file"
-plan_rebuild_goal_progress "$script_dir" "$plan_dir/$goal" "$goal"
-plan_rebuild_plan_progress "$script_dir" "$plan_dir"
-
-# One line on stdout (§10). What was reconciled, and the update-step.sh
-# follow-up, are stated in this file's docblock instead of nudged at runtime.
-printf 'Removed work unit %s (%s)\n' "$unit" "$step"
+plan_die "remove-work-unit: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it" 69

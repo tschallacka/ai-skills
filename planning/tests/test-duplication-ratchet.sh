@@ -5,10 +5,11 @@
 # Usage: test-duplication-ratchet.sh
 #
 # MAINTAINER.md section 3 inventories logic that exists in several places and
-# should be one helper. That table used to be 58 `# DEDUPE:` comments scattered
-# through the scripts, 51 of which named a helper that had already landed: a
-# comment nobody re-reads becomes misinformation. A table has the same failure
-# mode unless something checks it, so these caps are the check.
+# should be one helper. That table replaced scattered `# DEDUPE:` comments in
+# the scripts, most of which had gone stale, still naming a helper that had
+# already landed: a comment nobody re-reads becomes misinformation. A table
+# has the same failure mode unless something checks it, so these caps are
+# the check.
 #
 # On a genuine migration the count drops: lower the cap in the same commit and
 # update the table. Never raise a cap to make this pass.
@@ -24,6 +25,31 @@ scripts="$root/scripts"
 
 note_fail() { printf 'duplication-ratchet: %s\n' "$1" >&2; t_record "$1"; }
 
+# Occurrences of <pattern> in <file...>, full-line comments excluded (B73: a
+# comment explaining why a file does NOT use the forbidden pattern still
+# names it, and used to count as a use).
+count_in_code() { # <pattern> <file...>
+    local pattern="$1" total=0 f hits
+    shift
+    for f in "$@"; do
+        hits="$( { grep -v '^[[:space:]]*#' "$f" || true; } | { grep -o "$pattern" || true; } | wc -l | tr -d ' ')"
+        total=$(( total + hits ))
+    done
+    printf '%s' "$total"
+}
+
+# Files where <pattern> occurs outside a full-line comment (same exclusion as
+# count_in_code, for the presence checks below).
+files_with_in_code() { # <pattern> <file...>
+    local pattern="$1" f code
+    shift
+    for f in "$@"; do
+        code="$( { grep -v '^[[:space:]]*#' "$f" || true; } | { grep -c "$pattern" || true; } )"
+        [ "${code:-0}" -gt 0 ] && printf '%s\n' "$f"
+    done
+    return 0
+}
+
 # Cap, label, and the counting command. Keep in step with MAINTAINER.md §3.
 check_cap() {
     local label="$1" cap="$2" actual="$3"
@@ -35,21 +61,18 @@ check_cap() {
 }
 
 # Hand-rolled `"$f.tmp.$$"` temp files, which plan_atomic_write/plan_track_tmp own.
-check_cap 'hand-rolled .tmp.$$ temp sites' 43 \
-    "$( { grep -ho '\.tmp\.\$\$' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+check_cap 'hand-rolled .tmp.$$ temp sites' 7 \
+    "$(count_in_code '\.tmp\.\$\$' "$scripts"/*.sh)"
 
 # Tests that do not source lib-test.sh, and so cannot record a finding that
-# survives a command substitution. Six of them kept a byte-identical copy of the
-# library's reporter that exited on the first finding; that count is now zero,
-# but "a reporter whose body exits" needs brace matching to count and
-# CODE-STYLE.md section 12 rules out parsing shell structure with a pattern. The
-# library-source count is the countable precondition for accumulation, so it is
-# what this caps.
+# survives a command substitution. "A reporter whose body exits" needs brace
+# matching to count, and parsing shell structure with a pattern is out of
+# scope here. The library-source count is the countable precondition for
+# accumulation, so it is what this caps.
 #
 # Counted with grep -L over planning/tests, not the scripts directory the other
-# rows use. `fail() { t_fail "$*"; }` shims are deliberate and must not count:
-# 32 tests have one, and they are how the call sites stayed unchanged.
-check_cap 'tests not sourcing lib-test.sh' 7 \
+# rows use. `fail() { t_fail "$*"; }` shims are deliberate and must not count.
+check_cap 'tests not sourcing lib-test.sh' 6 \
     "$( { grep -L 'lib-test\.sh' "$root"/tests/test-*.sh || true; } | wc -l | tr -d ' ')"
 
 # Inline inventory-row parsing with hard-coded field indices. plan_inventory_row
@@ -57,20 +80,20 @@ check_cap 'tests not sourcing lib-test.sh' 7 \
 # inventory rewriters, and the floor is 1 (the helper's own parser).
 # The former overview renderer's generic reader was removed with that renderer;
 # only the remaining canonical-table sites are counted here.
-# 30th site: remove-coverage.sh (T17) matches coverage rows by outcome cell --
-# a new distinct table, admitted on the same terms as the 29th. The shared
-# reader that would absorb both remains future work tracked in MAINTAINER §3.
-check_cap "inline awk -F'|' parsers" 15 \
-    "$( { grep -ho "awk -F'|'" "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+# A distinct table that matches coverage rows by outcome cell was admitted
+# here on the same terms as any other site. The shared reader that would
+# absorb it remains future work tracked in MAINTAINER §3.
+check_cap "inline awk -F'|' parsers" 3 \
+    "$(count_in_code "awk -F'|'" "$scripts"/*.sh)"
 
 # The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a
 # migration must stay byte-identical.
-check_cap 'seed progress-bar literal copies' 3 \
-    "$( { grep -l '0%%  #### ' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+check_cap 'seed progress-bar literal copies' 0 \
+    "$(files_with_in_code '0%%  #### ' "$scripts"/*.sh | wc -l | tr -d ' ')"
 
 # percent/bar/icon derivation; update-progress.sh is the canonical copy.
-check_cap 'percent/bar/icon derivation copies' 3 \
-    "$( { grep -l 'completed \* 100 + total / 2' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+check_cap 'percent/bar/icon derivation copies' 1 \
+    "$(files_with_in_code 'completed \* 100 + total / 2' "$scripts"/*.sh | wc -l | tr -d ' ')"
 
 # Repo-wide, not just $scripts: two `# DEDUPE:` markers once survived in
 # benchmark/ while this check was scoped to a single directory.

@@ -75,24 +75,31 @@ assert_eq 'map namespace isolation' "$(plan_map_get other 'AR-01')" 'other map'
 link_dir="$temporary_root/links"
 mkdir -p "$link_dir/nested"
 printf 'target\n' > "$link_dir/real.md"
-ln -s real.md "$link_dir/relative"                       # relative target
-ln -s "$link_dir/real.md" "$link_dir/absolute"           # absolute target
-ln -s ../real.md "$link_dir/nested/up"                   # relative, one level up
-ln -s relative "$link_dir/chained"                       # link to a link
-
 assert_eq 'symlink plain file' "$(plan_resolve_symlink "$link_dir/real.md")" "$link_dir/real.md"
-assert_eq 'symlink relative target' "$(plan_resolve_symlink "$link_dir/relative")" "$link_dir/real.md"
-assert_eq 'symlink absolute target' "$(plan_resolve_symlink "$link_dir/absolute")" "$link_dir/real.md"
-assert_eq 'symlink chain' "$(plan_resolve_symlink "$link_dir/chained")" "$link_dir/real.md"
-assert_eq 'symlink up-level target' \
-    "$(cat "$(plan_resolve_symlink "$link_dir/nested/up")")" 'target'
 
-# A cycle is diagnosed, not looped on: exit 66 within the hop cap.
-ln -s cycle-b "$link_dir/cycle-a"
-ln -s cycle-a "$link_dir/cycle-b"
-cycle_rc=0
-( plan_resolve_symlink "$link_dir/cycle-a" >/dev/null 2>&1 ) || cycle_rc=$?
-assert_eq 'symlink cycle exit code' "$cycle_rc" '66'
+# The rest need real links. Git for Windows copies the target for `ln -s`
+# unless told otherwise (and cannot make a dangling one at all), and making a
+# native link needs a privilege; t_enable_symlinks turns them on where it can
+# and says when it cannot, in which case there is no link to resolve.
+if t_enable_symlinks; then
+    ln -s real.md "$link_dir/relative"                       # relative target
+    ln -s "$link_dir/real.md" "$link_dir/absolute"           # absolute target
+    ln -s ../real.md "$link_dir/nested/up"                   # relative, one level up
+    ln -s relative "$link_dir/chained"                       # link to a link
+
+    assert_eq 'symlink relative target' "$(plan_resolve_symlink "$link_dir/relative")" "$link_dir/real.md"
+    assert_eq 'symlink absolute target' "$(plan_resolve_symlink "$link_dir/absolute")" "$link_dir/real.md"
+    assert_eq 'symlink chain' "$(plan_resolve_symlink "$link_dir/chained")" "$link_dir/real.md"
+    assert_eq 'symlink up-level target' \
+        "$(cat "$(plan_resolve_symlink "$link_dir/nested/up")")" 'target'
+
+    # A cycle is diagnosed, not looped on: exit 66 within the hop cap.
+    ln -s cycle-b "$link_dir/cycle-a"
+    ln -s cycle-a "$link_dir/cycle-b"
+    cycle_rc=0
+    ( plan_resolve_symlink "$link_dir/cycle-a" >/dev/null 2>&1 ) || cycle_rc=$?
+    assert_eq 'symlink cycle exit code' "$cycle_rc" '66'
+fi
 
 # ── plan_atomic_write ────────────────────────────────────────────────────────
 write_dir="$temporary_root/atomic"
@@ -102,9 +109,15 @@ assert_eq 'atomic write content' "$(cat "$write_dir/doc.md")" "$(printf 'first\n
 
 # An existing target's mode survives the replacement.
 chmod 640 "$write_dir/doc.md"
+# NTFS has no permission bits (chmod is a no-op, stat says 644), so on Windows
+# what has to survive is whatever mode the file already had.
+expected_mode=640
+if t_is_windows; then
+    expected_mode="$(t_stat_mode "$write_dir/doc.md")"
+fi
 printf 'replaced\n' | plan_atomic_write "$write_dir/doc.md"
 assert_eq 'atomic write content after replace' "$(cat "$write_dir/doc.md")" 'replaced'
-assert_eq 'atomic write preserves mode' "$(plan_stat_mode "$write_dir/doc.md")" '640'
+assert_eq 'atomic write preserves mode' "$(plan_stat_mode "$write_dir/doc.md")" "$expected_mode"
 
 # No temp debris beside the target, and no leftover trap-less .XXXXXX file.
 leftovers="$(find "$write_dir" -maxdepth 1 -name '.doc.md.*' -print | wc -l | tr -d ' ')"
@@ -170,10 +183,17 @@ assert_eq 'progress full bar' "$(plan_progress_bar 4 4)" '####################'
 mode_probe="$temporary_root/mode-probe"
 : > "$mode_probe"
 chmod 754 "$mode_probe"
-assert_eq 'stat mode 754' "$(plan_stat_mode "$mode_probe")" '754'
-chmod 600 "$mode_probe"
-assert_eq 'stat mode 600' "$(plan_stat_mode "$mode_probe")" '600'
-# The uid wrapper must agree with the shell's view of the file's owner.
+if t_is_windows; then
+    # No permission bits to read back on NTFS: the wrapper has to agree with
+    # stat itself, whatever it reports.
+    assert_eq 'stat mode agrees with stat' "$(plan_stat_mode "$mode_probe")" "$(t_stat_mode "$mode_probe")"
+else
+    assert_eq 'stat mode 754' "$(plan_stat_mode "$mode_probe")" '754'
+    chmod 600 "$mode_probe"
+    assert_eq 'stat mode 600' "$(plan_stat_mode "$mode_probe")" '600'
+fi
+# The uid wrapper must agree with the shell's view of the file's owner. (MSYS
+# maps the Windows account to a uid of its own, which `id -u` reports too.)
 [ "$(plan_stat_uid "$mode_probe")" = "$(id -u)" ] \
     || fail 'plan_stat_uid did not report the current user as the owner'
 

@@ -1,6 +1,6 @@
 ---
 name: interactive-shell
-description: Drive any program that only works in a real terminal, through a PTY-backed wrapper with compact screen observations and a Unix-socket input client. Use it for a full-screen or curses program (nano, mc, lynx, a pager, a terminal menu), for an interactive prompt or installer that asks questions, and for driving ANOTHER CLI or AI agent interactively. Reach for it whenever a headless, --print or piped invocation cannot answer the question -- because the program draws to a terminal, or because the behaviour under test only exists in an interactive session. A headless run is not a smaller version of an interactive one; it is a different program with different output, and treating it as a substitute silently answers a question you did not ask.
+description: Drive any program that only works in a real terminal, through a PTY-backed wrapper with compact screen observations and a socket-based input client (a Unix domain socket on Linux/macOS, loopback TCP on Windows, and loopback TCP as an explicit --tcp opt-in on Linux/macOS too when a sandbox blocks AF_UNIX for the wrapped command). Use it for a full-screen or curses program (nano, mc, lynx, a pager, a terminal menu), for an interactive prompt or installer that asks questions, and for driving ANOTHER CLI or AI agent interactively. Reach for it whenever a headless, --print or piped invocation cannot answer the question -- because the program draws to a terminal, or because the behaviour under test only exists in an interactive session. A headless run is not a smaller version of an interactive one; it is a different program with different output, and treating it as a substitute silently answers a question you did not ask.
 ---
 
 <!-- MODE: PROD -->
@@ -23,8 +23,22 @@ proves nothing at all -- it needs a real terminal, which is what the wrapper
 allocates. Prefer this over a headless probe whenever the interactive path is
 the one that matters.
 
+Which client you have depends on the install mode (`integration.tsv`): a
+`skill` install ships the `interactive-shell-input` CLI this page drives (the
+default), and an `mcp` install ships only `interactive-shell-mcp`, where the
+same operations are MCP tools (`start`, `text`, `key`, `view`, `observe`,
+`wait`, ...) instead of shell commands, and `start` takes the place of
+launching `interactive-shell` directly. Both modes share the one
+`interactive-shell` PTY-wrapper binary underneath -- `interactive-shell-mcp`'s
+own `start` tool spawns it exactly the way this page's own examples do. If
+`interactive-shell-input` is not on disk, you are in an `mcp` install: call
+the MCP tool of the same name instead of the CLI line.
+
 Read [docs/README.md](docs/README.md) for the command reference and an end-to-end
-workflow. Start
+workflow. `interactive-shell` and `interactive-shell-input` live in the one
+shared location every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/`. Nothing puts it on
+`PATH` for you. Start
 `interactive-shell --session <ID> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
 or `interactive-shell --socket <SOCKET> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
 and observe its JSONL stdout. Use the smallest practical `--cols` and `--rows`
@@ -38,13 +52,30 @@ can recognize that a title or path may be clipped and request a larger resize.
 Use `rgbview [<ROW>...]` or `rgbview-delta [<ROW>...]` when ANSI foreground,
 background, bold, or reverse styling is useful; these still omit JSON but emit
 terminal SGR sequences for a color-capable consumer. `view` is preferable for
-minimum token cost.
+minimum token cost. Use `markup [<ROW>...]` when navigating an unfamiliar or
+dense screen (a large file listing, an unfamiliar pane layout) and the plain
+or color views leave you paging back and forth to find one entry: it re-encodes
+the same observation as lightweight HTML-like text -- a verified OSC 8 link as
+a literal `<a href="URI">label</a>`, a highlighted/selected run as `<span
+class="selected ...">`, and rows whose fields line up in the same columns as a
+real `<table>` -- using a small fixed utility-class vocabulary (`selected`,
+`reverse`, `bold`, `fg-<color>`, `bg-<color>`) so the same short token repeats
+verbatim everywhere it applies rather than a fresh inline style per row. This
+is additive, not a replacement: `view`, `rgbview`, `observe`, and `elements`
+are unchanged and still the right choice when markup's heuristic table/pane
+detection would add nothing (a short or already-plain screen). The structure
+markup infers is still a heuristic, the same risk class as `highlighted`
+today -- not proof of the application's real layout.
 For an unknown interface, identify the current focus, visible labels, selection
 state, and available navigation controls before acting. Prefer visible UI
 elements and keyboard navigation, including TAB to move focus and arrows or
-page keys to move within a pane. Ask the application's built-in help or a
-manpage when the screen does not explain an operation. Re-observe after each
-action and branch on what is actually shown.
+page keys to move within a pane. Before attempting any non-trivial navigation
+in an unfamiliar TUI, proactively consult the application's built-in help,
+F1, or a manpage -- do this first, not only as a fallback once the screen
+fails to explain an operation -- and, when fetch access is available, check
+for an existing tutorial or cheatsheet rather than learning purely by trial
+and error through the wrapper. Re-observe after each action and branch on what
+is actually shown.
 Use `observe` when you need structured JSON for cursor state, styles, scrollback,
 or all screen metadata. Use `elements [<ROW>...]` when you need only verified
 actionable elements and their labels/coordinates; row ranges such as `10-15`
@@ -53,7 +84,7 @@ are accepted. Send one request at a time with
 and receive 1-based row/column matches; it does not type, navigate, or assert
 that the match is clickable. Send one request at a time with
 `interactive-shell-input --socket <SOCKET> text '<TEXT>'`, `key <KEY>`, `combo <KEY> [CTRL] [ALT] [SHIFT]`, `paste '<TEXT>'`,
-`mouse <X> <Y> <BUTTON> down|up|move`, `resize <COLS> <ROWS>`, `view [<ROW>...]` (rows may be `10-15`), `view-delta [<ROW>...]`, `rgbview [<ROW>...]`, `rgbview-delta [<ROW>...]`, `elements [<ROW>...]`, `observe`, `wait '<TEXT>' [<TIMEOUT_MS>]`, `raw <HEX>`, or
+`mouse <X> <Y> <BUTTON> down|up|move`, `resize <COLS> <ROWS>`, `view [<ROW>...]` (rows may be `10-15`), `view-delta [<ROW>...]`, `rgbview [<ROW>...]`, `rgbview-delta [<ROW>...]`, `elements [<ROW>...]`, `markup [<ROW>...]`, `observe`, `wait '<TEXT>' [<TIMEOUT_MS>]`, `raw <HEX>`, or
 `click-id <ID> <BUTTON>`, `click-label '<LABEL>' <BUTTON>`, `click-at <X> <Y> <BUTTON>`, or
 `shutdown`.
 
@@ -69,6 +100,22 @@ that selects an agent-keyed session; when omitted, the wrapper checks
 `INTERACTIVE_SHELL_AGENT`, `CODEX_AGENT_ID`, and `AGENT_ID` in that order.
 Session files live below `$INTERACTIVE_SHELL_HOME`, or below the private
 `$XDG_RUNTIME_DIR/interactive-shell` directory when that variable is set.
+
+Pass `--tcp` to `interactive-shell` when the default Unix domain socket
+cannot be used even though the command itself is allowed to run -- a sandbox
+that permits the wrapped program but blocks `AF_UNIX` socket creation for it.
+Observed directly: codex's own command-execution sandbox refuses every
+Unix-socket bind/connect attempt even with the surrounding container's own
+confinement fully opened up, while loopback TCP still works. `--tcp` makes
+the wrapper bind a loopback TCP port instead and write it, with a per-start
+nonce, to the same path `--socket`/`--session` already names -- `--socket
+<SOCKET>` itself does not change; only what actually lives at that path does.
+`interactive-shell-input` needs no matching flag: `connect_in_directory`
+auto-detects which transport is actually there, and a `--session <ID>`
+started with `--tcp` remembers that choice across a later restart with no
+flag repeated. This is always on for the prebuilt Windows binary, which has
+no Unix domain socket at all -- `--tcp` is the explicit, opt-in form of the
+same transport on Linux/macOS.
 
 Screen events contain only rows changed since the previous event, a monotonically
 increasing `seq`, the preceding `base`, and the cursor. An `observe` request
@@ -102,6 +149,15 @@ instead of searching the active pane. Discover the pane's own search or
 navigation control from the current screen, built-in help, or its manpage; do
 not assume that typing a visible filename selects it.
 
+Set `EDITOR` (and `VISUAL`) before starting a file manager if it needs to
+open and save a file: Midnight Commander's edit key opened `$EDITOR` on the
+selected file rather than its own built-in editor when verified this way
+(B125), and an editor's own already-proven save keys (e.g. nano's CTRL-O then
+ENTER, CTRL-X to return) work the same driven through the file manager as
+standalone. Verify this on the file manager and version actually in use
+before relying on it -- a different build or configuration may still open
+its internal editor regardless of `$EDITOR`.
+
 Named keys include ENTER, CTRL-A through CTRL-Z, ALT-graphic keys, BACKSPACE,
 TAB, ESC, META-LEFT, META-RIGHT, UP, DOWN, LEFT, RIGHT, HOME, END, PAGEUP, PAGEDOWN, INSERT,
 DELETE, CTRL-PAGEUP, CTRL-PAGEDOWN, CTRL-INSERT, CTRL-DELETE, SHIFT/CTRL
@@ -119,6 +175,16 @@ the screen model, and rejects dimensions outside the wrapper bounds.
 `combo PAGEUP ctrl` sends the standard Ctrl-PageUp sequence; this is useful
 when the current application documents a modified navigation key that is not
 listed as a standalone named key.
+
+A named key describes byte delivery only, not application behavior (B146):
+`PAGEUP`/`PAGEDOWN` send the standard xterm bytes for that key on every
+application, but what those bytes DO -- scroll a pane, move a selection,
+change a directory level, nothing at all -- is defined by the application on
+the other end, not by the wrapper. This holds for every named key, not only
+paging: a correctly-delivered key is not evidence that the application acted
+on it the way the name suggests. Verify the actual effect from the next
+screen; do not assume a generic scrolling or navigation meaning just because
+the key has a generic name.
 
 Do not treat a successful socket acknowledgement as proof that the application
 accepted the key. A screen delta, changed selection, prompt, or lifecycle event
@@ -144,3 +210,32 @@ controls, including sequences split across PTY reads. Every ncurses extension
 remains a possible unsupported control. For mc or another TUI, use predicates
 based only on represented controls, or extend and test the model before relying
 on a new control.
+
+Before driving an unfamiliar TUI by trial and error, check
+`${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/appprofiles/<appname>.md` --
+vendor-shipped, installed alongside this skill, for common programs (mc,
+mcedit, nano, vi, less, top, htop, tmux, watch): screen layout, keybindings,
+dialogs, and known quirks, kept current with `appprofiles/FORMAT.md`
+elsewhere in this skill's own source. These are read-only reference and
+never rewritten at runtime; still verify a profile's claims against the
+actual screen, since a different version or configuration can behave
+differently than what was recorded.
+
+App-specific knowledge beyond a shipped profile -- or for an app with none --
+belongs in
+`${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/appprofiles.d/<appname>.md`, a
+sibling of the vendor `appprofiles/` directory but agent-writable: once you
+work out a TUI's keybindings, its mode-toggle appearance, or its own color
+convention (e.g. mc's directories in blue), write it there, in the same
+format as `appprofiles/FORMAT.md`, before finishing the task. A later session
+driving the same application should read that file back first, rather than
+rediscovering the same facts from scratch through trial and error.
+
+Its first line must be the literal marker `<!-- tui-app-profile: v1 -->`, or
+nothing that reads `appprofiles.d/` -- including the tui-hint plugin that
+reminds an agent this note exists -- will treat it as one. Unlike the vendor
+`appprofiles/` directory, this one is not itself a trust boundary: it is just
+wherever an agent writes a file, and the marker is what tells a reader this
+particular file is meant to be read as a profile. Being a sibling of
+`appprofiles/` rather than a project-relative path, it works identically for
+every harness this skill supports, with nothing host-specific to resolve.

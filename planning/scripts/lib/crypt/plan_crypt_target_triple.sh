@@ -29,8 +29,11 @@ plan_crypt_target_triple() {
             esac
             ;;
         # Git Bash, MSYS2 and Cygwin all run the msvc binary; there is no
-        # separate Cygwin row, per the same section's tier-3 rule.
-        MINGW* | MSYS* | CYGWIN*)
+        # separate Cygwin row, per the same section's tier-3 rule. Windows_NT
+        # (B94) is what a non-POSIX shell such as cmd or PowerShell reports;
+        # a POSIX uname never does, but this function should refuse no host
+        # the msvc binary actually serves.
+        MINGW* | MSYS* | CYGWIN* | Windows_NT)
             case "$arch" in
                 x86_64 | amd64) printf 'x86_64-pc-windows-msvc\n' ;;
                 *) return 1 ;;

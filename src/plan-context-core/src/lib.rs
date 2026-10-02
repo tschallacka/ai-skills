@@ -110,9 +110,31 @@ pub fn resolve_document(plan: &Path, id: &str) -> Result<PathBuf, String> {
                 .join("steps")
                 .join(format!("{}.md", row.step))
         }
-        value => return Err(format!("usage: unsupported entry id: {value}")),
+        value => return Err(unsupported_id(value)),
     };
     Ok(path)
+}
+
+/// An unsupported id is a dead end unless the message says what to use instead.
+/// A reviewer once asked for `progress:<goal>` -- the real id is
+/// `goal-progress:<goal>` -- and read a bare "unsupported entry id" as meaning
+/// per-goal progress trackers could not be served at all, so they went
+/// unreviewed. A near miss is named when one exists (a kind that ends with, or
+/// starts with, the prefix that was tried); otherwise the whole vocabulary is.
+fn unsupported_id(given: &str) -> String {
+    if let Some((prefix, rest)) = given.split_once(':') {
+        let suggestion = ["goal", "goal-progress", "step", "unit"]
+            .into_iter()
+            .find(|kind| *kind != prefix && (kind.ends_with(prefix) || kind.starts_with(prefix)));
+        if let Some(kind) = suggestion {
+            return format!(
+                "usage: unsupported entry id: {given} -- did you mean {kind}:{rest}? Run plan-context with no arguments for the full id list."
+            );
+        }
+    }
+    format!(
+        "usage: unsupported entry id: {given} -- valid ids are plan, inventory, progress, adversarial-review, coverage, stories, bugs, fixes, fix-keys, approval, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:WNN"
+    )
 }
 
 pub fn entry_inputs(plan: &Path, id: &str) -> Result<Vec<PathBuf>, String> {
@@ -123,12 +145,20 @@ pub fn entry_inputs(plan: &Path, id: &str) -> Result<Vec<PathBuf>, String> {
     Ok(inputs)
 }
 
+// The entry id itself is always the first hashed input. Two entries that
+// resolve to the SAME backing file (e.g. `inventory` and `coverage`, both
+// served from work-unit-inventory.md) must still get distinct hashes, or a
+// token minted for one is wrongly accepted as fresh for the other -- the
+// caller's staleness check compares only the hash and view, not the entry id
+// (B340, mirrored from the same bug in plan-context-lib.sh's own
+// context_hash_entry). Editing any input still invalidates every entry it
+// serves, since each input's own hash still feeds in unchanged.
 pub fn entry_hash(plan: &Path, id: &str) -> Result<String, String> {
     let inputs = entry_inputs(plan, id)?;
-    if inputs.len() == 1 {
-        return hash_file(&inputs[0]);
-    }
     let mut combined = Vec::new();
+    combined.extend_from_slice(b"entry:");
+    combined.extend_from_slice(id.as_bytes());
+    combined.push(b'\n');
     for input in inputs {
         if input.is_file() {
             combined.extend_from_slice(hash_file(&input)?.as_bytes());
@@ -305,7 +335,9 @@ fn labelled_paragraph(content: &str, heading: &str, label: &str) -> Result<Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_bytes, is_inventory_row, valid_section_label};
+    use super::{entry_hash, hash_bytes, is_inventory_row, resolve_document, valid_section_label};
+    use std::fs;
+    use std::path::Path;
 
     #[test]
     fn hash_matches_sha256_vector() {
@@ -313,6 +345,32 @@ mod tests {
             hash_bytes(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    // B340: `inventory` and `coverage` both resolve to work-unit-inventory.md,
+    // so a hash keyed only on file content collided -- a token minted for one
+    // was silently accepted as fresh for the other. entry_hash must fold the
+    // entry id itself in so two entries sharing a backing file still diverge.
+    #[test]
+    fn entries_sharing_a_backing_file_get_distinct_hashes() {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "plan-context-core-test-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("work-unit-inventory.md"), "some content\n").unwrap();
+        let inventory_hash = entry_hash(&dir, "inventory").unwrap();
+        let coverage_hash = entry_hash(&dir, "coverage").unwrap();
+        assert_ne!(
+            inventory_hash, coverage_hash,
+            "inventory and coverage share a backing file but must not share a hash"
+        );
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -333,5 +391,16 @@ mod tests {
         assert!(valid_section_label("§ 5.1"));
         assert!(!valid_section_label("§ 5.x"));
         assert!(!valid_section_label("§ 5.1 trailing"));
+    }
+
+    #[test]
+    fn an_unsupported_id_names_the_near_miss_or_the_vocabulary() {
+        let plan = Path::new("plan");
+        let near = resolve_document(plan, "progress:01-a").unwrap_err();
+        assert!(near.contains("did you mean goal-progress:01-a?"), "{near}");
+        let unknown = resolve_document(plan, "nonsense").unwrap_err();
+        for expected in ["plan", "inventory", "goal-progress:<goal>", "unit:WNN"] {
+            assert!(unknown.contains(expected), "{unknown}");
+        }
     }
 }

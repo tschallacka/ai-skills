@@ -9,7 +9,9 @@ t_trap_assertions
 
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-skill="$root/planning/SKILL.md"
+# T87: SKILL.md is now a generated index; the authored content this checks
+# for lives in skill-source.txt (and the parts generated from it).
+skill="$root/planning/skill-source.txt"
 readme="$root/benchmark/planning/README.md"
 monitor_sh="$root/planning/scripts/monitor-read.sh"
 

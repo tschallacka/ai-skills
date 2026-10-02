@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const CORE_WORDS: &[&str] = &[
     "git", "make", "docker", "sh", "bash", "zsh", "env", "sudo", "npx",
@@ -20,6 +21,7 @@ const BUILTIN_WORDS: &[&str] = &[
 pub struct CommandRegistry {
     path: Option<PathBuf>,
     commands: BTreeSet<String>,
+    registered_words: BTreeSet<String>,
     never_executable_extensions: BTreeSet<String>,
     available: bool,
 }
@@ -35,7 +37,7 @@ impl CommandRegistry {
             .ok()
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
             .unwrap_or(Value::Null);
-        let commands = value
+        let commands: BTreeSet<String> = value
             .as_object()
             .map(|object| {
                 object
@@ -58,9 +60,20 @@ impl CommandRegistry {
                     .collect()
             })
             .unwrap_or_default();
+        // report 20 §3: a registered command's first token teaches the
+        // detector that tool word, so an unregistered but shape-plausible
+        // sibling invocation (a new flag, a different subcommand) is still a
+        // candidate worth checking against the registry, matching
+        // `command_shaped`'s own `$registered_words` membership test.
+        let registered_words = commands
+            .iter()
+            .filter_map(|command| command.split_whitespace().next())
+            .map(str::to_owned)
+            .collect();
         Self {
             path: Some(path.to_path_buf()),
             commands,
+            registered_words,
             never_executable_extensions,
             available,
         }
@@ -86,8 +99,12 @@ impl CommandRegistry {
                 continue;
             };
             for span in command_spans(&text) {
-                if command_candidate(&span)
-                    && !command_disqualified(&span, &self.never_executable_extensions)
+                if command_candidate(&span, &self.registered_words)
+                    && !command_disqualified(
+                        &span,
+                        &self.never_executable_extensions,
+                        &self.registered_words,
+                    )
                     && !self.registered(&span)
                 {
                     let message = format!(
@@ -214,18 +231,26 @@ fn builtin_command(line: &str) -> bool {
         && line.contains(char::is_whitespace)
 }
 
-fn command_candidate(span: &str) -> bool {
+fn command_candidate(span: &str, registered_words: &BTreeSet<String>) -> bool {
     let token = span.split_whitespace().next().unwrap_or_default();
-    CORE_WORDS
-        .iter()
-        .chain(BUILTIN_WORDS)
-        .any(|word| *word == token)
+    // Only the small cross-language core is a candidate by bare word alone
+    // (matches `command_shaped`'s own `core_words`, which excludes
+    // BUILTIN_WORDS -- those wider names only widen the fenced-code-block
+    // LINE gate in `builtin_command`, one rung earlier). A bare `composer` or
+    // `phpunit` invocation is silent until registered or path-shaped: rules
+    // 1-3 are the only entry points, and this list is rule 1's static half.
+    CORE_WORDS.contains(&token)
+        || registered_words.contains(token)
         || bin_under(token)
         || (token.contains('/')
             && fs::metadata(token).is_ok_and(|meta| meta.is_file() && is_executable(token)))
 }
 
-fn command_disqualified(span: &str, never_executable_extensions: &BTreeSet<String>) -> bool {
+fn command_disqualified(
+    span: &str,
+    never_executable_extensions: &BTreeSet<String>,
+    registered_words: &BTreeSet<String>,
+) -> bool {
     let token = span.split_whitespace().next().unwrap_or_default();
     let last = span.split_whitespace().last().unwrap_or_default();
     let extension = last
@@ -240,11 +265,11 @@ fn command_disqualified(span: &str, never_executable_extensions: &BTreeSet<Strin
     {
         return true;
     }
-    if span.starts_with('/') && !bin_like(span) && !command_candidate(token) {
+    if span.starts_with('/') && !bin_like(span) && !command_candidate(token, registered_words) {
         return true;
     }
     if let Some(arg) = span.split_whitespace().nth(1) {
-        if arg.starts_with('/') && !bin_like(span) && !command_candidate(token) {
+        if arg.starts_with('/') && !bin_like(span) && !command_candidate(token, registered_words) {
             return true;
         }
     }
@@ -271,8 +296,54 @@ fn is_executable(_path: &str) -> bool {
     }
     #[cfg(not(unix))]
     {
-        false
+        // No permission bits on the filesystem. The executable bit that matters
+        // is the one the repository records, so a tracked file answers by its
+        // git mode -- a `.sh` that is only ever sourced (a library, a test
+        // helper) is 100644 and must not read as a command just because of its
+        // extension. Only a file git does not track falls back to the
+        // extension (the set Git for Windows' bash and cmd start).
+        tracked_executable(_path).unwrap_or_else(|| executable_by_extension(_path))
     }
+}
+
+/// Whether git tracks `path` as executable: `Some(true)` for mode 100755,
+/// `Some(false)` for any other tracked mode, `None` when git does not track
+/// it (or cannot be asked).
+#[cfg_attr(unix, allow(dead_code))]
+fn tracked_executable(path: &str) -> Option<bool> {
+    let path = Path::new(path);
+    let name = path.file_name()?;
+    let parent = path
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(parent)
+        .args(["ls-files", "-s", "--"])
+        .arg(name)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mode = text.split_whitespace().next()?;
+    Some(mode == "100755")
+}
+
+#[cfg_attr(unix, allow(dead_code))]
+fn executable_by_extension(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|extension| {
+            matches!(
+                extension.as_str(),
+                "exe" | "bat" | "cmd" | "com" | "ps1" | "sh"
+            )
+        })
 }
 
 #[cfg(test)]
@@ -288,11 +359,67 @@ mod tests {
     }
     #[test]
     fn bin_paths_are_candidates_but_citations_are_not() {
-        assert!(command_candidate("bin/tool --check"));
+        assert!(command_candidate("bin/tool --check", &BTreeSet::new()));
         assert!(command_disqualified(
             "docs/report.md:12",
-            &BTreeSet::from([".md".into()])
+            &BTreeSet::from([".md".into()]),
+            &BTreeSet::new(),
         ));
+    }
+
+    #[test]
+    fn a_tracked_file_is_executable_by_its_git_mode_not_its_extension() {
+        let dir = std::env::temp_dir().join(format!("pvc-tracked-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "-q"]);
+        fs::write(dir.join("run.sh"), "#!/bin/sh\n").unwrap();
+        fs::write(dir.join("lib.sh"), "#!/bin/sh\n").unwrap();
+        fs::write(dir.join("untracked.sh"), "#!/bin/sh\n").unwrap();
+        git(&["add", "run.sh", "lib.sh"]);
+        git(&["update-index", "--chmod=+x", "run.sh"]);
+        let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        assert_eq!(tracked_executable(&path("run.sh")), Some(true));
+        assert_eq!(
+            tracked_executable(&path("lib.sh")),
+            Some(false),
+            "a sourced library is 100644 however its name ends"
+        );
+        assert_eq!(tracked_executable(&path("untracked.sh")), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn without_permission_bits_an_extension_says_what_is_a_command() {
+        for command in ["vendor/x/tool.sh", "tools/run.EXE", "a/b.cmd", "a/b.ps1"] {
+            assert!(executable_by_extension(command), "{command}");
+        }
+        for cited in [
+            "vendor/x/config.xml",
+            "generated/Foo.php",
+            "README.md",
+            "bin/tool",
+        ] {
+            assert!(!executable_by_extension(cited), "{cited}");
+        }
+    }
+
+    #[test]
+    fn a_registered_commands_first_word_is_a_candidate_even_unregistered() {
+        // Registering "pytest -q" teaches "pytest" as a tool word (report 20
+        // §3), so a DIFFERENT pytest invocation ("pytest --forked") is still a
+        // candidate worth checking, even though it is not itself registered.
+        let registered_words = BTreeSet::from(["pytest".to_owned()]);
+        assert!(command_candidate("pytest --forked", &registered_words));
+        assert!(!command_candidate("pytest --forked", &BTreeSet::new()));
     }
 
     #[test]

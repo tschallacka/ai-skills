@@ -21,28 +21,19 @@ them.
 
 ### Where `todo` is
 
-Under a **per-triple** directory — `bin/<target-triple>/todo`, at the skill root
-when installed and at the repository root in a development tree, e.g.
-`bin/x86_64-unknown-linux-musl/todo`. There is no unsuffixed `bin/todo`, and
-nothing puts it on `PATH` for you, so every `todo …` line below is written for a
-shell that can already find it. Resolve it once and use that:
+Under one shared location every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/todo`. Nothing puts it
+on `PATH` for you, so every `todo …` line below is written for a shell that
+can already find it there:
 
 ```sh
-triple="$(uname -s):$(uname -m)"
-case "$triple" in
-    Linux:x86_64|Linux:amd64)   triple=x86_64-unknown-linux-musl ;;
-    Linux:aarch64|Linux:arm64)  triple=aarch64-unknown-linux-musl ;;
-    Darwin:x86_64)              triple=x86_64-apple-darwin ;;
-    Darwin:arm64)               triple=aarch64-apple-darwin ;;
-    MINGW*|MSYS*|CYGWIN*)       triple=x86_64-pc-windows-msvc ;;
-esac
-todo="$PWD/bin/$triple/todo"          # a development tree
-[ -x "$todo" ] || todo="<skill root>/bin/$triple/todo"
+todo="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/todo"
 ```
 
-`./setup-dev-env.sh` prints the `export PATH=` line for this host, which is the
-one thing that makes a bare `todo` work. Failing that, build it with
-`cargo build --release --manifest-path src/todo/Cargo.toml`.
+In a development tree that has run `./setup-dev-env.sh`, the same binary is
+also at `bin/<target-triple>/todo` under the repository root, and that
+script prints the `export PATH=` line for this host. Failing both, build it
+with `cargo build --release --manifest-path src/todo/Cargo.toml`.
 
 ## The file
 
@@ -139,6 +130,11 @@ todo add --title "Move the artifact map into the coupling registry" \
 It prints the id it allocated. `--title` and `--detail` are required and the
 command refuses without them: a task nobody else could pick up is a note to self,
 and it will read as one in three weeks.
+
+`--refs` is not write-once: `todo update T# --refs a,b` replaces the whole list,
+so a task filed without one (or with the wrong one) is not stuck that way.
+`--touching` matches only refs, not title or detail, so a task nobody can find
+by area is usually a missing `--refs`, not a search that needs widening.
 
 A sub-task is the same call with `--parent`:
 
@@ -371,9 +367,14 @@ evidence a closure owes.
 
 `planning/scripts/register-lib.sh`'s `reg_findings` is the shell oracle for the
 same rules, kept for the tests that compare the two. It tests membership with
-`index(...)` and an `as $e` binding, never jq's `IN/1`: `rjq` does not implement
-`IN/1` and exits 5 having printed nothing, and an empty findings string is the
-sound case — so an `IN/1` check reported every queue sound. `A | index(B)` also
+`index(...)` and an `as $e` binding rather than jq's `IN/1` — `rjq` now
+implements `IN/1` and `IN/2` (T85, ported from jq's own `builtin.jq`), but the
+oracle deliberately keeps its own independent expression of the rule rather
+than switching to it, since the two are compared against each other. An
+earlier version of this paragraph said `rjq` does not implement `IN/1` and
+exits 5 having printed nothing on a membership check, so an empty findings
+string read as a sound queue without the check ever running; that trap is now
+closed, but a new hand-rolled check still has to get `A | index(B)` right: it
 evaluates `B` against `A`, so a bare `index(.status)` looks `.status` up on the
 array and dies with "cannot index". Anything editing that oracle keeps both
 properties.

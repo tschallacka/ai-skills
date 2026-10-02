@@ -3,7 +3,8 @@
 
 This directory contains the agent instructions for operating interactive
 terminal programs. The Rust crate in `src/interactive-shell` provides the PTY
-wrapper and Unix-socket input client.
+wrapper and socket-based input client (a Unix domain socket on Linux/macOS,
+loopback TCP on Windows).
 
 The tools are generic: they do not know whether the child is `bash`, `nano`,
 `mc`, `mcedit`, `lynx`, `less`, or another TUI. The agent observes the current
@@ -23,7 +24,8 @@ nix develop .#default --command cargo build \
 The resulting binaries are under `src/interactive-shell/target/debug/`:
 
 - `interactive-shell` starts a child in a real PTY and exposes its terminal
-  state through a Unix socket.
+  state through a socket (a Unix domain socket on Linux/macOS, loopback TCP
+  on Windows).
 - `interactive-shell-input` observes that state and sends input requests.
 - `interactive-shell-fixture` is a deterministic protocol-test child.
 
@@ -53,6 +55,22 @@ interactive-shell-input --socket /private/session-dir/term.sock observe
 The socket parent must be a private directory owned by the current user. A
 wrapper-managed session directory is mode 0700 and its socket is mode 0600.
 
+Add `--tcp` to `interactive-shell` (server side only -- `interactive-shell-input`
+auto-detects the transport) when a sandbox lets the wrapped command run but
+blocks `AF_UNIX` socket creation for it:
+
+```sh
+interactive-shell --tcp --socket /private/session-dir/term.sock -- bash
+interactive-shell-input --socket /private/session-dir/term.sock observe
+```
+
+The path after `--socket` is unchanged; under `--tcp` it holds a loopback
+port plus a per-start nonce instead of a real Unix socket special file. A
+`--session ID` started with `--tcp` remembers that choice across a later
+restart with no flag repeated. This is always the transport on the prebuilt
+Windows binary, which has no Unix domain socket at all -- `--tcp` is the same
+mechanism made an explicit opt-in on Linux/macOS.
+
 ## Observe the screen
 
 Start with the smallest useful response and request detail only when needed:
@@ -65,6 +83,7 @@ rgbview              # compact text with terminal colors preserved
 rgbview-delta        # colored changed rows only
 locate 'label'       # visible text coordinates, not a click guarantee
 elements             # verified actionable elements and labels
+markup               # HTML-like structured text: links, selected spans, tables
 observe              # complete JSON snapshot and metadata
 wait 'expected text' 30000
 ```
@@ -73,7 +92,10 @@ Rows and mouse coordinates are one-based. `elements` reports semantic
 actionable elements such as OSC 8 hyperlinks. Ordinary visible text is exposed
 as a non-actionable coordinate hint. Use `click-id` or `click-label` only for
 actionable elements; use `click-at` for coordinate-driven TUIs and verify the
-result on the next screen.
+result on the next screen. `markup` is additive alongside `view`/`rgbview`:
+reach for it when navigating an unfamiliar or dense screen (a large listing,
+an unfamiliar pane layout) where the plain text leaves you paging back and
+forth to find one entry.
 
 View output includes the terminal size and rendered column spans. Prefer a
 small terminal to preserve context, increasing it only when labels or paths

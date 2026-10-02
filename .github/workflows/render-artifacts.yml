@@ -29,10 +29,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
-          # Only the crate is needed to build it. The full tree also carries
-          # fixture paths long enough to fail checkout on the Windows runner.
+          # Only the crate and its path dependencies are needed to build it.
+          # The full tree also carries fixture paths long enough to fail
+          # checkout on the Windows runner. plan-overview depends on
+          # planning-document by path; leaving it out failed every job here
+          # with "failed to load manifest for dependency `planning-document`".
           sparse-checkout: |
             src/plan-overview
+            src/planning-document
 
       - name: Install the musl C cross-toolchain
         if: contains(matrix.target, 'linux-musl')

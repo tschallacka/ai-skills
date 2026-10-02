@@ -66,7 +66,19 @@ fn rebuild_plan_progress(plan: &Path) -> Result<(), String> {
     let percent = progress_percent(completed as i64, total as i64);
     let icon = progress_icon(completed as i64, percent);
     let bar = progress_bar(completed as i64, total as i64, 20);
-    let plan_name = plan.file_name().unwrap().to_string_lossy();
+    // file_name() is None for a path that is exactly "." or ".." (or the
+    // filesystem root), which a caller can legitimately pass -- canonicalize
+    // resolves those to a real absolute path first (B338).
+    let plan_name = plan
+        .canonicalize()
+        .ok()
+        .and_then(|resolved| {
+            resolved
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+        .or_else(|| plan.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| ".".to_string());
     let mut output = format!(
         "# Progress: {plan_name}\n\n**Overall progress:** `{percent}%  {bar}  100%` {icon}\n\n| Goalname | Description | Completion status |\n|---|---|---|\n"
     );

@@ -1,0 +1,11 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "run-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

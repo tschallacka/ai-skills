@@ -3,6 +3,8 @@ name: ai-text-editor
 description: Use the local ai-text-editor server and short-lived client to inspect, search, navigate, edit, recover, and safely save text or raw-byte files through an agent-oriented protocol.
 ---
 
+<!-- MODE: PROD -->
+
 # ai-text-editor
 
 Use this skill when an agent needs durable editor tabs, server-owned file
@@ -23,6 +25,35 @@ replays on the next call, so nothing is lost:
 ai-text-editor search -f /path/to/file --mode exact_text --query needle
 ```
 
+**Under a harness that sandboxes every shell call into its own fresh process
+tree (verified: codex's per-command `bwrap` sandbox), a plain `open`'s
+auto-started server does not survive to the next command** — the server
+process dies with the sandbox that spawned it, before a following `read` or
+`search` can reach it, producing repeated `tab_stale`/`tab_unknown` errors
+even though `--takeover-stale-endpoint` clears the stale endpoint file each
+time. The fix is to pre-start the server explicitly, once, with no idle
+timeout, before the first real operation, then address every later call by
+file path rather than a cached tab id (a tab id from one command is not
+guaranteed to resolve in a later, separate command against the nominally
+same server):
+
+```text
+ai-text-editor-server start --file /path/to/file --idle-timeout-seconds 0 --takeover-stale-endpoint; exec bash
+ai-text-editor read -f /path/to/file
+```
+
+Chaining `exec bash` after the server start keeps the sandboxed process
+group alive long enough for the server to finish detaching; a harness
+without this per-command isolation (a normal shell, most other coding
+harnesses) never needs this and can simply rely on the auto-start above.
+
+In `skill` mode, `ai-text-editor`/`ai-text-editor-server` live in the one
+shared location every skill's compiled binaries live in:
+`${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/`. Nothing puts it on
+`PATH` for you. In `mcp` mode there is no CLI to resolve at all: the harness
+launches `ai-text-editor-mcp` itself from the same shared location, and
+every verb above is a typed tool call instead of a command line.
+
 The exception is the seven verbs that carry a revision guard — `insert`,
 `replace`, `large_edit`, `restore`, `undo`, `redo`, `save`. On a file with no
 tab they are refused, because the revision they carry cannot have come from a
@@ -40,7 +71,13 @@ tree out of a typo.
 ## Addressing a tab
 
 Every response reports a `tab_id`, and that id is addressing enough on its own
-for every verb — no path, no endpoint:
+for every verb — no path, no endpoint. It is the shortest prefix unambiguous
+among the currently open tabs when it was first assigned, git-style, not
+always the full id — one tab alone gets a single character, fixed for that
+tab's whole life; a later tab whose id would collide with one already claimed
+gets a longer one instead, never the other way around (a query too short to
+mean just one tab is refused as `tab_ambiguous`, naming candidates, rather
+than guessed):
 
 ```text
 ai-text-editor read --tab-id 4f2a...      # no -f needed
@@ -105,23 +142,44 @@ newline, and `--range-start-byte N --range-end-byte N` takes exactly the
 `byte_start`/`byte_end` a search hit reports, so a span across two hits is those
 two numbers copied across.
 
-**Guard by revision; add `--expected-text` only when the span's endpoints did
-not come from a read at that revision.** A revision proves the document has
-not moved since the read the coordinates came from — for a span read and
-edited in the same breath, that is the whole property that matters, and
-`--expected-text` re-sending the span's own content is duplicated generation
-that costs *output* tokens for no added safety. Reach for `--expected-text`
-when a coordinate is not fresh from a read: a line number carried across your
-own earlier edits, a search hit from an older revision, or an offset you
-computed rather than copied. There the guard earns its cost, because it
+**Default to search, confirm, then target by `--match-id`.** `search` finds
+the span; its response is the confirmation that the found text is the right
+text; `--match-id` (the hit's own id) then targets exactly that span, with no
+byte arithmetic and no content re-sent — the server already knows what it
+found there, and refuses `match_id_stale` if the document moved under it
+since. That is the whole point of routing through a search first: a coordinate
+you never had to compute cannot be miscomputed. `--preview-lines` keeps this
+cheap even for a large hit — the boundaries usually confirm a block is the
+right one without paying to see its middle.
+
+**When a span has no `match_id` yet, name it by anchor or symbol rather than
+inferring an endpoint.** `--range-start-match TEXT --range-end-before-match
+TEXT` (add `--range-match-regex` for a Rust regex instead of exact text)
+resolve the span from the start match's own beginning up to, but not
+including, the end match's beginning — server-side, so "up to where the next
+function starts" is never a byte count you computed by hand. `--symbol NAME`
+resolves to that name's own defining extent via CodeGraph's index, when one
+is enabled for the project. Both are refused by name rather than guessed when
+absent or ambiguous (`range_start_match_ambiguous`, `symbol_ambiguous`, …) —
+never silently the first occurrence or the first matching node.
+
+**Guard by revision otherwise; add `--expected-text` only when the span's
+endpoints did not come from a read (or a search) at that revision.** A
+revision proves the document has not moved since the coordinates were read —
+for a span read and edited in the same breath, that is the whole property
+that matters, and `--expected-text` re-sending the span's own content is
+duplicated generation that costs *output* tokens for no added safety. Reach
+for `--expected-text` when a coordinate is not fresh from a read or a live
+`match_id`: a line number carried across your own earlier edits, or an offset
+you computed rather than copied. There the guard earns its cost, because it
 catches what revision cannot — the document is unchanged but the text at this
 *span* is not what you think, the way a prior edit that shifted a length
 leaves a later `delete_len` wrong even though the revision it was read at is
-still current. When you do need it, a fresh `read` is still the cheaper way to
-get it right: reading spends input tokens, `--expected-text` spends output
-ones, and input is the far cheaper half. Every applied edit reports the
-`offset`, `delete_len` and `deleted` bytes it resolved, so verifying an edit
-against the response never needs a read-back either way.
+still current. When you do need it, a fresh `read` (or `search`) is still the
+cheaper way to get it right: reading spends input tokens, `--expected-text`
+spends output ones, and input is the far cheaper half. Every applied edit
+reports the `offset`, `delete_len` and `deleted` bytes it resolved, so
+verifying an edit against the response never needs a read-back either way.
 On a tab opened with NFC normalization, byte offsets address the ORIGINAL
 bytes, not the normalized view a read shows; a refused edit says so. Every
 job verb needs the `resume_token` `job_start` issued, and it is never shown to
@@ -138,7 +196,10 @@ current list rather than trusting prose here to have kept up with it.
 The client uses a short-lived request connection. Save a session with
 `--save-session-token PATH`, reuse it with `--session-token PATH`, or use
 `--session ID`/`--agent ID` so the client stores and resolves the token under
-the private editor metadata directory. Without an explicit id it falls back
+the private editor metadata directory — `$HOME/.config/tsch-ai-skills/editor`
+by default (created on first use, mode 0700), overridable with
+`TSCH_AI_EDITOR_METADATA_DIR` when that default location isn't writable
+(a workspace-scoped sandbox, a read-only home). Without an explicit id it falls back
 to whatever the surrounding coding harness itself exports
 (`CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID`, `OPENCODE_PID`) — this is also
 what makes the automatic workspace reconnection above possible with no flags.
@@ -195,11 +256,12 @@ default gives you.
 6. Insert, replace, delete, transact, restore normalized text when lossless,
    undo, redo, inspect history, and replay. A `replace` addresses its span by
    byte offset and length, by inclusive line range (the last line's newline
-   included, so a replace with no text deletes the lines outright), or by a
+   included, so a replace with no text deletes the lines outright), by a
    half-open byte range — the shape a search hit reports, so a span across two
-   hits needs no arithmetic. `--expected-text` has the server verify the bytes
-   at the span before deleting them, and supplies the length when nothing else
-   does.
+   hits needs no arithmetic — or by `--match-id`, a search hit's own id
+   (below). `--expected-text` has the server verify the bytes at the span
+   before deleting them, and supplies the length when nothing else does;
+   `--match-id` carries that guard already, so it takes no `--expected-text`.
 7. Search with explicit exact-text, exact-byte, wildcard, shell-wildcard,
    path-wildcard, Rust-regex, PCRE2-regex, and six fuzzy modes; all text modes
    are available on bounded large-file ranges. Every text mode matches within
@@ -209,7 +271,11 @@ default gives you.
    like HTML-escaped source that would have matched unescaped.
 8. Request counts, pager keys, first-four defaults, context lines, line/byte ranges,
    ordering, completeness, result generations, stale-page detection, and
-   explicit historical reads.
+   explicit historical reads. `--preview-lines N` shrinks a large `exact_bytes`
+   hit's shown contents to its first and last N lines (its `byte_start`/
+   `byte_end`, and so its `--match-id`, stay exact regardless) — for
+   confirming which of several similar blocks is the right one without
+   paying to see all of it.
    Large searches persist matches incrementally in bounded SQLite chunks and
    retain only the preview in server memory; page large result sets instead
    of expecting one unbounded response.
@@ -249,6 +315,27 @@ default gives you.
    `job-progress`, `job-complete`, `job-cancel`, `job-transfer`, and
     `job-release`; detached jobs can outlive a client connection. Use the
     acknowledged `large-edit` operation for streaming large-file rewrites.
+16. Query the read-only `jump-points` command for a file's outbound CodeGraph
+    references (calls, imports, instantiations, and similar), recomputed
+    server-side at `open` and after every `save` by reading CodeGraph's own
+    SQLite index directly -- no tokens spent unless you ask for it. Each
+    entry names the referring line/column, the edge kind, and the target
+    file/line/name/kind. `stale: true` means the tab was edited since the
+    last computation; `save` recomputes them. A `null` result means
+    CodeGraph is not enabled for this project (no `.codegraph/` index) or
+    its index is not in a shape this reader supports, not that the file has
+    no references.
+17. `move`/`copy` relocate or duplicate a span server-side, with no content
+    in the request or response -- a rearrangement no longer pays for text
+    that never changed. The source is addressed exactly like `replace`'s
+    own (a range or `--match-id`, never a bare offset -- refused by name,
+    since a point has no length to relocate); the destination is a point,
+    `--dest-offset` or `--dest-line` (one past the last line appends at end
+    of file). Both are one atomic operation -- one revision, one undo step
+    -- even though `move` performs two splices internally, which is why
+    `begin-transaction`/`end-transaction` (undo-grouping only) is not the
+    same guarantee. A destination strictly inside the source span is
+    refused as `move_destination_inside_source`.
 
 ## Agent responsibilities
 
@@ -263,9 +350,10 @@ default gives you.
 3. Acknowledge recovery, large-file work, force-save, and other safety prompts.
 4. Decide whether external bytes need a `.back` copy and whether a closing tab's
    journal is preserved or explicitly cleaned. Backup failure blocks the action.
-5. Every mutating request (`insert`, `replace`, `large_edit`, `restore`, `undo`,
-   `redo`, and `save`) must include the revision most recently returned by
-   `open`, `history`, or a completed mutation. Missing revisions are refused;
+5. Every mutating request (`insert`, `replace`, `move`, `copy`, `large_edit`,
+   `restore`, `undo`, `redo`, and `save`) must include the revision most
+   recently returned by `open`, `history`, or a completed mutation. Missing
+   revisions are refused;
    stale revisions are never merged implicitly.
 6. A request that names a file is only served by the tab holding that file;
    a request routed to a different tab is refused with `file_mismatch` and

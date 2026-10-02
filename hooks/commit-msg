@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Refuses a commit whose message carries Claude Code's attribution lines
+# (Co-Authored-By: Claude .../Claude-Session: ...). Requested explicitly by
+# the maintainer: this repo's commits do not carry that attribution.
+#
+# Git hands the hook the path to a file holding the message; a missing or
+# unreadable path is treated as nothing to check, never a blocked commit.
+set -euo pipefail
+message_file="${1:-}"
+[ -n "$message_file" ] && [ -r "$message_file" ] || exit 0
+
+if grep -qE '^(Co-Authored-By: Claude|Claude-Session:)' "$message_file"; then
+    printf 'commit-msg: refusing a commit whose message carries Claude attribution (Co-Authored-By: Claude.../Claude-Session:) -- remove those lines and commit again\n' >&2
+    exit 1
+fi

@@ -58,7 +58,14 @@ cat > "$tmp/defects.json" <<'JSON'
 {"defects":[{"id":"SD-01","path":"plan.md","old":"one initial button","new":"two initial buttons","location":"plan.md § 3.1","expected_signal":"one initial button","required_correction":"replace two initial buttons with one","severity":"high"},{"id":"SD-02","path":"plan.md","old":"fourth generated button","new":"third generated button","location":"plan.md § 3.1","expected_signal":"fourth generated button","required_correction":"replace third generated button with fourth","severity":"medium"},{"id":"SD-03","path":"plan.md","old":"visible white border","new":"visible black border","location":"plan.md § 3.1","expected_signal":"visible white border","required_correction":"replace visible black border with visible white border","severity":"low"}]}
 JSON
 "$root/seed-blinded-defects.sh" "$seed_root" "$defective_root" "$private_root" "$tmp/defects.json"
-[ "$(find "$private_root" -type f -perm -004 | wc -l)" -eq 0 ]
+# Nothing under the private root is readable by "other". Windows has no such
+# bit to test: Git for Windows mounts drives without ACL support, so chmod 600
+# is accepted and every file still reports 644 -- the seed script's chmod calls
+# cannot be observed there.
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) [ "$(find "$private_root" -type f -perm -004 | wc -l)" -eq 0 ] ;;
+esac
 [ ! -e "$defective_root/oracle-key" ]
 [ "$(benchmark_hash_file "$defective_root/plan.md")" = "$(openssl enc -d -aes-256-cbc -pbkdf2 -in "$private_root/defect-map.enc" -pass file:"$private_root/oracle-key" 2>/dev/null | python3 -c 'import json,sys,hashlib; print(json.load(sys.stdin)["defects"][0]["defective_sha256"])')" ]
 

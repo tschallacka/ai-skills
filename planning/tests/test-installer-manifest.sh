@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # MODE: DEV
 # test-installer-manifest — the planning ship manifest, the package map, and
-# install.sh's install set must describe the same file list.
+# skill_files()'s own install set must describe the same file list.
 #
 # Usage: test-installer-manifest.sh
 #
 # This file is itself shipped (it is registered in PACKAGE-MANIFEST.tsv), so it
-# holds to the shipped-runtime dependency rule in CODE-STYLE.md §1: bash, POSIX
-# coreutils, awk, sed, grep, git only. No python3.
+# holds to the shipped-runtime dependency rule: bash, POSIX coreutils, awk,
+# sed, grep, git only. No python3.
 set -euo pipefail
 export LC_ALL=C
 # shellcheck source=planning/tests/lib-test.sh
@@ -16,10 +16,13 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 map_file="$repo_dir/planning/PACKAGE-MAP.tsv"
 manifest_file="$repo_dir/planning/PACKAGE-MANIFEST.tsv"
-# Load the generated installer helper so the platform-path contract is tested
-# at the same implementation boundary used by install.sh.
+# Load the manifest helper directly: source_file()/platform_relative_path()
+# are called in-process rather than through a CLI dispatch.
+# shellcheck disable=SC1090
+source "$repo_dir/installer/src/05-config.sh"
 # shellcheck disable=SC1090
 source "$repo_dir/installer/src/50-manifest.sh"
+SOURCE_ROOT="$repo_dir"
 
 # Normalise a path without requiring GNU `realpath -m` (absent on macOS).
 # Both callers pass paths that exist, so resolving the parent is sufficient.
@@ -40,15 +43,25 @@ deferred_artifact() {
     esac
 }
 
+# The manifest names a compiled command without a suffix; source_file() returns
+# its physical path, which on Windows carries ".exe". The expectation gets the
+# same platform rule so the two are compared as the same file. Anything outside
+# planning/ is left as written.
+expected_source_path() { # <manifest source>
+    case "$1" in
+        planning/*) printf 'planning/%s\n' "$(platform_relative_path planning "${1#planning/}")" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
 test_manifest_emission() {
-    local emitted map_installable source destination owner gate collision source_only resolved manifest_count
+    local emitted map_installable source destination owner gate collision source_only resolved expected_source manifest_count
     emitted=$(mktemp)
     map_installable=$(mktemp)
     trap 'rm -f "$emitted" "$map_installable"' RETURN
 
-    # --print-skill-files cats PACKAGE-MANIFEST.tsv, so emitted-vs-manifest is a
-    # tautology; the real contract is manifest == the map's installable rows.
-    "$BASH" "$repo_dir/install.sh" --print-skill-files planning --format=tsv >"$emitted"
+    # The real contract is manifest == the map's installable rows.
+    cp "$manifest_file" "$emitted"
     awk -F '\t' 'NR == 1 { next } $6 == "false" { print }' "$map_file" >"$map_installable"
     cmp -s "$manifest_file" "$map_installable"
     # Derive the expected manifest row count from the map (it must equal the
@@ -67,8 +80,9 @@ test_manifest_emission() {
             }
             continue
         fi
-        resolved=$(abs_path "$("$BASH" "$repo_dir/install.sh" --resolve-source planning "$destination")")
-        [ "$resolved" = "$(abs_path "$repo_dir/$source")" ] || {
+        resolved=$(abs_path "$(source_file planning "$destination")")
+        expected_source="$(expected_source_path "$source")"
+        [ "$resolved" = "$(abs_path "$repo_dir/$expected_source")" ] || {
             printf 'source mismatch: %s -> %s (got %s)\n' "$source" "$destination" "$resolved" >&2
             return 1
         }
@@ -87,8 +101,8 @@ test_skill_files_matches_manifest() {
     manifest_dests=$(mktemp)
     trap 'rm -f "$manifest_dests" "$skill_files"' RETURN
 
-    # Extract the planning skill_files() heredoc destinations from install.sh.
-    # State machine over the same landmarks the previous python regex matched:
+    # Extract the planning skill_files() heredoc destinations directly from
+    # its own source (installer/src/50-manifest.sh). State machine:
     # `skill_files()` -> `planning)` -> `cat <<'EOF'` -> lines -> `EOF`.
     awk '
         !in_func && /^[[:space:]]*skill_files\(\)/ { in_func = 1; next }
@@ -102,7 +116,7 @@ test_skill_files_matches_manifest() {
             found = 1
         }
         END { if (!found) exit 1 }
-    ' "$repo_dir/install.sh" > "$skill_files"
+    ' "$repo_dir/installer/src/50-manifest.sh" > "$skill_files"
     cat >> "$skill_files" <<'EOF'
 bin/x86_64-unknown-linux-musl/rjq
 bin/aarch64-unknown-linux-musl/rjq
@@ -132,6 +146,12 @@ test_windows_command_paths() {
     [ "$(platform_relative_path planning scripts/plan-content.sh)" = \
         scripts/plan-content.sh ]
     [ "$(platform_relative_path planning SKILL.md)" = SKILL.md ]
+    # Only a command -- a name with no extension of its own -- gains the
+    # suffix. A data or awk file under planning/scripts is a plain file: on
+    # Windows the release builder went looking for
+    # validate-plan-countable-enumeration.awk.exe.
+    [ "$(platform_relative_path planning scripts/validate-plan-stale-wording.awk)" = \
+        scripts/validate-plan-stale-wording.awk ]
     unset -f uname
     printf '%s\n' 'test_windows_command_paths: PASS'
 }
@@ -165,13 +185,16 @@ test_rust_migration_registry() {
         "$repo_dir/planning/rust-migration.tsv")"
     excluded="$(awk -F '\t' '$2 == "runtime-binary" && $3 == "render-plans-board" { n++ } END { print n + 0 }' \
         "$repo_dir/planning/rust-migration.tsv")"
-    registry_count_is runtime-binary "$runtime" 48
+    registry_count_is runtime-binary "$runtime" 51
     registry_count_is build-generator "$generator" 1
-    # One: register-rebuild.sh. The four register helpers that were here went
-    # with their shell originals when the compiled `bugs` and `todo` replaced
-    # them -- every other row's path is a live file, which is the invariant the
-    # loop below enforces, and a completed migration cannot satisfy it.
-    registry_count_is dev-binary "$dev" 1
+    # Zero: register-rebuild.sh's row (the last dev-binary one) is gone
+    # entirely now, not just recategorized -- its shell original was deleted
+    # once the compiled binary's own shipping was decided and skill_files()
+    # took over listing it, the same way the four register helpers before it
+    # went when the compiled `bugs` and `todo` replaced them: every other
+    # row's path is a live file, which is the invariant the loop below
+    # enforces, and a completed migration cannot satisfy it.
+    registry_count_is dev-binary "$dev" 0
     registry_count_is 'excluded render-plans-board' "$excluded" 1
 
     while IFS=$'\t' read -r path kind candidate _; do

@@ -120,13 +120,17 @@ else
     sed 's/^/    /' "$temporary_root/after.log" >&2
 fi
 
-# The instruction that produces the marker must be in SKILL.md, not only here.
-skill="$repo_root/planning/SKILL.md"
+# The instruction that produces the marker must be in the skill, not only
+# here. T87: SKILL.md is now a generated index; the actual content lives in
+# skill-source.txt (and the parts generated from it), so that is what is
+# checked -- the one place every instruction this skill gives is guaranteed
+# to appear.
+skill="$repo_root/planning/skill-source.txt"
 for phrase in 'OBSOLETE' 'replaced-by:' 'Nothing is deleted'; do
     if grep -Fq "$phrase" "$skill"; then
-        pass "SKILL.md documents '$phrase'"
+        pass "the skill documents '$phrase'"
     else
-        fail "SKILL.md does not document '$phrase'"
+        fail "the skill does not document '$phrase'"
     fi
 done
 

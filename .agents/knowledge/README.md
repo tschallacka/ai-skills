@@ -37,6 +37,14 @@ contains, it does not belong here.
 | [unix-sockets-across-platforms.md](unix-sockets-across-platforms.md) | Why does a socket bind that works on Linux fail on macOS, and what actually ports? |
 | [github-ci-runners.md](github-ci-runners.md) | What are GitHub's runners actually like — arch, speed, `$TMPDIR`, what a resource cap can enforce — and which of those breaks tests? |
 | [agent-identity-across-harnesses.md](agent-identity-across-harnesses.md) | Which agent is calling? What each harness tells an MCP server and a skill binary, and what it refuses to tell either. |
+| [claude-code-grep-shim.md](claude-code-grep-shim.md) | Why does `grep` warn "stray \ before -" on patterns already in this repo's own tests, and is it a real bug? |
+| [opencode-plugin-loading-and-advisory-injection.md](opencode-plugin-loading-and-advisory-injection.md) | Can an opencode plugin ship as a local file, and can a hook add text a model will read? |
+| [compiled-binary-preference-fresh-checkout.md](compiled-binary-preference-fresh-checkout.md) | Why does a freshly-wired script fail outright on a clean checkout instead of falling through to bash? |
+| [shared-machine-resources-in-tests.md](shared-machine-resources-in-tests.md) | Why does a test pass alone and fail while another run is active — literal ports, git's detached maintenance — and how was each measured? |
+| [claude-code-channels.md](claude-code-channels.md) | Can an MCP server push into a running Claude Code session — idle or busy — what does that need, and where does it silently do nothing? |
+| [pty-sessions-on-macos.md](pty-sessions-on-macos.md) | Why does a PTY session pass by hand and hang or draw nothing under `cargo test` on macOS? |
+| [windows-under-git-bash.md](windows-under-git-bash.md) | Why does correct code fail on Windows under Git for Windows' bash — line endings, paths, `.exe`, sockets, error kinds — and what does the repo do about each? |
+| [npm-files-array-overrides-npmignore.md](npm-files-array-overrides-npmignore.md) | Why does a path `.npmignore` explicitly excludes still show up in `npm pack`, and is that a packaging bug? |
 ## Format
 
 One file per question, named for the subject rather than the occasion. Open

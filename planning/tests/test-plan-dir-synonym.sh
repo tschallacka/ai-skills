@@ -40,6 +40,17 @@ reset_copies() {
     done
 }
 
+# stdin to stdout with a copy's directory replaced by <plan>. The tools name it
+# as a native program spells it -- C:/... on Windows, possibly with backslashes
+# -- not as the bash-side /tmp/... path, so both spellings are masked
+# (t_native_path and t_slashes are the identity on unix).
+mask_dir() { # <dir>
+    local dir="$1" native shell_form
+    native="$(t_native_path "$dir")"
+    shell_form="$(printf '%s' "$dir" | t_slashes)"
+    t_slashes | sed -e "s|$native|<plan>|g" -e "s|$shell_form|<plan>|g"
+}
+
 # Minted ids and timestamps differ per run by design.
 normalise() {
     # A read loop rather than xargs -r, which is a GNU extension.
@@ -150,10 +161,9 @@ upc_pair -dp -dp 2.1 'a rewritten paragraph'
 upc_pair -ap -ap plan current-state 'an appended paragraph'
 upc_pair -f -f plan 'UI affected' yes
 
-# Scripts that read a plan and write nothing. A tree diff proves nothing there,
-# so the differential is exit status plus stdout. Without this they were exempt on
-# a claim that turned out to be false: no test in the suite invoked any of them
-# with --plan-dir at all.
+# Scripts that read a plan and write nothing were exercised by no existing
+# test, so the differential is exit status plus stdout — a tree diff proves
+# nothing here.
 readonly_pair() { # <label> <script> <args...>
     local label="$1" script="$2"
     shift 2
@@ -168,8 +178,8 @@ readonly_pair() { # <label> <script> <args...>
     t_assert_eq "$label: positional succeeds" "$arc" 0
     t_assert_eq "$label: --plan-dir succeeds" "$brc" 0
     t_assert_eq "$label: --plan-dir agrees on stdout" \
-        "$(printf '%s' "$bout" | sed "s|$work/b|<plan>|g")" \
-        "$(printf '%s' "$aout" | sed "s|$work/a|<plan>|g")"
+        "$(printf '%s' "$bout" | mask_dir "$work/b")" \
+        "$(printf '%s' "$aout" | mask_dir "$work/a")"
 }
 
 # plan-content takes its subcommand before the plan directory, so the plan
@@ -184,8 +194,8 @@ readonly_sub_pair() { # <label> <script> <subcommand> <args...>
     t_assert_eq "$label: positional succeeds" "$arc" 0
     t_assert_eq "$label: --plan-dir succeeds" "$brc" 0
     t_assert_eq "$label: --plan-dir agrees on stdout" \
-        "$(printf '%s' "$bout" | sed "s|$work/b|<plan>|g")" \
-        "$(printf '%s' "$aout" | sed "s|$work/a|<plan>|g")"
+        "$(printf '%s' "$bout" | mask_dir "$work/b")" \
+        "$(printf '%s' "$aout" | mask_dir "$work/a")"
 }
 
 # update-adversarial-review reads its rows from stdin, which check_pair cannot

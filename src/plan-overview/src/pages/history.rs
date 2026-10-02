@@ -1,6 +1,6 @@
 // MODE: DEV
 // PACKAGE: PROD
-use super::{esc, section};
+use super::{esc, link, section};
 use crate::plan::state::State;
 
 pub fn render_history(state: &State) -> String {
@@ -8,23 +8,30 @@ pub fn render_history(state: &State) -> String {
         .findings
         .iter()
         .map(|f| {
+            let owner = if f.work_unit.is_empty() {
+                "no unit".into()
+            } else {
+                link(&f.work_unit, &format!("#unit/{}", f.work_unit))
+            };
             format!(
-                "<li>{}: {} ({})</li>",
-                esc(&f.id),
+                "<li>{} <span class=\"status status-pending\">{}</span> ({}) — {} · unit {}</li>",
+                link(&f.id, &format!("#finding/{}", f.id)),
                 esc(&f.status),
-                esc(&f.cycle)
+                esc(&f.cycle),
+                esc(&f.item),
+                owner
             )
         })
         .collect::<Vec<_>>()
         .join("");
     format!(
-        "<article><h1>History</h1>{}{}</article>",
+        "<article><h1>History &amp; findings</h1>{}{}</article>",
         section(
             "Current phase",
             &format!("<p>{}</p>", esc(&state.identity.review_status))
         ),
         section(
-            "Review cycles",
+            "Adversarial-review findings",
             &format!(
                 "<p>Cycles recorded: {}</p><ul>{}</ul>",
                 state.cycles,

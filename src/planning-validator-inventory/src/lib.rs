@@ -129,6 +129,16 @@ impl Inventory {
             return;
         };
         for unit in &self.units {
+            if unit.kind == "relocation" {
+                let source = repo_root.join(unit.file.trim_end_matches('/'));
+                if !source.exists() {
+                    findings.fail(format!(
+                        "{} source path does not exist under --repo-root: {}",
+                        unit.id, unit.file
+                    ));
+                }
+                continue;
+            }
             if matches!(
                 unit.kind.as_str(),
                 "discovery" | "verification" | "generated"
@@ -198,6 +208,7 @@ fn validate_unit(unit: &Unit, findings: &mut Findings) {
         "generated",
         "discovery",
         "verification",
+        "relocation",
     ];
     if !TYPES.contains(&unit.kind.as_str()) {
         findings.fail(format!("{} has unsupported type '{}'", unit.id, unit.kind));
@@ -223,13 +234,20 @@ fn validate_unit(unit: &Unit, findings: &mut Findings) {
             unit.id
         ));
     }
-    if unit.file.contains('*') || unit.file.ends_with('/') {
+    if unit.kind == "relocation" {
+        if unit.scope == "N/A" {
+            findings.fail(format!(
+                "{} is relocation and must name its destination as the scope",
+                unit.id
+            ));
+        }
+    } else if unit.file.contains('*') || unit.file.ends_with('/') {
         findings.fail(format!(
             "{} must name one concrete file, not a glob or directory: {}",
             unit.id, unit.file
         ));
     }
-    if unit.kind != "verification" {
+    if unit.kind != "verification" && unit.kind != "relocation" {
         let symbol_count = unit.scope.matches("::").count();
         if symbol_count > 1 || unit.scope.contains(',') {
             findings.fail(format!(
@@ -425,6 +443,91 @@ mod tests {
             .messages
             .iter()
             .any(|message| message.text.contains("Dependency cycle")));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_relocation_unit_may_name_a_directory_and_needs_a_destination_scope() {
+        let root = std::env::temp_dir().join(format!(
+            "validator-inventory-relocation-{}",
+            std::process::id()
+        ));
+        let file = root.join("work-unit-inventory.md");
+        let _ = fs::create_dir_all(&root);
+        fs::write(
+            &file,
+            "## Definition-of-done coverage\n\n| Required outcome | Work units | Notes |\n|---|---|---|\n| outcome | W01 | note |\n\n## Work units\n\n| ID | Type | File | Scope | Subscope | Intended change | Depends on | Goal | Step |\n|---|---|---|---|---|---|---|---|---|\n| W01 | relocation | old/data/ | new/data/ | N/A | Move it | — | 01-goal | 01-step-a |\n",
+        )
+        .unwrap();
+        let mut findings = Findings::default();
+        let inventory = Inventory::parse(&file, &mut findings);
+        assert_eq!(
+            findings.errors, 0,
+            "a well-formed relocation row should not fail: {:?}",
+            findings.messages
+        );
+        assert_eq!(inventory.units[0].kind, "relocation");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_relocation_unit_with_no_destination_scope_fails() {
+        let root = std::env::temp_dir().join(format!(
+            "validator-inventory-relocation-no-dest-{}",
+            std::process::id()
+        ));
+        let file = root.join("work-unit-inventory.md");
+        let _ = fs::create_dir_all(&root);
+        fs::write(
+            &file,
+            "## Definition-of-done coverage\n\n| Required outcome | Work units | Notes |\n|---|---|---|\n| outcome | W01 | note |\n\n## Work units\n\n| ID | Type | File | Scope | Subscope | Intended change | Depends on | Goal | Step |\n|---|---|---|---|---|---|---|---|---|\n| W01 | relocation | old/data/ | N/A | N/A | Move it | — | 01-goal | 01-step-a |\n",
+        )
+        .unwrap();
+        let mut findings = Findings::default();
+        Inventory::parse(&file, &mut findings);
+        assert!(findings
+            .messages
+            .iter()
+            .any(|message| message.text.contains("must name its destination")));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn validate_target_paths_checks_a_relocation_units_source_directory_exists() {
+        let root = std::env::temp_dir().join(format!(
+            "validator-inventory-relocation-paths-{}",
+            std::process::id()
+        ));
+        let repo = root.join("repo");
+        let file = root.join("work-unit-inventory.md");
+        fs::create_dir_all(repo.join("old/data")).unwrap();
+        fs::write(repo.join("old/data/file.txt"), "content").unwrap();
+        fs::write(
+            &file,
+            "## Definition-of-done coverage\n\n| Required outcome | Work units | Notes |\n|---|---|---|\n| outcome | W01,W02 | note |\n\n## Work units\n\n| ID | Type | File | Scope | Subscope | Intended change | Depends on | Goal | Step |\n|---|---|---|---|---|---|---|---|---|\n| W01 | relocation | old/data/ | new/data/ | N/A | Move it | — | 01-goal | 01-step-a |\n| W02 | relocation | old/missing/ | new/missing/ | N/A | Move it | — | 01-goal | 02-step-b |\n",
+        )
+        .unwrap();
+        let mut findings = Findings::default();
+        let inventory = Inventory::parse(&file, &mut findings);
+        let mut target_findings = Findings::default();
+        inventory.validate_target_paths(Some(&repo), &mut target_findings);
+        assert!(
+            !target_findings
+                .messages
+                .iter()
+                .any(|message| message.text.contains("W01")),
+            "a real source directory must not be flagged: {:?}",
+            target_findings.messages
+        );
+        assert!(
+            target_findings
+                .messages
+                .iter()
+                .any(|message| message.text.contains("W02")
+                    && message.text.contains("does not exist")),
+            "a missing source directory should be flagged: {:?}",
+            target_findings.messages
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -139,14 +139,14 @@ fi
 
 # ---- 4. plan_fix_key is the derivation both scripts use --------------------
 # mint-fix-keys.sh and verify-fix-keys.sh each held their own copy under a
-# comment saying the two must stay byte-identical. They now call one function;
-# assert that neither has grown a private copy back.
+# comment saying the two must stay byte-identical. They now share one
+# derivation; assert that neither script has grown a private copy back. Both
+# scripts are exec shims onto the compiled binaries (T145), which derive the
+# key in-process, so the shim no longer names plan_fix_key -- the shell function
+# stays as the reference the derivation assertions below check against.
 for script in mint-fix-keys.sh verify-fix-keys.sh; do
     if grep -q '^fix_key() {' "$scripts/$script"; then
         t_fail "$script defines its own fix_key again; the shared plan_fix_key is the derivation"
-    fi
-    if ! grep -q 'plan_fix_key' "$scripts/$script"; then
-        t_fail "$script does not call plan_fix_key"
     fi
 done
 
@@ -221,30 +221,40 @@ case "$(uname -s)" in
         ;;
 esac
 
-# ---- 8. refusal, not improvisation -----------------------------------------
-# With no rung at all both scripts must exit 69 rather than mint or report a
-# key they cannot derive. The stub PATH holds everything the scripts need
-# except a digest tool.
-stub="$work/nodigest"
-mkdir -p "$stub"
-for tool in bash awk sed cat cut head tr mktemp mv rm chmod mkdir dirname grep od wc git printf uname sort comm find date stat; do
-    src="$(command -v "$tool" 2>/dev/null)" || continue
-    ln -sf "$src" "$stub/$tool"
+# B94: uname -s never reports the bare "Windows_NT" a POSIX shell would read
+# from the environment -- Git Bash, MSYS2 and Cygwin each print their own
+# MINGW*_NT/MSYS_NT/CYGWIN_NT form. A stub uname exercises all four spellings
+# without needing to run on an actual Windows host.
+uname_stub="$work/uname-stub"
+mkdir -p "$uname_stub"
+for fake_os in Windows_NT MINGW64_NT-10.0-19045 MSYS_NT-10.0-19045 CYGWIN_NT-10.0-19045; do
+    cat > "$uname_stub/uname" <<STUB
+#!/usr/bin/env bash
+case "\$1" in
+    -s) printf '%s\n' '$fake_os' ;;
+    -m) printf '%s\n' 'x86_64' ;;
+esac
+STUB
+    chmod +x "$uname_stub/uname"
+    fake_triple="$(PATH="$uname_stub:$PATH" bash -c '
+        source "'"$scripts"'/plan-crypt-lib.sh"
+        plan_crypt_target_triple
+    ' || printf '')"
+    [ "$fake_triple" = x86_64-pc-windows-msvc ] || \
+        t_fail "plan_crypt_target_triple returned '$fake_triple' for uname -s='$fake_os', want x86_64-pc-windows-msvc"
 done
-if [ -x "$stub/bash" ] && ! PATH="$stub" command -v sha256sum >/dev/null 2>&1; then
-    # mint-fix-keys.sh runs its preflight at the top of the script, before any
-    # argument is looked at, so the refusal is reachable without a plan
-    # directory. verify-fix-keys.sh runs its own after the ungated early
-    # returns — deliberately, so an ungated plan still passes on a machine with
-    # no digest tool — and so is not reachable this way.
-    rc=0
-    refusal="$(PATH="$stub" PLAN_CRYPT_BIN="$work/absent" "$stub/bash" \
-        "$scripts/mint-fix-keys.sh" --plan-dir "$work/no-such-plan" 2>&1)" || rc=$?
-    t_assert_eq 'mint with no digest rung exits 69' "$rc" '69'
-    t_assert_contains 'mint names the three rungs' \
-        'plan-crypt binary, sha256sum, or shasum' "$refusal"
-else
-    printf 'plan-crypt: SKIP the starved-PATH refusal check (no usable stub PATH here)\n'
-fi
+
+# ---- 8. refusal, not improvisation -----------------------------------------
+# The "no digest rung" refusal (exit 69 naming the plan-crypt binary, sha256sum
+# or shasum) belonged to the bash mint-fix-keys body, which probed for a digest
+# tool in the shell. That body is gone (T145): the compiled binary hashes with
+# its own in-process SHA-256, so there is no rung left to run out of. What the
+# shim still owes is the same exit 69 when the binary itself cannot be found.
+stub="$work/nobinary"
+mkdir -p "$stub"
+rc=0
+refusal="$(AI_SKILLS_BIN_ROOT="$stub" "$scripts/mint-fix-keys.sh" --plan-dir "$work/no-such-plan" 2>&1)" || rc=$?
+t_assert_eq 'mint with no compiled binary exits 69' "$rc" '69'
+t_assert_contains 'and says how to build it' 'setup-dev-env.sh' "$refusal"
 
 t_end

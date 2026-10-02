@@ -264,14 +264,14 @@ fn build_index(plan: &Path) -> String {
         if let Ok(entries) = fs::read_dir(goal.join("steps")) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "md")
-                    && !path
-                        .file_stem()
-                        .unwrap()
-                        .to_string_lossy()
-                        .ends_with("-testing")
-                {
-                    steps.push(path);
+                if path.extension().is_some_and(|ext| ext == "md") {
+                    let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+                    let is_companion = planning_document::is_testing_companion(&stem, |base| {
+                        path.with_file_name(format!("{base}.md")).is_file()
+                    });
+                    if !is_companion {
+                        steps.push(path);
+                    }
                 }
             }
         }
@@ -540,6 +540,14 @@ fn read_command(args: &Args, plan: &Path) {
         0
     };
     let (bounded, emitted, more, total) = page(&content, start, args.max_records, max_bytes);
+    // A page that ends on a blank line (a heading's trailing gap, the gap before
+    // the next section) must print that line: trimming it made a token walk drop
+    // one blank line at every such page boundary, so the reassembled pages were
+    // not the document. Only a clipped record has no newline of its own to end on.
+    let mut page_text = bounded.clone();
+    if !page_text.ends_with('\n') {
+        page_text.push('\n');
+    }
     let bounded = bounded.trim_end_matches('\n').to_string();
     let summary_excerpt = view == "summary" && !more && file_line_count(&file) > total;
     if args.format == "json" {
@@ -564,7 +572,7 @@ fn read_command(args: &Args, plan: &Path) {
         );
     } else {
         eprintln!("entry_id={id}\nview={view}\nreturned_records={emitted}\ntotal_records={total}\ntruncated={more}");
-        println!("{bounded}");
+        print!("{page_text}");
         if more {
             println!("next_token=continue:{hash}:{view}:{}", start + emitted);
         } else if summary_excerpt {

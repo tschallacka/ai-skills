@@ -69,8 +69,11 @@ fn watcher_reports_a_real_edit() {
     fs::write(root.join("plan.md"), "one").unwrap();
     let (events, stop) = watch_plan_dir(root.clone()).unwrap();
     fs::write(root.join("plan.md"), "two").unwrap();
+    // A CEILING, not a sleep: a healthy run still returns the moment the
+    // event arrives, so this costs nothing there and only buys margin on a
+    // starved run.
     let event = events
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(Duration::from_secs(10))
         .expect("edit event");
     assert_eq!(event.changed, vec![root.join("plan.md")]);
     let _ = stop.send(());

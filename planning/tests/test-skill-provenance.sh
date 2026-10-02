@@ -5,15 +5,15 @@
 #
 # Usage: test-skill-provenance.sh
 #
-# The failure was silent (T52): an installed copy 290 lines adrift of canonical
-# behaved like a working skill, and the drift surfaced only when a reader
-# concluded the reader itself lacked a feature and hand-patched around it.
-# Nothing said which build was speaking. Silence is asserted here as strictly as
-# the warning — a staleness warning that fires without evidence is worse than
+# The failure was silent: an installed copy adrift of canonical behaved like
+# a working skill, and the drift surfaced only when a reader concluded the
+# reader itself lacked a feature and hand-patched around it. Nothing said
+# which build was speaking. Silence is asserted here as strictly as the
+# warning — a staleness warning that fires without evidence is worse than
 # none, because the response to it is to reinstall.
 #
-# This file is shipped, so it holds to the shipped-runtime dependency rule in
-# CODE-STYLE.md §1: bash, POSIX coreutils, awk, sed, grep, rjq only. No python3.
+# This file is shipped, so it holds to the shipped-runtime dependency rule:
+# bash, POSIX coreutils, awk, sed, grep, rjq only. No python3.
 
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
@@ -32,7 +32,12 @@ trap 'rm -rf "$work"' EXIT
 # An installed copy is the skill without a git directory, plus the .version the
 # installer writes. Built from the real tree so the test exercises the shipped
 # scripts rather than a stand-in.
-install="$work/installed"
+# It keeps the real install layout, <skills>/planning/{scripts,.version}: the
+# compiled create-plan finds its skill directory from the PLANNING_SKILL_ROOT
+# the wrapper exports (the ancestor holding planning/scripts), not from a path
+# relative to the script.
+skills="$work/installed"
+install="$skills/planning"
 mkdir -p "$install"
 cp -r "$root/planning/scripts" "$install/"
 cp "$root"/planning/*.json "$install/" 2>/dev/null || true

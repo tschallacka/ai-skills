@@ -12,6 +12,7 @@ name = "validate-plan"
 path = "src/main.rs"
 
 [dependencies]
+planning-validator-coherence = { path = "../planning-validator-coherence" }
 planning-validator-common = { path = "../planning-validator-common" }
 planning-validator-docs = { path = "../planning-validator-docs" }
 planning-validator-placeholders = { path = "../planning-validator-placeholders" }
