@@ -1021,6 +1021,18 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
         0o700
     );
     assert_eq!(session["agent"], "session-agent");
+    // The session file is saved before the socket is bound; wait for both.
+    for _ in 0..READY_POLLS {
+        if socket.exists() {
+            break;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    assert!(
+        socket.exists(),
+        "the wrapper never bound {}",
+        socket.display()
+    );
     let input = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .env("INTERACTIVE_SHELL_HOME", &state)
         .args(["--session", "resume-case", "wait", "SESSION_READY", "30000"])
@@ -1469,6 +1481,19 @@ fn session_file_remembers_tcp_transport_across_a_restart() {
     let session: Value = serde_json::from_str(&fs::read_to_string(&session_file).unwrap()).unwrap();
     assert_eq!(session["use_tcp"], true);
     let socket = PathBuf::from(session["socket"].as_str().unwrap());
+    // The wrapper saves the session file before it binds; a CI VM paused in
+    // between left the socket absent here ("session is not active").
+    for _ in 0..READY_POLLS {
+        if socket.exists() {
+            break;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    assert!(
+        socket.exists(),
+        "the wrapper never bound {}",
+        socket.display()
+    );
     let input = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .env("INTERACTIVE_SHELL_HOME", &state)
         .args([
