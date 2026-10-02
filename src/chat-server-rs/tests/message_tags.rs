@@ -28,6 +28,8 @@ use support::{spawn_server, ChildGuard};
 /// reply; wait_for returns as soon as the needle appears, so raising this
 /// only helps a slow runner and costs a fast one nothing.
 const WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+/// How often `wait_for` looks at the output.
+const POLL: Duration = Duration::from_millis(50);
 
 /// A raw TLS connection to the server: stdin fed on demand, stdout
 /// accumulated in the background so `wait_for`/`output` can poll it without
@@ -90,15 +92,18 @@ impl RawConn {
         self.output.lock().unwrap().clone()
     }
 
+    /// Budgeted as a count of polls, not a deadline (B370): a CI VM frozen
+    /// by its host resumes counting, where a deadline it slept past made it
+    /// give up without looking again at a reply that was already there.
     fn wait_for(&self, needle: &str, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
+        let polls = (timeout.as_millis() / POLL.as_millis()).max(1);
+        for _ in 0..polls {
             if self.output().contains(needle) {
                 return true;
             }
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(POLL);
         }
-        false
+        self.output().contains(needle)
     }
 }
 
