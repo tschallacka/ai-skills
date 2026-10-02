@@ -253,9 +253,38 @@ pub fn save_session(id: &str, session: &Session) -> Result<(), String> {
     restrict_to_owner(parent, 0o700)
         .map_err(|error| format!("set session directory permissions: {error}"))?;
     let json = serde_json::to_string_pretty(session).map_err(|error| error.to_string())?;
-    fs::write(&path, json).map_err(|error| format!("write session {}: {error}", path.display()))?;
-    restrict_to_owner(&path, 0o600)
-        .map_err(|error| format!("set session file permissions: {error}"))
+    write_session_file(&path, &json)
+}
+
+/// Writes a sibling created at 0600 before any byte lands, then renames it
+/// over `path`, so no reader can observe the file with a wider mode (B387).
+fn write_session_file(path: &Path, json: &str) -> Result<(), String> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = path.with_extension(format!(
+        "json.tmp-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let written = options
+        .open(&tmp)
+        .and_then(|mut file| file.write_all(json.as_bytes()))
+        .map_err(|error| format!("write session {}: {error}", tmp.display()))
+        .and_then(|()| {
+            restrict_to_owner(&tmp, 0o600)
+                .map_err(|error| format!("set session file permissions: {error}"))
+        })
+        .and_then(|()| {
+            fs::rename(&tmp, path)
+                .map_err(|error| format!("replace session {}: {error}", path.display()))
+        });
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    written
 }
 
 pub fn session_socket(id: &str) -> Result<PathBuf, String> {
@@ -2468,6 +2497,45 @@ mod tests {
     // CWD/cwd_lock helper they share) moved to posix.rs's own #[cfg(test)]
     // mod tests (W02): both exercise bind_in_directory/connect_in_directory,
     // which are Unix-only.
+
+    /// B387: a reader that sees the session file must never see it wider than
+    /// 0600. A watcher spins on stat while the file is rewritten from scratch.
+    #[cfg(unix)]
+    #[test]
+    fn a_session_file_is_never_observable_with_a_wider_mode_than_0600() {
+        let dir = std::env::temp_dir().join(format!("b387-session-mode-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("case.json");
+        let done = std::sync::Arc::new(AtomicBool::new(false));
+        let watcher = {
+            let (path, done) = (path.clone(), done.clone());
+            std::thread::spawn(move || {
+                let mut wide = Vec::new();
+                while !done.load(Ordering::Relaxed) {
+                    if let Ok(meta) = fs::metadata(&path) {
+                        let mode = meta.permissions().mode() & 0o777;
+                        if mode != 0o600 {
+                            wide.push(mode);
+                        }
+                    }
+                }
+                wide
+            })
+        };
+        for _ in 0..500 {
+            let _ = fs::remove_file(&path);
+            write_session_file(&path, "{}").unwrap();
+        }
+        done.store(true, Ordering::Relaxed);
+        let wide = watcher.join().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        assert!(
+            wide.is_empty(),
+            "observed {} wider modes, first {:o}",
+            wide.len(),
+            wide[0]
+        );
+    }
 
     #[test]
     fn keys_are_stable() {
