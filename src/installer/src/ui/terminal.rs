@@ -12,7 +12,8 @@
 
 use std::io::{IsTerminal, Read};
 use std::process::{Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Mutex, Once, OnceLock};
 use std::thread;
 
 pub fn is_tty() -> bool {
@@ -80,28 +81,67 @@ pub fn size() -> (usize, usize) {
     }
 }
 
-/// A background thread reading stdin one byte at a time, so the picker's
-/// event loop can distinguish "no key yet" (Tick) from "a key arrived"
-/// without blocking forever -- `recv_timeout` on the returned channel is
-/// the seam. Sends `None` once and stops after stdin hits EOF or errors.
+/// Routes stdin bytes to whichever screen subscribed last. A byte read while
+/// no screen listens is held for the next one: a per-screen reader thread
+/// blocked in `read` used to swallow the next screen's first byte.
+#[derive(Default)]
+struct ReaderHub {
+    current: Option<Sender<Option<u8>>>,
+    pending: Vec<Option<u8>>,
+}
+
+impl ReaderHub {
+    fn subscribe(&mut self) -> Receiver<Option<u8>> {
+        let (tx, rx) = mpsc::channel();
+        for item in self.pending.drain(..) {
+            let _ = tx.send(item);
+        }
+        self.current = Some(tx);
+        rx
+    }
+
+    fn deliver(&mut self, item: Option<u8>) {
+        let sent = self
+            .current
+            .as_ref()
+            .is_some_and(|tx| tx.send(item).is_ok());
+        if !sent {
+            self.current = None;
+            self.pending.push(item);
+        }
+    }
+}
+
+static HUB: OnceLock<Mutex<ReaderHub>> = OnceLock::new();
+static READER: Once = Once::new();
+
+fn hub() -> &'static Mutex<ReaderHub> {
+    HUB.get_or_init(Mutex::default)
+}
+
+/// Subscribes the calling screen to the one process-wide stdin reader, so
+/// its event loop can tell "no key yet" (Tick) from "a key arrived" with
+/// `recv_timeout`. Receives `None` once stdin hits EOF or errors.
 pub fn spawn_reader() -> Receiver<Option<u8>> {
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let mut stdin = std::io::stdin();
-        let mut buf = [0u8; 1];
-        loop {
-            match stdin.read(&mut buf) {
-                Ok(0) | Err(_) => {
-                    let _ = tx.send(None);
+    let rx = hub().lock().unwrap_or_else(|e| e.into_inner()).subscribe();
+    READER.call_once(|| {
+        thread::spawn(|| {
+            let mut stdin = std::io::stdin();
+            let mut buf = [0u8; 1];
+            loop {
+                let item = match stdin.read(&mut buf) {
+                    Ok(0) | Err(_) => None,
+                    Ok(_) => Some(buf[0]),
+                };
+                hub()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .deliver(item);
+                if item.is_none() {
                     break;
                 }
-                Ok(_) => {
-                    if tx.send(Some(buf[0])).is_err() {
-                        break;
-                    }
-                }
             }
-        }
+        });
     });
     rx
 }
@@ -134,4 +174,34 @@ pub fn draw_overlay(row: usize, col: usize, lines: &[String]) {
     }
     let _ = out.write_all(buffer.as_bytes());
     let _ = out.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_byte_read_after_a_screen_ends_reaches_the_next_screen() {
+        let mut hub = ReaderHub::default();
+        let wizard = hub.subscribe();
+        hub.deliver(Some(b'w'));
+        assert_eq!(wizard.try_recv(), Ok(Some(b'w')));
+        drop(wizard);
+        hub.deliver(Some(0x1b));
+        hub.deliver(Some(b'['));
+        let picker = hub.subscribe();
+        hub.deliver(Some(b'<'));
+        let got: Vec<_> = picker.try_iter().collect();
+        assert_eq!(got, vec![Some(0x1b), Some(b'['), Some(b'<')]);
+    }
+
+    #[test]
+    fn a_new_screen_takes_over_from_one_still_holding_its_receiver() {
+        let mut hub = ReaderHub::default();
+        let wizard = hub.subscribe();
+        let picker = hub.subscribe();
+        hub.deliver(Some(b'i'));
+        assert_eq!(picker.try_recv(), Ok(Some(b'i')));
+        assert!(wizard.try_recv().is_err());
+    }
 }

@@ -299,10 +299,6 @@ fn apply_hint_click(state: &mut PickerState, click: render::HintClick) {
         render::HintClick::FocusToggle => state.toggle_focus(),
         render::HintClick::SelectAll => state.select_all(),
         render::HintClick::SelectNone => state.select_none(),
-        render::HintClick::Install => {
-            state.done = true;
-            state.confirmed = true;
-        }
         render::HintClick::Quit => {
             state.done = true;
             state.confirmed = false;
@@ -567,6 +563,71 @@ mod tests {
         assert_eq!(state.focus, Focus::Info);
         assert!(state.selected[0]);
         assert!(state.selected[1]);
+    }
+
+    /// Where `label` is drawn in a rendered frame, as the 1-based (col, row)
+    /// a click on its middle would report -- found in the frame a user sees,
+    /// not derived from `info_layout`, so the two cannot agree by construction.
+    fn on_screen(frame: &[String], label: &str) -> Option<Key> {
+        let strip = |row: &str| -> String {
+            let mut out = String::new();
+            let mut chars = row.chars();
+            while let Some(c) = chars.next() {
+                if c == '\u{1b}' {
+                    for c in chars.by_ref() {
+                        if c.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+            out
+        };
+        frame.iter().enumerate().find_map(|(r, row)| {
+            let plain = strip(row);
+            let at = plain.find(label)?;
+            let col = plain[..at].chars().count() + label.chars().count() / 2;
+            Some(Key::Click {
+                col: (col + 1) as u16,
+                row: (r + 1) as u16,
+            })
+        })
+    }
+
+    /// A click on a button is the intent itself: it must act on the FIRST
+    /// click, from a fresh picker whose focus is still on the skill list.
+    #[test]
+    fn one_click_on_a_details_button_acts_even_while_the_list_has_focus() {
+        let names_owned = ["ai-text-editor", "post-implementation-review", "www"];
+        for (cols, rows) in [(159usize, 42usize), (80, 24)] {
+            for unicode in [false, true] {
+                for (label, expect_done, expect_confirmed) in [
+                    ("Install/update all", true, true),
+                    ("Quit", true, false),
+                    ("Install this skill", true, true),
+                ] {
+                    let mut state = PickerState::new(skills(&names_owned));
+                    assert_eq!(state.focus, Focus::List);
+                    let names: Vec<&str> = state.skills.iter().map(|s| s.name.as_str()).collect();
+                    let title_rows = render::title_bar_lines(&state, cols).len();
+                    let hint_rows = render::hint_bar_lines(cols).len();
+                    let layout =
+                        layout::compute(cols, rows, &names, true, title_rows, hint_rows, unicode);
+                    let frame = render::render_frame(&state, &layout, ColorMode::TrueColor);
+                    let key = on_screen(&frame, label)
+                        .unwrap_or_else(|| panic!("{label} not on screen at {cols}x{rows}"));
+                    let source = std::path::Path::new(".");
+                    handle_key(&mut state, key, &layout, title_rows, hint_rows, source);
+                    assert_eq!(
+                        (state.done, state.confirmed),
+                        (expect_done, expect_confirmed),
+                        "one click on {label} at {cols}x{rows} unicode {unicode} did nothing"
+                    );
+                }
+            }
+        }
     }
 
     /// Converts an `info_layout` row/column into the absolute (col, row)

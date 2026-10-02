@@ -125,7 +125,6 @@ pub(crate) enum HintClick {
     FocusToggle,
     SelectAll,
     SelectNone,
-    Install,
     Quit,
 }
 
@@ -154,10 +153,6 @@ pub(crate) const HINT_SEGMENTS: &[HintSegment] = &[
     HintSegment {
         text: "n none",
         click: Some(HintClick::SelectNone),
-    },
-    HintSegment {
-        text: "i install",
-        click: Some(HintClick::Install),
     },
     HintSegment {
         text: "q quit",
@@ -352,9 +347,9 @@ pub(crate) struct ModeToggleLayout {
 /// The DETAILS pane's own global controls, present for every skill
 /// regardless of its own dependency state -- unlike `ActionButtonsLayout`
 /// (only there when something is missing) or `ModeToggleLayout` (only there
-/// for a multi-mode skill), these three buttons always draw, mirroring the
-/// hint bar's own always-present "i install"/"q quit" segments but placed
-/// where a mouse-first user is already looking. "Install/update this skill"
+/// for a multi-mode skill), these three buttons always draw: they are the
+/// picker's install controls, placed where a mouse-first user is already
+/// looking. "Install/update this skill"
 /// gets its own row; the bulk "install/update all" and "quit" share the row
 /// below it, the same side-by-side-buttons shape `ActionButtonsLayout`
 /// already uses for its own pair.
