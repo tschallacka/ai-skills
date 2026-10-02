@@ -56,6 +56,7 @@
 //! underneath it when the terminal is tall enough to leave room.
 
 use super::buttons::colorize_button;
+use super::emerald;
 use super::input::{self, Key};
 use super::mascot::{self, ColorMode};
 use super::render::BorderSet;
@@ -210,6 +211,8 @@ struct State {
     /// the actual `R` value separately, since this type does not know or
     /// care what `R` is.
     done: bool,
+    /// The emeralds raining down the top section while no question shows.
+    rain: emerald::Rain,
 }
 
 impl State {
@@ -229,6 +232,7 @@ impl State {
             modal_focus: 0,
             modal_text_scroll: 0,
             done: false,
+            rain: emerald::Rain::new(RAIN_SEED),
         }
     }
 
@@ -294,9 +298,18 @@ pub fn run<R: Send + 'static>(
     let mut pending_result: Option<R> = None;
     let mut eyes = mascot::EyeAnimator::new();
 
+    let mut last_frame = std::time::Instant::now();
+    let mut last_eye_move = last_frame;
     let final_result = loop {
         while let Ok(event) = rx.try_recv() {
             apply_event(&mut state, event);
+        }
+        let now = std::time::Instant::now();
+        state.rain.advance((now - last_frame).as_secs_f32());
+        last_frame = now;
+        if now - last_eye_move >= EYE_PERIOD {
+            eyes.advance();
+            last_eye_move = now;
         }
         let (cols, rows) = terminal::size();
         terminal::draw(&render_frame(&state, cols, rows, color_mode, unicode));
@@ -339,11 +352,13 @@ pub fn run<R: Send + 'static>(
                     .push("== Installation complete -- press Enter to continue ==".to_string());
             }
         }
-        match input::read_key(&key_rx) {
-            Key::Tick => {
-                eyes.advance();
-                continue;
-            }
+        let tick = if rain_visible(&state, color_mode) {
+            RAIN_FRAME
+        } else {
+            EYE_PERIOD
+        };
+        match input::read_key_within(&key_rx, tick) {
+            Key::Tick => continue,
             Key::Eof => continue,
             Key::Enter | Key::Escape if pending_result.is_some() => {
                 break pending_result.take().expect("checked is_some above");
@@ -482,6 +497,13 @@ fn left_pane_width(state: &State) -> usize {
 /// both need this to agree on where the modal's own rows actually land
 /// once it is no longer the only thing in the pane.
 const MODAL_TOP_OFFSET: usize = 2;
+
+/// Any fixed seed: the rain only has to look random, not differ per run.
+const RAIN_SEED: u64 = 0x5eed_e3e7;
+/// How often the screen redraws while the emeralds are falling.
+const RAIN_FRAME: std::time::Duration = std::time::Duration::from_millis(80);
+/// How often the mascot's eyes move, unchanged by the faster redraw.
+const EYE_PERIOD: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Blank columns between the right pane's borders and its content, on each
 /// side, so nothing in it sits flush against a border.
@@ -706,27 +728,68 @@ fn done_banner_lines(
     mode: ColorMode,
     unicode: bool,
 ) -> Vec<String> {
+    match banner_pixel_rows(width, available_rows) {
+        Some(rows) => rows
+            .iter()
+            .map(|r| paint_banner_row(&pad(&center_text(r, width), width), mode, unicode))
+            .collect(),
+        None => vec![pad(&center_text("DONE!", width), width)],
+    }
+}
+
+/// The banner's rows, `#` per pixel, at the widest scale that fits, or
+/// `None` when even one column per pixel does not.
+fn banner_pixel_rows(width: usize, available_rows: usize) -> Option<Vec<String>> {
     let art = done_banner_art(width, available_rows);
     if art.len() == 1 {
-        return art;
+        return None;
     }
-    for scale in [2, 1] {
-        let rows: Vec<String> = art
-            .iter()
-            .map(|r| {
-                r.chars()
-                    .flat_map(|c| std::iter::repeat_n(c, scale))
-                    .collect()
-            })
-            .collect();
-        if rows[0].chars().count() <= width {
-            return rows
-                .iter()
-                .map(|r| paint_banner_row(&pad(&center_text(r, width), width), mode, unicode))
-                .collect();
+    [2, 1]
+        .into_iter()
+        .map(|scale| {
+            art.iter()
+                .map(|r| {
+                    r.chars()
+                        .flat_map(|c| std::iter::repeat_n(c, scale))
+                        .collect()
+                })
+                .collect::<Vec<String>>()
+        })
+        .find(|rows| rows[0].chars().count() <= width)
+}
+
+/// Whether the emeralds are falling: no question pending, and colour to
+/// draw them in.
+fn rain_visible(state: &State, mode: ColorMode) -> bool {
+    state.question.is_none() && mode != ColorMode::None
+}
+
+/// The rain under the progress bar, with the DONE banner stamped over it
+/// once the run is done; `None` when the banner would not fit as pixels.
+fn rain_lines(
+    state: &State,
+    width: usize,
+    area: usize,
+    mode: ColorMode,
+    unicode: bool,
+) -> Option<Vec<String>> {
+    let mut grid = state.rain.paint(width, area);
+    if state.done {
+        let rows = banner_pixel_rows(width, area)?;
+        let top = area.saturating_sub(rows.len()) / 2;
+        for (i, row) in rows.iter().enumerate() {
+            for (x, c) in center_text(row, width).chars().enumerate() {
+                if c == '#' && x < width {
+                    grid[top + i][x] = Some(DONE_YELLOW);
+                }
+            }
         }
     }
-    vec![pad(&center_text("DONE!", width), width)]
+    Some(
+        grid.iter()
+            .map(|row| emerald::render_row(row, mode, unicode))
+            .collect(),
+    )
 }
 
 /// One centred, padded banner row with its `#` pixels drawn as solid
@@ -833,6 +896,14 @@ fn top_section_lines(
         &progress_bar(done, total, width, unicode),
         width,
     )];
+    if rain_visible(state, color_mode) {
+        let area = available_rows.saturating_sub(lines.len() + 1);
+        if let Some(rain) = rain_lines(state, width, area, color_mode, unicode) {
+            lines.push(pad("", width));
+            lines.extend(rain);
+            return lines;
+        }
+    }
     if state.done {
         lines.push(pad("", width));
         let remaining = available_rows.saturating_sub(lines.len());
@@ -1723,6 +1794,25 @@ mod tests {
         let narrow = done_banner_lines(50, 10, ColorMode::TrueColor, true);
         assert_eq!(narrow.len(), 5);
         assert!(!strip_sgr(&narrow[0]).contains(&"\u{2588}".repeat(10)));
+    }
+
+    #[test]
+    fn emeralds_rain_behind_the_done_banner_and_stop_for_a_question() {
+        let green = mascot::fg_sgr(ColorMode::TrueColor, (0x1d, 0xc4, 0x5c));
+        let yellow = mascot::fg_sgr(ColorMode::TrueColor, DONE_YELLOW);
+        let mut state = State::new(&names(&["a"]));
+        state.rain.advance(3.0);
+        let running = render_frame(&state, 140, 44, ColorMode::TrueColor, true).join("\n");
+        assert!(running.contains(&green), "no emerald while installing");
+        state.done = true;
+        let done = render_frame(&state, 140, 44, ColorMode::TrueColor, true).join("\n");
+        assert!(done.contains(&green), "the rain stopped once done");
+        assert!(done.contains(&yellow), "no DONE banner over the rain");
+        let (tx, _rx) = mpsc::channel();
+        state.done = false;
+        state.question = Some(("Grant access?".to_string(), String::new(), tx));
+        let asking = render_frame(&state, 140, 44, ColorMode::TrueColor, true).join("\n");
+        assert!(!asking.contains(&green), "emeralds drawn over a question");
     }
 
     #[test]
