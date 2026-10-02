@@ -840,7 +840,13 @@ const LOG_SECTION_ROWS: usize = 1 + LOG_CONTENT_ROWS;
 /// boundary from whatever sits above it.
 fn bottom_log_lines(state: &State, width: usize) -> Vec<String> {
     let mut lines = vec![pad_dash("LOG", width, '-')];
-    let wrapped: Vec<String> = state.log.iter().flat_map(|l| wrap(l, width)).collect();
+    let wrapped: Vec<String> = state
+        .log
+        .iter()
+        .flat_map(|entry| entry.split('\n'))
+        .map(printable_log_line)
+        .flat_map(|l| wrap(&l, width))
+        .collect();
     let total = wrapped.len();
     let max_scroll = total.saturating_sub(LOG_CONTENT_ROWS);
     let scroll = state.log_scroll.min(max_scroll);
@@ -853,6 +859,16 @@ fn bottom_log_lines(state: &State, width: usize) -> Vec<String> {
         lines.push(pad("", width));
     }
     lines
+}
+
+/// One physical log line with no control characters left in it. A newline
+/// inside a frame row moves the terminal's cursor, so the rest of the frame
+/// lands a row lower and the screen scrolls.
+fn printable_log_line(line: &str) -> String {
+    line.trim_end_matches('\r')
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 const MODAL_YES_BG: (u8, u8, u8) = (25, 110, 60);
@@ -1636,5 +1652,101 @@ mod tests {
         let state = State::new(&names(&["a"]));
         let frame = render_frame(&state, 80, 24, ColorMode::None, false);
         assert!(frame[1].contains("UPDATING/INSTALL"));
+    }
+
+    /// Display columns of one rendered row: SGR escapes take none.
+    fn display_cols(row: &str) -> usize {
+        let mut cols = 0;
+        let mut chars = row.chars();
+        while let Some(c) = chars.next() {
+            if c == '\u{1b}' {
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                cols += 1;
+            }
+        }
+        cols
+    }
+
+    /// A row wider than the terminal wraps, pushing the frame past the last
+    /// row so the terminal scrolls it up; every scroll position must fit.
+    #[test]
+    fn every_frame_row_fits_the_terminal_at_every_log_scroll_position() {
+        let skills: Vec<&str> = vec!["ai-text-editor", "post-implementation-review", "www"];
+        let mut state = State::new(&names(&skills));
+        for (i, s) in [
+            "chat",
+            "ci-failures",
+            "git-merge-resolving",
+            "post-implementation-review",
+        ]
+        .iter()
+        .cycle()
+        .take(24)
+        .enumerate()
+        {
+            state.log.push(format!(
+                "installed {s} \u{2192} /Users/someone/.config/tsch-ai-skills/tmp/gui-home.{i:06}/.config/opencode/skills/{s}"
+            ));
+        }
+        // The shape a real mcp-mode install logs: one entry carrying its own
+        // indented continuation line, plus stray \r and \t for good measure.
+        for _ in 0..3 {
+            state.log.push(
+                "installed chat -> /x/skills/chat\n              integration mode: mcp (--integration)\r\tdone"
+                    .to_string(),
+            );
+        }
+        let (tx, _rx) = std::sync::mpsc::channel();
+        state.question = Some((
+            "Create /Users/someone/.config/tsch-ai-worktrees as the agent worktree root?"
+                .to_string(),
+            "A git worktree is a second checked-out working copy of a repository.".to_string(),
+            tx,
+        ));
+        let statuses = [
+            SkillRunStatus::Pending,
+            SkillRunStatus::Running,
+            SkillRunStatus::Done,
+            SkillRunStatus::Skipped,
+        ];
+        for phase in 0..6 {
+            for (i, row) in state.skills.iter_mut().enumerate() {
+                row.status = statuses[(i + phase) % 4];
+                row.already_installed = phase % 2 == 1;
+            }
+            state.done = phase == 5;
+            if phase == 4 {
+                state.question = None;
+            }
+            for (cols, rows) in [(159, 42), (120, 30), (80, 24)] {
+                for scroll in 0..40 {
+                    state.log_scroll = scroll;
+                    for unicode in [false, true] {
+                        let frame = render_frame(&state, cols, rows, ColorMode::TrueColor, unicode);
+                        assert_eq!(
+                            frame.len(),
+                            rows,
+                            "{cols}x{rows} scroll {scroll}: row count"
+                        );
+                        for (n, row) in frame.iter().enumerate() {
+                            assert_eq!(
+                                display_cols(row),
+                                cols,
+                                "phase {phase} {cols}x{rows} scroll {scroll} unicode {unicode} row {n}: {row:?}"
+                            );
+                            assert!(
+                                !row.chars().any(|c| c.is_control() && c != '\u{1b}'),
+                                "phase {phase} {cols}x{rows} scroll {scroll} row {n} carries a control char: {row:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }
