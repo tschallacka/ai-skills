@@ -7,6 +7,7 @@
 //! `layout::hit_test`).
 
 pub mod buttons;
+pub mod emerald;
 pub mod input;
 pub mod layout;
 pub mod mascot;

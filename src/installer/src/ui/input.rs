@@ -175,7 +175,13 @@ fn decode_byte(byte: u8, rx: &Receiver<Option<u8>>) -> Key {
 /// Blocks for up to `IDLE_TICK_TIMEOUT`; `Tick` on timeout, `Eof` once the
 /// reader thread has nothing left to send.
 pub fn read_key(rx: &Receiver<Option<u8>>) -> Key {
-    match rx.recv_timeout(IDLE_TICK_TIMEOUT) {
+    read_key_within(rx, IDLE_TICK_TIMEOUT)
+}
+
+/// `read_key` with its own tick interval, for a screen that animates faster
+/// than the idle tick.
+pub fn read_key_within(rx: &Receiver<Option<u8>>, tick: Duration) -> Key {
+    match rx.recv_timeout(tick) {
         Err(_) => Key::Tick,
         Ok(None) => Key::Eof,
         Ok(Some(byte)) => decode_byte(byte, rx),
