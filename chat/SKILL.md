@@ -707,21 +707,11 @@ directory (see below; separate sessions no longer require it), so
 The announce line the server logs on startup carries the same address, and
 `chat-client-rs discover --json` reports it without needing the file at all.
 
-`tail` backfills from a *recorded* cursor and only from one (B269, fixed
-2026-09-09): if a prior `join`/`read`/saved session already has a real cursor
-for the channel, `tail` now FETCHes the gap between that cursor and now
-before settling into the live push subscription, so nothing posted while you
-were away is silently lost. An absent cursor is unchanged: a channel tailed
-for the first time still asks the server for `LASTID` and starts at the
-channel's current end, so a fresh tail does not dump a long-lived channel's
-whole history. `--no-session` is a third, separate case, not the same
-mechanism with the same practical effect — it skips cursor lookup entirely
-(seed is a static 0, no `LASTID` round-trip) and starts live from the JOIN,
-so nothing from before is shown either way, but there is no server call
-behind it. `tail` still has no `--since` of its own; `join` first (to
-establish the cursor this backfill reads from) or `read --since 0` (to take
-the whole history in one shot, independent of tail) are still the ways to
-control where it starts.
+`tail` replays from a recorded cursor only (B269): if a `join`, `read` or
+saved session left one, it FETCHes what was posted since, then goes live.
+With no cursor it starts at the channel's end (`LASTID`), so a first tail
+never dumps the log; `--no-session` starts live from the JOIN. There is no
+`--since`: `join` first, or `read --since 0` for the whole history.
 
 ### 2. If nothing answers, start the server yourself
 
