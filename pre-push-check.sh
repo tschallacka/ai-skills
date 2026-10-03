@@ -73,6 +73,14 @@
 set -u
 export LC_ALL=C
 
+# A git hook runs this gate with GIT_DIR (and a linked worktree's gitdir) set
+# in its environment, and every test below inherits it. A test that runs
+# `git init` or `git clone` in a temp directory then reinitializes THAT
+# repository -- in a worktree, the shared .git/config -- and sets
+# core.bare=true there. Clear the repository variables for the whole gate:
+# each step locates its repository from its own working directory.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ─────────────────────────────────────────────────────────────────────────────
