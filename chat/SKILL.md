@@ -707,11 +707,11 @@ directory (see below; separate sessions no longer require it), so
 The announce line the server logs on startup carries the same address, and
 `chat-client-rs discover --json` reports it without needing the file at all.
 
-`tail` deliberately does not replay history: with no cursor recorded it asks
-the server for `LASTID` and starts at the channel's current end, so tailing a
-long-lived channel shows what arrives from now on instead of dumping the log.
-Run `join` first to record the cursor, or `read --since 0` to take the history
-in one shot. `tail` has no `--since`; after JOIN it waits for pushed messages.
+`tail` replays from a recorded cursor only (B269): if a `join`, `read` or
+saved session left one, it FETCHes what was posted since, then goes live.
+With no cursor it starts at the channel's end (`LASTID`), so a first tail
+never dumps the log; `--no-session` starts live from the JOIN. There is no
+`--since`: `join` first, or `read --since 0` for the whole history.
 
 ### 2. If nothing answers, start the server yourself
 
