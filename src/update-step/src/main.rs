@@ -368,6 +368,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{all_declared_targets, read_progress_file, read_with_retry};
+    use std::path::Path;
+    use std::time::Duration;
 
     #[test]
     fn read_progress_file_succeeds_on_a_present_file() {
@@ -419,19 +421,68 @@ mod tests {
         let path = dir.join("progress.md");
         let write_path = path.clone();
         let handle = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(30));
-            std::fs::write(&write_path, "late content").unwrap();
+            appear_after(
+                &write_path,
+                "late content",
+                Duration::from_millis(30),
+                Duration::ZERO,
+            )
         });
         // A loaded CI runner can start the writer thread later than
         // production does. The behaviour under test is "retries until the
-        // file appears", so the test gives the retry loop two seconds to
-        // see it.
+        // file appears", so the test gives the retry loop 200 attempts: a
+        // count, which a paused VM resumes rather than overruns. The file
+        // appears by rename, so a writer frozen mid-write (B369) is never
+        // read as an empty file.
         assert_eq!(
             read_with_retry(&path, 200, std::time::Duration::from_millis(10)).unwrap(),
             "late content"
         );
         handle.join().unwrap();
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Makes `content` appear at `path` the way a replaced file does: written
+    /// in full to a sibling first, then renamed into place in one step, with
+    /// a freeze of `pause` between creating the sibling and writing it.
+    fn appear_after(path: &Path, content: &str, delay: Duration, pause: Duration) {
+        use std::io::Write;
+        std::thread::sleep(delay);
+        let staged = path.with_extension("staged");
+        let mut file = std::fs::File::create(&staged).unwrap();
+        std::thread::sleep(pause);
+        file.write_all(content.as_bytes()).unwrap();
+        drop(file);
+        std::fs::rename(&staged, path).unwrap();
+    }
+
+    /// B369: a writer frozen mid-write (a CI VM paused by its host) must not
+    /// let the reader see a created-but-empty file and return "".
+    #[test]
+    fn a_writer_frozen_mid_write_never_exposes_a_partial_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "update-step-b369-frozen-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("progress.md");
+        let write_path = path.clone();
+        let handle = std::thread::spawn(move || {
+            appear_after(
+                &write_path,
+                "late content",
+                Duration::from_millis(5),
+                Duration::from_millis(100),
+            )
+        });
+        let got = read_with_retry(&path, 200, Duration::from_millis(10)).unwrap();
+        handle.join().unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(got, "late content");
     }
 
     /// B354 regression: a batched commit's own "extra" files must be checked
