@@ -12,7 +12,12 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn recoverable_from_git(directory: &Path) -> bool {
+    // Decided from the path alone. A git hook exports GIT_DIR (and a worktree's
+    // gitdir) to its children, which would make every path look "inside" the
+    // pushing repository and skip the backup.
     Command::new("git")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .arg("-C")
         .arg(directory)
         .args(["rev-parse", "--is-inside-work-tree"])
@@ -87,7 +92,15 @@ mod tests {
     #[test]
     fn inside_a_git_tree_no_backup_file_is_written() {
         let dir = tempfile::tempdir().unwrap();
+        // A git hook (the pre-push gate) runs this test with GIT_DIR pointing
+        // at the repository it was pushed from. `git init <dir>` then
+        // reinitializes THAT repository -- and in a linked worktree, that is
+        // the shared .git/config -- setting core.bare=true there. Clear the
+        // inherited repository variables so the init always creates the
+        // fresh temp repo it names.
         Command::new("git")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
             .arg("init")
             .arg("-q")
             .arg(dir.path())
