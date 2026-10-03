@@ -405,9 +405,10 @@ case "$mode" in
                 exit 66
             }
         fi
-        # The two register binaries are release-built and never committed, the
-        # same as the chat pair above, and skill_files() lists the host's row
-        # for each -- so the copy loop below requires them for THIS host. Build
+        # The two register binaries and ci-failures' are release-built and never
+        # committed, the same as the chat pair above, and skill_files() lists
+        # the host's row for each -- so the copy loop below requires them for
+        # THIS host. Build
         # them when cargo is here and otherwise require the CI step's output,
         # rather than letting the loop fail with a bare "does not exist" on a
         # path nothing in this script ever writes. host_target(), not a fourth
@@ -419,7 +420,7 @@ case "$mode" in
             || { printf '%s: unsupported host for the register binaries\n' "${0##*/}" >&2; exit 66; }
         register_exe=''
         case "$register_dir" in *windows*) register_exe='.exe' ;; esac
-        for register_pair in 'bug-report:bugs' 'todo:todo'; do
+        for register_pair in 'bug-report:bugs' 'todo:todo' 'ci-failures:ci-failures'; do
             register_skill="${register_pair%%:*}"
             register_bin="${register_pair#*:}$register_exe"
             if [ -x "$repo_root/$register_skill/bin/$register_dir/$register_bin" ]; then

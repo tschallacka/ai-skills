@@ -98,6 +98,10 @@ ai-text-editor/bin/*/
 # per-skill plumbing (B291).
 interactive-shell/bin/*/
 
+# ci-failures' compiled binary, on the same terms: the skill gained a
+# binaries.tsv after the rules above, and its release build stages here.
+ci-failures/bin/*/
+
 # A local `cargo build` drop of the plan-crypt helper, the same developer
 # convenience as chat/runtime/chat-server-rs above. plan-crypt now has a
 # shipped row in planning/binaries.tsv alongside plan-overview and rjq (T72

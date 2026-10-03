@@ -1,0 +1,13 @@
+# MODE: PROD
+# The prebuilt ci-failures binary shipped with the ci-failures skill.
+# Built per target by CI and by ../setup-dev-env.sh; never committed.
+#
+# scripts/ci-failures.sh is only a shim: it execs this binary from the shared
+# bin and has no shell implementation to fall back to, so an install without
+# it can do nothing but refuse.
+target	condition	binary	why
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	ci-failures	Static 64-bit x86 Linux CI failure reader
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	ci-failures	Static 64-bit ARM Linux CI failure reader
+x86_64-apple-darwin	Darwin:x86_64	ci-failures	Intel macOS CI failure reader
+aarch64-apple-darwin	Darwin:arm64	ci-failures	Apple Silicon macOS CI failure reader
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	ci-failures.exe	64-bit Windows and POSIX-layer CI failure reader
