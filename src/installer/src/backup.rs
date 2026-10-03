@@ -12,7 +12,12 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn recoverable_from_git(directory: &Path) -> bool {
+    // Decided from the path alone. A git hook exports GIT_DIR (and a worktree's
+    // gitdir) to its children, which would make every path look "inside" the
+    // pushing repository and skip the backup.
     Command::new("git")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .arg("-C")
         .arg(directory)
         .args(["rev-parse", "--is-inside-work-tree"])

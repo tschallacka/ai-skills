@@ -19,7 +19,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn git_output(source_root: &Path, args: &[&str]) -> Option<String> {
+    // Resolved from the path given, not from an inherited GIT_DIR (see
+    // backup.rs's recoverable_from_git for why a git hook would leak one).
     let output = Command::new("git")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .arg("-C")
         .arg(source_root)
         .args(args)
