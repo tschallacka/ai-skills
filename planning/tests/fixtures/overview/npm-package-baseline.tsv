@@ -52,6 +52,7 @@ package/chat/docs/interrupts.md	9277
 package/chat/integration.tsv	1782
 package/chat/requires.tsv	467
 package/ci-failures/SKILL.md	4151
+package/ci-failures/binaries.tsv	861
 package/ci-failures/docs/README.md	1146
 package/ci-failures/requires.tsv	1641
 package/ci-failures/scripts/ci-failures-glab-lib.sh	7548

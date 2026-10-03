@@ -221,7 +221,7 @@ fn stage_primary(
 /// shared-bin copy was already there.
 fn skill_dir_for(crate_name: &str) -> Option<&str> {
     match crate_name {
-        "bug-report" | "todo" | "interactive-shell" => Some(crate_name),
+        "bug-report" | "todo" | "interactive-shell" | "ci-failures" => Some(crate_name),
         "interactive-shell-mcp" => Some("interactive-shell"),
         "chat-client-rs" | "chat-mcp" | "chat-server-rs" | "chat-spool-watch" => Some("chat"),
         "ai-text-editor" | "ai-text-editor-mcp" => Some("ai-text-editor"),
@@ -297,6 +297,9 @@ mod tests {
         for crate_name in ["bug-report", "todo", "interactive-shell"] {
             assert_eq!(skill_dir_for(crate_name), Some(crate_name), "{crate_name}");
         }
+        // ci-failures' shim resolves its binary only from the shared bin, which
+        // the installer fills only from ci-failures/bin/<triple>/.
+        assert_eq!(skill_dir_for("ci-failures"), Some("ci-failures"));
         assert_eq!(
             skill_dir_for("interactive-shell-mcp"),
             Some("interactive-shell")
