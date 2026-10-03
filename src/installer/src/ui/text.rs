@@ -19,16 +19,40 @@
 /// both counts. Never used for content where the cut text itself matters
 /// (see `overflow`'s and `wrap`'s own docs for the alternative).
 pub(crate) fn pad(text: &str, width: usize) -> String {
-    if text.len() > width {
+    if text.chars().count() > width {
         return if width == 0 {
             String::new()
         } else if width < 4 {
             ".".repeat(width)
         } else {
-            format!("{}...", &text[..width - 3])
+            format!("{}...", &text[..char_byte_index(text, width - 3)])
         };
     }
     format!("{text:<width$}")
+}
+
+/// Border characters drawn before a pane or section title, so a title never
+/// sits flush against a corner or a T-junction.
+pub(crate) const TITLE_LEAD: usize = 2;
+
+/// Exactly `width` columns of `fill` with `label` set in after `TITLE_LEAD`
+/// of them; `reverse` draws the label in reverse video (a focused pane).
+pub(crate) fn titled_rule(label: &str, width: usize, fill: char, reverse: bool) -> String {
+    let lead = TITLE_LEAD.min(width);
+    let label: String = label.chars().take(width - lead).collect();
+    let tail = width - lead - label.chars().count();
+    let shown = if reverse {
+        format!("\x1b[7m{label}\x1b[0m")
+    } else {
+        label
+    };
+    let line = |n| std::iter::repeat_n(fill, n).collect::<String>();
+    format!("{}{shown}{}", line(lead), line(tail))
+}
+
+/// Byte offset of the `n`th character of `text`, or its length when shorter.
+fn char_byte_index(text: &str, n: usize) -> usize {
+    text.char_indices().nth(n).map_or(text.len(), |(i, _)| i)
 }
 
 /// Like `pad`, but measured by displayed CHARACTER count rather than byte
@@ -65,19 +89,20 @@ pub(crate) fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut remaining = text;
     while !remaining.is_empty() {
-        if remaining.len() <= width {
+        if remaining.chars().count() <= width {
             lines.push(remaining.to_string());
             break;
         }
-        let candidate = &remaining[..width];
+        let candidate = &remaining[..char_byte_index(remaining, width)];
         match candidate.rfind(' ') {
             Some(split) if split > 0 => {
                 lines.push(candidate[..split].to_string());
                 remaining = remaining[split..].trim_start_matches(' ');
             }
             _ => {
-                lines.push(format!("{}-", &remaining[..width - 1]));
-                remaining = &remaining[width - 1..];
+                let cut = char_byte_index(remaining, width - 1);
+                lines.push(format!("{}-", &remaining[..cut]));
+                remaining = &remaining[cut..];
             }
         }
     }
@@ -174,6 +199,43 @@ mod tests {
             assert!(!line.contains("  "));
         }
         assert_eq!(lines.join(" "), "one two three four");
+    }
+
+    #[test]
+    fn a_title_never_hugs_the_corner_and_the_rule_fills_its_width() {
+        assert_eq!(
+            titled_rule("LOG", 10, '\u{2500}', false),
+            "\u{2500}\u{2500}LOG\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"
+        );
+        assert_eq!(titled_rule("A LONG TITLE", 6, '-', false), "--A LO");
+        assert_eq!(titled_rule("X", 1, '-', false), "-");
+        let focused = titled_rule("[SKILLS]", 20, '-', true);
+        assert!(focused.starts_with("--\x1b[7m[SKILLS]\x1b[0m"));
+        assert!(focused.ends_with(&"-".repeat(10)));
+    }
+
+    /// A 3-byte arrow straddling the cut point must not panic, and every
+    /// line must fit in `width` displayed characters, not bytes.
+    #[test]
+    fn wrap_and_pad_measure_and_cut_by_character_not_byte() {
+        for width in 8..40 {
+            for lead in 0..12 {
+                let text = format!("{}x \u{2192} /a/very/long/path/name/here", "y".repeat(lead));
+                for line in wrap(&text, width) {
+                    assert!(line.chars().count() <= width, "{width}: {line:?}");
+                }
+                let token = format!("{}\u{2192}{}", "y".repeat(lead), "z".repeat(40));
+                assert!(wrap(&token, width)
+                    .iter()
+                    .all(|l| l.chars().count() <= width));
+                assert_eq!(
+                    pad(&text, width).chars().count(),
+                    width,
+                    "{width}: {text:?}"
+                );
+            }
+        }
+        assert_eq!(pad("a\u{2192}b", 5), "a\u{2192}b  ");
     }
 
     #[test]
