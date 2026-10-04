@@ -102,9 +102,13 @@ installer_binary_path() { # <target> -> where its binary sits once built
     printf '%s/target/%s/release/%s\n' "$repo_root" "$1" "$(binary_name_for "$1")"
 }
 
-# Builds only when nothing is there yet; staleness detection is left to the
-# tests. Returns 1 (not a hard exit) when cargo is absent or the build
-# fails, so the caller can decide whether that is fatal.
+# Always asks cargo rather than trusting an existing binary: a binary built
+# before a git pull is still executable, and reusing it silently repacks a
+# stale installer into the release tarball (B382). cargo's own incremental
+# cache makes an up-to-date build a no-op. Returns 1 (not a hard exit) when
+# the build fails, so the caller can decide whether that is fatal; with no
+# cargo at all, an existing binary is used with a warning that it may predate
+# HEAD.
 #
 # ALWAYS passes --target, even when it names the running host: `uname`
 # cannot tell a glibc host from a musl one, so a "this is the host, skip
@@ -117,8 +121,11 @@ installer_binary_path() { # <target> -> where its binary sits once built
 ensure_installer_binary() {
     local target="$1" bin
     bin="$(installer_binary_path "$target")"
-    [ -x "$bin" ] && return 0
-    command -v cargo >/dev/null 2>&1 || return 1
+    if ! command -v cargo >/dev/null 2>&1; then
+        [ -x "$bin" ] || return 1
+        printf '%s: warning: no cargo; using %s, which may predate HEAD\n' "${0##*/}" "$bin" >&2
+        return 0
+    fi
     (cd "$repo_root" && cargo build --release -p installer --target "$target") || return 1
     [ -x "$bin" ]
 }
