@@ -8111,7 +8111,7 @@
     {
       "id": "B387",
       "title": "interactive-shell's session file briefly has mode 644 before save_session's own chmod tightens it to 600, observed flaking on x86_64-apple-darwin CI",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -8124,12 +8124,12 @@
         "src/interactive-shell/tests/protocol.rs",
         "ci"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "save_session now writes the session file to a sibling temp file created 0600 from the start, then renames it into place (the same approach as the earlier session-file hardening), so no reader ever sees the file at a wider mode. Merged in PR #171.",
+      "verification": "PR #171 merged after CI passed on x86_64-apple-darwin; the session test passes there. Re-running the protocol test on macOS CI is the confirmation.",
       "found_by": "CI (x86_64-apple-darwin build-and-runs-every-subject-in-scope job), surfaced while pushing an unrelated installer UI change",
       "notes": "Not yet reproduced locally -- filed from a single observed CI failure on x86_64-apple-darwin, at the user's explicit request to investigate and write it up for them to test/confirm on their own Mac. Recommended fix direction (not yet attempted): make save_session's file creation atomic with its permissions, e.g. write to a sibling temp file opened via OpenOptions with mode 0o600 set BEFORE any bytes are written (not after), then rename() into place -- rename is atomic on POSIX, so no reader ever observes an intermediate mode. The existing restrict_to_owner(&path, 0o600) call after fs::write would then become redundant (or stay as a defensive no-op) rather than the only thing narrowing the window. To reproduce locally before fixing: loop 'cargo test -p interactive-shell --test protocol session_file_reuses_socket_and_command_without_repeating_arguments' under artificial scheduling pressure (e.g. 'sudo cpulimit' on the test process, or running many parallel 'cargo test' jobs concurrently to contend for CPU) and watch for the same assertion; if that doesn't reproduce it either, the race may need an actual SIGSTOP/SIGCONT around save_session's own write-then-chmod window (the same technique B384's own verification needed) to force the gap open on demand.",
       "created_at": "2026-10-01T14:51:45Z",
-      "updated_at": "2026-10-01T14:52:14Z"
+      "updated_at": "2026-10-04T15:46:03Z"
     },
     {
       "id": "B59",
