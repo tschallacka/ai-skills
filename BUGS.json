@@ -3512,7 +3512,7 @@
     {
       "id": "B391",
       "title": "setup-dev-env.sh runs its stale bash fallback on any machine with skills installed, so B372/B373 chat, ai-text-editor and ci-failures staging never happens",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3523,17 +3523,17 @@
       "surfaces": [
         "setup-dev-env.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh (pecbip_pick) now tries the checkout's own <checkout>/bin/<triple>/<name> first, before the shared bin, so setup-dev-env runs its freshly built binary rather than the stale bash copy (commit 050aa18c, branch fix/b391-b392-b393-new-bugs).",
+      "verification": "test-exec-compiled-binary-preference: the new B391 case (a checkout build runs while the shared bin exists without it) passes. Live, on this checkout with an empty shared bin: pecbip_pick selects bin/x86_64-unknown-linux-musl/setup-dev-env. Full ./run-tests.sh: 250 of 250 pass. Not run on macOS.",
       "found_by": "post-install hash comparison, compile-and-install session 2026-10-05",
-      "notes": "Why it went unnoticed: the B372 verification ran the rebuilt setup-dev-env binary directly rather than through the shell shim. Both paths print the same summary, and the built count is true on either, so only the mtimes of the skill-local copies show which one ran. B376 has the same root (the shared bin wins once skills are installed), seen through generate-portability. Workaround: export AI_SKILLS_BIN_ROOT to the checkout bin/<triple> before running the shim. Bringing the bash copy up to B372/B373 parity would hide this instance only: any later fix made in the Rust crate alone would be skipped the same way, so the selection is the defect. Related: B392 (same picker; a stale shared-bin planning command wins over the fresh sibling).",
+      "notes": "Why it went unnoticed: the B372 verification ran the rebuilt setup-dev-env binary directly rather than through the shell shim. Both paths print the same summary, and the built count is true on either, so only the mtimes of the skill-local copies show which one ran. B376 has the same root (the shared bin wins once skills are installed), seen through generate-portability. Workaround: export AI_SKILLS_BIN_ROOT to the checkout bin/<triple> before running the shim. Bringing the bash copy up to B372/B373 parity would hide this instance only: any later fix made in the Rust crate alone would be skipped the same way, so the selection is the defect. Related: B392 (same picker; a stale shared-bin planning command wins over the fresh sibling). Fix is on fix/b391-b392-b393-new-bugs; not yet merged to master.",
       "created_at": "2026-10-05T15:22:55Z",
-      "updated_at": "2026-10-05T15:23:20Z"
+      "updated_at": "2026-10-05T16:09:41Z"
     },
     {
       "id": "B393",
       "title": "The compiled register-command refuses with exit 69 when rjq is not on PATH, though it never uses rjq",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3544,12 +3544,12 @@
       "surfaces": [
         "src/register-command/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "register-command no longer checks for rjq on PATH; the binary keeps commands.json with serde_json and never runs rjq (commit 9e96bbd7).",
+      "verification": "src/register-command/tests/without_rjq_on_path.rs: --list succeeds on an empty registry with PATH set to nothing (cargo test -p register-command: 1 passed). cargo fmt and clippy clean for the crate. Full ./run-tests.sh: 250 of 250 pass.",
       "found_by": "an agent working a plan, relayed by Tschallacka 2026-10-05; reproduced in the same session",
-      "notes": "Why it went unnoticed: the dev tree and CI put bin/<triple> on PATH, and the bash helpers prepend the bin dir when they load, so rjq is always findable there. Only an installed skill run from an agent shell whose PATH lacks the shared bin hits it, and the compiled binary is exec-ed before any helper could fix PATH. The message also sent that agent to brew install rjq, a formula that does not exist; dropping the check removes the message with it. Fix: delete main.rs:63-69, with a test running the binary on a PATH holding no rjq. Workaround until then: export PATH with the shared bin (~/.config/tsch-ai-skills/bin) first. Not swept: other Rust ports may carry the same vestigial precondition; a search of src/ for the brew rjq text found only this one, but a probe with different wording would not show up that way.",
+      "notes": "Why it went unnoticed: the dev tree and CI put bin/<triple> on PATH, and the bash helpers prepend the bin dir when they load, so rjq is always findable there. Only an installed skill run from an agent shell whose PATH lacks the shared bin hits it, and the compiled binary is exec-ed before any helper could fix PATH. The message also sent that agent to brew install rjq, a formula that does not exist; dropping the check removes the message with it. Fix: delete main.rs:63-69, with a test running the binary on a PATH holding no rjq. Workaround until then: export PATH with the shared bin (~/.config/tsch-ai-skills/bin) first. Not swept: other Rust ports may carry the same vestigial precondition; a search of src/ for the brew rjq text found only this one, but a probe with different wording would not show up that way. Fix is on fix/b391-b392-b393-new-bugs; not yet merged to master.",
       "created_at": "2026-10-05T15:36:26Z",
-      "updated_at": "2026-10-05T15:36:34Z"
+      "updated_at": "2026-10-05T16:09:41Z"
     },
     {
       "id": "B14",
@@ -5291,7 +5291,7 @@
     {
       "id": "B392",
       "title": "A planning command left in the shared bin shadows every later install of it, because the installed wrapper prefers the shared copy and the installer never refreshes it",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -5302,12 +5302,12 @@
       "surfaces": [
         "planning/scripts/lib/core/plan_exec_compiled_binary_if_present.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "pecbip_pick tries the copy beside the wrapper before the shared bin, so the copy the installer just placed beside an installed wrapper runs, and a stale copy in the shared bin no longer shadows it (commit 050aa18c).",
+      "verification": "test-exec-compiled-binary-preference: a copy beside the wrapper wins over a stale copy in the shared bin, and the shared copy is not run. The B365 case, which used to pin the shared bin first, now pins the beside copy. Full ./run-tests.sh: 250 of 250 pass. Not run on macOS.",
       "found_by": "post-install hash comparison, compile-and-install session 2026-10-05",
-      "notes": "Why it went unnoticed: the B365 verification installed into a scratch HOME whose shared bin held no planning commands, so the sibling copy was the only candidate. On a long-lived machine most shared copies stay byte-identical to a fresh build because a planning command rarely changes, so a hash spot-check usually passes; here only 2 of 53 differed. Hand-fixed for this session by copy-then-mv of the two differing files, so reproducing now needs a deliberately older copy in the shared bin. Either direction closes it: the installer sweeps or refreshes planning commands it finds in the shared bin, or the picker prefers an installed skill sibling copy over the shared bin. The second reverses the ordering B365 chose and needs that decision revisited. Related: B391 (same picker, setup-dev-env side).",
+      "notes": "Why it went unnoticed: the B365 verification installed into a scratch HOME whose shared bin held no planning commands, so the sibling copy was the only candidate. On a long-lived machine most shared copies stay byte-identical to a fresh build because a planning command rarely changes, so a hash spot-check usually passes; here only 2 of 53 differed. Hand-fixed for this session by copy-then-mv of the two differing files, so reproducing now needs a deliberately older copy in the shared bin. Either direction closes it: the installer sweeps or refreshes planning commands it finds in the shared bin, or the picker prefers an installed skill sibling copy over the shared bin. The second reverses the ordering B365 chose and needs that decision revisited. Related: B391 (same picker, setup-dev-env side). Fix is on fix/b391-b392-b393-new-bugs; not yet merged to master.",
       "created_at": "2026-10-05T15:23:10Z",
-      "updated_at": "2026-10-05T15:23:15Z"
+      "updated_at": "2026-10-05T16:09:41Z"
     },
     {
       "id": "B6",
