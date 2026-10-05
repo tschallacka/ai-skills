@@ -15,7 +15,6 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Mutex, Once, OnceLock};
 use std::thread;
-use std::time::Duration;
 
 pub fn is_tty() -> bool {
     std::io::stdin().is_terminal()
@@ -52,18 +51,9 @@ pub fn enter() -> String {
     saved
 }
 
-/// How long `leave` keeps echo off after disabling mouse tracking, so a mouse
-/// report already in flight (a click's release, sent after its press caused
-/// the screen to finish) is read while echo is still off. Once cooked mode
-/// returns, the tty driver echoes any such bytes as visible text (B385).
-const MOUSE_RELEASE_GRACE: Duration = Duration::from_millis(100);
-
 pub fn leave(saved: &str) {
-    print!("\x1b[?1000l\x1b[?1006l");
+    print!("\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l");
     use std::io::Write;
-    let _ = std::io::stdout().flush();
-    std::thread::sleep(MOUSE_RELEASE_GRACE);
-    print!("\x1b[?25h\x1b[?1049l");
     let _ = std::io::stdout().flush();
     if !saved.is_empty() {
         let _ = stty(&[saved]);
