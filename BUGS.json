@@ -5207,7 +5207,7 @@
     {
       "id": "B382",
       "title": "build-installer-release.sh repacks a stale installer binary after a git pull",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -5216,12 +5216,12 @@
       "expected": "ensure_installer_binary should rebuild whenever the source it would build from is newer than the existing binary (e.g. compare the binary's mtime against 'git log -1 --format=%ct -- src/installer' for the current HEAD, or simply always rebuild and let cargo's own incremental-compilation cache make a no-op rebuild cheap), so a stale binary is never silently repacked.",
       "mechanism": "ensure_installer_binary() in installer/build-installer-release.sh only checks '[ -x \"$bin\" ]' before skipping the cargo build -- it never compares the binary's mtime/commit against the current source tree. A binary compiled before a git pull is still executable, so it is silently reused (and repacked into the release tarball) even though the source it was built from is now behind HEAD. The function's own comment says 'staleness detection is left to the tests', but no test in this repo actually catches this: build-release.sh/pack-target's own tests check the PACKAGE CONTENTS shape, not whether the installer binary inside it matches the current git commit.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "0dc627ac (PR #182): ensure_installer_binary always runs cargo build (a no-op when current) instead of returning early when a binary exists; with no cargo it uses the existing binary with a warning that it may predate HEAD.",
+      "verification": "On master a7bdc9e5 with a stale target/aarch64-apple-darwin/release/installer from 2026-10-02 (sha256 4e5a24ea...): build-installer-release.sh --host-only recompiled it (3aa12397...) and the tarball's installer is 3aa12397..., where before the fix the stale binary was packed unchanged (observed 2026-09-28).",
       "found_by": "Tschallacka (live GUI test-drive re-test, reported to the assistant mid-session)",
       "notes": "Not yet fixed. Filed at the user's own request after independently confirming the mechanism by reading ensure_installer_binary's source; the user had already worked around it this time by rebuilding both target binaries by hand before re-running build-installer-release.sh.",
       "created_at": "2026-09-28T15:40:49Z",
-      "updated_at": "2026-09-28T15:40:49Z"
+      "updated_at": "2026-10-05T09:16:31Z"
     },
     {
       "id": "B386",
