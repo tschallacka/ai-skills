@@ -3531,6 +3531,27 @@
       "updated_at": "2026-10-05T15:23:20Z"
     },
     {
+      "id": "B393",
+      "title": "The compiled register-command refuses with exit 69 when rjq is not on PATH, though it never uses rjq",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "T=$(mktemp -d); mkdir \"$T/plan\"; printf '{}\\n' > \"$T/plan/commands.json\"\n# A PATH without the shared bin, as an agent shell commonly has:\nenv -i HOME=\"$HOME\" PATH=/usr/bin:/bin /bin/bash ~/.claude/skills/planning/scripts/register-command.sh \"$T/plan\" --list; echo \"exit=$?\"\n# The same with the shared bin, where rjq is installed, on PATH:\nenv -i HOME=\"$HOME\" PATH=\"$HOME/.config/tsch-ai-skills/bin:/usr/bin:/bin\" /bin/bash ~/.claude/skills/planning/scripts/register-command.sh \"$T/plan\" --list; echo \"exit=$?\"\nbrew info rjq\n",
+      "observed": "macOS arm64, installed from master 1e6d58fe, 2026-10-05. First call: \"rjq is required by register-command; install rjq (macOS: brew install rjq, Debian: apt-get install rjq)\", exit=69. Second call: exit=0. `brew info rjq`: \"Error: No available formula with the name \"rjq\"\". rjq was installed the whole time at ~/.config/tsch-ai-skills/bin/rjq (rjq 0.1.0), next to the register-command binary the wrapper ran. An agent working a plan hit the first case, reported that the plan's command list could not be filled in and that validate-plan.sh --complete would fail, and proposed `brew install rjq` because the message says to.\n",
+      "expected": "register-command lists, adds and removes entries in commands.json whether or not rjq is on PATH, since it does that work itself; no message sends anyone to a package manager for rjq.",
+      "mechanism": "register-command.sh only hands off to the compiled register-command (plan_exec_compiled_binary_if_present). src/register-command/src/main.rs:63-69 then runs `rjq --version` through std::process::Command, which resolves rjq on PATH only, and dies 69 when that fails. The check is a precondition carried over from the bash implementation (register-lib.sh:15, `command -v rjq`): the binary reads and writes commands.json itself with serde_json (main.rs:80-83), and lines 63 and 68 are the only rjq references in the crate. So the binary refuses for want of a tool it never uses, and the shared bin that holds both binaries is not on PATH unless the caller put it there. The die message (main.rs:68) names a Homebrew formula and a Debian package that do not exist; rjq is this repository's own crate (src/rjq) and ships only through the installer.\n",
+      "surfaces": [
+        "src/register-command/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "an agent working a plan, relayed by Tschallacka 2026-10-05; reproduced in the same session",
+      "notes": "Why it went unnoticed: the dev tree and CI put bin/<triple> on PATH, and the bash helpers prepend the bin dir when they load, so rjq is always findable there. Only an installed skill run from an agent shell whose PATH lacks the shared bin hits it, and the compiled binary is exec-ed before any helper could fix PATH. The message also sent that agent to brew install rjq, a formula that does not exist; dropping the check removes the message with it. Fix: delete main.rs:63-69, with a test running the binary on a PATH holding no rjq. Workaround until then: export PATH with the shared bin (~/.config/tsch-ai-skills/bin) first. Not swept: other Rust ports may carry the same vestigial precondition; a search of src/ for the brew rjq text found only this one, but a probe with different wording would not show up that way.",
+      "created_at": "2026-10-05T15:36:26Z",
+      "updated_at": "2026-10-05T15:36:34Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
