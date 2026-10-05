@@ -62,6 +62,7 @@ for a persistent `ai-skills-install` command on `PATH` instead of `npx`.
 | AI text editor | Server-owned agent editor tabs with explicit search, revision-aware edits, undo/redo, raw-byte and hex modes, SQLite metadata, and Unix/TCP transport. | [docs](ai-text-editor/docs/README.md) |
 | www | A brake the human can pull, and one the agent pulls on itself when it is thrashing: stop, answer what do we have / what are the values / what are we trying to achieve, in order, then continue with one reasoned step or a numbered question. | [docs](www/docs/README.md) |
 | CI failures | What actually failed in a CI run or pipeline, from a run/pipeline id, a PR/MR number, or a branch: GitHub and GitLab detected from the git remote, named rather than chosen silently, with just the failing lines extracted per job. | [docs](ci-failures/docs/README.md) |
+| rjq | Parses, filters and searches JSON with the shipped `rjq` binary, a jq-compatible tool, on machines without `jq`. | [docs](rjq/docs/README.md) |
 
 Use a skill only when its frontmatter trigger matches the task or when the
 user explicitly requests it. Each skill documents when not to activate.

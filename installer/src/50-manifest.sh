@@ -755,6 +755,27 @@ ISHEOF
                     return 69 ;;
             esac
             ;;
+        rjq)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv
+            # The rjq binary ships as this skill's own, the same shape as todo's
+            # arm above: setup-dev-env stages it into rjq/bin/<triple>/, and the
+            # host's row is existence-gated through skill_artifact_files (B317).
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    skill_artifact_files rjq bin/x86_64-unknown-linux-musl/rjq ;;
+                Linux:aarch64|Linux:arm64)
+                    skill_artifact_files rjq bin/aarch64-unknown-linux-musl/rjq ;;
+                Darwin:x86_64)
+                    skill_artifact_files rjq bin/x86_64-apple-darwin/rjq ;;
+                Darwin:arm64)
+                    skill_artifact_files rjq bin/aarch64-apple-darwin/rjq ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    skill_artifact_files rjq bin/x86_64-pc-windows-msvc/rjq.exe ;;
+                *)
+                    printf 'skill_files: no rjq artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
+            ;;
     esac
 }
 
