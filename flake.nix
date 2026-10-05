@@ -182,6 +182,10 @@
               pkgs.shellcheck
               pkgs.actionlint
               pkgs.git
+              # The debugger the interactive-shell app profile for gdb drives,
+              # including its -tui mode. Development-only: no test depends on
+              # it, so the suite still runs without nix.
+              pkgs.gdb
               # The build toolchain for the crates under src/ (CODE-STYLE 1b).
               # This was development-only while nothing shipped was Rust; that
               # stopped being true when src/tony-the-pony and src/chat landed, so
