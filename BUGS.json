@@ -3489,6 +3489,27 @@
       "updated_at": "2026-09-26T19:44:49Z"
     },
     {
+      "id": "B388",
+      "title": "An installed ci-failures skill always refuses: no release ever shipped its compiled binary",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Install the released skills, then run ~/.claude/skills/ci-failures/scripts/ci-failures.sh <pr>",
+      "observed": "ci-failures.sh: no compiled binary found (checked AI_SKILLS_BIN_ROOT and the default bin dir); run ./setup-dev-env.sh to build it, or install the planning skill alongside ci-failures. Seen by an agent in a GitLab client project, which then fetched the job log by hand.",
+      "expected": "The installed skill runs; its binary is in the shared bin.",
+      "mechanism": "scripts/ci-failures.sh is only a shim that execs the compiled binary from the shared per-user bin (AI_SKILLS_BIN_ROOT, else ~/.config/tsch-ai-skills/bin). The installer fills that bin solely from a skill's own bin/<triple>/, and ci-failures had no binaries.tsv, no binary row in installer/src/50-manifest.sh skill_files(), no entry in build-release.sh's build loop, and setup-dev-env built it into the repo's bin/<triple>/ only. So no release ever carried the binary and every install refused.\n",
+      "surfaces": [
+        "ci-failures/binaries.tsv"
+      ],
+      "fix": "801fe51c + c7dc05e5 (PR #178): ci-failures/binaries.tsv per target; skill_files() lists the host's row through skill_artifact_files; build-release.sh builds it in the register loop; setup-dev-env stages it into ci-failures/bin/<triple>/; .gitignore covers ci-failures/bin/*/.\n",
+      "verification": "A host release built from the fix carries ci-failures/bin/aarch64-apple-darwin/ci-failures; installing it into an empty home puts ci-failures in the shared bin and the installed shim's --help exits 0 (it refused before). pre-push-check, test-installer-manifest, test-mode-markers and test-ci-failures-contract pass.\n",
+      "found_by": "an agent session using the installed skill on a client project",
+      "notes": null,
+      "created_at": "2026-10-05T09:14:59Z",
+      "updated_at": "2026-10-05T09:15:15Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -7760,12 +7781,12 @@
       "surfaces": [
         "src/update-step/src/main.rs"
       ],
-      "fix": "8c5631e6 on nextupdate: the retry loop's attempts and delay became arguments of read_with_retry; production still calls it with 5 x 20 ms, and the test gives it 200 x 10 ms.",
-      "verification": "cargo test -p update-step passes locally (5 tests). The failure was a timing race on a slow runner, so a green CI run on the x86_64 macOS leg is the real confirmation; see the run that follows the push of 8c5631e6.",
+      "fix": "89bc24f4 (PR #174): the real cause was not the retry budget but the test's writer. It made the file appear with fs::write, which creates the file and then fills it; a CI VM paused between the two left an empty file and the reader returned \"\" (CI: left \"\", right \"late content\"). The writer now writes a sibling in full and renames it into place, and a new test freezes the writer 100 ms between create and write. 8c5631e6's attempt-count budget stays; a count resumes after a pause.\n",
+      "verification": "Reproduced on macOS before the fix: a writer pausing 100 ms after create gave \"\" 3 of 3 runs, the exact CI values. With the fix update-step's tests pass 5 of 5; mutation (writing straight to the final path again) makes the new frozen-writer test fail with the same \"\".\n",
       "found_by": "aiskills, CI run 35660433933, 2026-09-21",
-      "notes": "The same shape as B349's own mitigation (a bounded retry against a transient disappearance): the retry is unchanged, only the test's patience.",
+      "notes": "The same shape as B349's own mitigation (a bounded retry against a transient disappearance): the retry is unchanged, only the test's patience. Recurred on ubuntu-latest after 8c5631e6; that fix had addressed a budget the failure never ran out of.",
       "created_at": "2026-09-21T22:37:21Z",
-      "updated_at": "2026-09-21T22:37:21Z"
+      "updated_at": "2026-10-05T09:14:25Z"
     },
     {
       "id": "B370",
@@ -7781,12 +7802,12 @@
       "surfaces": [
         "src/chat-server-rs/tests/message_tags.rs"
       ],
-      "fix": "chat-server-rs's message_tags.rs raised its wait_for ceiling from a flat 5s to a named WAIT_TIMEOUT constant of 20s, used at all 13 call sites. wait_for already returns as soon as the expected text appears, so this only helps a slow runner and costs a fast one nothing.",
-      "verification": "cargo test -p chat-server-rs --test message_tags green locally (9/9); full local suite and pre-push-check.sh green; CI run on commit c867ce98d20b257a816d183fd505a61d38b63eed: 33/33 checks passed, including the windows-latest legs the original failure was seen on. This is a timing hypothesis (a slow Windows runner exceeding the old 5s handshake window), not a locally reproduced race, so a longer ceiling mitigates rather than proves the mechanism; re-open with evidence if it recurs.",
+      "fix": "785d9e66 (PR #175): raising wait_for's ceiling to 20 s could not help; the cause was the B384 mechanism. wait_for looped `while Instant::now() < deadline`, so a CI VM frozen past the deadline woke, found the condition false and returned without looking again; every test waiting at that moment failed together. wait_for now runs a count of polls derived from the same timeout (400 x 50 ms) and checks once more after the last.\n",
+      "verification": "Reproduced on macOS by SIGSTOP-ing the cap_ls test process for 22 s mid-wait while server and s_client ran: it failed with \"CAP LS produced no reply at all: :server CAP * LS :message-tags\", the reply in its own message. With the fix the same freeze passes 3 of 3 runs, each finishing in 22.17 s; all 9 message_tags tests pass.\n",
       "found_by": "aiskills, CI run 35664485010, 2026-09-21",
-      "notes": "Hypothesis, not measured: the tests drive the server through a spawned 'openssl s_client' subprocess and wait 5 s for output (wait_for). On a slow Windows runner, running several of them in parallel, starting openssl and finishing the TLS handshake can take longer than that, so the output is still empty when the wait ends. The empty output in the failure message (nothing at all, not even the handshake banner) fits a client that had not got that far. A rerun of the failed job was started; if it passes this is a timing flake, and a fix would wait for the handshake first or use a longer, event-driven wait.",
+      "notes": "Hypothesis, not measured: the tests drive the server through a spawned 'openssl s_client' subprocess and wait 5 s for output (wait_for). On a slow Windows runner, running several of them in parallel, starting openssl and finishing the TLS handshake can take longer than that, so the output is still empty when the wait ends. The empty output in the failure message (nothing at all, not even the handshake banner) fits a client that had not got that far. A rerun of the failed job was started; if it passes this is a timing flake, and a fix would wait for the handshake first or use a longer, event-driven wait. Recurred on the Windows leg after the 20 s ceiling; the deadline, not its length, was the defect.",
       "created_at": "2026-09-21T23:19:48Z",
-      "updated_at": "2026-09-22T22:45:53Z"
+      "updated_at": "2026-10-05T09:14:25Z"
     },
     {
       "id": "B376",
@@ -7829,6 +7850,48 @@
       "notes": "Reproduced (1 of 7 runs) but the mechanism is not yet proven, hence reported rather than confirmed. Hypothesis: current() spawns uname via Command::output() and maps any spawn or read error to an empty string (.ok() then unwrap_or_default()), which resolve() then reports as UnsupportedHost; a transient spawn failure under parallel test threads would produce exactly this panic. Confirm by logging the Command error when output() fails. Separate and not filed here: in the pre-push hook run, backup::tests::outside_a_git_tree_a_dotfile_backup_is_written, backup::tests::a_second_backup_the_same_second_does_not_clobber_the_first and install::tests::a_reinstall_over_a_user_edited_file_backs_it_up_first also failed (backup.rs:76, :118, install.rs:599 expected exactly one backup), consistent with the temp dir resolving inside a tracked tree because HOME carries a stray repository; unconfirmed. Fixed and verified this session; the mechanism (parallel uname spawn contention, not a resolve() logic bug) was confirmed directly by reproducing the failure reliably in a sandboxed dev environment (tighter process limits than the reported macOS CI runner made it fail consistently rather than ~1-in-7), then confirming --test-threads=1 alone made it pass, before writing the fix. Did not separately investigate the three other tests this bug's own notes flagged as 'separate and not filed here' (backup.rs / a_reinstall_over_a_user_edited_file_backs_it_up_first) -- out of scope for this fix.",
       "created_at": "2026-09-28T16:00:13Z",
       "updated_at": "2026-09-28T16:14:01Z"
+    },
+    {
+      "id": "B389",
+      "title": "chat-mcp flow tests fail together on the Windows leg: parallel tests could share one UDP beacon port",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cargo test -p chat-mcp --test mcp_flow on the x86_64-pc-windows-msvc CI leg (job 111471949111, PR #183)",
+      "observed": "Five tests panicked at mcp_flow.rs:217: join refused: no chat server found ... no announce beacon on UDP 7780 after several attempts; start_server refused: started chat-server-rs.exe but it has not announced on UDP 57394 after several attempts. Test result FAILED, 22 passed, 5 failed, finished in 12.49s.",
+      "expected": "Each test discovers its own server on its own beacon port.",
+      "mechanism": "src/chat-mcp/tests/mcp_flow.rs chose each test's UDP beacon port as \"free TCP port + 1\" (the harness) or a free TCP port (the start_server tests); neither was checked as a free UDP port. Windows hands out ports in sequence, so with tests running in parallel one test's beacon could land on another's; the second UdpSocket::bind failed, and chat_client_rs::discover_candidates turns a bind failure into an empty list at once, so all ten 2 s discovery attempts returned in milliseconds (the whole binary finished in 12.5 s) and discovery reported no beacon.\n",
+      "surfaces": [
+        "src/chat-mcp/tests/mcp_flow.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "CI on PR #183, a change to installer/terminal.rs only",
+      "notes": "Fix in PR #184 (free_udp_port per test); not reproducible on macOS, which randomises ephemeral ports. Close once #184 merges and the Windows leg stays green.",
+      "created_at": "2026-10-05T09:15:15Z",
+      "updated_at": "2026-10-05T09:15:15Z"
+    },
+    {
+      "id": "B390",
+      "title": "chat-mcp flow tests intermittently fail on join: the server closes the connection (unexpected end of file)",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "for i in 1 2 3 4 5 6 7 8 9 10; do cargo test -q -p chat-mcp --test mcp_flow 2>&1 | awk '/refused:|test result/'; done   # macOS aarch64, nix dev shell",
+      "observed": "join refused: send: unexpected end of file (also once: send: Connection reset by peer, os error 54), panicking at mcp_flow.rs:227; 3 of 16 runs on unchanged master, 4 of 15 with PR #184's beacon-port change, each run failing one or two tests.",
+      "expected": "join succeeds on every run against the test's own chat-server-rs.",
+      "mechanism": null,
+      "surfaces": [
+        "src/chat-mcp/tests/mcp_flow.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "repeated local runs while verifying PR #184",
+      "notes": "Mechanism not yet known: the harness seeds the session with its own server, so join never reaches discovery; the server tears the TLS connection down during or right after registration. Reproducible locally at about 1 run in 5.",
+      "created_at": "2026-10-05T09:15:26Z",
+      "updated_at": "2026-10-05T09:15:26Z"
     },
     {
       "id": "B25",
