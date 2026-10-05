@@ -22,7 +22,6 @@
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
@@ -70,11 +69,6 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-fn free_port() -> u16 {
-    let probe = TcpListener::bind("127.0.0.1:0").expect("a free port");
-    probe.local_addr().expect("bound address").port()
-}
-
 /// A UDP port of the test's own for the announce beacon. "TCP port + 1" was
 /// not free on Windows, which hands out ports in sequence: a parallel test's
 /// beacon could land on the same number, the second bind failed, and
@@ -97,10 +91,10 @@ impl Harness {
             return None;
         }
         let home = scratch(name);
-        let port = free_port();
         let beacon_port = free_udp_port();
         let server = Command::new(&server_bin)
-            .arg(port.to_string())
+            // Port 0: the server binds whatever is free and records it.
+            .arg("0")
             .env("AI_CHAT_HOME", &home)
             .env("AI_CHAT_BIND", "127.0.0.1")
             // The server reads `CHAT_BEACON_PORT` (no `AI_` prefix); the
@@ -118,6 +112,7 @@ impl Harness {
             .stderr(Stdio::null())
             .spawn()
             .expect("chat-server-rs starts");
+        let port = bound_port(&home);
         wait_for_port(port);
         // Seed the session so resolution takes its first rung: an explicit
         // saved server. Discovery is deliberately never reached.
@@ -272,9 +267,29 @@ impl Drop for Harness {
     }
 }
 
+/// The port the test's own server actually bound, from the `server.port` it
+/// writes. A port picked here and handed to it could be taken by another
+/// socket first; the server then moved to an ephemeral one while the test
+/// talked to whatever held the old port (B390).
+fn bound_port(home: &Path) -> u16 {
+    let file = home.join("server.port");
+    for _ in 0..200 {
+        let recorded = std::fs::read_to_string(&file).ok();
+        if let Some(port) = recorded.and_then(|text| text.trim().parse().ok()) {
+            return port;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!(
+        "chat-server-rs never recorded its port in {}",
+        file.display()
+    );
+}
+
+/// Budgeted as a count of polls, not a deadline, so a paused CI VM resumes
+/// the wait instead of finding it already over.
 fn wait_for_port(port: u16) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
+    for _ in 0..200 {
         if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
             return;
         }
