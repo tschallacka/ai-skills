@@ -8151,7 +8151,7 @@
     {
       "id": "B385",
       "title": "A raw-mode/mouse-tracking screen that exits on a click can leak the trailing mouse-release SGR bytes onto the next plain-text output",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -8164,12 +8164,12 @@
         "ui",
         "terminal"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Two changes on fix/b385-release-echo, not yet merged to master: (1) a left-button click fires on the mouse release rather than the press (ui/input.rs finish_mouse, commit 007b7d8c), so the screen reads the whole click before it exits; the 100 ms grace from ebcf988f is removed. (2) ReaderHub.subscribe() drops complete SGR mouse reports (ESC [ < Cb;Cx;Cy M|m) from the bytes held for the next screen, so a release that arrives after its screen exits is not read as keys (ui/terminal.rs without_mouse_reports, commit 1d3d0c4c).",
+      "verification": "Unit: cargo test -p installer inside nix develop, 475 pass, including the new input and hub tests. Live: in a bash session driving the installer through its interactive-shell socket. Control, the pre-B385 binary from 9f821b10: the picker [ Quit ] click printed the release report 0;62;21m into the shell prompt, and bash tried to run it. Fixed binary: same click, three runs, shell clean each time. Other exits on the fixed binary, all clean: [ Install/update all ] with modal clicks [ No ], [ Yes ] and [ All ]; single-skill install with [ All ] then Enter; completion dismissed with Escape; picker quit with q. Not covered: Windows, macOS and Git Bash terminals; completion-screen clicks (that screen takes keys only).",
       "found_by": "",
-      "notes": "Purely cosmetic in the one live case actually observed (this session's verification of the new ui::progress screen): the functional outcome (the click's own answer, and the rest of the pipeline) was unaffected -- the next plain-text prompt still worked correctly once the garbage bytes were skipped over. A fix would touch ui/terminal.rs's leave() (shared by every screen), e.g. draining any immediately-available bytes from the reader channel before restoring cooked mode, or disabling mouse tracking and giving the terminal a moment to stop sending further reports before leave() prints its own restore sequence and returns. Not attempted here: out of scope for the task that surfaced it, and touching shared terminal shutdown logic needs its own dedicated verification across every screen that uses it.",
+      "notes": "Purely cosmetic in the one live case actually observed (this session's verification of the new ui::progress screen): the functional outcome (the click's own answer, and the rest of the pipeline) was unaffected -- the next plain-text prompt still worked correctly once the garbage bytes were skipped over. A fix would touch ui/terminal.rs's leave() (shared by every screen), e.g. draining any immediately-available bytes from the reader channel before restoring cooked mode, or disabling mouse tracking and giving the terminal a moment to stop sending further reports before leave() prints its own restore sequence and returns. Not attempted here: out of scope for the task that surfaced it, and touching shared terminal shutdown logic needs its own dedicated verification across every screen that uses it.  Closed by the tests in verification. The fix lands on master via the fix/b385-release-echo PR.",
       "created_at": "2026-09-29T13:38:15Z",
-      "updated_at": "2026-09-29T13:38:15Z"
+      "updated_at": "2026-10-05T13:33:33Z"
     },
     {
       "id": "B387",
