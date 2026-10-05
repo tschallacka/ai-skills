@@ -11,7 +11,7 @@ package/.agents/profiles/maintainer.json	26207
 package/.agents/profiles/nitpicker.json	12892
 package/.agents/profiles/oracle.json	16193
 package/LICENSE	1068
-package/README.md	19559
+package/README.md	19711
 package/agent-identity-plugin/.claude-plugin/plugin.json	405
 package/agent-identity-plugin/README.md	3064
 package/agent-identity-plugin/hooks/hooks.json	192
@@ -144,7 +144,7 @@ package/interactive-shell/requires.tsv	2252
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
-package/package.json	2142
+package/package.json	2153
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	17811
 package/planning/REVIEWER.md	25748
@@ -202,7 +202,7 @@ package/planning/scripts/overview-state.sh	1842
 package/planning/scripts/plan-content.sh	2117
 package/planning/scripts/plan-context-wrapper.sh	1638
 package/planning/scripts/plan-context.sh	2111
-package/planning/scripts/plan-core-lib.sh	23643
+package/planning/scripts/plan-core-lib.sh	23277
 package/planning/scripts/plan-crypt-lib.sh	10784
 package/planning/scripts/plan-document-lib.sh	23104
 package/planning/scripts/plan-env.sh	2232
@@ -254,6 +254,10 @@ package/resource-limited-testing/SKILL.md	10226
 package/resource-limited-testing/docs/README.md	1115
 package/resource-limited-testing/requires.tsv	1407
 package/resource-limited-testing/scripts/limited-run.sh	4459
+package/rjq/SKILL.md	2537
+package/rjq/binaries.tsv	758
+package/rjq/docs/README.md	859
+package/rjq/requires.tsv	360
 package/text-etiquette/SKILL.md	3897
 package/text-etiquette/docs/README.md	1083
 package/text-etiquette/requires.tsv	1187

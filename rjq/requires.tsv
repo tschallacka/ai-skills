@@ -1,0 +1,7 @@
+# MODE: PROD
+# What this skill needs on the target machine at runtime, and how badly.
+#
+# NO TOOL ROWS, and that is the point: the rjq binary is shipped (binaries.tsv),
+# so querying JSON asks the target machine for nothing -- not jq, not a shell.
+# Columns are as in the other skills' requires.tsv: tool, condition, strength, why.
+tool	condition	strength	why

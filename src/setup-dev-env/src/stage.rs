@@ -221,7 +221,7 @@ fn stage_primary(
 /// shared-bin copy was already there.
 fn skill_dir_for(crate_name: &str) -> Option<&str> {
     match crate_name {
-        "bug-report" | "todo" | "interactive-shell" | "ci-failures" => Some(crate_name),
+        "bug-report" | "todo" | "interactive-shell" | "ci-failures" | "rjq" => Some(crate_name),
         "interactive-shell-mcp" => Some("interactive-shell"),
         "chat-client-rs" | "chat-mcp" | "chat-server-rs" | "chat-spool-watch" => Some("chat"),
         "ai-text-editor" | "ai-text-editor-mcp" => Some("ai-text-editor"),

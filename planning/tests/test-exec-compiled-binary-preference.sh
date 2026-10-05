@@ -203,10 +203,13 @@ mkdir -p "$empty_override"
 t_assert_contains 'an override without the binary falls through, not to the wrapper directory' 'OVERRIDE_FALLS_THROUGH' "$(cat "$work/override-run.out")"
 t_assert_eq 'and the copy beside the wrapper was not run' "$(cat "$side_out")" ''
 
-# A copy beside the wrapper never shadows the shared bin's.
+# A copy beside the wrapper beats a stale copy in the shared bin (B392): the
+# installer put that copy beside this wrapper, so the shared one must not
+# shadow every later install of the command.
+shared_out="$work/shared.out"
 cat >"$shared_bin/side-binary" <<STUB
 #!/usr/bin/env bash
-printf 'shared argv:%s\n' "\$*" > "$side_out"
+printf 'shared argv:%s\n' "\$*" > "$shared_out"
 STUB
 chmod +x "$shared_bin/side-binary"
 (
@@ -215,7 +218,30 @@ chmod +x "$shared_bin/side-binary"
     export XDG_CONFIG_HOME
     plan_exec_compiled_binary_if_present 'side-binary' "$installed_dir" gamma
 ) >/dev/null 2>&1 || true
-t_assert_contains 'the shared bin still wins over a copy beside the wrapper' 'shared argv:gamma' "$(cat "$side_out")"
+t_assert_contains 'a copy beside the wrapper wins over a stale copy in the shared bin (B392)' 'side argv:gamma' "$(cat "$side_out" 2>/dev/null || true)"
+t_assert_eq 'and the shared copy was not run' "$(cat "$shared_out" 2>/dev/null || true)" ''
+
+# A checkout's own build runs when the shared bin exists but lacks the command
+# (B391): the development tree's bin/<triple> is the candidate, found from the
+# checkout that holds the wrapper.
+checkout="$work/checkout"
+# The fall-through cases above unset the helpers they loaded, so load them again.
+source "$scripts_dir/plan-crypt-lib.sh"
+triple="$(plan_crypt_target_triple)"
+mkdir -p "$checkout/planning/scripts" "$checkout/bin/$triple"
+checkout_out="$work/checkout.out"
+cat >"$checkout/bin/$triple/checkout-binary" <<STUB
+#!/usr/bin/env bash
+printf 'checkout argv:%s\n' "\$*" > "$checkout_out"
+STUB
+chmod +x "$checkout/bin/$triple/checkout-binary"
+(
+    unset AI_SKILLS_BIN_ROOT
+    XDG_CONFIG_HOME="$xdg_home"
+    export XDG_CONFIG_HOME
+    plan_exec_compiled_binary_if_present 'checkout-binary' "$checkout" epsilon
+) >/dev/null 2>&1 || true
+t_assert_contains 'a checkout build runs when the shared bin exists but lacks it (B391)' 'checkout argv:epsilon' "$(cat "$checkout_out" 2>/dev/null || true)"
 
 # With nothing beside the wrapper and nothing in the shared bin it still falls
 # through, so the wrapper's own exit-69 message stays reachable.

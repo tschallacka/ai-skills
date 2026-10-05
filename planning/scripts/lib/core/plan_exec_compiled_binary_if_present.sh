@@ -57,25 +57,23 @@ pecbip_find_skill_root() {
 # pecbip_pick <bin-dir, or empty> <name> <caller-script-dir> -- print the
 # executable to run, or return 1.
 #
-# It is `<name>` in the bin directory plan_bin_dir chose, then, last, beside the
-# wrapper itself (B365). An installed skill carries its compiled commands in its
-# own scripts/ directory, next to the .sh wrappers that front them, while
-# plan_bin_dir answers with the first directory that EXISTS, not the first that
-# holds this binary -- so the moment a shared bin exists every installed wrapper
-# would otherwise fall through to the exit-69 branch with its binary sitting
-# next to it. Beside the wrapper comes only after the shared bin and the
-# development tree, so neither can be shadowed by a stray copy, and never when
-# AI_SKILLS_BIN_ROOT is set: an explicit override names where the binaries are,
-# and the tests that point it at an empty directory to simulate a missing binary
-# would otherwise find the copy a checkout stages beside every wrapper.
+# Order: the checkout's <checkout>/bin/<triple>/<name> (B391), then beside the
+# wrapper (B365, B392), then plan_bin_dir's shared bin. Neither the checkout
+# build nor the beside copy is tried under AI_SKILLS_BIN_ROOT, an explicit
+# override.
 #
 # A Windows build is `<name>.exe`. Git for Windows' bash usually resolves
 # `<name>` to it on its own, but asking for the suffixed name outright does not
 # depend on that, and costs nothing anywhere else.
 pecbip_pick() {
-    local dir candidate side
+    local dir candidate side devbin devroot triple
     side="$(cd "$3" && pwd)"
-    for dir in "$1" "$side"; do
+    devbin=""
+    if [ -z "${AI_SKILLS_BIN_ROOT:-}" ]; then
+        devroot="$(pecbip_find_skill_root "$side")" && triple="$(plan_crypt_target_triple 2>/dev/null)" \
+            && devbin="$devroot/bin/$triple"
+    fi
+    for dir in "$devbin" "$side" "$1"; do
         [ -n "$dir" ] || continue
         [ "$dir" = "$side" ] && [ "$dir" != "$1" ] && [ -n "${AI_SKILLS_BIN_ROOT:-}" ] && continue
         for candidate in "$2" "$2.exe"; do
