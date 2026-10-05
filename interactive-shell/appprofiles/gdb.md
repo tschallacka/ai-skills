@@ -1,6 +1,6 @@
 # gdb
 
-Not tested this session -- nix package fetch too slow. This profile covers two modes: (a) default CLI/REPL mode, standard debugger interface, and (b) TUI mode with on-screen source/assembly pane. Both are standard, stable documented behavior. [unconfirmed] throughout.
+This profile covers two modes: (a) default CLI/REPL mode, standard debugger interface, and (b) TUI mode with on-screen source/assembly pane. Workflows 3-6 are run against gdb 17.2 (the flake's `pkgs.gdb`). Other [unconfirmed] tags mark facts not checked.
 
 ### Identity
 GNU Debugger. `gdb PROGRAM` (load program for debugging), `gdb -tui PROGRAM` (start in TUI mode), or `gdb` with no arguments (start with no program loaded, attach later).
@@ -45,7 +45,11 @@ GNU Debugger. `gdb PROGRAM` (load program for debugging), `gdb -tui PROGRAM` (st
 ### Workflows
 1. Debug a compiled program: `gdb ./myapp`, break main (set breakpoint), run (start), step (execute line by line), print variable (inspect value), continue (resume), quit (exit).
 2. TUI mode: `gdb -tui ./myapp`, same commands, but with source visible on screen.
-3. Inspect crash: `gdb ./myapp`, `core /path/to/core.dump` (load core file [unconfirmed]), `bt` (backtrace), print variables to inspect state at crash.
+3. TUI stopped at a point, set up at launch: `gdb -tui -ex 'break add' -ex 'run' ./myapp`. The `-ex` commands run in order after the program loads, so the TUI opens at the stop.
+4. TUI stopped at a point, set up from a command file: write `break add` and `run` one per line to `cmds.gdb`, then `gdb -tui -x cmds.gdb ./myapp`.
+5. TUI entered mid-session: `gdb ./myapp`, `break add`, `run`, then CTRL-X a to enter TUI at the current stop, then `layout src`.
+6. Start at `main` instead of a named breakpoint: `gdb -tui -ex start ./myapp` (`start` sets a temporary breakpoint at `main` and runs to it).
+7. Inspect crash: `gdb ./myapp`, `core /path/to/core.dump` (load core file [unconfirmed]), `bt` (backtrace), print variables to inspect state at crash.
 
 ### Quirks
 - gdb uses `break` for breakpoints (not `b` alone; `b` is an abbreviation for `break` [unconfirmed]).
@@ -53,6 +57,9 @@ GNU Debugger. `gdb PROGRAM` (load program for debugging), `gdb -tui PROGRAM` (st
 - TUI mode redraws the source pane as you step, showing current line highlighted.
 - Source pane requires debug symbols in the binary (`-g` flag during compilation).
 - gdb persists state across multiple `run` commands; breakpoints stay set until deleted.
+- Starting gdb with a 30-row screen first shows the copyright banner and a `--Type <RET> for more` pager prompt; send ENTER to continue past it.
+- The first `run` in a session asks `Enable debuginfod for this session? (y or [n])`; send `n`. A run started from `-x` answers it automatically.
+- With `-tui`, the source pane is shown as soon as gdb stops, so `layout src` is only needed to change the pane.
 
 ### Unconfirmed
 - Exact list of TUI layouts and what each shows

@@ -2,10 +2,11 @@
 // PACKAGE: PROD
 //! Decodes a byte stream into keys, including SGR mouse reports
 //! (`ESC [ < Cb ; Cx ; Cy M/m`, enabled by `terminal::enter` alongside raw
-//! mode) -- a left-button press becomes `Key::Click`, the wheel becomes
-//! `Key::Up`/`Key::Down`, and everything else this slice has no use for
-//! (release, drag, other buttons) is swallowed rather than surfaced as a
-//! spurious `Escape`.
+//! mode) -- a left-button release becomes `Key::Click` (the press is
+//! swallowed, so the screen exits only once the whole click has been read),
+//! the wheel becomes `Key::Up`/`Key::Down`, and everything else this slice
+//! has no use for (press of the wheel-less buttons, drag, other buttons) is
+//! swallowed rather than surfaced as a spurious `Escape`.
 //!
 //! Uses a short timeout to tell an arrow key's trailing bytes (or a mouse
 //! report's) from a bare Escape, and a separate, longer timeout for the idle
@@ -137,16 +138,16 @@ fn finish_mouse(digits: &[u8], pressed: bool) -> Key {
     let (Ok(cb), Ok(cx), Ok(cy)) = (cb.parse::<u32>(), cx.parse::<u16>(), cy.parse::<u16>()) else {
         return Key::Tick;
     };
-    if !pressed {
-        return Key::Tick;
-    }
     // Mask off the modifier (shift=4, meta=8, ctrl=16) and motion (32) bits:
     // this slice does not distinguish a modified or dragged click from a
     // plain one.
-    match cb & !0x1c {
-        0 => Key::Click { col: cx, row: cy },
-        64 => Key::Up,
-        65 => Key::Down,
+    match (cb & !0x1c, pressed) {
+        // A click fires on the release, not the press: a screen that exits
+        // on the press would leave the release in flight for the terminal to
+        // echo once cooked mode is back (B385).
+        (0, false) => Key::Click { col: cx, row: cy },
+        (64, true) => Key::Up,
+        (65, true) => Key::Down,
         _ => Key::Tick,
     }
 }
@@ -246,11 +247,16 @@ mod tests {
     }
 
     #[test]
-    fn a_left_click_sgr_report_decodes_its_column_and_row() {
+    fn a_left_click_fires_on_its_release_and_carries_the_release_position() {
         assert_eq!(
-            read_key(&feed(b"\x1b[<0;10;5M")),
+            read_key(&feed(b"\x1b[<0;10;5m")),
             Key::Click { col: 10, row: 5 }
         );
+    }
+
+    #[test]
+    fn a_left_button_press_alone_is_swallowed_so_the_click_waits_for_its_release() {
+        assert_eq!(read_key(&feed(b"\x1b[<0;10;5M")), Key::Tick);
     }
 
     #[test]
@@ -260,14 +266,9 @@ mod tests {
     }
 
     #[test]
-    fn a_release_report_is_swallowed_as_a_tick_not_a_click() {
-        assert_eq!(read_key(&feed(b"\x1b[<0;10;5m")), Key::Tick);
-    }
-
-    #[test]
-    fn a_middle_or_right_button_press_is_swallowed_as_a_tick() {
-        assert_eq!(read_key(&feed(b"\x1b[<1;10;5M")), Key::Tick);
-        assert_eq!(read_key(&feed(b"\x1b[<2;10;5M")), Key::Tick);
+    fn a_middle_or_right_button_release_is_swallowed_as_a_tick() {
+        assert_eq!(read_key(&feed(b"\x1b[<1;10;5m")), Key::Tick);
+        assert_eq!(read_key(&feed(b"\x1b[<2;10;5m")), Key::Tick);
     }
 
     #[test]
@@ -277,7 +278,7 @@ mod tests {
         // it must still decode the coordinates rather than falling through
         // to the button-1/2 Tick arm.
         assert_eq!(
-            read_key(&feed(b"\x1b[<4;10;5M")),
+            read_key(&feed(b"\x1b[<4;10;5m")),
             Key::Click { col: 10, row: 5 }
         );
     }
