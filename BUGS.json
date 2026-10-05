@@ -5226,25 +5226,25 @@
     {
       "id": "B386",
       "title": "test-bootstrap-piped-stdin still flakes on macOS (both default bash and the bash-3.2 floor) despite the readiness-marker fix",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
       "reproduce": "Run the CI 'ci' workflow's 'Test suite passes on macos-latest (default bash, shard 2)' leg repeatedly (this is where test-bootstrap-piped-stdin happens to be sharded); or run tests/test-bootstrap-piped-stdin.sh directly on a real macOS runner (BSD script, not util-linux) under load, several times in a row.",
       "observed": "Two of the three most recent observations on this exact shard failed with the identical assertion: \"FAIL: a real keystroke reaches the compiled installer, not a line of bootstrap.sh itself: expected 'GOT:hello', got 'GOT:'\" (commit 83496e37, job 109437931299; commit 088cebe5's first run, job 109451639983). A rerun of the identical job on the identical commit (088cebe5) then passed cleanly. This is the SAME assertion the readiness-marker fix earlier this session (replacing a fixed sleep with wait_for_stub_ready(), polling for the installer stub's own READY_MARKER touch-file) was meant to make impossible -- that fix was verified clean on the macOS bash-3.2 shard, but this is a DIFFERENT shard (macos-latest's own default/homebrew bash, not the bash-3.2 floor), and it is recurring there at a real, non-negligible rate.",
       "expected": "The test should pass deterministically on every shard, the same as the bash-3.2 floor now does. Ruled out: the readiness marker's own polling loop is not the missing piece here -- pipes do not drop buffered bytes just because the reader has not called read() yet, so the SUBSHELL that waits on READY_MARKER then writes 'hello\\n' should deliver those bytes to script's own stdin pipe reliably regardless of exactly when script starts reading it.",
-      "mechanism": "Not confirmed. Research (bugs.ruby-lang.org #20682, macOS 13.2) documents a real macOS PTY kernel quirk: unread buffered data on a pty can be silently dropped around a process's exit/exec boundary, depending on whether S_CTTYREF (a controlling-terminal reference) was ever set for the process holding it -- that issue is about a child's OUTPUT being dropped when it exits before the parent reads it, which is the mirror image of this test's own symptom (the STUB's INPUT -- our injected keystroke -- never arriving, while the stub itself is still blocked in read(), not exited), so it is a LEAD, not a confirmed match. bootstrap.sh's own chain execs through several processes ending in an `exec ... < /dev/tty` handoff (the same mechanism B381 already required this test to get right, for an unrelated reason), any one of which is a candidate boundary for an analogous drop on the INPUT side -- but which one, if any, needs a real macOS machine (dtruss/lldb on the actual `script`/shell chain) to pin down. The documented workaround for the OUTPUT-side bug (opening and closing /dev/tty to force a blocking flush) is not being tried blind here: it carries its own known trade-off (can hang in waitpid if nothing ever drains the output), and applying it without being able to verify the outcome risks trading one flake for a hang, which is a worse failure mode for CI.",
+      "mechanism": "The test sent \"hello\\n\" and closed script's stdin at once. BSD script relays its own stdin EOF into the pty as VEOF; with script paused (a host-paused CI VM), the ^D reached the stub's read ahead of the keystroke: read returned EOF (status 1) and the typescript ended \"^D^H^Hhello^M\". Earlier investigation used util-linux script, which is why it never reproduced. The exact kernel ordering is not pinned down: a script-only repro without bootstrap.sh did not drop the keystroke.\n",
       "surfaces": [
         "ci",
         "bootstrap.sh",
         "macos"
       ],
-      "fix": "Mitigation only, committed 657109ae: retry up to 5 freshly spawned attempts of the whole script+bootstrap+stub session (each run_piped() call already clears and re-runs cleanly) instead of running once -- the same pattern that fixed B384's own (different, confirmed) race. Does not depend on understanding the exact mechanism, only on the drop being intermittent rather than deterministic, consistent with the failure rate observed so far (roughly half of a handful of CI runs, never all of them). Verified: the common/uncontended case still passes on the first attempt (unchanged runtime) across 8 consecutive local runs plus separate passes under a current bash and this repo's own bash 3.2 floor. NOT verified: whether this actually reduces the real CI failure rate, since the failure was never reproduced locally to test the mitigation against directly (unlike B384, where the fix was verified against a real, reproduced failure). Left open rather than closed for exactly that reason -- a future session with real macOS access should pick up from the S_CTTYREF lead above.",
-      "verification": null,
+      "fix": "5e92cc99 (PR #186): the test keeps script's stdin open until the stub has recorded what it read, so no EOF is relayed before the keystroke; the five-attempt retry is removed.",
+      "verification": "Reproduced on macOS by SIGSTOP-ing BSD script 2 s after the stub was ready: 5 to 7 of 10 single attempts failed. With the fix 12 of 12 pass under the same freeze; the test passes 10 of 10 plainly, 10 of 10 with script frozen, and under bash 3.2; CI green.",
       "found_by": "",
       "notes": "A prerequisite noisy-but-non-fatal ERR-trap line (from `script --version` exiting nonzero, which lib-test.sh's trap always prints for on macOS regardless of this bug) was already fixed separately (commit 088cebe5), so a future investigation sees only this test's own real assertion failure, not two unrelated-looking messages at once. Needs either a real macOS machine to debug script's own piped-stdin relay behavior directly (e.g. reproduce with `script`'s own strace/dtruss equivalent, or a minimal repro outside this test entirely), or enough repeated CI runs to establish a more precise failure rate before attempting a fix blind. A rerun-until-green pattern (matching this session's own practice for confirmed one-off flakes) is a reasonable short-term mitigation, but this flake rate is high enough that it will keep costing CI reruns until actually understood. A prerequisite noisy-but-non-fatal ERR-trap line (from `script --version` exiting nonzero, which lib-test.sh's trap always prints for on macOS regardless of this bug) was already fixed separately (commit 088cebe5). Needs either a real macOS machine to debug script's own piped-stdin relay behavior directly, or enough repeated CI runs to establish a more precise failure rate before attempting a fix blind. A rerun-until-green pattern is a reasonable short-term mitigation, but this flake rate is high enough that it will keep costing CI reruns until actually understood.\n\nInvestigation lead from fixing the UNRELATED but structurally similar B384 (chat-client-rs's beacon-discovery test) in the same session: B384's flake reproduced 0/8 times under ordinary CPU-load contention (64 `yes` processes saturating a 4-core box -- Linux's own fair scheduler absorbs that gracefully) but 3/3 times when the relevant process was SIGSTOP-ed mid-operation past its own timing assumption, then SIGCONT-ed -- i.e. a genuinely PAUSED process, not merely a busy host, is what actually reproduces this class of CI flake. A future attempt at B386 should try the same technique: SIGSTOP the `script` process (or its child bootstrap.sh/stub chain) for a few seconds at points bracketing the keystroke hand-off, rather than generating ordinary CPU load, before concluding BSD script's piped-stdin relay itself cannot be made reliable here. Unlike B384, though, `wait_for_stub_ready`'s own loop is iteration-count-based, not wall-clock-deadline-based, so the exact B384 mechanism (a fixed real-time deadline expiring while frozen) does not directly transfer -- this is a lead to test, not a confirmed root cause. Investigated further (2026-09-29), status stays 'reported' (a mitigation, not a confirmed fix -- see MECHANISM/FIX below, both honestly qualified). Applied the same SIGSTOP-based reproduction technique that found B384's real mechanism: froze `script` itself immediately at launch and held it until well after the whole inner pipeline (readiness marker touched, keystroke sent, subshell exited) had already completed, testing whether `script`'s own relay loop mishandles polling a stdin pipe that is simultaneously readable AND already hung up. 3/3 runs against this box's util-linux `script` still delivered the keystroke correctly -- this specific mechanism does NOT reproduce here, so it is not simply 'script hadn't started relaying yet' the way B384's client-freeze case was.",
       "created_at": "2026-09-29T15:12:09Z",
-      "updated_at": "2026-09-29T22:04:54Z"
+      "updated_at": "2026-10-05T11:10:51Z"
     },
     {
       "id": "B6",
@@ -7854,7 +7854,7 @@
     {
       "id": "B389",
       "title": "chat-mcp flow tests fail together on the Windows leg: parallel tests could share one UDP beacon port",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -7865,33 +7865,33 @@
       "surfaces": [
         "src/chat-mcp/tests/mcp_flow.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "eb998cf9 (PR #184): each mcp_flow test takes its beacon port from a UDP socket bound to port 0 instead of free TCP port + 1.",
+      "verification": "The Windows leg that failed five tests on #183 is green on #184 and on #185, which builds on it; the flow tests pass on macOS before and after. Windows' sequential port allocation cannot be reproduced on macOS.",
       "found_by": "CI on PR #183, a change to installer/terminal.rs only",
       "notes": "Fix in PR #184 (free_udp_port per test); not reproducible on macOS, which randomises ephemeral ports. Close once #184 merges and the Windows leg stays green.",
       "created_at": "2026-10-05T09:15:15Z",
-      "updated_at": "2026-10-05T09:15:15Z"
+      "updated_at": "2026-10-05T11:10:51Z"
     },
     {
       "id": "B390",
       "title": "chat-mcp flow tests intermittently fail on join: the server closes the connection (unexpected end of file)",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
       "reproduce": "for i in 1 2 3 4 5 6 7 8 9 10; do cargo test -q -p chat-mcp --test mcp_flow 2>&1 | awk '/refused:|test result/'; done   # macOS aarch64, nix dev shell",
       "observed": "join refused: send: unexpected end of file (also once: send: Connection reset by peer, os error 54), panicking at mcp_flow.rs:227; 3 of 16 runs on unchanged master, 4 of 15 with PR #184's beacon-port change, each run failing one or two tests.",
       "expected": "join succeeds on every run against the test's own chat-server-rs.",
-      "mechanism": null,
+      "mechanism": "mcp_flow's harness picked its server port with free_port() (bind 127.0.0.1:0, read the number, drop the listener) and only then started chat-server-rs on it. Under 27 parallel tests another socket took the port in between; chat-server-rs then logged \"port N taken (Address already in use); picking an ephemeral port\" and listened elsewhere, while the harness kept talking to port N, so join ended in \"send: unexpected end of file\" or \"Connection reset by peer\". Caught by keeping each server's stderr during a failing run.\n",
       "surfaces": [
         "src/chat-mcp/tests/mcp_flow.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "c14d77cc (PR #185): the harness starts chat-server-rs on port 0 and reads the port it bound from its server.port; free_port() is removed; wait_for_port's deadline became a count of polls.",
+      "verification": "macOS: a join failed in 3 of 16 runs on master and 4 of 15 with #184 alone; 0 of 16 with the fix. CI green on all legs.",
       "found_by": "repeated local runs while verifying PR #184",
       "notes": "Mechanism not yet known: the harness seeds the session with its own server, so join never reaches discovery; the server tears the TLS connection down during or right after registration. Reproducible locally at about 1 run in 5.",
       "created_at": "2026-10-05T09:15:26Z",
-      "updated_at": "2026-10-05T09:15:26Z"
+      "updated_at": "2026-10-05T11:10:51Z"
     },
     {
       "id": "B25",
