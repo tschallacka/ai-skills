@@ -81,6 +81,42 @@ pub fn size() -> (usize, usize) {
     }
 }
 
+/// Drops the complete SGR mouse reports (`ESC [ < Cb ; Cx ; Cy M|m`) from
+/// bytes held for the next screen. A click's release that arrives after the
+/// screen which read its press has already exited is a mouse report, not a
+/// keypress; left in the queue, the next screen reads it as stray keys (B385).
+fn without_mouse_reports(bytes: Vec<Option<u8>>) -> Vec<Option<u8>> {
+    let mut kept = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match mouse_report_end(&bytes, i) {
+            Some(end) => i = end,
+            None => {
+                kept.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    kept
+}
+
+/// The index just past the mouse report starting at `start`, if one starts
+/// there. Anything that is not a complete report answers `None`, so the
+/// bytes of a truncated or unrelated sequence are kept, not dropped.
+fn mouse_report_end(bytes: &[Option<u8>], start: usize) -> Option<usize> {
+    if bytes.get(start..start + 3)? != [Some(0x1b), Some(b'['), Some(b'<')] {
+        return None;
+    }
+    let mut i = start + 3;
+    loop {
+        match bytes.get(i)? {
+            Some(b'0'..=b'9' | b';') => i += 1,
+            Some(b'M' | b'm') => return Some(i + 1),
+            _ => return None,
+        }
+    }
+}
+
 /// Routes stdin bytes to whichever screen subscribed last. A byte read while
 /// no screen listens is held for the next one: a per-screen reader thread
 /// blocked in `read` used to swallow the next screen's first byte.
@@ -93,7 +129,7 @@ struct ReaderHub {
 impl ReaderHub {
     fn subscribe(&mut self) -> Receiver<Option<u8>> {
         let (tx, rx) = mpsc::channel();
-        for item in self.pending.drain(..) {
+        for item in without_mouse_reports(std::mem::take(&mut self.pending)) {
             let _ = tx.send(item);
         }
         self.current = Some(tx);
@@ -193,6 +229,28 @@ mod tests {
         hub.deliver(Some(b'<'));
         let got: Vec<_> = picker.try_iter().collect();
         assert_eq!(got, vec![Some(0x1b), Some(b'['), Some(b'<')]);
+    }
+
+    #[test]
+    fn a_mouse_release_that_arrives_after_its_screen_exits_is_not_read_as_keys() {
+        let mut hub = ReaderHub::default();
+        for &b in b"\x1b[<0;38;13mq" {
+            hub.deliver(Some(b));
+        }
+        let picker = hub.subscribe();
+        let got: Vec<_> = picker.try_iter().collect();
+        assert_eq!(got, vec![Some(b'q')]);
+    }
+
+    #[test]
+    fn an_arrow_key_held_for_the_next_screen_is_kept() {
+        let mut hub = ReaderHub::default();
+        for &b in b"\x1b[A" {
+            hub.deliver(Some(b));
+        }
+        let picker = hub.subscribe();
+        let got: Vec<_> = picker.try_iter().collect();
+        assert_eq!(got, vec![Some(0x1b), Some(b'['), Some(b'A')]);
     }
 
     #[test]
