@@ -75,6 +75,15 @@ fn free_port() -> u16 {
     probe.local_addr().expect("bound address").port()
 }
 
+/// A UDP port of the test's own for the announce beacon. "TCP port + 1" was
+/// not free on Windows, which hands out ports in sequence: a parallel test's
+/// beacon could land on the same number, the second bind failed, and
+/// discovery reported "no announce beacon" at once.
+fn free_udp_port() -> u16 {
+    let probe = std::net::UdpSocket::bind("0.0.0.0:0").expect("a free UDP port");
+    probe.local_addr().expect("bound address").port()
+}
+
 impl Harness {
     /// Start a server and an adapter against a private chat home, or None when
     /// this build has no server beside the adapter (a single-crate test leg).
@@ -89,6 +98,7 @@ impl Harness {
         }
         let home = scratch(name);
         let port = free_port();
+        let beacon_port = free_udp_port();
         let server = Command::new(&server_bin)
             .arg(port.to_string())
             .env("AI_CHAT_HOME", &home)
@@ -103,7 +113,7 @@ impl Harness {
             // nowhere: latent until a call needed real discovery rather than
             // the pre-seeded session (T143's session/agent-override tests
             // were the first).
-            .env("CHAT_BEACON_PORT", (port + 1).to_string())
+            .env("CHAT_BEACON_PORT", beacon_port.to_string())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -123,7 +133,7 @@ impl Harness {
         let mut adapter = Command::new(bin_dir().join("chat-mcp"))
             .env("AI_CHAT_HOME", &home)
             .env("CHAT_SESSION_ID", SESSION)
-            .env("AI_CHAT_BEACON_PORT", (port + 1).to_string())
+            .env("AI_CHAT_BEACON_PORT", beacon_port.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -1218,7 +1228,7 @@ fn start_server_spawns_one_when_nothing_answers_and_a_client_can_then_reach_it()
     let home = scratch("startfresh");
     // A beacon port nothing else on this machine announces on, chosen the
     // same way the rest of this file isolates itself.
-    let beacon_port = free_port();
+    let beacon_port = free_udp_port();
 
     let mut adapter = Command::new(bin_dir().join("chat-mcp"))
         .env("AI_CHAT_HOME", &home)
