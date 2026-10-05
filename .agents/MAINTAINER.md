@@ -430,16 +430,24 @@ the CI map.
 - `pre-push-check.sh` refuses any push that touches either register from a
   non-`registers` branch (1.17). A fix's resolution keys (`fix`, `verification`,
   `status`) go the same way as a new entry, after the code lands. The sequence:
-  1. **Find the branch's checkout** with `git worktree list`. If `registers` is
-     already checked out in another worktree (on the maintainer's machine it is,
-     under `~/.config/tsch-ai-skills/worktrees/registers`), `git switch registers`
-     in the main tree fails and that worktree is the one to use. Otherwise
-     `git switch registers`, or `git switch -c registers origin/registers` if it
-     is not local yet (never from `origin/master`: that drops an entry on
-     `origin/registers` that has not landed). Worktrees are made as the
-     `git-worktrees` skill says.
-  2. **`cd` into that checkout** and `git pull --ff-only`. `registers-sync.yml`
-     keeps the branch level with `master`, so it should be level.
+  1. **Use the one registers worktree**, `~/.config/tsch-ai-worktrees/registers`
+     (where the `git-worktrees` skill puts agent worktrees). There is exactly one;
+     never make a second checkout of `registers` under `.claude/worktrees/` or
+     anywhere else, because git lets a branch be checked out once, and a second
+     copy left behind goes stale and mints ids that already exist (B78). If it is
+     missing, create it from the main tree:
+     `git fetch origin registers && git worktree add ~/.config/tsch-ai-worktrees/registers registers`
+     (`git branch -f registers origin/registers` first if the local branch is behind;
+     never base it on `origin/master`, which drops entries on `origin/registers`
+     that have not landed yet).
+  2. **Reset it to the newest `origin/registers` before every filing.** `cd` into
+     it, `git fetch origin registers`, then check that
+     `git log --oneline origin/registers..registers` prints nothing and
+     `git status --porcelain` is empty (anything there is an entry someone filed
+     and did not push: push it, or ask whose it is, never discard it). Then
+     `git reset --hard origin/registers`. A plain `git pull --ff-only` is not
+     enough: it refuses to move a checkout that has diverged, and it leaves the
+     index alone when the branch ref was moved underneath the checkout.
   3. **Run the CLI there**, from `bin/<triple>/bugs` or `bin/<triple>/todo`
      (built by `setup-dev-env.sh`): `bugs add ...`, `todo add ...`, never a
      hand edit. **The CLI takes the register from the current directory:** `--file
