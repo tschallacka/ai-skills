@@ -60,13 +60,6 @@ fn main() {
     if !plan.is_dir() {
         die(format!("directory does not exist: {}", plan.display()), 66);
     }
-    if std::process::Command::new("rjq")
-        .arg("--version")
-        .output()
-        .is_err()
-    {
-        die(format!("rjq is required by {TOOL}; install rjq (macOS: brew install rjq, Debian: apt-get install rjq)"), 69);
-    }
     let commands_file = plan.join("commands.json");
     if !commands_file.is_file() {
         die(
