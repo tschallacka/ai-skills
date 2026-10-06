@@ -78,15 +78,24 @@ fn parse(args: &[String]) -> Result<Option<Args>, String> {
                 }
                 let name = name.ok_or("--name is required")?;
                 if !valid_name(&name) {
-                    return Err(format!("invalid name {name:?}: use letters, digits, - and _"));
+                    return Err(format!(
+                        "invalid name {name:?}: use letters, digits, - and _"
+                    ));
                 }
                 if let Some(nick) = &nick {
                     if !valid_name(nick) {
-                        return Err(format!("invalid nick {nick:?}: use letters, digits, - and _"));
+                        return Err(format!(
+                            "invalid nick {nick:?}: use letters, digits, - and _"
+                        ));
                     }
                 }
                 let dir = dir.ok_or("--dir is required")?;
-                return Ok(Some(Args { name, nick, dir, command }));
+                return Ok(Some(Args {
+                    name,
+                    nick,
+                    dir,
+                    command,
+                }));
             }
             other => return Err(format!("unknown argument {other:?}")),
         }
@@ -127,8 +136,15 @@ fn parse_holder(text: &str) -> Option<Holder> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    let group = lines.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-    Some(Holder { pid, identity, group })
+    let group = lines
+        .next()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    Some(Holder {
+        pid,
+        identity,
+        group,
+    })
 }
 
 /// Live while the monitor still runs under the identity it wrote, or while the watched
@@ -174,7 +190,8 @@ fn write_file(path: &Path, text: &str) -> std::io::Result<()> {
 /// cannot both take it, and a reader never sees a half-written lock. A lock whose holder
 /// is gone is replaced.
 fn take_lock(dir: &Path, name: &str) -> Result<Lock, Refusal> {
-    fs::create_dir_all(dir).map_err(|e| Refusal::Io(format!("cannot create {}: {e}", dir.display())))?;
+    fs::create_dir_all(dir)
+        .map_err(|e| Refusal::Io(format!("cannot create {}: {e}", dir.display())))?;
     let path = dir.join(format!("{name}.pid"));
     let staging = staging_path(dir, name);
     let me = Holder {
@@ -204,13 +221,19 @@ fn take_lock(dir: &Path, name: &str) -> Result<Lock, Refusal> {
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                     Err(error) => {
-                        return Err(Refusal::Io(format!("cannot read {}: {error}", path.display())))
+                        return Err(Refusal::Io(format!(
+                            "cannot read {}: {error}",
+                            path.display()
+                        )))
                     }
                 }
             }
             Err(error) => {
                 let _ = fs::remove_file(&staging);
-                return Err(Refusal::Io(format!("cannot take {}: {error}", path.display())));
+                return Err(Refusal::Io(format!(
+                    "cannot take {}: {error}",
+                    path.display()
+                )));
             }
         }
     }
@@ -244,7 +267,10 @@ fn run(args: Args) -> ExitCode {
     let mut lock = match take_lock(&args.dir, &key) {
         Ok(lock) => lock,
         Err(Refusal::Held(pid)) => {
-            eprintln!("{PROGRAM}: {} is already running as pid {pid}; not starting another", args.name);
+            eprintln!(
+                "{PROGRAM}: {} is already running as pid {pid}; not starting another",
+                args.name
+            );
             return ExitCode::from(ALREADY_RUNNING);
         }
         Err(Refusal::Io(message)) => {
@@ -429,9 +455,11 @@ mod tests {
 
     #[test]
     fn parses_name_dir_and_the_command_after_the_separator() {
-        let parsed = parse(&words(&["--name", "chat", "--dir", "/tmp/x", "--", "tail", "-f"]))
-            .unwrap()
-            .unwrap();
+        let parsed = parse(&words(&[
+            "--name", "chat", "--dir", "/tmp/x", "--", "tail", "-f",
+        ]))
+        .unwrap()
+        .unwrap();
         assert_eq!(parsed.name, "chat");
         assert_eq!(parsed.dir, PathBuf::from("/tmp/x"));
         assert_eq!(parsed.command, words(&["tail", "-f"]));
@@ -451,11 +479,16 @@ mod tests {
 
     #[test]
     fn a_nick_is_parsed_and_checked_like_a_name() {
-        let parsed = parse(&words(&["--name", "chat", "--nick", "agent-a", "--dir", "/tmp/x", "--", "tail"]))
-            .unwrap()
-            .unwrap();
+        let parsed = parse(&words(&[
+            "--name", "chat", "--nick", "agent-a", "--dir", "/tmp/x", "--", "tail",
+        ]))
+        .unwrap()
+        .unwrap();
         assert_eq!(parsed.nick.as_deref(), Some("agent-a"));
-        assert!(parse(&words(&["--name", "chat", "--nick", "../a", "--dir", "/tmp/x", "--", "tail"])).is_err());
+        assert!(parse(&words(&[
+            "--name", "chat", "--nick", "../a", "--dir", "/tmp/x", "--", "tail"
+        ]))
+        .is_err());
     }
 
     #[test]
@@ -471,7 +504,11 @@ mod tests {
             group: 7,
         };
         assert_eq!(parse_holder(&render_holder(&holder)), Some(holder));
-        let bare = Holder { pid: 9, identity: None, group: 0 };
+        let bare = Holder {
+            pid: 9,
+            identity: None,
+            group: 0,
+        };
         assert_eq!(parse_holder(&render_holder(&bare)), Some(bare));
         assert_eq!(parse_holder(""), None);
     }
@@ -487,7 +524,9 @@ mod tests {
         assert!(matches!(take_lock(&dir, "watch"), Err(Refusal::Held(pid)) if pid == me as i32));
         // A pid that cannot exist is stale: the lock is taken over.
         fs::write(dir.join("watch.pid"), "4000000\n\n0\n").unwrap();
-        let lock = take_lock(&dir, "watch").ok().expect("stale lock should be replaced");
+        let lock = take_lock(&dir, "watch")
+            .ok()
+            .expect("stale lock should be replaced");
         lock.release();
         assert!(!dir.join("watch.pid").exists());
         let _ = fs::remove_dir_all(&dir);

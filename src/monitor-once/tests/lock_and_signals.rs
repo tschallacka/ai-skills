@@ -25,13 +25,20 @@ fn wait_for_group(lock: &Path) -> i32 {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Ok(text) = fs::read_to_string(lock) {
-            if let Some(group) = text.lines().nth(2).and_then(|s| s.trim().parse::<i32>().ok()) {
+            if let Some(group) = text
+                .lines()
+                .nth(2)
+                .and_then(|s| s.trim().parse::<i32>().ok())
+            {
                 if group > 0 {
                     return group;
                 }
             }
         }
-        assert!(Instant::now() < deadline, "the lock never recorded the watch's group");
+        assert!(
+            Instant::now() < deadline,
+            "the lock never recorded the watch's group"
+        );
         thread::sleep(Duration::from_millis(50));
     }
 }
@@ -65,9 +72,16 @@ fn sigterm_to_the_monitor_stops_the_watch_and_frees_the_lock() {
     let group = wait_for_group(&dir.join("watch.pid"));
     signal(monitor.id() as i32, libc::SIGTERM);
     let status = monitor.wait().unwrap();
-    assert_eq!(status.code(), Some(143), "a monitor stopped by SIGTERM exits 128+15");
+    assert_eq!(
+        status.code(),
+        Some(143),
+        "a monitor stopped by SIGTERM exits 128+15"
+    );
     thread::sleep(Duration::from_millis(300));
-    assert!(!group_alive(group), "the watch must not outlive its monitor");
+    assert!(
+        !group_alive(group),
+        "the watch must not outlive its monitor"
+    );
     assert!(!dir.join("watch.pid").exists(), "the lock must be released");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -80,13 +94,24 @@ fn a_killed_monitor_leaves_the_lock_held_while_its_watch_lives() {
     signal(monitor.id() as i32, libc::SIGKILL);
     monitor.wait().unwrap();
     thread::sleep(Duration::from_millis(200));
-    assert!(group_alive(group), "the watch survives a SIGKILL of its monitor");
+    assert!(
+        group_alive(group),
+        "the watch survives a SIGKILL of its monitor"
+    );
     let refused = start(&dir, "watch", &["true"]).wait().unwrap();
-    assert_eq!(refused.code(), Some(75), "a second start is refused while the watch lives");
+    assert_eq!(
+        refused.code(),
+        Some(75),
+        "a second start is refused while the watch lives"
+    );
     signal(-group, libc::SIGTERM);
     thread::sleep(Duration::from_millis(300));
     let allowed = start(&dir, "watch", &["true"]).wait().unwrap();
-    assert_eq!(allowed.code(), Some(0), "once the watch is gone the lock is free");
+    assert_eq!(
+        allowed.code(),
+        Some(0),
+        "once the watch is gone the lock is free"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -109,7 +134,11 @@ fn different_nicks_run_the_same_watch_and_one_nick_runs_it_once() {
     assert!(dir.join("watch.agent-alice.pid").exists());
     assert!(dir.join("watch.agent-bob.pid").exists());
     let again = start_as("agent-alice").wait().unwrap();
-    assert_eq!(again.code(), Some(75), "the same nick is refused while its watch runs");
+    assert_eq!(
+        again.code(),
+        Some(75),
+        "the same nick is refused while its watch runs"
+    );
     assert_eq!(alice.wait().unwrap().code(), Some(0));
     assert_eq!(bob.wait().unwrap().code(), Some(0));
     let _ = fs::remove_dir_all(&dir);
@@ -118,7 +147,9 @@ fn different_nicks_run_the_same_watch_and_one_nick_runs_it_once() {
 #[test]
 fn simultaneous_starts_elect_exactly_one_monitor() {
     let dir = scratch("race");
-    let mut children: Vec<_> = (0..8).map(|_| start(&dir, "race", &["sleep", "1"])).collect();
+    let mut children: Vec<_> = (0..8)
+        .map(|_| start(&dir, "race", &["sleep", "1"]))
+        .collect();
     let codes: Vec<Option<i32>> = children
         .iter_mut()
         .map(|child| child.wait().unwrap().code())

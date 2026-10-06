@@ -50,7 +50,10 @@ fn bound_port(home: &Path) -> u16 {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    panic!("chat-server-rs never recorded its port in {}", file.display());
+    panic!(
+        "chat-server-rs never recorded its port in {}",
+        file.display()
+    );
 }
 
 fn wait_for_port(port: u16) {
@@ -91,8 +94,7 @@ impl Bridge {
         std::fs::create_dir_all(&sessions).expect("sessions dir");
         std::fs::write(
             sessions.join(format!("{SESSION}.json")),
-            json!({"server": format!("127.0.0.1:{port}"), "nick": NICK, "cursors": {}})
-                .to_string(),
+            json!({"server": format!("127.0.0.1:{port}"), "nick": NICK, "cursors": {}}).to_string(),
         )
         .expect("session file");
         let mut adapter = Command::new(bin_dir().join("chat-mcp"))
@@ -222,17 +224,25 @@ fn a_cli_send_and_names_are_answered_by_the_bridge_and_no_second_nick_appears() 
     let (code, out) = bridge.cli(&["send", "--chan", CHAN, "--text", "from the cli"]);
     assert_eq!(code, 0, "the forwarded send succeeds: {out}");
     assert!(
-        out.contains(&format!(":{NICK}!{NICK}@localhost PRIVMSG {CHAN} :from the cli")),
+        out.contains(&format!(
+            ":{NICK}!{NICK}@localhost PRIVMSG {CHAN} :from the cli"
+        )),
         "the send is reported as the bridge's own: {out}"
     );
 
     let (code, out) = bridge.cli(&["names", "--chan", CHAN]);
     assert_eq!(code, 0, "the forwarded names succeeds: {out}");
     assert!(out.contains(NICK), "the bridge is a member: {out}");
-    assert!(!out.contains(&format!("{NICK}-2")), "no suffixed nick: {out}");
+    assert!(
+        !out.contains(&format!("{NICK}-2")),
+        "no suffixed nick: {out}"
+    );
 
     let roster = bridge.roster();
-    assert!(roster.contains(NICK), "the server still has the bridge: {roster}");
+    assert!(
+        roster.contains(NICK),
+        "the server still has the bridge: {roster}"
+    );
     assert!(
         !roster.contains(&format!("{NICK}-2")),
         "the server never renamed a second connection: {roster}"

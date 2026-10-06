@@ -12,8 +12,7 @@ use planning_validator_docs::{
     validate_existence, validate_obsolete, validate_plan_documents, validate_step_numbers,
 };
 use planning_validator_goals::{
-    validate_goals, validate_step_naming, validate_steps, validate_tracker_rows,
-    GoalTableRegistry,
+    validate_goals, validate_step_naming, validate_steps, validate_tracker_rows, GoalTableRegistry,
 };
 use planning_validator_inventory::Inventory;
 use planning_validator_placeholders::PlaceholderValidator;

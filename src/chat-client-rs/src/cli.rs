@@ -930,7 +930,8 @@ fn serve_read(
     let mut since = request.since.clone();
     if since.is_empty() {
         // A RECORDED cursor counts even at 0 (B269).
-        if let Some(cursor) = Session::load_with_key(state_dir, key).cursor_recorded(&request.chan) {
+        if let Some(cursor) = Session::load_with_key(state_dir, key).cursor_recorded(&request.chan)
+        {
             since = cursor.to_string();
         }
     }

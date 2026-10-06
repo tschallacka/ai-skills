@@ -71,8 +71,7 @@ fn recompute(goal: &Path) {
     let percent = progress_percent(completed as i64, total as i64) as usize;
     let bar = progress_bar(completed as i64, total as i64, 20);
     let icon = progress_icon(completed as i64, percent as i64);
-    let content =
-        fs::read_to_string(&progress).unwrap_or_else(|error| die(error.to_string(), 66));
+    let content = fs::read_to_string(&progress).unwrap_or_else(|error| die(error.to_string(), 66));
     let replacement = format!("**Progress:** `{}%  {}  100%` {}", percent, bar, icon);
     let mut found = false;
     let updated = content
@@ -127,9 +126,7 @@ fn main() {
             );
             recompute(&goal);
         }
-        Some(goal_dir) if args.len() == 2 && goal_dir != "--rows" => {
-            recompute(Path::new(goal_dir))
-        }
+        Some(goal_dir) if args.len() == 2 && goal_dir != "--rows" => recompute(Path::new(goal_dir)),
         _ => usage(64),
     }
 }
