@@ -3552,6 +3552,31 @@
       "updated_at": "2026-10-05T16:09:41Z"
     },
     {
+      "id": "B396",
+      "title": "the review loop cannot converge: reviewers flag goal-tracker rows that no helper can fix",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "create a plan with one goal and two units and let the trackers be created; run a review cycle that yields a finding; fix it with update-work-unit.sh <plan> W01 --description '...'; validate-plan.sh <plan> passes; a fresh reviewer reports the W01 tracker row as stale; create-progress.sh <plan>/<goal> refuses because the file exists; --review-status <plan> approved is refused while the finding is open",
+      "observed": "Fresh reviewers check goal-tracker rows against the inventory and step objectives and raise stale rows as open findings. Cycle 2 reported stale tracker rows for W23, W33 and W25 (AR-04, AR-05). Cycle 3 raised them as AR-19. The coordinator deleted the goal trackers and recreated them with create-progress.sh, which the skill forbids. Cycle 4 verified AR-19 resolved only because of that write. Browser-discovery fixes made rows W01, W02, W08 and W34 stale again, and two trackers were deleted and recreated a second time. Cycle 7 kept AR-22 and AR-23 open partly over tracker rows (the goal 01 progress row for W08 still lacks printPath), although the substance of both fixes was verified correct. The coordinator then stopped and asked the human. Findings tied to tracker rows took part in 4 of 7 cycles, at roughly 120 to 230k tokens per cycle.",
+      "expected": "The review loop converges. A stale tracker description is either refreshed by the helper that changed the unit or step, derived and never a finding, flagged by validate-plan.sh with the fix command, or given a sanctioned outcome (for example tool-limited with a filed bug id). A finding whose only fix is a forbidden direct write is escalated, not approved around and not performed.",
+      "mechanism": "Tracker rows are written only at creation or when a unit moves. Description and objective edits by update-work-unit.sh and update-plan-content.sh change the inventory and step files but nothing re-derives the goal progress.md row text, so every normal review fix can make a row stale. The approval gate requires every finding resolved, no helper can refresh a row, and section 4.5 forbids direct writes, so a fix can create a new unfixable finding each cycle. The coordinator's only remaining options are to break 4.5, waive a finding it may not approve, or never finish. Contributing: the finding category is not scoped, so cycles judged it differently (cycles 2, 3 and 7 raised it; cycles 1 and 5 did not).",
+      "surfaces": [
+        "planning/parts/part-3.md",
+        "planning/parts/part-4.md",
+        "planning/scripts/validate-plan.sh",
+        "planning/scripts/update-progress.sh",
+        "planning/scripts/update-work-unit.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "coordinator session, review cycles 2 to 7 (AR-04, AR-05, AR-19, AR-22, AR-23)",
+      "notes": "Area: planning (review gate). Related to B394 (stale goal-tracker rows, the root staleness mechanism); this is the review-gate consequence of it, a peer and not a facet, so no parent. Not reproduced by the filer in a fresh plan; the reproduction is the reporter's sequence of helper calls. Fix options, any one or a combination: (1) helpers that change a unit description or step objective also rewrite the matching tracker row keeping its status (fix/plan-tracker-row-refresh does this); (2) reviewer scope says tracker descriptions are derived: grade status and membership only, never wording; (3) validate-plan.sh warns on a stale tracker row and names the command that fixes it; (4) a sanctioned finding outcome tool-limited with a filed bug id, accepted by the approval gate only when the finding names no plan content beyond derived artifacts; (5) part-4 section 4.5 adds: if the only fix for a finding is a direct write, stop and escalate; do not perform it and do not approve around it.",
+      "created_at": "2026-10-06T10:34:58Z",
+      "updated_at": "2026-10-06T10:34:58Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
