@@ -3577,6 +3577,27 @@
       "updated_at": "2026-10-06T10:34:58Z"
     },
     {
+      "id": "B397",
+      "title": "reopened plan cannot be re-approved without editing fixes.md by hand",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Approve a plan with a gated finding (WNN unit) and record fix claims with add-fix-claim.sh. Reopen with update-plan-content.sh --review-status <plan> pending, land a new review cycle (update-adversarial-review.sh), then run add-fix-claim.sh for the same pairs and --review-status approved. Every old pair is refused: 'already claimed with a different key in fixes.md -- remove that line'; verify-fix-keys.sh fails each old pair as 'forged or stale key'.",
+      "observed": "No helper clears or replaces a claim line in fixes.md. The new mint session makes every old claim fail verification and blocks a new claim for the same pair, so the approval gate cannot pass again. The refusal advises a direct write to a plan artifact, which section 4.5 forbids.",
+      "expected": "Reopening retires the existing claims (archived with the review cycle), or add-fix-claim.sh --replace swaps a claim whose key no longer matches the current mint session. Verification reports a claim from a superseded session as superseded, not as forged, and the refusal names a helper command rather than a line removal.",
+      "mechanism": null,
+      "surfaces": [
+        "planning"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "coordinator agent, plan outfit-order-design-sync (proforto), skill 2.0.0-alpha.3 (1e6d58fedf28)",
+      "notes": "Reporter's suggested fixes: archive and clear fixes.md on --review-status pending; add --replace to add-fix-claim.sh; split the verify outcome into superseded-by-later-mint and mismatch-within-session; document the reopen path in parts 3.1 and 4.5.",
+      "created_at": "2026-10-06T11:53:08Z",
+      "updated_at": "2026-10-06T11:53:08Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
