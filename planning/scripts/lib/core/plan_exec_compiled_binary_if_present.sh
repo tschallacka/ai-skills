@@ -97,8 +97,9 @@ plan_exec_compiled_binary_if_present() {
         pecbip_skill_root="$(pecbip_find_skill_root "$(cd "$caller_script_dir" && pwd)")" || pecbip_skill_root=""
         # A root the caller already named (PLANNING_SKILL_ROOT) survives when this
         # walk finds none: a copied scripts tree has no ancestor to find, and an
-        # empty export here would undo the override the caller set.
-        if [ -n "$pecbip_skill_root" ]; then
+        # empty export here would undo the override the caller set. Without a
+        # caller's root, the walk's answer (even empty) is exported as before.
+        if [ -n "$pecbip_skill_root" ] || [ -z "${PLANNING_SKILL_ROOT:-}" ]; then
             PLANNING_SKILL_ROOT="$pecbip_skill_root" exec "$pecbip_target" "$@"
         fi
         exec "$pecbip_target" "$@"
