@@ -111,6 +111,67 @@ pub fn install_tui_hint_plugin_claude(
     )
 }
 
+/// The Claude Code mods (mods/<board>), each shipped alongside the skills it
+/// serves. A mod is copied onto a Claude root when one of its companion skills
+/// is installed there. `loading` is not a mod of its own: the boards that use
+/// it carry a copy (mods/<board>/hooks/loading.tsx, kept by mods/loading/sync.sh).
+/// build-release.sh's mods_files() lists the same boards; a test holds them equal.
+pub const MODS: &[(&str, &[&str])] = &[
+    ("chat-board", &["chat"]),
+    ("ci-board", &["ci-failures"]),
+    ("plan-board", &["planning"]),
+    ("brainstorm-board", &["brainstorm"]),
+    ("register-board", &["bug-report", "todo"]),
+    ("tui-hint-board", &["interactive-shell"]),
+    (
+        "signal-bus",
+        &[
+            "chat",
+            "ci-failures",
+            "planning",
+            "brainstorm",
+            "bug-report",
+            "todo",
+            "interactive-shell",
+        ],
+    ),
+];
+
+/// Copies every mod whose companion skill is installed on `target_root` from
+/// `source_root/mods/<mod>` to `target_root/<mod>`. Returns the directories
+/// written; a mod with no installed companion is left alone.
+pub fn install_mods_claude(source_root: &Path, target_root: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut written = Vec::new();
+    for (name, companions) in MODS {
+        if !companions.iter().any(|skill| target_root.join(skill).is_dir()) {
+            continue;
+        }
+        let source = source_root.join("mods").join(name);
+        if !source.is_dir() {
+            continue;
+        }
+        let destination = target_root.join(name);
+        copy_dir_tree(&source, &destination)?;
+        written.push(destination);
+    }
+    Ok(written)
+}
+
+fn copy_dir_tree(from: &Path, to: &Path) -> io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let path = entry.path();
+        let destination = to.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_tree(&path, &destination)?;
+        } else {
+            fs::copy(&path, &destination)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn install_editor_gate_plugin(source_root: &Path, target_root: &Path) -> io::Result<PathBuf> {
     copy_plugin_files(
         source_root,
@@ -461,5 +522,41 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let removed = uninstall_tui_hint_plugin_opencode(home.path()).unwrap();
         assert!(!removed);
+    }
+
+    fn write_mod(source_root: &Path, name: &str) {
+        let file = source_root.join("mods").join(name).join("hooks").join("register.tsx");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, "export {}\n").unwrap();
+    }
+
+    #[test]
+    fn a_mod_is_copied_only_where_a_companion_skill_is_installed() {
+        let source_root = tempfile::tempdir().unwrap();
+        write_mod(source_root.path(), "chat-board");
+        write_mod(source_root.path(), "ci-board");
+        let target_root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(target_root.path().join("chat")).unwrap();
+
+        let written = install_mods_claude(source_root.path(), target_root.path()).unwrap();
+
+        assert_eq!(written, vec![target_root.path().join("chat-board")]);
+        assert!(target_root
+            .path()
+            .join("chat-board/hooks/register.tsx")
+            .is_file());
+        assert!(!target_root.path().join("ci-board").exists());
+    }
+
+    #[test]
+    fn every_mod_companion_is_a_skill_the_installer_knows() {
+        for (name, companions) in MODS {
+            for skill in *companions {
+                assert!(
+                    crate::manifest::SKILLS.iter().any(|s| s.name == *skill),
+                    "{name} names {skill}, which is not a skill"
+                );
+            }
+        }
     }
 }

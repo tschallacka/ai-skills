@@ -255,12 +255,28 @@ profile_files_for_release() {
     done
 }
 
+# The Claude Code mods (mods/<board>), shipped alongside the skills they serve.
+# Their files are JSON and TSX, with no marker a MODE line could sit in, so the
+# boards are listed here and their tracked files taken whole. The same board
+# names are plugins::MODS in src/installer/src/plugins.rs; the test that holds
+# the two equal is tests/test-mods-package.sh. loading is not listed: the boards
+# carry their own copy of it.
+MODS_BOARDS="chat-board ci-board plan-board brainstorm-board register-board tui-hint-board signal-bus"
+
+mods_files() {
+    local board
+    for board in $MODS_BOARDS; do
+        (cd "$repo_root" && git ls-files "mods/$board")
+    done
+}
+
 collect() {
     {
         printf 'README.md\nLICENSE\npackage.json\n'
         tui_hint_plugin_files
         editor_gate_plugin_files
         agent_identity_plugin_files
+        mods_files
         profile_files_for_release
         local path
         while IFS= read -r path; do

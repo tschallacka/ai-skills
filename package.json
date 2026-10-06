@@ -18,6 +18,13 @@
   },
   "files": [
     "installer/bootstrap.sh",
+    "mods/brainstorm-board",
+    "mods/chat-board",
+    "mods/ci-board",
+    "mods/plan-board",
+    "mods/register-board",
+    "mods/signal-bus",
+    "mods/tui-hint-board",
     "planning",
     "project-specifics",
     "resource-limited-testing",
