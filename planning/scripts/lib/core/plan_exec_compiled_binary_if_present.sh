@@ -95,14 +95,8 @@ plan_exec_compiled_binary_if_present() {
     pecbip_bin_dir="$(plan_bin_dir)" || pecbip_bin_dir=""
     if pecbip_target="$(pecbip_pick "$pecbip_bin_dir" "$binary_name" "$caller_script_dir")"; then
         pecbip_skill_root="$(pecbip_find_skill_root "$(cd "$caller_script_dir" && pwd)")" || pecbip_skill_root=""
-        # A root the caller already named (PLANNING_SKILL_ROOT) survives when this
-        # walk finds none: a copied scripts tree has no ancestor to find, and an
-        # empty export here would undo the override the caller set. Without a
-        # caller's root, the walk's answer (even empty) is exported as before.
-        if [ -n "$pecbip_skill_root" ] || [ -z "${PLANNING_SKILL_ROOT:-}" ]; then
-            PLANNING_SKILL_ROOT="$pecbip_skill_root" exec "$pecbip_target" "$@"
-        fi
-        exec "$pecbip_target" "$@"
+        PLANNING_SKILL_ROOT="$pecbip_skill_root" \
+            exec "$pecbip_target" "$@"
     fi
     unset -f plan_bin_dir plan_crypt_bin plan_crypt_resolve plan_crypt_target_triple \
         plan_fix_key plan_random_hex plan_sha256_chain plan_sha256_hex pecbip_find_skill_root pecbip_pick

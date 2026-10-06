@@ -170,10 +170,13 @@ t_assert_eq "the builder's --list matches the derived set" \
 # not a repository copy: they are never tracked (.agents/MAINTAINER.md 1.10),
 # so a clean tree has none, and a stale present one must not silently pass
 # here - the lib test owns staleness, this test owns what the tarball carries.
-fresh_scripts="$work/fresh-scripts"
+# The copy sits under <work>/planning/scripts, so the builder's own walk finds
+# <work> as the skill root: no PLANNING_SKILL_ROOT, which would otherwise be
+# inherited by every test run under this suite.
+fresh_scripts="$work/planning/scripts"
 mkdir -p "$fresh_scripts"
 cp -R "$repo_root/planning/scripts/." "$fresh_scripts/"
-( cd "$fresh_scripts" && PLANNING_SKILL_ROOT="$repo_root" ./build-plan-libs.sh ) >/dev/null 2>&1 \
+( cd "$fresh_scripts" && ./build-plan-libs.sh ) >/dev/null 2>&1 \
     || t_fail 'building the compiled libraries for comparison failed'
 mkdir -p "$work/extract"
 tar -xzf "$tarball" -C "$work/extract"
