@@ -99,5 +99,33 @@ if "$BASH" "$verifier" --part part-1 --token "$real_token" "$copy2" >/dev/null 2
     note_fail 'a token from before a regeneration still verified after the part changed'
 fi
 
+# ── the planning skill promotes the ai-text-editor (B395) ───────────────────
+# The generated parts must prefer the editor for existing files, state its
+# advantages, and name its tools in the reviewer allowance. Phrase checks are
+# the contract: the wording is what an agent reads.
+part1="$planning_dir/parts/part-1.md"
+part3="$planning_dir/parts/part-3.md"
+for phrase in \
+    'prefer the ai-text-editor over the built-in Edit' \
+    'select:mcp__ai-text-editor__open' \
+    'Fewer tokens per call' \
+    'Replace by matched text' \
+    'A change journal that survives a `git checkout`' \
+    'Revision-guarded edits'; do
+    grep -qF -- "$phrase" "$part1" || note_fail "part-1.md lacks editor promotion text: $phrase"
+done
+for phrase in \
+    'Reviewer tool allowance when a reviewer may write' \
+    'mcp__ai-text-editor__replace' \
+    'mcp__ai-text-editor__save' \
+    'a here-document'; do
+    grep -qF -- "$phrase" "$part3" || note_fail "part-3.md lacks reviewer editor allowance: $phrase"
+done
+# Nothing in the generated parts may tell an agent it can skip the editor.
+if grep -qiE 'skip the editor|editor is not required|not required here' "$part1" "$part3"; then
+    note_fail 'a generated part tells agents they may skip the ai-text-editor'
+fi
+
 [ "$(t_failures)" -eq 0 ] || exit 1
+
 printf '%s\n' 'test-skill-docs-generation: PASS'
