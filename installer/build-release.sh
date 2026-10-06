@@ -556,8 +556,14 @@ case "$mode" in
         # equality holds between builds on one machine, and file-for-file
         # equality holds anywhere. test-release-package.sh asserts both.
         find "$root" -type f -exec touch -t 202001010000 {} +
+        # One tar call for the whole list, read from a file. xargs splits a long
+        # list into batches when the shell's command line is short (Windows), and
+        # every batch writes its own archive with an end marker, so the tarball
+        # silently stopped at the first batch: 57 of 362 entries on a simulated
+        # small limit. The list file lives in the stage, outside the package tree.
         ( cd "$stage" && find "ai-skills-$version" -type f | LC_ALL=C sort \
-            | tr '\n' '\0' | xargs -0 tar -cf - | gzip -n -9 > "$tarball" )
+            > .tarball-files && tar -cf - -T .tarball-files | gzip -n -9 > "$tarball"
+          rm -f .tarball-files )
         printf 'Wrote %s (%s files, %s)\n' "${tarball#"$repo_root"/}" "$count" \
             "$(du -h "$tarball" | awk '{print $1}')"
         ;;
