@@ -614,6 +614,21 @@ jobs:
             echo 'C:\Program Files\Git\usr\bin'
           } >> "$GITHUB_PATH"
 
+      # The runner's jq.exe writes CRLF on stdout. Every value the suite reads
+      # back from it then ends in a CR: a heading never matches the same line of
+      # a document, and a recipe read from a schema fails on its CR. `-b` (binary
+      # mode, honoured on Windows only) keeps LF. The wrapper adds that flag to
+      # every jq call the suite makes, from a directory of its own on PATH.
+      - name: Give the suite a jq that writes LF
+        shell: bash
+        run: |
+          real_jq="$(command -v jq)"
+          shim="$RUNNER_TEMP/lf-tools"
+          mkdir -p "$shim"
+          printf '#!/usr/bin/env bash\nexec "%s" -b "$@"\n' "$real_jq" > "$shim/jq"
+          chmod +x "$shim/jq"
+          echo "$shim" >> "$GITHUB_PATH"
+
       - name: Build every compiled helper into bin/<triple>
         shell: bash
         run: |
