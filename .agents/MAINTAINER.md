@@ -693,6 +693,11 @@ rjq and jq are used for two separate things, and the rules keep them apart.
 9. Commit as one coordinated, no-backwards-compat change. The message carries the
    *why* that does not belong in a comment (`CODE-STYLE.md` §12) and names the
    register entries it closes, so the two can be checked against each other.
+10. Before a PR is opened or updated, merge the current `master` into the branch
+    (`git fetch origin && git merge origin/master`; a normal merge, never a rebase
+    of a shared branch). The `registers` branch follows `master`, so a branch that
+    has not merged `master` carries master's register updates as its own diff,
+    which the register-scope gate then refuses. Re-run the gate after the merge.
 
 ### 2a. Adding a file
 
