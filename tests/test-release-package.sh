@@ -108,6 +108,11 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
     printf 'agent-identity-plugin/hooks/hooks.json\n'
     printf 'agent-identity-plugin/hooks/lib.sh\n'
     printf 'agent-identity-plugin/hooks/subagent-start.sh\n'
+    # The mods: every tracked file of each board installer/build-release.sh's
+    # mods_files() lists, the same way that function takes them.
+    for board in $(sed -n 's/^MODS_BOARDS="\(.*\)"$/\1/p' "$repo_root/installer/build-release.sh"); do
+        (cd "$repo_root" && git ls-files "mods/$board")
+    done
     # T102: agent profiles are not a skill (no skill_files() entry) and their
     # canonical source is JSON, a format with no comment syntax a MODE marker
     # could sit in -- same reasoning as the three plugin lists above. Derived
@@ -168,7 +173,7 @@ t_assert_eq "the builder's --list matches the derived set" \
 fresh_scripts="$work/fresh-scripts"
 mkdir -p "$fresh_scripts"
 cp -R "$repo_root/planning/scripts/." "$fresh_scripts/"
-( cd "$fresh_scripts" && ./build-plan-libs.sh ) >/dev/null 2>&1 \
+( cd "$fresh_scripts" && PLANNING_SKILL_ROOT="$repo_root" ./build-plan-libs.sh ) >/dev/null 2>&1 \
     || t_fail 'building the compiled libraries for comparison failed'
 mkdir -p "$work/extract"
 tar -xzf "$tarball" -C "$work/extract"
