@@ -221,6 +221,13 @@ never rewritten at runtime; still verify a profile's claims against the
 actual screen, since a different version or configuration can behave
 differently than what was recorded.
 
+When both files exist for one program, read them as one profile: the shipped
+`appprofiles/<appname>.md` first, then the `appprofiles.d/<appname>.md` notes
+for this system, which extend it (a different version's keys, this machine's
+configuration). Where the notes contradict the shipped text, the notes win for
+this machine. The tui-hint board shows the two the same way, the notes under an
+"Added for this system" heading.
+
 App-specific knowledge beyond a shipped profile -- or for an app with none --
 belongs in
 `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/appprofiles.d/<appname>.md`, a
