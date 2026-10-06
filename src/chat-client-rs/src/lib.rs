@@ -32,7 +32,7 @@ mod net;
 mod session;
 mod wire;
 
-pub use cli::{read_last_id, run};
+pub use cli::{read_last_id, run, serve_request, Following};
 pub use discovery::{discover_candidates, resolve_server, DEFAULT_BEACON_PORT};
 pub use local::{channels_home, local_chan_log, local_last_id};
 pub use net::{connect, read_line, server_host, wait_for_welcome, write_line, Client};
