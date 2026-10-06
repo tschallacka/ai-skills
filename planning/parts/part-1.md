@@ -172,6 +172,26 @@ the lookup to the named work unit and follow its pagination or result limits.
 Use text search only for literals, non-code documents, configuration values,
 or when the repository-aware lookup cannot answer the question.
 
+**Editing an existing file: prefer the ai-text-editor over the built-in Edit.**
+Load its tools first with ToolSearch
+(`select:mcp__ai-text-editor__open,mcp__ai-text-editor__search,mcp__ai-text-editor__replace,mcp__ai-text-editor__save`);
+they are deferred and are not callable until loaded. It is the better
+instrument for plan and memory files:
+
+- Fewer tokens per call: the default verbosity 1 returns only the revision and
+  the span an edit resolved to, not the file again.
+- Finer search: exact, regex, fuzzy and byte modes, by line or byte range; a
+  hit's `match_id` edits exactly that hit with no coordinates to compute.
+- Replace by matched text: `expected_text` refuses on a mismatch before
+  anything is deleted. The built-in Edit cannot tell you the span moved.
+- A change journal that survives a `git checkout` that would discard a
+  working-tree edit.
+- Revision-guarded edits: a stale view is refused, never merged.
+
+Use the built-in Write only for a new file. A hook hint that calls the editor
+optional describes the tool, not this rule: existing files are edited through
+the ai-text-editor. Do not fall back to here-documents or shell rewrites.
+
 **Comment discipline for produced code** (see
 [`references/comment-discipline-contract.md`](references/comment-discipline-contract.md)).
 Code produced under a plan MUST be self-documenting; comments MUST NOT exceed
@@ -242,14 +262,14 @@ relocation outcome; state the reason in its `goal.md`. A goal with more than
 contract, deployability, or ownership boundary. Do not split merely by file
 type.
 
-<!-- SKILL-LOAD-PROOF part=part-1 token=1d15f3f4e11748e1 -->
-
-
 Every goal needs its own definition of done that can be demonstrated without
 claiming completion of later goals. If it cannot be demonstrated independently,
 it is a segment of another goal, not a goal.
 
 ### Target reachability gate
+
+
+<!-- SKILL-LOAD-PROOF part=part-1 token=aa2e72c5f9282cca -->
 
 Before a work unit may target a template, block, or layout, the plan must
 record evidence that the target actually renders on the surface in question. A
