@@ -6,7 +6,8 @@ import { LOADING_FRAMES, LOADING_FRAME_MS, loadingArt, pickSlogan } from './load
 // The failing jobs of the branch's latest CI run, as the ci-failures tool reports
 // them, or the list of the repo's recent runs: a run picked from the list shows its
 // own report. The tool talks to the network, so it runs when the pane opens, when
-// the person presses [refresh] or a run, not on a timer. The last report, the
+// the person presses [refresh] or a run, not on a timer. The one timer is the job
+// count of a listed run still going, re-read every 30 seconds so its bar moves. The last report, the
 // browsing state, the run list and the picked run are kept in $.state so a redraw
 // keeps them. Toggled by `enabled` in settings.json pluginConfigs["ci-board"].options.
 
@@ -60,6 +61,38 @@ async function jobCountsFor($: Parameters<typeof update>[0], id: string): Promis
 function jobBar({ done, total }: JobCounts, width = 20): string {
   const filled = total === 0 ? 0 : Math.round((width * done) / total)
   return `[${'#'.repeat(filled)}${'-'.repeat(width - filled)}] ${done} of ${total} jobs`
+}
+
+// The job counts of runs still going are re-read this often while the list is open,
+// so their bars move without a press. The timer stops once no listed run is still going.
+const JOB_REFRESH_MS = 30_000
+let jobRefresh: { cancel: () => void } | undefined
+
+// Re-reads the jobs of each listed run still going, and of the open run when it is one,
+// then redraws. Quiet, with no loading screen.
+async function refreshLiveJobs($: Parameters<typeof update>[0]): Promise<void> {
+  const { value: listed } = await $.state.get(runs)
+  const current = (listed ?? []) as RunRow[]
+  const next: RunRow[] = []
+  for (const row of current) {
+    next.push(row.live ? { ...row, jobs: (await jobCountsFor($, row.id)) ?? row.jobs } : row)
+  }
+  await update($, runs, () => next)
+  const { value: open } = await $.state.get(picked)
+  const liveOpen = next.find(row => row.live && open && row.id === open.id)
+  if (liveOpen) await update($, picked, () => ({ ...open, jobs: liveOpen.jobs }))
+  if (!next.some(row => row.live)) {
+    jobRefresh?.cancel()
+    jobRefresh = undefined
+  }
+}
+
+// Starts the 30-second re-read of live runs, unless it is already running.
+function followLiveRuns($: Parameters<typeof update>[0]): void {
+  if (jobRefresh) return
+  jobRefresh = $.clock.every(JOB_REFRESH_MS, () => {
+    void refreshLiveJobs($)
+  })
 }
 
 // How long a run took, from when it started to when it finished, as "4m 12s".
@@ -122,6 +155,7 @@ async function loadRunList($: Parameters<typeof update>[0], limit = 20): Promise
     if (row.live) row.jobs = await jobCountsFor($, row.id)
   }
   await update($, runs, () => rows)
+  if (rows.some(row => row.live)) followLiveRuns($)
   await update($, picked, () => null)
   await update($, browsing, () => true)
 }
