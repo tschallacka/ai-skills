@@ -156,7 +156,7 @@ package/mods/chat-board/types/index.d.ts	321
 package/mods/ci-board/.claude-plugin/plugin.json	414
 package/mods/ci-board/hooks/hooks.json	36
 package/mods/ci-board/hooks/loading.tsx	12225
-package/mods/ci-board/hooks/register.tsx	17481
+package/mods/ci-board/hooks/register.tsx	19354
 package/mods/ci-board/types/index.d.ts	562
 package/mods/plan-board/.claude-plugin/plugin.json	1033
 package/mods/plan-board/hooks/hooks.json	36

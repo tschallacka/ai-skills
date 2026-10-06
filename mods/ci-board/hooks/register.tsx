@@ -35,7 +35,32 @@ const FILTERS: { label: string; tone: string; keeps: (conclusion: string) => boo
 ]
 
 // A run in the browse list: its id, what it was for, and how it ended.
-type RunRow = { id: string; title: string; branch: string; conclusion: string; when: string; age: string; took: string }
+type RunRow = { id: string; title: string; branch: string; conclusion: string; when: string; age: string; took: string; live: boolean; jobs?: JobCounts }
+
+// How many of a run's jobs have finished, out of how many there are.
+type JobCounts = { done: number; total: number }
+
+// The jobs of a run gh has listed, as finished and total. An unreadable answer is none.
+function jobCountsOf(stdout: string): JobCounts | undefined {
+  try {
+    const jobs = (JSON.parse(stdout).jobs ?? []) as { status: string }[]
+    return { done: jobs.filter(job => job.status === 'completed').length, total: jobs.length }
+  } catch {
+    return undefined
+  }
+}
+
+// A run's jobs as they stand now, from the jobs API: gh run view refuses a run still going.
+async function jobCountsFor($: Parameters<typeof update>[0], id: string): Promise<JobCounts | undefined> {
+  const listed = await $.process.run(['gh', 'api', `repos/{owner}/{repo}/actions/runs/${id}/jobs?per_page=100`])
+  return listed.exitCode === 0 ? jobCountsOf(listed.stdout) : undefined
+}
+
+// A bar of the jobs finished so far, as "[########------------] 8 of 20 jobs".
+function jobBar({ done, total }: JobCounts, width = 20): string {
+  const filled = total === 0 ? 0 : Math.round((width * done) / total)
+  return `[${'#'.repeat(filled)}${'-'.repeat(width - filled)}] ${done} of ${total} jobs`
+}
 
 // How long a run took, from when it started to when it finished, as "4m 12s".
 function tookOf(startedAt: string, finishedAt: string): string {
@@ -92,6 +117,10 @@ async function loadRunList($: Parameters<typeof update>[0], limit = 20): Promise
   const nowMs = Number(clock.stdout.trim()) * 1000
   const result = await $.process.run(['gh', 'run', 'list', '--limit', String(limit), '--json', 'databaseId,displayTitle,headBranch,conclusion,status,createdAt,startedAt,updatedAt'])
   const rows = result.exitCode === 0 && Number.isFinite(nowMs) ? runsOf(result.stdout, nowMs) : []
+  // A run still going gets its job count, one jobs-API call each, so its bar shows.
+  for (const row of rows) {
+    if (row.live) row.jobs = await jobCountsFor($, row.id)
+  }
   await update($, runs, () => rows)
   await update($, picked, () => null)
   await update($, browsing, () => true)
@@ -118,6 +147,7 @@ function runsOf(stdout: string, nowMs: number): RunRow[] {
       when: row.createdAt.slice(0, 16).replace('T', ' '),
       age: ago(row.createdAt, nowMs),
       took: tookOf(row.startedAt, row.updatedAt),
+      live: row.status !== 'completed',
     }))
   } catch {
     return []
@@ -230,6 +260,7 @@ export const register: Register = (on, options) => {
       const xdg = (await $.env.get('XDG_CONFIG_HOME')) ?? ''
       let text = ''
       let url = ''
+      let jobs: JobCounts | undefined
       await busyWhile(`run ${row.id}`, [
         async () => {
           text = reportOf(await $.process.run([toolPath(home, xdg), row.id]))
@@ -247,7 +278,11 @@ export const register: Register = (on, options) => {
           }
         },
         async () => {
-          await update($, picked, () => ({ id: row.id, title: row.title, text, url, took: row.took, conclusion: row.conclusion }))
+          // A run still going: its jobs as they stand now, so the bar is current.
+          if (row.live) jobs = await jobCountsFor($, row.id)
+        },
+        async () => {
+          await update($, picked, () => ({ id: row.id, title: row.title, text, url, took: row.took, conclusion: row.conclusion, jobs }))
         },
       ])
     }
@@ -290,6 +325,7 @@ export const register: Register = (on, options) => {
             </Box>
           )}
           <Text>{`${run.conclusion === 'success' ? 'Passed' : run.conclusion}  ·  took ${run.took ?? 'unknown'}`}</Text>
+          {run.live && <Text color="yellow">{run.jobs ? jobBar(run.jobs) : 'waiting for jobs'}</Text>}
           {run.url ? (
             <Button
               onPress={async () => {
@@ -364,6 +400,7 @@ export const register: Register = (on, options) => {
                   <Button onPress={() => openRun(row)}>{`${word}${row.title}`}</Button>
                 </Box>
                 <Text italic>{`   ${row.when}  ·  ${row.age ?? 'press refresh runs for its age'}  ·  took ${row.took ?? 'unknown'}  ·  on ${row.branch}`}</Text>
+                {row.live && <Text color="yellow">{`   ${row.jobs ? jobBar(row.jobs) : 'waiting for jobs'}`}</Text>}
               </Box>
             )
           })}
