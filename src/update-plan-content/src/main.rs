@@ -570,8 +570,36 @@ fn update_review_status(plan: &Path, requested: &str) {
     if let Some(session) = invalidate_session {
         let _ = fs::remove_dir_all(session);
     }
+    if requested == "pending" {
+        retire_fix_claims(plan);
+    }
     invalidate_context(plan, "plan");
     println!("Updated review-status");
+}
+
+/// Reopening a plan retires the fix claims recorded for its last approval.
+///
+/// The claims were keyed to the session that approved them. Once the plan is
+/// reopened, the next review cycle mints under a new session, so every old
+/// claim fails verification and would block a fresh one for the same pair (B397).
+/// Moving `fixes.md` aside, rather than deleting it, keeps what was approved;
+/// the next approval then needs a complete new set of claims, which is what it
+/// is meant to check.
+fn retire_fix_claims(plan: &Path) {
+    let claims = plan.join("fixes.md");
+    if !claims.is_file() {
+        return;
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    let retired = plan.join(format!("fixes.superseded-{stamp}.md"));
+    fs::rename(&claims, &retired).unwrap_or_else(|error| die(error.to_string(), 73));
+    eprintln!(
+        "note: fix claims from the last approval retired to {}; the next approval needs a fresh set",
+        retired.display()
+    );
 }
 
 fn paragraph_args(args: &[String], section: u8) -> Result<String, String> {
