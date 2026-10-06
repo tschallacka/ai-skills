@@ -126,10 +126,22 @@ cat > "$work/TODO.json" <<'JSON'
   ]
 }
 JSON
-recipe="$(jq -r '.upgrade_from.unversioned.steps[] | select(startswith("now=") or startswith("rjq "))' "$schema")"
+# The recipe finds rjq in the shared install directory, as shipped code does
+# (.agents/MAINTAINER.md 1.18), and never through PATH. This test stands that
+# directory up in the scratch home with this checkout's own build, so the recipe
+# is proven to resolve rjq there: a bare `rjq` would fail here on a machine
+# whose PATH has none, as the Windows runners' does.
+rjq_src=''
+for candidate in "$repo_root"/bin/*/rjq "$repo_root"/bin/*/rjq.exe; do
+    [ -f "$candidate" ] && { rjq_src="$candidate"; break; }
+done
+[ -n "$rjq_src" ] || t_fail 'no built rjq under bin/; run ./setup-dev-env.sh first'
+mkdir -p "$work/xdg/tsch-ai-skills/bin"
+cp "$rjq_src" "$work/xdg/tsch-ai-skills/bin/"
+recipe="$(jq -r '.upgrade_from.unversioned.steps[] | select(startswith("now=") or startswith("rjq_bin=") or startswith("\"$rjq_bin\" "))' "$schema")"
 t_assert_eq 'todo: the upgrade recipe has runnable steps' \
-    "$(printf '%s\n' "$recipe" | grep -c '^rjq ')" '1'
-( cd "$work" && "$BASH" -c "set -euo pipefail; $recipe" )
+    "$(printf '%s\n' "$recipe" | grep -c '^"\$rjq_bin" ')" '1'
+( cd "$work" && XDG_CONFIG_HOME="$work/xdg" "$BASH" -c "set -euo pipefail; $recipe" )
 
 t_assert_eq 'todo: the upgraded file records the current version' \
     "$(jq -r '.skill_version' "$work/TODO.json")" "$package_version"
