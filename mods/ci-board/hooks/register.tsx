@@ -83,6 +83,18 @@ function toolPath(home: string, xdg: string): string {
   return `${bin}/ci-failures`
 }
 
+// The repo's recent runs, read into the pane's state. Quiet, with no loading
+// screen, so opening the board shows them at once, runs in progress included.
+async function loadRunList($: Parameters<typeof update>[0]): Promise<void> {
+  const clock = await $.process.run(['date', '+%s'])
+  const nowMs = Number(clock.stdout.trim()) * 1000
+  const result = await $.process.run(['gh', 'run', 'list', '--limit', '20', '--json', 'databaseId,displayTitle,headBranch,conclusion,status,createdAt,startedAt,updatedAt'])
+  const rows = result.exitCode === 0 && Number.isFinite(nowMs) ? runsOf(result.stdout, nowMs) : []
+  await update($, runs, () => rows)
+  await update($, picked, () => null)
+  await update($, browsing, () => true)
+}
+
 // The repo's recent runs, from gh's JSON; an unreadable answer is no runs.
 function runsOf(stdout: string, nowMs: number): RunRow[] {
   try {
@@ -138,6 +150,7 @@ export const register: Register = (on, options) => {
       return { text: 'CI board closed.' }
     }
     await $.ui.open({ id: PANE, title: 'CI failures' })
+    await loadRunList($)
     return { text: 'CI board opened.' }
   })
 
