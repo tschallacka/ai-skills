@@ -81,7 +81,7 @@ rearm_text=''
 if [ -f "$spool/.active" ] \
     && chat_interrupt_hook_is_stale "$spool/.watcher" "$REARM_STALE_SECONDS" \
     && chat_interrupt_hook_is_stale "$spool/.rearm-reminded" "$REARM_COOLDOWN_SECONDS"; then
-    rearm_text='No chat-spool-watch is watching your chat interrupts right now, so a matching message or a timer will not reach you while you are idle -- only this reminder, at your next tool call. Arm it again (it exits after 30 minutes at most and does not restart itself): chat-spool-watch, as a Monitor or in the background.'
+    rearm_text='No chat-spool-watch is watching your chat interrupts right now, so a matching message or a timer will not reach you while you are idle -- only this reminder, at your next tool call. Arm it again as a Monitor, through monitor-once, which refuses to start a second watcher while one still runs: monitor-once --name chat-spool-watch --dir "<this session'"'"'s spool directory>" -- chat-spool-watch --session "<your session id>". It exits after 30 minutes at most and does not restart itself.'
     printf '' >"$spool/.rearm-reminded" 2>/dev/null || true
 fi
 
