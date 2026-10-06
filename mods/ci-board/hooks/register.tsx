@@ -85,10 +85,15 @@ function toolPath(home: string, xdg: string): string {
 
 // The repo's recent runs, read into the pane's state. Quiet, with no loading
 // screen, so opening the board shows them at once, runs in progress included.
+// Limited to the checked-out branch, so an open PR's own runs are not pushed out
+// of the list by other branches' runs; with no branch to name, the repo's own.
 async function loadRunList($: Parameters<typeof update>[0]): Promise<void> {
   const clock = await $.process.run(['date', '+%s'])
   const nowMs = Number(clock.stdout.trim()) * 1000
-  const result = await $.process.run(['gh', 'run', 'list', '--limit', '20', '--json', 'databaseId,displayTitle,headBranch,conclusion,status,createdAt,startedAt,updatedAt'])
+  const head = await $.process.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
+  const branch = head.exitCode === 0 ? head.stdout.trim() : ''
+  const scope = branch && branch !== 'HEAD' ? ['--branch', branch] : []
+  const result = await $.process.run(['gh', 'run', 'list', ...scope, '--limit', '50', '--json', 'databaseId,displayTitle,headBranch,conclusion,status,createdAt,startedAt,updatedAt'])
   const rows = result.exitCode === 0 && Number.isFinite(nowMs) ? runsOf(result.stdout, nowMs) : []
   await update($, runs, () => rows)
   await update($, picked, () => null)
