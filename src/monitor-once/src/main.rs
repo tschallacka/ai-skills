@@ -426,6 +426,15 @@ mod sys {
 
     pub fn signal_group(_group: i32, _signal: i32) {}
 
+    /// Windows has no signals to send and no process groups, so a holder is only
+    /// ever its own pid. The lock is still held by a live pid, which is what keeps
+    /// a second monitor out.
+    #[cfg(windows)]
+    pub fn alive(pid: i32) -> bool {
+        windows_process::alive(pid)
+    }
+
+    #[cfg(not(windows))]
     pub fn alive(_pid: i32) -> bool {
         false
     }
@@ -434,6 +443,14 @@ mod sys {
         false
     }
 
+    /// The process creation time, so a pid reused by a later process is told apart
+    /// from the one that wrote the lock.
+    #[cfg(windows)]
+    pub fn identity(pid: i32) -> Option<String> {
+        windows_process::identity(pid)
+    }
+
+    #[cfg(not(windows))]
     pub fn identity(_pid: i32) -> Option<String> {
         None
     }
@@ -442,6 +459,88 @@ mod sys {
 
     pub fn exit_code(status: &ExitStatus) -> u8 {
         status.code().map_or(1, |code| code.clamp(0, 255) as u8)
+    }
+
+    /// The two kernel32 calls the lock needs, declared directly so this crate
+    /// takes no Windows dependency.
+    #[cfg(windows)]
+    mod windows_process {
+        use std::ffi::c_void;
+
+        const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+        const STILL_ACTIVE: u32 = 259;
+        const ERROR_ACCESS_DENIED: i32 = 5;
+
+        #[repr(C)]
+        #[derive(Default)]
+        struct FileTime {
+            low: u32,
+            high: u32,
+        }
+
+        unsafe extern "system" {
+            fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+            fn CloseHandle(handle: *mut c_void) -> i32;
+            fn GetExitCodeProcess(handle: *mut c_void, code: *mut u32) -> i32;
+            fn GetProcessTimes(
+                handle: *mut c_void,
+                created: *mut FileTime,
+                exited: *mut FileTime,
+                kernel: *mut FileTime,
+                user: *mut FileTime,
+            ) -> i32;
+        }
+
+        /// An open process handle, closed when dropped.
+        struct Handle(*mut c_void);
+
+        impl Drop for Handle {
+            fn drop(&mut self) {
+                unsafe {
+                    CloseHandle(self.0);
+                }
+            }
+        }
+
+        /// The handle, or the Windows error code that refused it.
+        fn open(pid: i32) -> Result<Handle, i32> {
+            if pid <= 0 {
+                return Err(0);
+            }
+            let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32) };
+            if handle.is_null() {
+                Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(0))
+            } else {
+                Ok(Handle(handle))
+            }
+        }
+
+        pub fn alive(pid: i32) -> bool {
+            match open(pid) {
+                Ok(handle) => {
+                    let mut code = 0u32;
+                    let queried = unsafe { GetExitCodeProcess(handle.0, &mut code) } != 0;
+                    queried && code == STILL_ACTIVE
+                }
+                // The process exists but this user may not query it, which is what
+                // EPERM means on unix.
+                Err(code) => code == ERROR_ACCESS_DENIED,
+            }
+        }
+
+        pub fn identity(pid: i32) -> Option<String> {
+            let handle = open(pid).ok()?;
+            let mut created = FileTime::default();
+            let (mut exited, mut kernel, mut user) = (
+                FileTime::default(),
+                FileTime::default(),
+                FileTime::default(),
+            );
+            let read = unsafe {
+                GetProcessTimes(handle.0, &mut created, &mut exited, &mut kernel, &mut user)
+            } != 0;
+            read.then(|| format!("{:08x}{:08x}", created.high, created.low))
+        }
     }
 }
 
