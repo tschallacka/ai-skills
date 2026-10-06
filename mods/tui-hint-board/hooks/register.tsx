@@ -123,7 +123,7 @@ export const register: Register = (on, options) => {
         'Open one terminal program profile in the board for the person to read, by its name (its file name without .md). Shows the shipped text with any notes for this system under "Added for this system".',
       inputSchema: {
         type: 'object',
-        properties: { name: { type: 'string', description: 'The profile name, e.g. jq or lldb.' } },
+        properties: { name: { type: 'string', description: 'The profile name, e.g. less or lldb.' } },
         required: ['name'],
       },
     })

@@ -121,11 +121,8 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
   doorbell rather than the message, so read the channel from your cursor on
   waking. The filter matches against the nick you **requested**, so a decorated
   nick never fires on the plain one. When your nick is
-  taken by a concurrent connection that is not this session's owner, the client
-  auto-suffixes its own connection (`nick-2`, `nick-3`, …) like a standard IRC
-  client so the call still works. A session's own verbs do not get there: while
-  a tail or the bridge holds the session, they are answered over its connection
-  (see *Connecting to a channel* and *The MCP bridge*).
+  taken by a connection that is not this session's owner, that connection is
+  suffixed (`nick-2`, …); the session's own verbs run through its owner.
 
 ## The MCP bridge
 
@@ -211,16 +208,8 @@ blocks on the connection that is already holding your membership. What the two
 postures share is the rule underneath — read the channel at every natural
 pause, because a blocked `wait` is not the only way work reaches you.
 
-**The bridge also owns the session's socket, so the CLI borrows it.** The
-adapter serves the same control socket a tail does (`owners/<key>.json` in the
-state directory). A CLI verb run for that session (`send`, `read`, `names`,
-`join`, `leave`) is answered over the adapter's connection and never registers
-its own, so it cannot be renamed `<nick>-2`. Two things to know. The socket
-answers on the adapter's own tick, so a borrowed call waits behind whatever the
-adapter is doing, which is normally under a tenth of a second. And a borrowed
-`join` or `leave` changes the cursor and the wire membership, but the adapter's
-own record of its channels is not updated by it, so do not rely on the adapter
-to report a channel that was joined from the CLI.
+**The bridge also owns the session's socket,** so a CLI verb for that session
+runs over its connection and never registers as `<nick>-2`.
 
 What the CLI keeps: `read --local` / `tail --local`, which walk the channel log
 with no server at all. That is a maintenance path, and it has no tool.
@@ -674,12 +663,8 @@ Two traps that cost time to rediscover:
 - **The mention filter matches `@<nick>` against the nick you *requested*.**
   Tail under the exact nick people type. A decorated nick like `aiskills-tail`
   never fires on `@aiskills` — the filter is a plain `text.contains` against the
-  requested nick, so the decoration is part of what it looks for. Your own
-  `send` does not suffix to `<nick>-2` while the tail holds the name: the tail
-  owns the session's socket, and the CLI borrows it (see *Connecting to a
-  channel*). The suffix only appears when a verb opens a connection of its own
-  under a nick that is still held, which is what a verb does when no tail or
-  bridge owns the session.
+  requested nick, so the decoration is part of what it looks for. A tail's own
+  `send` never suffixes.
 
 Omitting `--server` is the point, not an oversight. Every connecting
 subcommand (`send`, `read`, `tail`, `join`, `leave`) runs one resolution ladder

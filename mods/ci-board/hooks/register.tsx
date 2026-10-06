@@ -221,8 +221,15 @@ export const register: Register = (on, options) => {
         },
         async () => {
           // The run's page on GitHub, for the link in its details; empty when gh cannot say.
-          const page = await $.process.run(['gh', 'run', 'view', row.id, '--json', 'url', '--jq', '.url'])
-          url = page.exitCode === 0 ? page.stdout.trim() : ''
+          const page = await $.process.run(['gh', 'run', 'view', row.id, '--json', 'url'])
+          url = ''
+          if (page.exitCode === 0) {
+            try {
+              url = JSON.parse(page.stdout).url ?? ''
+            } catch {
+              url = ''
+            }
+          }
         },
         async () => {
           await update($, picked, () => ({ id: row.id, title: row.title, text, url, took: row.took, conclusion: row.conclusion }))

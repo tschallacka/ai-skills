@@ -27,6 +27,12 @@ plan="$work/plan"
 cp -R "$repo_root/benchmark/planning/tests/fixtures/review-lifecycle-plan" "$plan"
 companion="$(find "$plan" -type f -name '*-testing.md' | LC_ALL=C sort | head -1)"
 [ -n "$companion" ] || t_fail 'the fixture has no testing companion to write into'
+# The fixture's tracker rows predate the row-refresh rule (B394): refresh each
+# goal's rows from its step objectives, so the only finding a companion can
+# produce here is the comparison under test.
+while IFS= read -r tracker; do
+    "$scripts_dir/update-progress.sh" --rows "$(dirname "$tracker")" >/dev/null
+done < <(find "$plan" -mindepth 2 -maxdepth 2 -name progress.md)
 pristine="$work/companion.pristine"
 cp "$companion" "$pristine"
 

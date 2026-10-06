@@ -358,6 +358,8 @@ tests/lib-script-stub.sh
 tests/lib-test.sh
 tests/test-add-fix-claim.sh
 tests/test-add-planning-bug.sh
+tests/test-progress-row-refresh.sh
+tests/test-reopen-retires-fix-claims.sh
 tests/test-add-work-unit-staging.sh
 tests/test-adversarial-review-cycles.sh
 tests/test-adversarial-review-sources.sh
