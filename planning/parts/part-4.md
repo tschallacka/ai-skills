@@ -167,6 +167,7 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> completed
 "$PLANNING_SKILL_DIR/scripts/update-progress.sh" <goal-directory>
+"$PLANNING_SKILL_DIR/scripts/update-progress.sh" --rows <goal-directory>   # re-derive each row's objective text from its step file, keeping statuses
 plan-overview --plan-dir <plan-directory> --out <file>   # one-file HTML dashboard
 plan-overview --plan-dir <plan-directory> --serve --port <port>   # serve the artifact on loopback
 # If no matching prebuilt artifact exists, the installer reports the overview as unavailable.
@@ -274,6 +275,15 @@ steps, testing companions, inventory rows, progress rows, content changes,
 review status, decomposition status, and validation state. Direct editor,
 patch, redirection, or ad-hoc script writes to plan artifacts are prohibited.
 
+If no helper can make a change the plan requires, stop and report it as a
+planning-skill gap, naming the artifact, the change, and the helper that is
+missing or insufficient. Do not edit the artifact by hand, and do not delete and
+recreate it to get around the gap. A goal tracker's row text is covered by a
+helper: after a unit description or step objective edit, the matching
+`progress.md` row is refreshed by `update-progress.sh --rows <goal-directory>`,
+which keeps each row's status; validate-plan WARNs on a row whose text no longer
+matches its step.
+
 When many helper mutations are needed, prefer one temporary executable batch
 script containing only approved helper commands. Run it with strict mode and
 bounded arguments, capture its output, remove it after completion, and run the
@@ -312,6 +322,9 @@ resume the same manifest rather than installing a partial package.
 ### 4.7 A plan from an older skill version is obsolete, not migrated
 
 This skill does no backwards compatibility, and a plan directory is one of its
+
+<!-- SKILL-LOAD-PROOF part=part-4 token=096115d6a833c09a -->
+
 interfaces. A plan built by an older version of the skill is therefore not
 resumed, not repaired, and not migrated: it is marked obsolete, and the
 initiative is rebuilt as a new plan in a new plan directory with the current
@@ -340,9 +353,6 @@ marker is a separate file rather than a key in `.env` or a status line in
 manifest whose key allow-list rejects an unknown key and whose schema check
 demands the current version, and the `- Status:` field is already owned by the
 review-status gate, which permits only `💤 pending` and `✅ approved`. A file is
-
-<!-- SKILL-LOAD-PROOF part=part-4 token=2c51bf581dc0df91 -->
-
 also visible in a directory listing, which is where somebody about to resume the
 wrong plan is looking.
 

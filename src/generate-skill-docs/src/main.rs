@@ -266,7 +266,7 @@ fn emit_index(source: &str) -> String {
     out.push_str(
         "| [parts/part-3.md](parts/part-3.md) | Mandatory classification and independent review |\n",
     );
-    out.push_str("| [parts/part-4.md](parts/part-4.md) | Resuming and updating a plan |\n\n");
+    out.push_str("| [parts/part-4.md](parts/part-4.md) | Revising a plan after its first draft: resuming, updating, and helper-only mutations |\n\n");
     out.push_str("Every part carries a load-sanity check (T86): a hidden line at a random\n");
     out.push_str("position near its end, and a command (`planning/scripts/verify-skill-load.sh\n");
     out.push_str("with --part <N> --token <token>`) that must succeed before the part counts\n");

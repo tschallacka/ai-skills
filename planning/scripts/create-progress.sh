@@ -3,8 +3,8 @@
 # create-progress.sh — generate a goal's progress.md: one row per implementation
 # step, in step-name order, each carrying the step's own Objective text.
 #
-# Refuses to overwrite an existing tracker (73): rebuilding one is
-# update-progress.sh's and rebuild-plan-progress.sh's job, not this script's.
+# Refuses to overwrite an existing tracker (73): re-deriving its rows is
+# update-progress.sh --rows's job, not this script's.
 # Testing companions (*-testing.md) are not steps and get no row.
 #
 # Usage:

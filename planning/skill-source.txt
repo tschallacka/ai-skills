@@ -821,6 +821,16 @@ appears in including sibling units and goal documents, check the inventory row
 named in its goal roster (5), and re-run the search to confirm the only
 remaining hits are deliberate references to the corrected history.
 
+The goal tracker's row for a step carries that step's objective text, so a
+finding that changes a step objective or a unit description also reaches the
+`progress.md` row: refresh it with `update-progress.sh --rows <goal-directory>`
+(statuses are kept), then confirm validate-plan no longer WARNs on it.
+
+If no helper can make the change a finding requires, stop and report it as a
+planning-skill gap, naming the artifact, the change and the missing helper. Do not
+edit the artifact by hand to close the finding, and do not record the finding as
+resolved.
+
 A resolution recorded without the sweep is a claim, not a fix. The
 verification-one-unit-away variant is the hardest: a unit may be correct across
 all seven surfaces while the verification unit that grades it still checks the
@@ -1392,6 +1402,7 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> completed
 "$PLANNING_SKILL_DIR/scripts/update-progress.sh" <goal-directory>
+"$PLANNING_SKILL_DIR/scripts/update-progress.sh" --rows <goal-directory>   # re-derive each row's objective text from its step file, keeping statuses
 plan-overview --plan-dir <plan-directory> --out <file>   # one-file HTML dashboard
 plan-overview --plan-dir <plan-directory> --serve --port <port>   # serve the artifact on loopback
 # If no matching prebuilt artifact exists, the installer reports the overview as unavailable.
@@ -1498,6 +1509,15 @@ canonical `scripts/plan-mutate.sh` dispatcher. This includes creating goals,
 steps, testing companions, inventory rows, progress rows, content changes,
 review status, decomposition status, and validation state. Direct editor,
 patch, redirection, or ad-hoc script writes to plan artifacts are prohibited.
+
+If no helper can make a change the plan requires, stop and report it as a
+planning-skill gap, naming the artifact, the change, and the helper that is
+missing or insufficient. Do not edit the artifact by hand, and do not delete and
+recreate it to get around the gap. A goal tracker's row text is covered by a
+helper: after a unit description or step objective edit, the matching
+`progress.md` row is refreshed by `update-progress.sh --rows <goal-directory>`,
+which keeps each row's status; validate-plan WARNs on a row whose text no longer
+matches its step.
 
 When many helper mutations are needed, prefer one temporary executable batch
 script containing only approved helper commands. Run it with strict mode and
