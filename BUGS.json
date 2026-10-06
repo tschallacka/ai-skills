@@ -5310,6 +5310,35 @@
       "updated_at": "2026-10-05T16:09:41Z"
     },
     {
+      "id": "B394",
+      "title": "No helper refreshes stale goal-tracker rows after a unit description or step objective changes",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "create-plan.sh, add-goal.sh, add-work-unit.sh for one unit; update-work-unit.sh <plan> W01 --description 'new text'; update-progress.sh <plan>/<goal>; read goal-progress:<goal> through plan-context.sh; then validate-plan.sh <plan>",
+      "observed": "update-work-unit.sh and update-plan-content.sh -sp <plan> <goal>/<step> 4.1 both report success and the inventory row / step objective change. update-progress.sh reports 'Updated ... progress.md (0/N steps)' and the goal tracker row keeps the old description. create-progress.sh refuses because the file exists. validate-plan.sh passes silently. A fresh reviewer raised the stale rows as AR-19; the agent could not resolve it through the helpers and deleted <goal>/progress.md with rm, then recreated it with create-progress.sh.",
+      "expected": "Editing a unit's description or a step's objective through a helper also updates that step's tracker row, keeping its status; or a documented helper-only command re-derives tracker rows from step files while keeping statuses. validate-plan.sh reports a tracker row whose description no longer matches its unit.",
+      "mechanism": "Tracker rows are written only when a row is created or a unit is moved (update-work-unit.sh --goal/--step). Description and objective edits change the inventory and step files but nothing re-derives the goal progress.md row text. update-progress.sh only recomputes the progress bar, rebuild-plan-progress.sh only touches the plan-level tracker, and add-work-unit.sh's 'goal progress was rebuilt from step files; existing statuses carried across' message describes a rebuild that does not run on description edits. validate-plan.sh has no drift check between tracker rows and unit text.",
+      "surfaces": [
+        "planning/scripts/update-work-unit.sh",
+        "planning/scripts/update-plan-content.sh",
+        "planning/scripts/update-progress.sh",
+        "planning/scripts/rebuild-plan-progress.sh",
+        "planning/scripts/create-progress.sh",
+        "planning/scripts/add-work-unit.sh",
+        "planning/scripts/validate-plan.sh",
+        "planning/SKILL.md",
+        "planning/parts/part-4.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fresh reviewer subagent (AR-19) during a planning session",
+      "notes": "Area: planning (plan artifacts, goal trackers). Contributing: (1) no refresh capability for tracker rows; (2) update-progress and rebuild-plan-progress names suggest they refresh rows but they do not; (3) validate-plan.sh has no drift check; (4) the rules 'resolve every finding' and 'helper-only mutations' (part-4 section 4.5) conflict with no escalation path, so the agent edited around them; (5) SKILL.md index frames part 4 as resume-only, not revision; (6) helper --help texts do not state the no-direct-edit rule. Fix direction: status-preserving row refresh in the update helpers or a --refresh-rows command; validate-plan.sh WARN for description drift with the fix command; part 4 index wording covering revision; a section 4.5 rule to stop and report a planning-skill gap instead of editing; create-progress.sh refusal naming the refresh command. Severity mapped to major: the bug-report vocabulary has no medium. No data lost, every step was still incomplete.",
+      "created_at": "2026-10-06T10:08:55Z",
+      "updated_at": "2026-10-06T10:08:55Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
