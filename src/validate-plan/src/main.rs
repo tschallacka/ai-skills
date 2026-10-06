@@ -12,7 +12,7 @@ use planning_validator_docs::{
     validate_existence, validate_obsolete, validate_plan_documents, validate_step_numbers,
 };
 use planning_validator_goals::{
-    validate_goals, validate_step_naming, validate_steps, GoalTableRegistry,
+    validate_goals, validate_step_naming, validate_steps, validate_tracker_rows, GoalTableRegistry,
 };
 use planning_validator_inventory::Inventory;
 use planning_validator_placeholders::PlaceholderValidator;
@@ -82,6 +82,7 @@ fn main() {
     let goals = GoalTableRegistry::from_file(&skill.join("goal-tables.json"), &mut findings);
     validate_goals(&plan, &inventory, &goals, options.complete, &mut findings);
     validate_steps(&plan, &inventory, &mut findings);
+    validate_tracker_rows(&plan, &inventory, &mut findings);
     validate_step_naming(&plan, &inventory, &mut findings);
     let unit_types = inventory
         .units

@@ -165,6 +165,16 @@ appears in including sibling units and goal documents, check the inventory row
 named in its goal roster (5), and re-run the search to confirm the only
 remaining hits are deliberate references to the corrected history.
 
+The goal tracker's row for a step carries that step's objective text, so a
+finding that changes a step objective or a unit description also reaches the
+`progress.md` row: refresh it with `update-progress.sh --rows <goal-directory>`
+(statuses are kept), then confirm validate-plan no longer WARNs on it.
+
+If no helper can make the change a finding requires, stop and report it as a
+planning-skill gap, naming the artifact, the change and the missing helper. Do not
+edit the artifact by hand to close the finding, and do not record the finding as
+resolved.
+
 A resolution recorded without the sweep is a claim, not a fix. The
 verification-one-unit-away variant is the hardest: a unit may be correct across
 all seven surfaces while the verification unit that grades it still checks the
@@ -284,6 +294,15 @@ excepted.
 it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
 land them.
+
+**Reviewer tool allowance when a reviewer may write.** A reviewer brief that
+lets the reviewer write (`adversarial-review-incoming.md`, or any other
+findings file) names the ai-text-editor tools in its tool allowance:
+`mcp__ai-text-editor__open`, `mcp__ai-text-editor__read`,
+`mcp__ai-text-editor__replace` and `mcp__ai-text-editor__save`. The brief says
+the reviewer loads them with ToolSearch and makes every write through them, not
+through a here-document or a shell redirect. A reviewer that cannot reach the
+editor reports that gap in its findings; it does not write around it.
 
 **A plan records what it assumed.** `## Assumptions` (§ 11.1) holds what was
 assumed rather than confirmed, and what would change if the assumption is wrong.
@@ -500,6 +519,9 @@ never changes the exit status, so a plan is not blocked by it and its output doe
 not need clearing before the plan is ready. Read the warnings and judge each one:
 measured on real plans the count phrases were right 0 times in 24 hits, because a
 count that has drifted reads exactly like one that cannot. What *is* gated is the
+
+<!-- SKILL-LOAD-PROOF part=part-3 token=1140bbd20ae67ea6 -->
+
 part that can be decided: an acceptance criterion declaring a comparison in the
 step's `## Artifact comparisons` table is checked against
 `planning/artifact-comparisons.json`, so asking for `exact` on a PDF or an image
@@ -528,9 +550,6 @@ disproven claim rather than making a new ordering promise.
 It also WARNs (never blocks) when a unit's instructions mention a project
 symbol (one whose namespace root or path prefix the plan edits) that no
 inventory row owns — this rule cannot distinguish "edit this" from "this is
-
-<!-- SKILL-LOAD-PROOF part=part-3 token=1bb864f223f09de7 -->
-
 where we attach" from text alone, so it is a skimmable signal, not a gate. It
 does not flag mere vendor/core seams (`Magento\...`, `Amasty\...`,
 `Vendor_Module::path` templates), `X::class` constants, or cross-plan

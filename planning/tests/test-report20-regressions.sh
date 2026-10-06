@@ -93,7 +93,7 @@ done
 # Rule 5's source of truth is never-executable-extensions.json (rjq-matched):
 # it must be a plain array of dotted extensions covering the cases above.
 extensions_file="$script_dir/../never-executable-extensions.json"
-rjq -e 'type == "array" and (all(.[]; type == "string" and startswith("."))) and (index(".xml") != null) and (index(".php") != null) and (index(".sql") != null)' \
+jq -e 'type == "array" and (all(.[]; type == "string" and startswith("."))) and (index(".xml") != null) and (index(".php") != null) and (index(".sql") != null)' \
     "$extensions_file" >/dev/null \
     || fail 'never-executable-extensions.json is not a dotted-extension array (needs .xml/.php/.sql)'
 

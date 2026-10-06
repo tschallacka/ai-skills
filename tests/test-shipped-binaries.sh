@@ -28,7 +28,9 @@ if command -v rustc >/dev/null 2>&1; then
     rust_targets="$(rustc --print target-list 2>/dev/null || true)"
 fi
 
-registries="$(find "$root" -name binaries.tsv -not -path '*/.git/*' | sort)"
+# .claude/ holds the agent worktrees: separate checkouts with their own copies of
+# these registers, not this repository's skills.
+registries="$(find "$root" -name binaries.tsv -not -path '*/.git/*' -not -path '*/.claude/*' | sort)"
 [ -n "$registries" ] || t_fail 'no binaries.tsv found anywhere; this test has nothing to guard'
 
 for reg in $registries; do

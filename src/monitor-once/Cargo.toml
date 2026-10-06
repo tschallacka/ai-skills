@@ -1,0 +1,15 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "monitor-once"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Runs a monitor command only if no live monitor of the same name holds its lock, so an agent never runs two of the same watch"
+
+[[bin]]
+name = "monitor-once"
+path = "src/main.rs"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

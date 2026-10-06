@@ -141,7 +141,8 @@ fn main() {
             66,
         );
     }
-    if Command::new("rjq").arg("--version").output().is_err() {
+    // rjq is the shipped tool, run from its shared-bin path, never PATH.
+    if planning_register::rjq_program().is_err() {
         die(
             "register: rjq is required (it reads and writes the JSON registers); install rjq and re-run",
             69,
@@ -182,7 +183,8 @@ fn main() {
   | select($surface == "" or ((.surfaces // []) | join(",") | contains($surface)))
             | [.id, (.status // "-"), (.priority // "-"), (.severity // "-"), .title]
             | @tsv"#;
-            let output = Command::new("rjq")
+            let rjq = planning_register::rjq_program().unwrap_or_else(|error| die(error, 69));
+            let output = Command::new(rjq)
                 .arg("-r")
                 .args(["--arg", "status", &status, "--arg", "priority", &priority])
                 .args(["--arg", "surface", &surface, "--arg", "parent", &parent])

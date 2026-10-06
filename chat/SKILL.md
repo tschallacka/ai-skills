@@ -121,8 +121,8 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
   doorbell rather than the message, so read the channel from your cursor on
   waking. The filter matches against the nick you **requested**, so a decorated
   nick never fires on the plain one. When your nick is
-  taken by a concurrent connection (e.g. a tail), the client auto-suffixes it
-  (`nick-2`, `nick-3`, …) like a standard IRC client so sends/reads still work.
+  taken by a connection that is not this session's owner, that connection is
+  suffixed (`nick-2`, …); the session's own verbs run through its owner.
 
 ## The MCP bridge
 
@@ -207,6 +207,9 @@ leave. There is nothing to re-arm, because nothing exits to wake you: `wait`
 blocks on the connection that is already holding your membership. What the two
 postures share is the rule underneath — read the channel at every natural
 pause, because a blocked `wait` is not the only way work reaches you.
+
+**The bridge also owns the session's socket,** so a CLI verb for that session
+runs over its connection and never registers as `<nick>-2`.
 
 What the CLI keeps: `read --local` / `tail --local`, which walk the channel log
 with no server at all. That is a maintenance path, and it has no tool.
@@ -660,9 +663,8 @@ Two traps that cost time to rediscover:
 - **The mention filter matches `@<nick>` against the nick you *requested*.**
   Tail under the exact nick people type. A decorated nick like `aiskills-tail`
   never fires on `@aiskills` — the filter is a plain `text.contains` against the
-  requested nick, so the decoration is part of what it looks for. The cost of
-  tailing under the plain nick is that your own `send` auto-suffixes to
-  `<nick>-2` because the tail holds the name; accept that, it is cosmetic.
+  requested nick, so the decoration is part of what it looks for. A tail's own
+  `send` never suffixes.
 
 Omitting `--server` is the point, not an oversight. Every connecting
 subcommand (`send`, `read`, `tail`, `join`, `leave`) runs one resolution ladder

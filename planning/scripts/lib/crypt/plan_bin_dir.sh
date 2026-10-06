@@ -43,3 +43,22 @@ plan_bin_dir() {
     [ -n "$found" ] || return 1
     printf '%s\n' "$found"
 }
+
+# plan_rjq — print the full path of the shipped rjq binary, or return 1.
+#
+# rjq is a shipped runtime tool, and a skill refers to it by where it lives.
+# It is never looked up on PATH and never put there: a bare `rjq` would depend
+# on whatever the machine happens to have first, which is exactly the coupling
+# the shared install location exists to remove. Callers hold the result in a
+# variable and run "$RJQ", so the path is decided once, here.
+plan_rjq() {
+    local dir name
+    dir="$(plan_bin_dir)" || return 1
+    for name in rjq rjq.exe; do
+        if [ -x "$dir/$name" ]; then
+            printf '%s\n' "$dir/$name"
+            return 0
+        fi
+    done
+    return 1
+}

@@ -1121,6 +1121,29 @@ fn run_remaining_post_install_steps(
         run_chat_interrupt_plugin_post_install(known_roots, source, sink);
     }
     run_profiles_post_install(known_roots, source, home, sink);
+    run_mods_post_install(known_roots, source, sink);
+}
+
+/// The Claude Code mods ride with the skills they serve (plugins::MODS). They
+/// are a Claude Code plugin set, so only Claude roots receive them.
+fn run_mods_post_install(
+    known_roots: &[(&Path, &str)],
+    source: &Path,
+    sink: &mut dyn ui::progress::Sink,
+) {
+    for (root, kind) in known_roots {
+        if *kind != "claude" {
+            continue;
+        }
+        match plugins::install_mods_claude(source, root) {
+            Ok(written) => {
+                for destination in written {
+                    sink.log(&format!("Installed: {}", destination.display()));
+                }
+            }
+            Err(error) => sink.log(&format!("mods: {error}")),
+        }
+    }
 }
 
 /// T102: installs every `manifest::PROFILES` entry into `home` for each

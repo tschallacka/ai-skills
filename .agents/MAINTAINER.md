@@ -213,12 +213,9 @@ the CI map.
   compiled `run-tests` and exits 69 without it. What a local run cannot show is
   the other platforms' compiled paths (macOS, Windows, aarch64): only the CI
   legs in section 3 exercise those.
-- **A machine's own `rjq` wins over the bundled one.** The plan helpers put
-  `plan_bin_dir` on PATH themselves when they load, but only if no `rjq` is
-  already on PATH (`planning/scripts/lib/document/99-facade.sh`), so an
-  operator's pinned `rjq`, or a test's injected stub, is never overridden. For
-  an interactive shell `setup-dev-env.sh` prints the `export PATH=` line for
-  this host.
+- **rjq is never put on PATH.** Nothing prepends a bin directory to PATH, and
+  shipped code resolves rjq by its full path. The rule and the test that
+  enforces it are in 1.18.
 - **The Rust toolchain is pinned by literal in several places.** `rust-toolchain.toml`
   says `1.98`, and so do the `dtolnay/rust-toolchain@1.98` steps in `ci.yml`,
   `windows.yml`, `render-artifacts.yml` and `release-installer.yml`; the `test`
@@ -430,16 +427,24 @@ the CI map.
 - `pre-push-check.sh` refuses any push that touches either register from a
   non-`registers` branch (1.17). A fix's resolution keys (`fix`, `verification`,
   `status`) go the same way as a new entry, after the code lands. The sequence:
-  1. **Find the branch's checkout** with `git worktree list`. If `registers` is
-     already checked out in another worktree (on the maintainer's machine it is,
-     under `~/.config/tsch-ai-skills/worktrees/registers`), `git switch registers`
-     in the main tree fails and that worktree is the one to use. Otherwise
-     `git switch registers`, or `git switch -c registers origin/registers` if it
-     is not local yet (never from `origin/master`: that drops an entry on
-     `origin/registers` that has not landed). Worktrees are made as the
-     `git-worktrees` skill says.
-  2. **`cd` into that checkout** and `git pull --ff-only`. `registers-sync.yml`
-     keeps the branch level with `master`, so it should be level.
+  1. **Use the one registers worktree**, `~/.config/tsch-ai-worktrees/registers`
+     (where the `git-worktrees` skill puts agent worktrees). There is exactly one;
+     never make a second checkout of `registers` under `.claude/worktrees/` or
+     anywhere else, because git lets a branch be checked out once, and a second
+     copy left behind goes stale and mints ids that already exist (B78). If it is
+     missing, create it from the main tree:
+     `git fetch origin registers && git worktree add ~/.config/tsch-ai-worktrees/registers registers`
+     (`git branch -f registers origin/registers` first if the local branch is behind;
+     never base it on `origin/master`, which drops entries on `origin/registers`
+     that have not landed yet).
+  2. **Reset it to the newest `origin/registers` before every filing.** `cd` into
+     it, `git fetch origin registers`, then check that
+     `git log --oneline origin/registers..registers` prints nothing and
+     `git status --porcelain` is empty (anything there is an entry someone filed
+     and did not push: push it, or ask whose it is, never discard it). Then
+     `git reset --hard origin/registers`. A plain `git pull --ff-only` is not
+     enough: it refuses to move a checkout that has diverged, and it leaves the
+     index alone when the branch ref was moved underneath the checkout.
   3. **Run the CLI there**, from `bin/<triple>/bugs` or `bin/<triple>/todo`
      (built by `setup-dev-env.sh`): `bugs add ...`, `todo add ...`, never a
      hand edit. **The CLI takes the register from the current directory:** `--file
@@ -629,6 +634,41 @@ the CI map.
   checklist in section 2 below, plus `planning/MAINTAINER.md` section 4 for a
   change to the planning skill.
 
+### 1.18 Two JSON tools: rjq ships, jq is the dev shell's
+
+rjq and jq are used for two separate things, and the rules keep them apart.
+
+- **rjq is a shipped runtime tool.** The registers, the planning helpers and
+  the CI helpers run it while they work, so it is part of what the skills need
+  to *use*. Shipped code refers to it by its full path in the shared install
+  directory, `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/bin/rjq` (`.exe` on
+  Windows). The planning libraries resolve that path with `plan_rjq`
+  (`planning/scripts/lib/crypt/plan_bin_dir.sh`); a skill outside the planning
+  libraries resolves it itself, as `ci_rjq` does in `ci-failures`. The directory
+  is found by `plan_bin_dir`'s own order, `AI_SKILLS_BIN_ROOT` first, so a
+  checkout's build is reachable without anything on PATH.
+- **rjq is never on PATH.** No script prepends a bin directory to PATH for rjq,
+  and no shipped code looks it up with `command -v rjq`, `which rjq` or `type
+  rjq`. A bare `rjq` in shipped code is a dependency on whatever the machine has
+  first, which is the coupling the shared directory exists to remove.
+- **jq is a development dependency.** It is provided by the flake's dev shell
+  (`pkgs.jq` in `flake.nix`), and the build and the tests may use `jq` directly,
+  because they run inside that shell. A build or test script that needs a JSON
+  query uses `jq`, not rjq. The tests of rjq itself (`test-rjq-*`,
+  `src/rjq/tests/differential.rs`) keep invoking rjq, by its built path.
+- **The split is enforced by `tests/test-rjq-active-references.sh`, and only on
+  shipped files.** "Shipped" is the set the npm package baseline records
+  (`planning/tests/fixtures/overview/npm-package-baseline.tsv`), which the
+  release test checks against a real pack. The test fails on a bare `jq` word,
+  a bare `rjq` command in a shell position, or a PATH lookup of rjq, in any
+  shipped file. Build and test files (`tests/`, `planning/tests/`, `flake.nix`,
+  the root `bootstrap.sh`, `setup-dev-env-lib.sh`, `pre-push-check.sh`,
+  `installer/build-release.sh`, the CI workflows) are not scanned, so using jq
+  there is correct and never a finding.
+- **A new shipped file that needs rjq** takes the full-path form above. Adding
+  a `jq` call to shipped code is the mistake this rule exists to catch: a shipped
+  tool does not get jq from the dev shell, so it must not name it.
+
 ## 2. Change checklist (minimum, per change)
 
 1. Identify every consumer (parser/validator, other helpers, tests, manifest/map,
@@ -661,6 +701,11 @@ the CI map.
 9. Commit as one coordinated, no-backwards-compat change. The message carries the
    *why* that does not belong in a comment (`CODE-STYLE.md` §12) and names the
    register entries it closes, so the two can be checked against each other.
+10. Before a PR is opened or updated, merge the current `master` into the branch
+    (`git fetch origin && git merge origin/master`; a normal merge, never a rebase
+    of a shared branch). The `registers` branch follows `master`, so a branch that
+    has not merged `master` carries master's register updates as its own diff,
+    which the register-scope gate then refuses. Re-run the gate after the merge.
 
 ### 2a. Adding a file
 

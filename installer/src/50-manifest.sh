@@ -358,6 +358,8 @@ tests/lib-script-stub.sh
 tests/lib-test.sh
 tests/test-add-fix-claim.sh
 tests/test-add-planning-bug.sh
+tests/test-progress-row-refresh.sh
+tests/test-reopen-retires-fix-claims.sh
 tests/test-add-work-unit-staging.sh
 tests/test-adversarial-review-cycles.sh
 tests/test-adversarial-review-sources.sh
@@ -517,7 +519,7 @@ EOF
         todo)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
                 schema.1.4.2.json schema.2.0.0-alpha.1.json schema.2.0.0-alpha.2.json \
-                schema.2.0.0-alpha.3.json
+                schema.2.0.0-alpha.3.json schema.2.0.0-alpha.4.json
             # The queue's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its queue instead of being told
             # to hand-edit JSON. Only the host's row is emitted, existence-gated
@@ -545,7 +547,7 @@ EOF
         bug-report)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
                 schema.1.4.2.json schema.2.0.0-alpha.1.json schema.2.0.0-alpha.2.json \
-                schema.2.0.0-alpha.3.json
+                schema.2.0.0-alpha.3.json schema.2.0.0-alpha.4.json
             # The register's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its register instead of being
             # told to hand-edit JSON. Only the host's row is emitted,
@@ -615,15 +617,15 @@ CHATEOF
             # down with it.
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    skill_artifact_files chat bin/x86_64-unknown-linux-musl/chat-server-rs bin/x86_64-unknown-linux-musl/chat-client-rs bin/x86_64-unknown-linux-musl/chat-mcp bin/x86_64-unknown-linux-musl/chat-spool-watch ;;
+                    skill_artifact_files chat bin/x86_64-unknown-linux-musl/chat-server-rs bin/x86_64-unknown-linux-musl/chat-client-rs bin/x86_64-unknown-linux-musl/chat-mcp bin/x86_64-unknown-linux-musl/chat-spool-watch bin/x86_64-unknown-linux-musl/monitor-once ;;
                 Linux:aarch64|Linux:arm64)
-                    skill_artifact_files chat bin/aarch64-unknown-linux-musl/chat-server-rs bin/aarch64-unknown-linux-musl/chat-client-rs bin/aarch64-unknown-linux-musl/chat-mcp bin/aarch64-unknown-linux-musl/chat-spool-watch ;;
+                    skill_artifact_files chat bin/aarch64-unknown-linux-musl/chat-server-rs bin/aarch64-unknown-linux-musl/chat-client-rs bin/aarch64-unknown-linux-musl/chat-mcp bin/aarch64-unknown-linux-musl/chat-spool-watch bin/aarch64-unknown-linux-musl/monitor-once ;;
                 Darwin:x86_64)
-                    skill_artifact_files chat bin/x86_64-apple-darwin/chat-server-rs bin/x86_64-apple-darwin/chat-client-rs bin/x86_64-apple-darwin/chat-mcp bin/x86_64-apple-darwin/chat-spool-watch ;;
+                    skill_artifact_files chat bin/x86_64-apple-darwin/chat-server-rs bin/x86_64-apple-darwin/chat-client-rs bin/x86_64-apple-darwin/chat-mcp bin/x86_64-apple-darwin/chat-spool-watch bin/x86_64-apple-darwin/monitor-once ;;
                 Darwin:arm64)
-                    skill_artifact_files chat bin/aarch64-apple-darwin/chat-server-rs bin/aarch64-apple-darwin/chat-client-rs bin/aarch64-apple-darwin/chat-mcp bin/aarch64-apple-darwin/chat-spool-watch ;;
+                    skill_artifact_files chat bin/aarch64-apple-darwin/chat-server-rs bin/aarch64-apple-darwin/chat-client-rs bin/aarch64-apple-darwin/chat-mcp bin/aarch64-apple-darwin/chat-spool-watch bin/aarch64-apple-darwin/monitor-once ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    skill_artifact_files chat bin/x86_64-pc-windows-msvc/chat-server-rs.exe bin/x86_64-pc-windows-msvc/chat-client-rs.exe bin/x86_64-pc-windows-msvc/chat-mcp.exe bin/x86_64-pc-windows-msvc/chat-spool-watch.exe ;;
+                    skill_artifact_files chat bin/x86_64-pc-windows-msvc/chat-server-rs.exe bin/x86_64-pc-windows-msvc/chat-client-rs.exe bin/x86_64-pc-windows-msvc/chat-mcp.exe bin/x86_64-pc-windows-msvc/chat-spool-watch.exe bin/x86_64-pc-windows-msvc/monitor-once.exe ;;
                 *)
                     printf 'skill_files: no chat artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;

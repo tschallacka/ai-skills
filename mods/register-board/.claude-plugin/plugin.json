@@ -1,0 +1,13 @@
+{
+  "name": "register-board",
+  "version": "0.1.0",
+  "description": "A pane with the open bugs and open tasks of the project's own BUGS.json and TODO.json, most urgent first.",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Register board",
+      "description": "Register the register-board command and its pane. Off removes both.",
+      "default": true
+    }
+  }
+}

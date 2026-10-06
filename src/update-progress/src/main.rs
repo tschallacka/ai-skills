@@ -1,6 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
-use planning_progress::{count_progress_rows, progress_bar, progress_icon, progress_percent};
+use planning_progress::{
+    count_progress_rows, progress_bar, progress_icon, progress_percent, refresh_goal_rows,
+};
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -21,6 +23,7 @@ fn command_name() -> String {
 
 fn usage(code: i32) -> ! {
     println!("Usage: {} <goal-directory>", command_name());
+    println!("       {} --rows <goal-directory>", command_name());
     println!("       {} --help", command_name());
     std::process::exit(code);
 }
@@ -55,12 +58,57 @@ fn atomic_write(path: &Path, content: &[u8]) {
     });
 }
 
+fn recompute(goal: &Path) {
+    let progress = goal.join("progress.md");
+    if !progress.is_file() {
+        die(
+            format!("Progress file not found: {}", progress.display()),
+            66,
+        );
+    }
+    let (completed, total) =
+        count_progress_rows(&progress, 5).unwrap_or_else(|message| die(message, 66));
+    let percent = progress_percent(completed as i64, total as i64) as usize;
+    let bar = progress_bar(completed as i64, total as i64, 20);
+    let icon = progress_icon(completed as i64, percent as i64);
+    let content = fs::read_to_string(&progress).unwrap_or_else(|error| die(error.to_string(), 66));
+    let replacement = format!("**Progress:** `{}%  {}  100%` {}", percent, bar, icon);
+    let mut found = false;
+    let updated = content
+        .lines()
+        .map(|line| {
+            if line.starts_with("**Progress:**") {
+                found = true;
+                replacement.as_str()
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let updated = if content.ends_with('\n') {
+        format!("{}\n", updated)
+    } else {
+        updated
+    };
+    if found {
+        atomic_write(&progress, updated.as_bytes());
+    }
+    println!(
+        "Updated {} ({}/{} steps, {}%)",
+        progress.display(),
+        completed,
+        total,
+        percent
+    );
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("--help") | Some("-h") => usage(0),
-        Some(goal_dir) if args.len() == 2 => {
-            let goal = PathBuf::from(goal_dir);
+        Some("--rows") if args.len() == 3 => {
+            let goal = PathBuf::from(&args[2]);
             let progress = goal.join("progress.md");
             if !progress.is_file() {
                 die(
@@ -68,43 +116,17 @@ fn main() {
                     66,
                 );
             }
-            let (completed, total) =
-                count_progress_rows(&progress, 5).unwrap_or_else(|message| die(message, 66));
-            let percent = progress_percent(completed as i64, total as i64) as usize;
-            let bar = progress_bar(completed as i64, total as i64, 20);
-            let icon = progress_icon(completed as i64, percent as i64);
-            let content =
-                fs::read_to_string(&progress).unwrap_or_else(|error| die(error.to_string(), 66));
-            let replacement = format!("**Progress:** `{}%  {}  100%` {}", percent, bar, icon);
-            let mut found = false;
-            let updated = content
-                .lines()
-                .map(|line| {
-                    if line.starts_with("**Progress:**") {
-                        found = true;
-                        replacement.as_str()
-                    } else {
-                        line
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            let updated = if content.ends_with('\n') {
-                format!("{}\n", updated)
-            } else {
-                updated
-            };
-            if found {
-                atomic_write(&progress, updated.as_bytes());
-            }
+            let changed = refresh_goal_rows(&goal)
+                .unwrap_or_else(|message| die(message, 73))
+                .unwrap_or(0);
             println!(
-                "Updated {} ({}/{} steps, {}%)",
-                progress.display(),
-                completed,
-                total,
-                percent
+                "Refreshed {} row(s) in {} from their step files",
+                changed,
+                progress.display()
             );
+            recompute(&goal);
         }
+        Some(goal_dir) if args.len() == 2 && goal_dir != "--rows" => recompute(Path::new(goal_dir)),
         _ => usage(64),
     }
 }

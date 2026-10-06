@@ -214,6 +214,7 @@ jobs:
           cargo build --release --manifest-path src/chat-client-rs/Cargo.toml
           cargo build --release --manifest-path src/chat-mcp/Cargo.toml
           cargo build --release --manifest-path src/chat-spool-watch/Cargo.toml
+          cargo build --release --manifest-path src/monitor-once/Cargo.toml
           case "$(uname -s):$(uname -m)" in
             Linux:x86_64|Linux:amd64) dir=x86_64-unknown-linux-musl ;;
             Linux:aarch64|Linux:arm64) dir=aarch64-unknown-linux-musl ;;
@@ -227,6 +228,7 @@ jobs:
           cp "$GITHUB_WORKSPACE/target/release/chat-client-rs" "chat/bin/$dir/chat-client-rs"
           cp "$GITHUB_WORKSPACE/target/release/chat-mcp" "chat/bin/$dir/chat-mcp"
           cp "$GITHUB_WORKSPACE/target/release/chat-spool-watch" "chat/bin/$dir/chat-spool-watch"
+          cp "$GITHUB_WORKSPACE/target/release/monitor-once" "chat/bin/$dir/monitor-once"
 
       - name: Place the compiled register rungs
         run: |
@@ -612,6 +614,21 @@ jobs:
             echo 'C:\Program Files\Git\usr\bin'
           } >> "$GITHUB_PATH"
 
+      # The runner's jq.exe writes CRLF on stdout. Every value the suite reads
+      # back from it then ends in a CR: a heading never matches the same line of
+      # a document, and a recipe read from a schema fails on its CR. `-b` (binary
+      # mode, honoured on Windows only) keeps LF. The wrapper adds that flag to
+      # every jq call the suite makes, from a directory of its own on PATH.
+      - name: Give the suite a jq that writes LF
+        shell: bash
+        run: |
+          real_jq="$(command -v jq)"
+          shim="$RUNNER_TEMP/lf-tools"
+          mkdir -p "$shim"
+          printf '#!/usr/bin/env bash\nexec "%s" -b "$@"\n' "$real_jq" > "$shim/jq"
+          chmod +x "$shim/jq"
+          echo "$shim" >> "$GITHUB_PATH"
+
       - name: Build every compiled helper into bin/<triple>
         shell: bash
         run: |
@@ -939,7 +956,13 @@ jobs:
         run: |
           set -euo pipefail
           cargo build -p rjq --target "${{ matrix.target }}"
-          echo "$GITHUB_WORKSPACE/target/${{ matrix.target }}/debug" >> "$GITHUB_PATH"
+          # rjq is a shipped tool, found by its shared install directory, never on PATH.
+          shared="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin"
+          mkdir -p "$shared"
+          for name in rjq rjq.exe; do
+            [ -f "$GITHUB_WORKSPACE/target/${{ matrix.target }}/debug/$name" ] && cp "$GITHUB_WORKSPACE/target/${{ matrix.target }}/debug/$name" "$shared/$name"
+          done
+          true
 
       # ---- one workspace-wide gate, not one per subject -------------------
       # fmt, clippy and test cover every member of the workspace in a single
@@ -1044,7 +1067,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for crate in src/chat-server-rs src/chat-client-rs src/chat-mcp src/chat-spool-watch; do
+          for crate in src/chat-server-rs src/chat-client-rs src/chat-mcp src/chat-spool-watch src/monitor-once; do
             printf '==> %s\n' "$crate"
             cargo build --manifest-path "$crate/Cargo.toml" --release --target "${{ matrix.target }}"
           done
@@ -1063,6 +1086,8 @@ jobs:
             target/${{ matrix.target }}/release/chat-mcp.exe
             target/${{ matrix.target }}/release/chat-spool-watch
             target/${{ matrix.target }}/release/chat-spool-watch.exe
+            target/${{ matrix.target }}/release/monitor-once
+            target/${{ matrix.target }}/release/monitor-once.exe
           if-no-files-found: error
 
       # ---- interactive-shell -----------------------------------------------

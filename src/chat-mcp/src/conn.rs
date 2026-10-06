@@ -20,6 +20,7 @@ use crate::interrupt::{self, SharedEngine};
 use chat_client_rs as client;
 use chat_proto::{Message, FETCH_END};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -245,6 +246,15 @@ impl Held {
         // silent server could not hang it. From here the loop wants a tick.
         tls.sock.set_read_timeout(Some(TICK)).ok();
         let (jobs, queue) = channel();
+        let control = client::control::serve(
+            state_dir,
+            session_key,
+            client::control::OwnerRecord {
+                server: server.to_string(),
+                nick: nick.to_string(),
+                ..client::control::OwnerRecord::default()
+            },
+        );
         let owner = Owner {
             tls,
             buf: Vec::new(),
@@ -257,6 +267,8 @@ impl Held {
             next_trigger_id: 1,
             engine: interrupt::engine_for(session_key),
             closed: false,
+            parked: VecDeque::new(),
+            control,
         };
         std::thread::spawn(move || owner.run(queue));
         Ok(Held {
@@ -366,14 +378,33 @@ struct Owner {
     /// process-wide map rather than owned, so they outlive this connection.
     engine: SharedEngine,
     closed: bool,
+    /// Lines a borrowed verb read while collecting its answer, handed back to
+    /// the owner's own reads rather than dropped (the tail's `pending`).
+    parked: VecDeque<String>,
+    /// The control socket this session's other processes borrow the connection
+    /// through: `read`, `send`, `names`, `join` and `leave` from a CLI call land
+    /// here instead of registering a second time under the nick (B283).
+    /// `None` when another owner already holds the socket.
+    control: Option<client::control::Control>,
 }
 
 impl Owner {
     /// Take a job, or read for a tick. Forever, until the adapter drops the
     /// handle or the server closes the link.
     fn run(mut self, queue: Receiver<Job>) {
+        self.serve_jobs(&queue);
+        // The connection is gone, so stop answering borrowers: the next verb
+        // finds no owner and opens its own connection, as it would with no
+        // adapter running at all.
+        if let Some(control) = self.control.take() {
+            client::control::stop(&control);
+        }
+    }
+
+    fn serve_jobs(&mut self, queue: &Receiver<Job>) {
         loop {
             self.fire_timers();
+            self.serve_borrowed();
             match queue.try_recv() {
                 Ok((op, reply)) => {
                     let answer = self.execute(op);
@@ -387,6 +418,31 @@ impl Owner {
                 }
                 Err(TryRecvError::Disconnected) => return,
             }
+        }
+    }
+
+    /// Answer what other processes on this session have asked for, on this
+    /// connection. Checked each pass, so a borrowed request waits at most one
+    /// tick behind whatever job is running.
+    fn serve_borrowed(&mut self) {
+        let Some(control) = self.control.as_ref() else {
+            return;
+        };
+        for job in control.take_pending() {
+            let mut following = client::Following {
+                chans: Vec::new(),
+                stop: false,
+            };
+            let reply = client::serve_request(
+                &job.request,
+                &mut self.tls,
+                &self.nick,
+                &mut following,
+                &self.state_dir,
+                &self.session_key,
+                &mut self.parked,
+            );
+            job.answer(reply);
         }
     }
 
@@ -903,6 +959,13 @@ impl Owner {
     /// One complete line out of the read buffer, pushed messages consumed into
     /// the inbox rather than returned.
     fn take_line(&mut self) -> Option<String> {
+        // Lines parked by a borrowed verb come back first, in the order read.
+        if let Some(line) = self.parked.pop_front() {
+            if !self.take_push(&line) {
+                return Some(line);
+            }
+            return self.take_line();
+        }
         loop {
             let end = self.buf.iter().position(|byte| *byte == b'\n')?;
             let line: Vec<u8> = self.buf.drain(..=end).collect();

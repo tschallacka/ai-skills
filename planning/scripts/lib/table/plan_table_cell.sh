@@ -18,22 +18,37 @@ plan_table_cells() {
         | grep -v '^$' || true
 }
 
+# plan_table_rjq — print the full path of the shipped rjq, or fail. rjq is run
+# from its shared-bin path (AI_SKILLS_BIN_ROOT first), never looked up on PATH.
+# Callers capture the path and check it, because an exit inside a command
+# substitution would only end the subshell.
+plan_table_rjq() {
+    local dir name
+    for dir in "${AI_SKILLS_BIN_ROOT:-}" "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin"; do
+        [ -n "$dir" ] || continue
+        for name in rjq rjq.exe; do
+            if [ -x "$dir/$name" ]; then
+                printf '%s\n' "$dir/$name"
+                return 0
+            fi
+        done
+    done
+    printf 'plan-table: rjq is required for JSON emission; install rjq and re-run\n' >&2
+    return 1
+}
+
 # json_str TEXT — emit TEXT as one properly escaped JSON string value.
 json_str() {
-    command -v rjq >/dev/null 2>&1 || {
-        printf 'plan-table: rjq is required for JSON emission; install rjq and re-run\n' >&2
-        exit 69
-    }
- printf '%s' "$1" | rjq -Rs '.'; }
+    local rjq_bin
+    rjq_bin="$(plan_table_rjq)" || exit 69
+    printf '%s' "$1" | "$rjq_bin" -Rs '.'
+}
 
 # plan_table_row_json HEADER_ROW DATA_ROW — emit one JSON object whose keys
 # are the header cells and whose values are the corresponding data cells.
 # Iterates columns until a header cell is empty.
 plan_table_row_json() {
-    command -v rjq >/dev/null 2>&1 || {
-        printf 'plan-table: rjq is required for JSON emission; install rjq and re-run\n' >&2
-        exit 69
-    }
+    plan_table_rjq >/dev/null || exit 69
 
     local hdr="$1" dat="$2" i=2 out="" key val sep=""
     while true; do

@@ -5,7 +5,7 @@
 //! checks performed before any test runs, both shelling out to the real
 //! scripts rather than reimplementing their own logic.
 
-use crate::platform::{self, script_command, which};
+use crate::platform::{self, script_command};
 use std::path::Path;
 
 /// Returns Err(message) with the exact multi-line refusal when a prior
@@ -67,13 +67,13 @@ pub fn bootstrap_generated(repo_root: &Path) -> Result<Option<String>, String> {
         .current_dir(repo_root)
         .status();
 
-    if which("rjq") {
+    if shipped_rjq_present() {
         return Ok(None);
     }
-    // PATH is prepended unconditionally whenever the bootstrap call
-    // succeeds with non-empty output, with NO re-verification that rjq is
-    // then actually found on the newly-extended PATH. Only a failing call,
-    // or one succeeding with empty output, is treated as a failure.
+    // The bootstrap call names the directory that holds rjq, and that directory
+    // is handed to the children as AI_SKILLS_BIN_ROOT. It is never put on PATH:
+    // rjq is a shipped tool, run by its path. Only a failing call, or one
+    // succeeding with empty output, is treated as a failure.
     let output = script_command(&repo_root.join("bootstrap.sh"))
         .args(["rjq", "--path-only"])
         .current_dir(repo_root)
@@ -93,11 +93,29 @@ pub fn bootstrap_generated(repo_root: &Path) -> Result<Option<String>, String> {
     }
 }
 
-/// Builds the effective PATH string for a spawned child process, prepending
-/// `extra_dir` (the rjq-fallback directory, when bootstrap_generated found
-/// one) ahead of this process's own current PATH.
-pub fn effective_path(extra_dir: Option<&str>) -> Option<String> {
-    platform::prepend_to_path(extra_dir?)
+/// Whether the shipped rjq is in the shared bin directory, or in the one
+/// AI_SKILLS_BIN_ROOT names. Looked up by path, never through PATH.
+pub fn shipped_rjq_present() -> bool {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(root) = std::env::var_os("AI_SKILLS_BIN_ROOT") {
+        dirs.push(root.into());
+    }
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config"))
+        });
+    if let Some(config) = config {
+        dirs.push(config.join("tsch-ai-skills").join("bin"));
+    }
+    dirs.iter()
+        .any(|dir| dir.join("rjq").is_file() || dir.join("rjq.exe").is_file())
+}
+
+/// The bin directory handed to the children as AI_SKILLS_BIN_ROOT, when the
+/// bootstrap had to locate one. The children never see it on PATH.
+pub fn bin_root_for_children(extra_dir: Option<&str>) -> Option<String> {
+    extra_dir.map(str::to_string)
 }
 
 #[cfg(test)]

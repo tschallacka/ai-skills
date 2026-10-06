@@ -1,0 +1,14 @@
+{
+  "name": "tui-hint-board",
+  "version": "0.1.0",
+  "description": "A pane listing the terminal-program profiles the agent has, with a profile shown as formatted text when picked.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "TUI hint board",
+      "description": "Register the tui-hint-board command and its pane. Off removes them.",
+      "default": true
+    }
+  }
+}

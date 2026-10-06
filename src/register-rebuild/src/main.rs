@@ -5,7 +5,6 @@ use serde_json::{Map, Value};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// This binary's own name, so its usage text and refusals name the tool the
@@ -33,7 +32,8 @@ fn main() {
         println!("  {TOOL} --help");
         return;
     }
-    if Command::new("rjq").arg("--version").output().is_err() {
+    // rjq is the shipped tool, run from its shared-bin path, never PATH.
+    if planning_register::rjq_program().is_err() {
         die(
             format!(
                 "{TOOL}: rjq is required (it assembles the JSON state); install rjq and re-run"

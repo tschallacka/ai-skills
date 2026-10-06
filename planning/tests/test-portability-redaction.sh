@@ -25,8 +25,8 @@ rules="$repo_root/portability-rules.json"
 source "$tests_dir/lib-test.sh"
 t_begin
 
-command -v rjq >/dev/null 2>&1 || {
-    printf 'portability-redaction: UNCONFIGURED (rjq)\n' >&2
+command -v jq >/dev/null 2>&1 || {
+    printf 'portability-redaction: UNCONFIGURED (jq)\n' >&2
     exit 64
 }
 if [ ! -x "$redactor" ] && command -v cargo >/dev/null 2>&1; then
@@ -40,7 +40,7 @@ fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/portability-redaction.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-detect="$(rjq -r '.rules[] | select(.id == "sed-inplace") | .detect' "$rules")"
+detect="$(jq -r '.rules[] | select(.id == "sed-inplace") | .detect' "$rules")"
 [ -n "$detect" ] || { t_record 'the sed-inplace rule has no detect pattern'; t_end; }
 
 # The line numbers a scan would report for one fixture, space separated.

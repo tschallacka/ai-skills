@@ -108,6 +108,11 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
     printf 'agent-identity-plugin/hooks/hooks.json\n'
     printf 'agent-identity-plugin/hooks/lib.sh\n'
     printf 'agent-identity-plugin/hooks/subagent-start.sh\n'
+    # The mods: every tracked file of each board installer/build-release.sh's
+    # mods_files() lists, the same way that function takes them.
+    for board in $(sed -n 's/^MODS_BOARDS="\(.*\)"$/\1/p' "$repo_root/installer/build-release.sh"); do
+        (cd "$repo_root" && git ls-files "mods/$board")
+    done
     # T102: agent profiles are not a skill (no skill_files() entry) and their
     # canonical source is JSON, a format with no comment syntax a MODE marker
     # could sit in -- same reasoning as the three plugin lists above. Derived
@@ -165,7 +170,10 @@ t_assert_eq "the builder's --list matches the derived set" \
 # not a repository copy: they are never tracked (.agents/MAINTAINER.md 1.10),
 # so a clean tree has none, and a stale present one must not silently pass
 # here - the lib test owns staleness, this test owns what the tarball carries.
-fresh_scripts="$work/fresh-scripts"
+# The copy sits under <work>/planning/scripts, so the builder's own walk finds
+# <work> as the skill root: no PLANNING_SKILL_ROOT, which would otherwise be
+# inherited by every test run under this suite.
+fresh_scripts="$work/planning/scripts"
 mkdir -p "$fresh_scripts"
 cp -R "$repo_root/planning/scripts/." "$fresh_scripts/"
 ( cd "$fresh_scripts" && ./build-plan-libs.sh ) >/dev/null 2>&1 \

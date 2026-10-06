@@ -164,7 +164,10 @@ fn run() -> i32 {
     }
 
     println!("setup-dev-env: building for {host_triple}\n");
-    let outcome = stage::run(&repo_root, &host_triple, exe_suffix);
+    let mut outcome = stage::run(&repo_root, &host_triple, exe_suffix);
+    outcome
+        .failed
+        .extend(stage::build_test_siblings(&repo_root));
 
     let bin_dir = repo_root.join("bin").join(&host_triple);
     generated::build_if_missing(&repo_root, &bin_dir);

@@ -181,6 +181,10 @@
               runOne32
               pkgs.shellcheck
               pkgs.actionlint
+              # The JSON tool the build and the tests use. rjq is the shipped
+              # runtime tool, referenced by its shared-bin path, not a build
+              # dependency: a test that needs a JSON query uses this one.
+              pkgs.jq
               pkgs.git
               # The debugger the interactive-shell app profile for gdb drives,
               # including its -tui mode. Development-only: no test depends on

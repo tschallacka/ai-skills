@@ -38,7 +38,7 @@
 #                           shipped implementation: ids, statuses, severities,
 #                           priorities, parents, timestamps, reproductions,
 #                           mechanism-on-confirmed, verification-on-fixed
-#                           (needs rjq on PATH)
+#                           (needs the shipped rjq in the shared bin, not on PATH)
 #   npm package baseline    every pinned byte size in
 #                           planning/tests/fixtures/overview/npm-package-baseline.tsv
 #                           against the working tree. Not npm's file selection -
@@ -83,6 +83,24 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Dev tooling always runs inside the flake's dev shell, the compiled binary
+# included. The gates need the shell's jq, toolchain and linters, and a Git hook
+# runs with the caller's own environment, which may provide a different Cargo
+# than the repository's pinned one. Re-enter once, before anything else runs; the
+# marker prevents recursion inside the shell. The `registers` branch is the one
+# exception: its only check is the scope check below, which needs only git, so
+# it runs without nix (and the flake may be the stale master one, B333).
+pre_push_branch="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+if [ -z "${AI_SKILLS_PREPUSH_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ] \
+    && [ "$pre_push_branch" != registers ]; then
+    command -v nix >/dev/null 2>&1 || {
+        printf '%s: nix develop is required; pre-push checks run only inside the dev shell\n' "${0##*/}" >&2
+        exit 69
+    }
+    exec nix develop "$repo_root" --command env \
+        AI_SKILLS_PREPUSH_IN_NIX=1 "$repo_root/pre-push-check.sh" "$@"
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Compiled-binary preference
 # ─────────────────────────────────────────────────────────────────────────────
@@ -105,22 +123,8 @@ source "$repo_root/pre-push-check-lib.sh"
 
 full=false
 
-# Git runs hooks with the caller's environment, which may provide a different
-# Cargo than the repository's pinned toolchain. Re-enter the flake once; the
-# marker prevents recursion inside the development shell. The `registers`
-# branch is exempt: its one gate needs only git, and its flake is the stale
-# master one, whose dev shell does not build on every host (B333).
 register_branch=registers
 current_branch="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
-if [ -z "${AI_SKILLS_PREPUSH_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ] &&
-    [ "$current_branch" != "$register_branch" ]; then
-    command -v nix >/dev/null 2>&1 || {
-        printf '%s: nix develop .#default is required for Rust pre-push checks\n' "${0##*/}" >&2
-        exit 69
-    }
-    exec nix develop "$repo_root" --command env \
-        AI_SKILLS_PREPUSH_IN_NIX=1 "$repo_root/pre-push-check.sh" "$@"
-fi
 
 usage() {
     awk 'NR > 1 && /^# ?(MODE|PACKAGE):/{ next } NR > 1 && /^#/{ sub(/^# ?/, ""); print } /^set -u/{ exit }' "$0"
@@ -339,7 +343,19 @@ gate_rust_crates
 # statuses known" for every register, always. Measured against a register with
 # a duplicate id and two invalid statuses: no finding. Errors are now fatal to
 # the check rather than silent, so a runtime that cannot run it says so.
-if command -v rjq >/dev/null 2>&1; then
+# The shipped rjq, found by its shared-bin path (AI_SKILLS_BIN_ROOT first), not
+# through PATH: reg_findings runs it by that path (planning/scripts/register-lib.sh).
+shipped_rjq_present() {
+    local dir name
+    for dir in "${AI_SKILLS_BIN_ROOT:-}" "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin"; do
+        [ -n "$dir" ] || continue
+        for name in rjq rjq.exe; do
+            [ -f "$dir/$name" ] && return 0
+        done
+    done
+    return 1
+}
+if shipped_rjq_present; then
     # shellcheck source=planning/scripts/register-lib.sh
     source "$(cd "$(dirname "$0")/planning/scripts" && pwd)/register-lib.sh"
     for reg in TODO.json BUGS.json; do
@@ -356,7 +372,7 @@ if command -v rjq >/dev/null 2>&1; then
         fi
     done
 else
-    note "rjq not on PATH; register soundness skipped (CI runs test-register-schemas)"
+    note "the shipped rjq is not in the shared bin directory; register soundness skipped (CI runs test-register-schemas)"
 fi
 
 # ---- 5b. the npm package baseline ------------------------------------------

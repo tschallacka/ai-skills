@@ -120,8 +120,8 @@ add_unit "$plan" W04 04-step-flush
 assert_eq "$authored" "$(testing_row "$goal")" 'rationale after consecutive add-work-unit calls'
 
 # 3/4. The validation pass: the decoy table is reported, the plain goal is not.
-if ! command -v rjq >/dev/null 2>&1; then
-    printf 'goal-testing-row: UNCONFIGURED (rjq) — validation assertions skipped\n'
+if ! command -v jq >/dev/null 2>&1; then
+    printf 'goal-testing-row: UNCONFIGURED (jq) — validation assertions skipped\n'
     [ "$(t_failures)" -eq 0 ] || exit 1
     printf 'goal-testing-row: PASS\n'
     exit 0

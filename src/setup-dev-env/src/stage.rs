@@ -177,6 +177,51 @@ pub fn run(repo_root: &Path, triple: &str, exe_suffix: &str) -> BuildOutcome {
     BuildOutcome { built, failed }
 }
 
+/// The chat-mcp integration tests run chat-server-rs and chat-client-rs from
+/// target/debug, beside the adapter they test, because that is the profile
+/// `cargo test` builds into. `run` writes release binaries under bin/<triple>
+/// only, so on a fresh tree those tests skipped instead of running. These two
+/// are built here in the test profile, and nothing else.
+const TEST_SIBLINGS: [&str; 2] = ["chat-server-rs", "chat-client-rs"];
+
+/// Builds `TEST_SIBLINGS` in the debug profile into `repo_root/target`,
+/// printing one line each. Returns the ones that failed.
+pub fn build_test_siblings(repo_root: &Path) -> Vec<String> {
+    let mut failed = Vec::new();
+    for sibling in TEST_SIBLINGS {
+        let manifest = repo_root.join("src").join(sibling).join("Cargo.toml");
+        if !manifest.is_file() {
+            println!("  {sibling:<16} no crate at src/{sibling}; skipped");
+            continue;
+        }
+        print!("  {sibling:<16} (test profile) ");
+        let output = Command::new("cargo")
+            .arg("build")
+            .arg("--manifest-path")
+            .arg(&manifest)
+            .current_dir(repo_root)
+            .env("CARGO_TARGET_DIR", repo_root.join("target"))
+            .output();
+        match output {
+            Ok(output) if output.status.success() => println!("ok"),
+            Ok(output) => {
+                println!("FAILED");
+                let combined = [output.stdout, output.stderr].concat();
+                for line in String::from_utf8_lossy(&combined).lines() {
+                    eprintln!("      | {line}");
+                }
+                failed.push(sibling.to_string());
+            }
+            Err(error) => {
+                println!("FAILED");
+                eprintln!("      | {error}");
+                failed.push(sibling.to_string());
+            }
+        }
+    }
+    failed
+}
+
 fn built_artifact(repo_root: &Path, triple: &str, exe_suffix: &str, binary: &str) -> PathBuf {
     repo_root
         .join("target")
@@ -212,7 +257,7 @@ fn stage_primary(
 /// interactive-shell-mcp is its own crate but not its own skill: its binary
 /// ships in the interactive-shell skill's mcp-mode install
 /// (integration.tsv), so it lands in THAT skill's bin/<triple>/.
-/// chat-client-rs/chat-mcp/chat-server-rs/chat-spool-watch (per
+/// chat-client-rs/chat-mcp/chat-server-rs/chat-spool-watch/monitor-once (per
 /// chat/binaries.tsv) and ai-text-editor/ai-text-editor-mcp (per
 /// ai-text-editor/binaries.tsv) are the same shape: each is its own crate,
 /// not its own skill directory, and the installer reads a skill's binaries
@@ -223,7 +268,9 @@ fn skill_dir_for(crate_name: &str) -> Option<&str> {
     match crate_name {
         "bug-report" | "todo" | "interactive-shell" | "ci-failures" | "rjq" => Some(crate_name),
         "interactive-shell-mcp" => Some("interactive-shell"),
-        "chat-client-rs" | "chat-mcp" | "chat-server-rs" | "chat-spool-watch" => Some("chat"),
+        "chat-client-rs" | "chat-mcp" | "chat-server-rs" | "chat-spool-watch" | "monitor-once" => {
+            Some("chat")
+        }
         "ai-text-editor" | "ai-text-editor-mcp" => Some("ai-text-editor"),
         _ => None,
     }
@@ -282,6 +329,7 @@ mod tests {
             "chat-mcp",
             "chat-server-rs",
             "chat-spool-watch",
+            "monitor-once",
         ] {
             assert_eq!(skill_dir_for(crate_name), Some("chat"), "{crate_name}");
         }

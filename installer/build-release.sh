@@ -255,12 +255,28 @@ profile_files_for_release() {
     done
 }
 
+# The Claude Code mods (mods/<board>), shipped alongside the skills they serve.
+# Their files are JSON and TSX, with no marker a MODE line could sit in, so the
+# boards are listed here and their tracked files taken whole. The same board
+# names are plugins::MODS in src/installer/src/plugins.rs; the test that holds
+# the two equal is tests/test-mods-package.sh. loading is not listed: the boards
+# carry their own copy of it.
+MODS_BOARDS="chat-board ci-board plan-board brainstorm-board register-board tui-hint-board signal-bus"
+
+mods_files() {
+    local board
+    for board in $MODS_BOARDS; do
+        (cd "$repo_root" && git ls-files "mods/$board")
+    done
+}
+
 collect() {
     {
         printf 'README.md\nLICENSE\npackage.json\n'
         tui_hint_plugin_files
         editor_gate_plugin_files
         agent_identity_plugin_files
+        mods_files
         profile_files_for_release
         local path
         while IFS= read -r path; do
@@ -344,12 +360,15 @@ case "$mode" in
                 || { printf '%s: cargo build chat-mcp failed\n' "${0##*/}" >&2; exit 66; }
             ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-spool-watch ) \
                 || { printf '%s: cargo build chat-spool-watch failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package monitor-once ) \
+                || { printf '%s: cargo build monitor-once failed\n' "${0##*/}" >&2; exit 66; }
             mkdir -p "$repo_root/chat/bin/$chat_dir"
             chat_release="$repo_root/target/$chat_dir/release"
             cp "$chat_release/chat-server-rs$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-server-rs$skill_exe"
             cp "$chat_release/chat-client-rs$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-client-rs$skill_exe"
             cp "$chat_release/chat-mcp$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-mcp$skill_exe"
             cp "$chat_release/chat-spool-watch$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-spool-watch$skill_exe"
+            cp "$chat_release/monitor-once$skill_exe" "$repo_root/chat/bin/$chat_dir/monitor-once$skill_exe"
         else
             # Prebuilt binaries must already be in place (CI build step).
             ls "$repo_root/chat/bin/"*/"chat-server-rs$skill_exe" >/dev/null 2>&1 \
@@ -537,8 +556,14 @@ case "$mode" in
         # equality holds between builds on one machine, and file-for-file
         # equality holds anywhere. test-release-package.sh asserts both.
         find "$root" -type f -exec touch -t 202001010000 {} +
+        # One tar call for the whole list, read from a file. xargs splits a long
+        # list into batches when the shell's command line is short (Windows), and
+        # every batch writes its own archive with an end marker, so the tarball
+        # silently stopped at the first batch: 57 of 362 entries on a simulated
+        # small limit. The list file lives in the stage, outside the package tree.
         ( cd "$stage" && find "ai-skills-$version" -type f | LC_ALL=C sort \
-            | tr '\n' '\0' | xargs -0 tar -cf - | gzip -n -9 > "$tarball" )
+            > .tarball-files && tar -cf - -T .tarball-files | gzip -n -9 > "$tarball"
+          rm -f .tarball-files )
         printf 'Wrote %s (%s files, %s)\n' "${tarball#"$repo_root"/}" "$count" \
             "$(du -h "$tarball" | awk '{print $1}')"
         ;;

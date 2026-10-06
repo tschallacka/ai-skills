@@ -13,7 +13,8 @@ use crate::discovery::{resolve_server, DEFAULT_BEACON_PORT};
 use crate::local::{channels_home, local_last_id, local_read};
 use crate::net::{connect, read_line, wait_for_welcome, write_line, Client};
 use crate::session::{
-    apply_session, client_state_dir, parse_flag, save_cursor, save_session, session_key, Session,
+    apply_session, client_state_dir, parse_flag, save_cursor, save_cursor_with_key, save_session,
+    session_key, Session,
 };
 use crate::wire::{json_field, mentions, msg_line_id, valid_chan, wire_segments};
 use chat_proto::Message;
@@ -839,18 +840,26 @@ fn collect_answer(
 /// `join` adds to it, `leave` removes from it, and emptying it stops the tail.
 /// No lock, because serving happens on the tail's own thread -- the monitor
 /// thread only queues the request.
-struct Following {
-    chans: Vec<String>,
-    stop: bool,
+pub struct Following {
+    pub chans: Vec<String>,
+    pub stop: bool,
 }
 
-/// Perform one borrowed verb and answer it.
-fn serve_request(
+/// Perform one borrowed verb and answer it. Public so `chat-mcp` can own a
+/// session the same way the tail does, from its own worker thread.
+///
+/// `key` is the owner's own session key. Cursors are read and written under it,
+/// never under this process's default key (T143): an owner that is not the
+/// process whose env resolved the default must not move someone else's cursor.
+/// Parked lines (anything not part of the answer) go to `pending` for the owner
+/// to handle as it would any other line.
+pub fn serve_request(
     request: &control::Request,
     tls: &mut Client,
     nick: &str,
     following: &mut Following,
     state_dir: &std::path::Path,
+    key: &str,
     pending: &mut VecDeque<String>,
 ) -> control::Reply {
     if !request.chan.is_empty() && !valid_chan(&request.chan) {
@@ -861,10 +870,10 @@ fn serve_request(
     }
     match request.verb.as_str() {
         "send" => serve_send(request, tls, nick, pending),
-        "read" => serve_read(request, tls, state_dir, pending),
+        "read" => serve_read(request, tls, state_dir, key, pending),
         "names" => serve_names(request, tls, pending),
-        "join" => serve_join(request, tls, following, state_dir, pending),
-        "leave" => serve_leave(request, tls, following, state_dir),
+        "join" => serve_join(request, tls, following, state_dir, key, pending),
+        "leave" => serve_leave(request, tls, following, state_dir, key),
         other => control::Reply::fail(
             64,
             format!("chat-client-rs: the session owner cannot serve {}", other),
@@ -915,12 +924,14 @@ fn serve_read(
     request: &control::Request,
     tls: &mut Client,
     state_dir: &std::path::Path,
+    key: &str,
     pending: &mut VecDeque<String>,
 ) -> control::Reply {
     let mut since = request.since.clone();
     if since.is_empty() {
         // A RECORDED cursor counts even at 0 (B269).
-        if let Some(cursor) = Session::load(state_dir).cursor_recorded(&request.chan) {
+        if let Some(cursor) = Session::load_with_key(state_dir, key).cursor_recorded(&request.chan)
+        {
             since = cursor.to_string();
         }
     }
@@ -948,7 +959,7 @@ fn serve_read(
     // remote read (now fixed the same way) and the --local arm's own guard.
     if !request.mentions {
         if let Some(id) = max_id {
-            save_cursor(state_dir, &request.chan, id, false);
+            save_cursor_with_key(state_dir, key, &request.chan, id, false);
         }
     }
     control::Reply::ok(lines)
@@ -990,6 +1001,7 @@ fn serve_join(
     tls: &mut Client,
     following: &mut Following,
     state_dir: &std::path::Path,
+    key: &str,
     pending: &mut VecDeque<String>,
 ) -> control::Reply {
     if let Err(e) = write_line(tls, &format!("JOIN {}", request.chan))
@@ -1003,9 +1015,9 @@ fn serve_join(
     } else {
         request.since.parse::<u64>().unwrap_or(current)
     };
-    let mut session = Session::load(state_dir);
+    let mut session = Session::load_with_key(state_dir, key);
     session.cursors.insert(request.chan.clone(), seed);
-    let _ = session.save(state_dir);
+    let _ = session.save_with_key(state_dir, key);
     // The JOIN above made this connection a MEMBER of the channel, so the
     // server will now relay its traffic here. Following it is not optional: a
     // tail that stayed on its original channel would read those lines off the
@@ -1028,13 +1040,14 @@ fn serve_leave(
     tls: &mut Client,
     following: &mut Following,
     state_dir: &std::path::Path,
+    key: &str,
 ) -> control::Reply {
     if let Err(e) = write_line(tls, &format!("PART {}", request.chan)) {
         return control::Reply::fail(70, format!("chat-client-rs: {}", e));
     }
-    let mut session = Session::load(state_dir);
+    let mut session = Session::load_with_key(state_dir, key);
     session.cursors.remove(&request.chan);
-    let _ = session.save(state_dir);
+    let _ = session.save_with_key(state_dir, key);
     // Leaving a channel this tail follows stops FOLLOWING it. An earlier
     // version refused the request when the channel was the tailed one and told
     // the caller to stop the tail instead -- which is the wrong end of the
@@ -1350,6 +1363,7 @@ pub(crate) fn tail(args: &[String], state_dir: &std::path::Path) {
                     &nick,
                     &mut following,
                     state_dir,
+                    &session_key().0,
                     &mut pending,
                 );
                 job.answer(reply);

@@ -1027,6 +1027,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "monitor-once"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "monitor-read"
 version = "0.1.0"
 
@@ -1209,6 +1216,7 @@ dependencies = [
 name = "planning-progress"
 version = "0.1.0"
 dependencies = [
+ "planning-core",
  "planning-table",
 ]
 
@@ -1277,6 +1285,7 @@ dependencies = [
 name = "planning-validator-goals"
 version = "0.1.0"
 dependencies = [
+ "planning-progress",
  "planning-table",
  "planning-validator-common",
  "planning-validator-inventory",
@@ -1474,6 +1483,7 @@ dependencies = [
 name = "register-read"
 version = "0.1.0"
 dependencies = [
+ "planning-register",
  "serde_json",
 ]
 
@@ -2037,6 +2047,7 @@ dependencies = [
  "planning-core",
  "planning-document",
  "planning-inventory",
+ "planning-progress",
  "planning-table",
 ]
 

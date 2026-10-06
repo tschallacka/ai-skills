@@ -236,7 +236,7 @@ case "$(cat "$review_rationale")" in
     *) note_fail "first --set-rationale did not stamp cycle 2 (Cycle 1 already archived, so the CURRENT table is cycle 2)" ;;
 esac
 
-key1="$(rjq -r '.keys["AR-01"]["W01"]' "$plan_rationale/fix-keys.json")"
+key1="$(jq -r '.keys["AR-01"]["W01"]' "$plan_rationale/fix-keys.json")"
 "$scripts/add-fix-claim.sh" "$plan_rationale" --finding AR-01 --work-unit W01 --key "$key1" >/dev/null
 "$scripts/update-plan-content.sh" --review-status "$plan_rationale" approved >/dev/null \
     || note_fail "approving with a fresh rationale was refused"
@@ -251,7 +251,7 @@ esac
 # stays at 2, but the archive (and cycle_number computed fresh) moves to 3.
 printf 'ID,Missing or over-broad item,Required plan change,Status,Work unit\nAR-02,Missing Y,Add Y,resolved,W02\n' \
     | MINTED_BY=reviewer-1 "$scripts/update-adversarial-review.sh" "$plan_rationale" >/dev/null
-key2="$(rjq -r '.keys["AR-02"]["W02"]' "$plan_rationale/fix-keys.json")"
+key2="$(jq -r '.keys["AR-02"]["W02"]' "$plan_rationale/fix-keys.json")"
 "$scripts/add-fix-claim.sh" "$plan_rationale" --finding AR-02 --work-unit W02 --key "$key2" >/dev/null
 "$scripts/update-plan-content.sh" --review-status "$plan_rationale" approved >/dev/null \
     || note_fail "re-approving after a second cycle was refused"

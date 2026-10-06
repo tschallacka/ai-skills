@@ -167,6 +167,26 @@ the lookup to the named work unit and follow its pagination or result limits.
 Use text search only for literals, non-code documents, configuration values,
 or when the repository-aware lookup cannot answer the question.
 
+**Editing an existing file: prefer the ai-text-editor over the built-in Edit.**
+Load its tools first with ToolSearch
+(`select:mcp__ai-text-editor__open,mcp__ai-text-editor__search,mcp__ai-text-editor__replace,mcp__ai-text-editor__save`);
+they are deferred and are not callable until loaded. It is the better
+instrument for plan and memory files:
+
+- Fewer tokens per call: the default verbosity 1 returns only the revision and
+  the span an edit resolved to, not the file again.
+- Finer search: exact, regex, fuzzy and byte modes, by line or byte range; a
+  hit's `match_id` edits exactly that hit with no coordinates to compute.
+- Replace by matched text: `expected_text` refuses on a mismatch before
+  anything is deleted. The built-in Edit cannot tell you the span moved.
+- A change journal that survives a `git checkout` that would discard a
+  working-tree edit.
+- Revision-guarded edits: a stale view is refused, never merged.
+
+Use the built-in Write only for a new file. A hook hint that calls the editor
+optional describes the tool, not this rule: existing files are edited through
+the ai-text-editor. Do not fall back to here-documents or shell rewrites.
+
 **Comment discipline for produced code** (see
 [`references/comment-discipline-contract.md`](references/comment-discipline-contract.md)).
 Code produced under a plan MUST be self-documenting; comments MUST NOT exceed
@@ -387,8 +407,11 @@ hits). Use it before a paragraph-level edit to confirm the target is unique:
 
 **Worked examples:**
 ```bash
+# rjq is the shipped JSON tool, run from the shared install directory:
+RJQ="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/rjq"
+
 # every document mentioning a phrase, machine-readable:
-plan-content.sh find <plan> "<pattern>" --in all --format json | rjq -r '.matches[].document'
+plan-content.sh find <plan> "<pattern>" --in all --format json | "$RJQ" -r '.matches[].document'
 
 # did a fix land at THIS surface (not merely somewhere in the plan)?
 plan-content.sh find <plan> "<required wording>" --document step:<goal>/<step>
@@ -402,7 +425,7 @@ plan-content.sh find <plan> "<required wording>" --document step:<goal>/<step>
 zero **or** multiple matches — deliberately (a unique target is the goal).
 "Exit 1 with matches present" means *narrow the pattern*, not *error*, so a
 caller checking only the exit code will misread it. With `json`,
-`rjq '.matches | length'` gives the count directly.
+`"$RJQ" '.matches | length'` gives the count directly.
 
 **A fix is verified by finding the wording at the surface the finding named,
 never by finding it somewhere in the plan.** The plan-wide probe
@@ -821,6 +844,16 @@ appears in including sibling units and goal documents, check the inventory row
 named in its goal roster (5), and re-run the search to confirm the only
 remaining hits are deliberate references to the corrected history.
 
+The goal tracker's row for a step carries that step's objective text, so a
+finding that changes a step objective or a unit description also reaches the
+`progress.md` row: refresh it with `update-progress.sh --rows <goal-directory>`
+(statuses are kept), then confirm validate-plan no longer WARNs on it.
+
+If no helper can make the change a finding requires, stop and report it as a
+planning-skill gap, naming the artifact, the change and the missing helper. Do not
+edit the artifact by hand to close the finding, and do not record the finding as
+resolved.
+
 A resolution recorded without the sweep is a claim, not a fix. The
 verification-one-unit-away variant is the hardest: a unit may be correct across
 all seven surfaces while the verification unit that grades it still checks the
@@ -940,6 +973,15 @@ excepted.
 it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
 land them.
+
+**Reviewer tool allowance when a reviewer may write.** A reviewer brief that
+lets the reviewer write (`adversarial-review-incoming.md`, or any other
+findings file) names the ai-text-editor tools in its tool allowance:
+`mcp__ai-text-editor__open`, `mcp__ai-text-editor__read`,
+`mcp__ai-text-editor__replace` and `mcp__ai-text-editor__save`. The brief says
+the reviewer loads them with ToolSearch and makes every write through them, not
+through a here-document or a shell redirect. A reviewer that cannot reach the
+editor reports that gap in its findings; it does not write around it.
 
 **A plan records what it assumed.** `## Assumptions` (§ 11.1) holds what was
 assumed rather than confirmed, and what would change if the assumption is wrong.
@@ -1392,6 +1434,7 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> completed
 "$PLANNING_SKILL_DIR/scripts/update-progress.sh" <goal-directory>
+"$PLANNING_SKILL_DIR/scripts/update-progress.sh" --rows <goal-directory>   # re-derive each row's objective text from its step file, keeping statuses
 plan-overview --plan-dir <plan-directory> --out <file>   # one-file HTML dashboard
 plan-overview --plan-dir <plan-directory> --serve --port <port>   # serve the artifact on loopback
 # If no matching prebuilt artifact exists, the installer reports the overview as unavailable.
@@ -1498,6 +1541,15 @@ canonical `scripts/plan-mutate.sh` dispatcher. This includes creating goals,
 steps, testing companions, inventory rows, progress rows, content changes,
 review status, decomposition status, and validation state. Direct editor,
 patch, redirection, or ad-hoc script writes to plan artifacts are prohibited.
+
+If no helper can make a change the plan requires, stop and report it as a
+planning-skill gap, naming the artifact, the change, and the helper that is
+missing or insufficient. Do not edit the artifact by hand, and do not delete and
+recreate it to get around the gap. A goal tracker's row text is covered by a
+helper: after a unit description or step objective edit, the matching
+`progress.md` row is refreshed by `update-progress.sh --rows <goal-directory>`,
+which keeps each row's status; validate-plan WARNs on a row whose text no longer
+matches its step.
 
 When many helper mutations are needed, prefer one temporary executable batch
 script containing only approved helper commands. Run it with strict mode and
