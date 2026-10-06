@@ -83,17 +83,14 @@ function toolPath(home: string, xdg: string): string {
   return `${bin}/ci-failures`
 }
 
-// The repo's recent runs, read into the pane's state. Quiet, with no loading
-// screen, so opening the board shows them at once, runs in progress included.
-// Limited to the checked-out branch, so an open PR's own runs are not pushed out
-// of the list by other branches' runs; with no branch to name, the repo's own.
-async function loadRunList($: Parameters<typeof update>[0]): Promise<void> {
+// The repo's recent runs, read into the pane's state, every run gh reports for
+// the first `limit` (gh's own default is 20). Quiet, with no loading screen, so
+// opening the board shows them at once, runs in progress included. "load more"
+// asks again with a larger limit.
+async function loadRunList($: Parameters<typeof update>[0], limit = 20): Promise<void> {
   const clock = await $.process.run(['date', '+%s'])
   const nowMs = Number(clock.stdout.trim()) * 1000
-  const head = await $.process.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
-  const branch = head.exitCode === 0 ? head.stdout.trim() : ''
-  const scope = branch && branch !== 'HEAD' ? ['--branch', branch] : []
-  const result = await $.process.run(['gh', 'run', 'list', ...scope, '--limit', '50', '--json', 'databaseId,displayTitle,headBranch,conclusion,status,createdAt,startedAt,updatedAt'])
+  const result = await $.process.run(['gh', 'run', 'list', '--limit', String(limit), '--json', 'databaseId,displayTitle,headBranch,conclusion,status,createdAt,startedAt,updatedAt'])
   const rows = result.exitCode === 0 && Number.isFinite(nowMs) ? runsOf(result.stdout, nowMs) : []
   await update($, runs, () => rows)
   await update($, picked, () => null)
@@ -254,25 +251,9 @@ export const register: Register = (on, options) => {
         },
       ])
     }
-    const browse = () => {
-      let nowMs = NaN
-      let rows: RunRow[] = []
-      return busyWhile('the run list', [
-        async () => {
-          const clock = await $.process.run(['date', '+%s'])
-          nowMs = Number(clock.stdout.trim()) * 1000
-        },
-        async () => {
-          const result = await $.process.run(['gh', 'run', 'list', '--limit', '20', '--json', 'databaseId,displayTitle,headBranch,conclusion,status,createdAt,startedAt,updatedAt'])
-          rows = result.exitCode === 0 && Number.isFinite(nowMs) ? runsOf(result.stdout, nowMs) : []
-        },
-        async () => {
-          await update($, runs, () => rows)
-          await update($, picked, () => null)
-          await update($, browsing, () => true)
-        },
-      ])
-    }
+    const browse = () => busyWhile('the run list', [async () => loadRunList($)])
+    // The next page of runs: as many again as are listed, plus the default page.
+    const loadMore = (listed: number) => busyWhile('the run list', [async () => loadRunList($, listed + 20)])
 
     const { value: fetching } = await $.state.get(busy)
     const { value: task } = await $.state.get(progress)
@@ -385,6 +366,11 @@ export const register: Register = (on, options) => {
               </Box>
             )
           })}
+          {(list ?? []).length >= 20 && (
+            <Box flexDirection="row">
+              <Button onPress={() => loadMore((list ?? []).length)}>load more</Button>
+            </Box>
+          )}
         </Box>
       )
     } else {
