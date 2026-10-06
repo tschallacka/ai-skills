@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 //! End-to-end checks of the lock against the real binary: a signalled monitor stops its
 //! watch, a killed monitor leaves its watch holding the lock, and simultaneous starts
 //! elect exactly one monitor. Unix only, since they send signals and inspect process groups.

@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: DEV
 //! The bridge owns its session's connection: a CLI verb run for the same session
 //! is answered by the adapter's held connection, so it never registers under the
 //! nick and the server never renames it `<nick>-2`.
