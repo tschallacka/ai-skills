@@ -165,6 +165,16 @@ appears in including sibling units and goal documents, check the inventory row
 named in its goal roster (5), and re-run the search to confirm the only
 remaining hits are deliberate references to the corrected history.
 
+The goal tracker's row for a step carries that step's objective text, so a
+finding that changes a step objective or a unit description also reaches the
+`progress.md` row: refresh it with `update-progress.sh --rows <goal-directory>`
+(statuses are kept), then confirm validate-plan no longer WARNs on it.
+
+If no helper can make the change a finding requires, stop and report it as a
+planning-skill gap, naming the artifact, the change and the missing helper. Do not
+edit the artifact by hand to close the finding, and do not record the finding as
+resolved.
+
 A resolution recorded without the sweep is a claim, not a fix. The
 verification-one-unit-away variant is the hardest: a unit may be correct across
 all seven surfaces while the verification unit that grades it still checks the
@@ -491,6 +501,9 @@ own. Data/markup extensions (the rjq-matched list in
 without a bin-like segment) never flag. Each registered command's first token
 teaches the detector that tool word, so registering `pytest -q` makes
 `pytest` a word — no per-language list to maintain.
+
+
+<!-- SKILL-LOAD-PROOF part=part-3 token=8ce589b7619c1e25 -->
 
 ### 3.3 Validate, then create progress trackers
 

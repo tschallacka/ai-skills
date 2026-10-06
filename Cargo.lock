@@ -1216,6 +1216,7 @@ dependencies = [
 name = "planning-progress"
 version = "0.1.0"
 dependencies = [
+ "planning-core",
  "planning-table",
 ]
 
@@ -1284,6 +1285,7 @@ dependencies = [
 name = "planning-validator-goals"
 version = "0.1.0"
 dependencies = [
+ "planning-progress",
  "planning-table",
  "planning-validator-common",
  "planning-validator-inventory",
@@ -2044,6 +2046,7 @@ dependencies = [
  "planning-core",
  "planning-document",
  "planning-inventory",
+ "planning-progress",
  "planning-table",
 ]
 

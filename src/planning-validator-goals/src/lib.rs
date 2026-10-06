@@ -2,6 +2,7 @@
 // PACKAGE: PROD
 //! Goal and step validation formerly provided by `validate-plan-goals-lib.sh`.
 
+use planning_progress::stale_rows;
 use planning_table::table_cell;
 use planning_validator_common::Findings;
 use planning_validator_inventory::{Inventory, Unit};
@@ -164,6 +165,24 @@ pub fn validate_steps(plan: &Path, inventory: &Inventory, findings: &mut Finding
             findings,
         );
         validate_atomicity(plan, unit, &step_file, &text, findings);
+    }
+}
+
+/// WARNs on a goal tracker row whose objective text no longer matches its step file.
+pub fn validate_tracker_rows(plan: &Path, inventory: &Inventory, findings: &mut Findings) {
+    for goal in inventory.goals.keys() {
+        let goal_dir = plan.join(goal);
+        let Ok(progress) = fs::read_to_string(goal_dir.join("progress.md")) else {
+            continue;
+        };
+        for stale in stale_rows(&progress, &goal_dir.join("steps")) {
+            findings.warn(format!(
+                "{}/progress.md row for {} does not match its step objective; run update-progress.sh --rows {}",
+                goal,
+                stale.step,
+                goal_dir.display()
+            ));
+        }
     }
 }
 

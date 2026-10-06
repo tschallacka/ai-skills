@@ -3,7 +3,7 @@
 use planning_core::{atomic_write, git_snapshot, require_safe_value};
 use planning_document::replace_paragraph;
 use planning_inventory::{find, is_unit_id, update_row};
-use planning_progress::step_objective;
+use planning_progress::{refresh_goal_rows, step_objective};
 use planning_table::table_cell;
 use std::collections::BTreeMap;
 use std::env;
@@ -431,6 +431,18 @@ fn main() {
     atomic_write(&step_file, step.as_bytes()).unwrap_or_else(|error| die(error, 73));
     if let Some(value) = updates.get("description") {
         if !value.is_empty() {
+            match refresh_goal_rows(&plan.join(&original.goal)) {
+                Ok(Some(changed)) if changed > 0 => eprintln!(
+                    "note: refreshed {changed} row(s) in {}/progress.md; statuses kept",
+                    original.goal
+                ),
+                Ok(_) => {}
+                Err(message) => eprintln!(
+                    "{COMMAND}: could not refresh {}/progress.md: {message}; run update-progress.sh --rows {}",
+                    original.goal,
+                    plan.join(&original.goal).display()
+                ),
+            }
             let goal_file = plan.join(&original.goal).join("goal.md");
             if let Ok(goal) = fs::read_to_string(&goal_file) {
                 let (updated_goal, found) = update_goal_blurb(&goal, &unit, value);

@@ -43,6 +43,10 @@ fn main() {
     }
     if progress_file.exists() {
         eprintln!("Progress file already exists: {}", progress_file.display());
+        eprintln!(
+            "to re-derive its rows from the step files, run: update-progress.sh --rows {}",
+            goal_dir.display()
+        );
         std::process::exit(73);
     }
 

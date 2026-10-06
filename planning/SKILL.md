@@ -24,7 +24,7 @@ its own.
 | [parts/part-1.md](parts/part-1.md) | Setup, operating rules, tool/context-limit discipline, hard planning gates, establishing the plan boundary |
 | [parts/part-2.md](parts/part-2.md) | Creating the plan directory |
 | [parts/part-3.md](parts/part-3.md) | Mandatory classification and independent review |
-| [parts/part-4.md](parts/part-4.md) | Resuming and updating a plan |
+| [parts/part-4.md](parts/part-4.md) | Revising a plan after its first draft: resuming, updating, and helper-only mutations |
 
 Every part carries a load-sanity check (T86): a hidden line at a random
 position near its end, and a command (`planning/scripts/verify-skill-load.sh

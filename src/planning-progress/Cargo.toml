@@ -11,4 +11,5 @@ license = "MIT"
 name = "planning_progress"
 
 [dependencies]
+planning-core = { path = "../planning-core" }
 planning-table = { path = "../planning-table" }

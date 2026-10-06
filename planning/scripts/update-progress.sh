@@ -5,14 +5,19 @@
 # Reads the goal's progress.md step table (canonical 4 data columns: Goalname |
 # Stepname | Description | Completion status, so awk -F'|' sees the status in
 # $5) and rewrites the single `**Progress:**` line with the percentage, a
-# 20-cell bar, and a status icon. It never touches step rows — update-step.sh
-# owns those, and calls this script afterwards.
+# 20-cell bar, and a status icon. It leaves step rows alone — update-step.sh
+# owns the status cells, and calls this script afterwards.
+#
+# --rows first re-derives each row's Description from its step file's objective,
+# keeping every status cell, then recomputes the bar as above.
 #
 # Usage:
 #   update-progress.sh <goal-directory>
+#   update-progress.sh --rows <goal-directory>
 #   update-progress.sh --help
 #
-# Exit codes: 64 bad invocation, 66 the goal has no progress.md.
+# Exit codes: 64 bad invocation, 66 the goal has no progress.md, 73 the tracker
+# could not be written.
 
 set -euo pipefail
 export LC_ALL=C

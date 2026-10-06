@@ -6,6 +6,7 @@ use planning_document::{
     replace_section, replace_title,
 };
 use planning_inventory::find;
+use planning_progress::refresh_goal_rows;
 use planning_table::{csv_to_markdown, replace_testing_requirement, CsvError};
 use std::env;
 use std::fs;
@@ -262,8 +263,29 @@ fn write_document(plan: &Path, id: &str, rendered: String, mode: &str) {
     }
     atomic_write(&file, rendered.as_bytes()).unwrap_or_else(|error| die(error, 73));
     invalidate_context(plan, id);
+    refresh_tracker_rows(plan, id);
     emit_step_testing_reminder(plan, id);
     println!("Updated {mode}");
+}
+
+/// A step's objective is the tracker row's text, so an edit to it refreshes that goal's rows.
+fn refresh_tracker_rows(plan: &Path, id: &str) {
+    if !(id.starts_with("step:") || id.starts_with("unit:")) {
+        return;
+    }
+    let Ok(step) = document_path(plan, id) else {
+        return;
+    };
+    let Some(goal_dir) = step.parent().and_then(Path::parent) else {
+        return;
+    };
+    if let Err(message) = refresh_goal_rows(goal_dir) {
+        eprintln!(
+            "{COMMAND}: could not refresh {}/progress.md: {message}; run update-progress.sh --rows {}",
+            goal_dir.display(),
+            goal_dir.display()
+        );
+    }
 }
 
 fn invalidate_context(plan: &Path, id: &str) {
