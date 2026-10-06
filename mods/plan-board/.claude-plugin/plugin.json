@@ -1,0 +1,26 @@
+{
+  "name": "plan-board",
+  "version": "0.1.0",
+  "description": "A pane with a plan selector (project plans, then global), each plan's status and percentage, and the chosen plan's goal and overall progress, read from the planning skill's own progress files.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Plan board",
+      "description": "Register the plan-board command and its pane. Off removes both; the rest of the session is unchanged.",
+      "default": true
+    },
+    "plan": {
+      "type": "string",
+      "title": "Plan name",
+      "description": "The plan to show, by its folder name. Empty shows the plan whose progress file changed most recently.",
+      "default": ""
+    },
+    "plansDir": {
+      "type": "string",
+      "title": "Plans folder",
+      "description": "Where the planning skill keeps global plans. Empty uses ~/.config/tsch-ai-skills/plans, or $XDG_CONFIG_HOME/tsch-ai-skills/plans when that is set.",
+      "default": ""
+    }
+  }
+}

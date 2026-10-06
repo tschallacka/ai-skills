@@ -1,0 +1,14 @@
+{
+  "name": "ci-board",
+  "version": "0.1.0",
+  "description": "A pane with the failing jobs of the branch's latest CI run, from the ci-failures tool, refreshed on demand.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "CI board",
+      "description": "Register the ci-board command and its pane. Off removes both.",
+      "default": true
+    }
+  }
+}

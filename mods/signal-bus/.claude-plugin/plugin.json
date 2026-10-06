@@ -1,0 +1,14 @@
+{
+  "name": "signal-bus",
+  "version": "0.1.0",
+  "description": "The shared signal bus: which board tabs are open and which holds the keyboard, and what the person did in the boards, read by read_signal_bus.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Signal bus",
+      "description": "Track the open board tabs and board signals, and register read_signal_bus. Off removes them.",
+      "default": true
+    }
+  }
+}

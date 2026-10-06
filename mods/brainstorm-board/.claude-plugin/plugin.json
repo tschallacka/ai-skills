@@ -1,0 +1,14 @@
+{
+  "name": "brainstorm-board",
+  "version": "0.1.0",
+  "description": "A pane with the brainstorms the brainstorm skill recorded, project's first, then global, shown as formatted text.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Brainstorm board",
+      "description": "Register the brainstorm-board command, its pane and its agent tool. Off removes them.",
+      "default": true
+    }
+  }
+}

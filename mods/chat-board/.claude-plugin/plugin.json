@@ -1,0 +1,20 @@
+{
+  "name": "chat-board",
+  "version": "0.1.0",
+  "description": "A pane with the latest messages of one chat channel, read from the local chat log, refreshed every few seconds, and a channel list to browse the channels on this machine.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Chat board",
+      "description": "Register the chat-board command, its pane and its agent tool. Off removes them.",
+      "default": true
+    },
+    "channel": {
+      "type": "string",
+      "title": "Channel",
+      "description": "The channel to show, with its #. Empty shows #ops.",
+      "default": "#ops"
+    }
+  }
+}

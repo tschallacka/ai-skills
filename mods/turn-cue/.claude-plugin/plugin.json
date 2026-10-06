@@ -1,0 +1,13 @@
+{
+  "name": "turn-cue",
+  "version": "0.1.0",
+  "description": "A toast when a turn finishes, so the person sees it without watching the transcript.",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Turn-done toast",
+      "description": "Show a toast when a turn finishes. Off removes the toast; the rest of the session is unchanged.",
+      "default": true
+    }
+  }
+}
