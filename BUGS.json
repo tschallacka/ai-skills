@@ -5339,6 +5339,31 @@
       "updated_at": "2026-10-06T10:08:55Z"
     },
     {
+      "id": "B395",
+      "title": "The planning skill does not promote the ai-text-editor, so agents edit plan and memory files with the built-in Edit tool",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "grep -c 'ai-text-editor' planning/skill-source.txt planning/SKILL.md planning/parts/part-*.md planning/roles/*.md  # every count is 0",
+      "observed": "An agent whose in-place shell edit was blocked by the editor-gate hook switched to the built-in Edit tool, not the ai-text-editor MCP the hook named, and kept using Edit for every later edit. Every planning-skill file counts 0 mentions of ai-text-editor. The editor-gate Edit/Write hint says the editor 'could also go through' and is 'Not required here'.",
+      "expected": "The planning skill says the ai-text-editor is the preferred editor for existing files, states its concrete advantages (verbosity-1 token saving, finer search modes, expected_text refusal on mismatch, a journal that survives a git checkout, revision-guarded edits), tells agents to load its tools with ToolSearch first, and the reviewer brief names its tools in the tool allowance when a reviewer may write, with writes made through them rather than here-documents.",
+      "mechanism": "The planning skill source never mentions the ai-text-editor. Its tool-discipline section covers only code-lookup tools, and the reviewer's writable-file paragraph names no editor. The editor's advantages appear only in ai-text-editor/SKILL.md, which an agent working a plan does not read. The editor-gate hint presents the editor as optional, and the MCP tools are deferred, so an agent that does not load them by ToolSearch never sees them as an option. A reviewer subagent brief named only codegraph and magequery, so its reviewer had no editor either and stopped when a here-document was blocked.",
+      "surfaces": [
+        "planning/skill-source.txt",
+        "planning/parts/part-1.md",
+        "planning/parts/part-3.md",
+        "planning/SKILL.md",
+        "editor-gate-plugin/hooks/pre-tool-use-edit-write.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "planning session during review (agent edits blocked by editor-gate, then built-in Edit used throughout)",
+      "notes": "The editor-gate hook wording is outside this repo's planning skill; the fix does not change it, only makes the skill say the editor is preferred. Not locally reproduced in a live session; reproduction is the grep count and the observed transcript. The editor-gate hook (editor-gate-plugin/hooks/pre-tool-use-edit-write.sh) is left unchanged by the fix; its wording is a separate decision. The skill text is what this entry's fix changes.",
+      "created_at": "2026-10-06T10:22:56Z",
+      "updated_at": "2026-10-06T10:23:00Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
