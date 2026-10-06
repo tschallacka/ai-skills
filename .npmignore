@@ -3477,6 +3477,7 @@ tests/test-ai-text-editor.sh
 tests/test-bootstrap-default.sh
 tests/test-bootstrap-piped-stdin.sh
 tests/test-mode-markers.sh
+tests/test-mods-package.sh
 tests/test-profile-files-manifest.sh
 tests/test-register-branch-gate.sh
 tests/test-register-crate-parity.sh
