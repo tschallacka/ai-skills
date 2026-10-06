@@ -143,7 +143,10 @@ pub const MODS: &[(&str, &[&str])] = &[
 pub fn install_mods_claude(source_root: &Path, target_root: &Path) -> io::Result<Vec<PathBuf>> {
     let mut written = Vec::new();
     for (name, companions) in MODS {
-        if !companions.iter().any(|skill| target_root.join(skill).is_dir()) {
+        if !companions
+            .iter()
+            .any(|skill| target_root.join(skill).is_dir())
+        {
             continue;
         }
         let source = source_root.join("mods").join(name);
@@ -525,7 +528,11 @@ mod tests {
     }
 
     fn write_mod(source_root: &Path, name: &str) {
-        let file = source_root.join("mods").join(name).join("hooks").join("register.tsx");
+        let file = source_root
+            .join("mods")
+            .join(name)
+            .join("hooks")
+            .join("register.tsx");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(file, "export {}\n").unwrap();
     }

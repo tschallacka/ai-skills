@@ -131,6 +131,13 @@ fn other_skill_on_root_needs_plugin(
     let Some((_, companions)) = CLAUDE_PLUGINS.iter().find(|(name, _)| *name == plugin_name) else {
         return false;
     };
+    other_companion_on_root(target_root, companions, exclude_skill)
+}
+
+/// Whether a companion of a plugin or mod, other than `exclude_skill`, is still
+/// installed on `target_root`: the piece both the plugin and the mod removal
+/// rules share.
+fn other_companion_on_root(target_root: &Path, companions: &[&str], exclude_skill: &str) -> bool {
     companions
         .iter()
         .any(|companion| *companion != exclude_skill && target_root.join(companion).is_dir())
@@ -228,6 +235,14 @@ pub fn preview_uninstall(
                 would_remove_plugins.push((*plugin_name).to_string());
             }
         }
+        for (mod_name, companions) in crate::plugins::MODS {
+            if companions.contains(&skill)
+                && !other_companion_on_root(target_root, companions, skill)
+                && target_root.join(mod_name).is_dir()
+            {
+                would_remove_plugins.push((*mod_name).to_string());
+            }
+        }
     }
 
     let has_mcp_entry =
@@ -323,6 +338,20 @@ pub fn uninstall_skill(
             if plugin_dir.is_dir() {
                 fs::remove_dir_all(&plugin_dir)?;
                 removed_plugins.push((*plugin_name).to_string());
+            }
+        }
+        // The mods ride with their companion skills, so the same rule applies:
+        // a mod goes when no other companion of it is still installed here.
+        for (mod_name, companions) in crate::plugins::MODS {
+            if !companions.contains(&skill)
+                || other_companion_on_root(target_root, companions, skill)
+            {
+                continue;
+            }
+            let mod_dir = target_root.join(mod_name);
+            if mod_dir.is_dir() {
+                fs::remove_dir_all(&mod_dir)?;
+                removed_plugins.push((*mod_name).to_string());
             }
         }
     }
@@ -481,6 +510,65 @@ mod tests {
             vec!["chat-interrupt-plugin".to_string()]
         );
         assert!(!target_root.path().join("chat-interrupt-plugin").exists());
+    }
+
+    #[test]
+    fn a_mod_is_removed_with_its_last_companion_skill() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("chat").join("SKILL.md"), "content");
+        write(
+            &source_root
+                .path()
+                .join("mods/chat-board/hooks/register.tsx"),
+            "export {}\n",
+        );
+        let target_root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        install_into(source_root.path(), "chat", target_root.path(), home.path());
+        plugins::install_mods_claude(source_root.path(), target_root.path()).unwrap();
+        assert!(target_root.path().join("chat-board").is_dir());
+
+        let report = uninstall_skill(
+            source_root.path(),
+            "chat",
+            target_root.path(),
+            home.path(),
+            Some("claude"),
+        )
+        .unwrap();
+
+        assert_eq!(report.removed_plugins, vec!["chat-board".to_string()]);
+        assert!(!target_root.path().join("chat-board").exists());
+    }
+
+    #[test]
+    fn a_mod_stays_while_another_of_its_companion_skills_is_installed() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("chat").join("SKILL.md"), "content");
+        write(
+            &source_root
+                .path()
+                .join("mods/signal-bus/hooks/register.tsx"),
+            "export {}\n",
+        );
+        let target_root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        install_into(source_root.path(), "chat", target_root.path(), home.path());
+        // planning is a companion of signal-bus too, and it is still installed here.
+        fs::create_dir_all(target_root.path().join("planning")).unwrap();
+        plugins::install_mods_claude(source_root.path(), target_root.path()).unwrap();
+
+        let report = uninstall_skill(
+            source_root.path(),
+            "chat",
+            target_root.path(),
+            home.path(),
+            Some("claude"),
+        )
+        .unwrap();
+
+        assert!(report.removed_plugins.is_empty());
+        assert!(target_root.path().join("signal-bus").is_dir());
     }
 
     #[test]
