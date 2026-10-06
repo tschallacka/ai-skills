@@ -339,6 +339,7 @@ export const register: Register = (on, options) => {
                 >
                   {item.label}
                 </Button>
+                {active?.label === item.label && <Text inverse bold>{' FILTER ON '}</Text>}
                 <Text> </Text>
               </Box>
             ))}
