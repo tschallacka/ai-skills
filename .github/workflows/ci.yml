@@ -941,7 +941,13 @@ jobs:
         run: |
           set -euo pipefail
           cargo build -p rjq --target "${{ matrix.target }}"
-          echo "$GITHUB_WORKSPACE/target/${{ matrix.target }}/debug" >> "$GITHUB_PATH"
+          # rjq is a shipped tool, found by its shared install directory, never on PATH.
+          shared="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin"
+          mkdir -p "$shared"
+          for name in rjq rjq.exe; do
+            [ -f "$GITHUB_WORKSPACE/target/${{ matrix.target }}/debug/$name" ] && cp "$GITHUB_WORKSPACE/target/${{ matrix.target }}/debug/$name" "$shared/$name"
+          done
+          true
 
       # ---- one workspace-wide gate, not one per subject -------------------
       # fmt, clippy and test cover every member of the workspace in a single

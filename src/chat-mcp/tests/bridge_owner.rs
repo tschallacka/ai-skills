@@ -207,6 +207,15 @@ impl Drop for Bridge {
 
 #[test]
 fn a_cli_send_and_names_are_answered_by_the_bridge_and_no_second_nick_appears() {
+    // The server and the CLI are sibling binaries of the adapter. A per-crate
+    // `cargo test -p chat-mcp` builds only the adapter, so the flow is skipped
+    // there, the way mcp_flow.rs skips it; the workspace-wide run drives it.
+    for sibling in ["chat-server-rs", "chat-client-rs"] {
+        if !bin_dir().join(format!("{sibling}{}", std::env::consts::EXE_SUFFIX)).is_file() {
+            eprintln!("bridge_owner: SKIPPED — no {sibling} beside the adapter in this build");
+            return;
+        }
+    }
     let home = scratch();
     let mut bridge = Bridge::start(home);
     // The first tool call on the identity opens its held connection.
