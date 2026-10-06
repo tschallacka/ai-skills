@@ -2,19 +2,46 @@
 // PACKAGE: PROD
 use serde_json::{Map, Value};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const RJQ_MISSING: &str =
+    "rjq is required (it reads and writes the JSON registers); install rjq and re-run";
+
+/// The shipped rjq, by its path: `AI_SKILLS_BIN_ROOT` first (an install or a
+/// build that names its own bin directory), then the shared install directory.
+/// Never PATH. rjq is a shipped runtime tool, and a bare name resolves to
+/// whatever the machine happens to have first.
+pub fn rjq_program() -> Result<PathBuf, String> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(root) = std::env::var_os("AI_SKILLS_BIN_ROOT") {
+        dirs.push(PathBuf::from(root));
+    }
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));
+    if let Some(config) = config {
+        dirs.push(config.join("tsch-ai-skills").join("bin"));
+    }
+    for dir in dirs {
+        for name in ["rjq", "rjq.exe"] {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+    Err(RJQ_MISSING.into())
+}
+
 pub fn require_rjq() -> Result<(), String> {
-    Command::new("rjq")
+    let program = rjq_program()?;
+    Command::new(program)
         .arg("--version")
         .output()
         .map(|_| ())
-        .map_err(|_| {
-            "rjq is required (it reads and writes the JSON registers); install rjq and re-run"
-                .into()
-        })
+        .map_err(|_| RJQ_MISSING.into())
 }
 
 pub fn read(path: &Path) -> Result<Value, String> {

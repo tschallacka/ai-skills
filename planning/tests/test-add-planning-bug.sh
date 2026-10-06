@@ -45,23 +45,23 @@ add "$plan" --id PB-01 --title 'The importer drops the last row' \
     --expected 'both rows' --found-by 'step 02' >/dev/null
 t_assert_eq 'the register is created' "$([ -s "$register" ] && printf yes || printf no)" 'yes'
 t_assert_eq 'and the entry is in it' \
-    "$(rjq -r '.bugs[0].id' "$register")" 'PB-01'
+    "$(jq -r '.bugs[0].id' "$register")" 'PB-01'
 t_assert_eq 'with the schema its readers expect' \
-    "$(rjq -r '.skill' "$register")" 'bug-report'
+    "$(jq -r '.skill' "$register")" 'bug-report'
 t_assert_eq 'the defaults are recorded rather than left null' \
-    "$(rjq -r '.bugs[0] | "\(.status)/\(.severity)/\(.priority)"' "$register")" 'reported/major/normal'
+    "$(jq -r '.bugs[0] | "\(.status)/\(.severity)/\(.priority)"' "$register")" 'reported/major/normal'
 t_assert_eq 'and the timestamps are set' \
-    "$(rjq -r '.bugs[0] | select(.created_at != null and .updated_at != null) | "set"' "$register")" 'set'
+    "$(jq -r '.bugs[0] | select(.created_at != null and .updated_at != null) | "set"' "$register")" 'set'
 
 # ── text that would break a hand-rolled writer survives ────────────────────
 add "$plan" --id PB-02 --title 'The regex \d fails and it says "no input"' \
     --reproduce 'grep -E "\d" f' --observed 'exit 1' --expected 'a match' \
     --severity minor --priority low --status confirmed >/dev/null
 t_assert_eq 'a backslash and quotes survive the round trip' \
-    "$(rjq -r '.bugs[] | select(.id == "PB-02") | .title' "$register")" \
+    "$(jq -r '.bugs[] | select(.id == "PB-02") | .title' "$register")" \
     'The regex \d fails and it says "no input"'
 t_assert_eq 'the second entry is appended, not replacing the first' \
-    "$(rjq -r '.bugs | length' "$register")" '2'
+    "$(jq -r '.bugs | length' "$register")" '2'
 
 # ── the refusals, each with its own exit code ──────────────────────────────
 t_assert_eq 'a duplicate id is refused' \
@@ -91,7 +91,7 @@ t_assert_eq 'and the damaged file is left as it was' "$(cat "$register")" 'not j
 cp "$work/keep.json" "$register"
 
 # ── the bug-report skill's own render reads a plan register unchanged ───────
-rendered="$(rjq -r '
+rendered="$(jq -r '
   def glyph: {reported:"💤", confirmed:"⛔", fixed:"✅"}[.status] // "❔";
   def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
   def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;

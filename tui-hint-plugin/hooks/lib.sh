@@ -16,7 +16,9 @@ tui_hint_rjq_bin() {
         printf '%s\n' "$bin"
         return 0
     fi
-    command -v rjq
+    # Never PATH: the shipped rjq lives in the shared bin, and an ambient
+    # rjq is whatever the machine happens to have first.
+    return 1
 }
 #
 # The program a shell command line runs is not always its first word: a

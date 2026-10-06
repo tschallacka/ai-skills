@@ -2,11 +2,12 @@
 // PACKAGE: PROD
 
 //! Gate 5: register soundness via reg_findings, the shipped implementation
-//! (planning/scripts/register-lib.sh), needing rjq on PATH -- quietly
-//! skipped without it (CI runs test-register-schemas regardless). Shells to
-//! bash to source the real function rather than reimplementing it.
+//! (planning/scripts/register-lib.sh). That function runs the shipped rjq by
+//! its shared-bin path, so the gate needs that path present, not rjq on PATH;
+//! quietly skipped without it (CI runs test-register-schemas regardless).
+//! Shells to bash to source the real function rather than reimplementing it.
 
-use crate::platform::{bash, which};
+use crate::platform::{bash, shipped_rjq_present};
 use crate::report::Report;
 use std::path::Path;
 
@@ -15,8 +16,8 @@ fn shell_quote(text: &str) -> String {
 }
 
 pub fn gate_register_soundness(repo_root: &Path, report: &mut Report) {
-    if !which("rjq") {
-        report.note("rjq not on PATH; register soundness skipped (CI runs test-register-schemas)");
+    if !shipped_rjq_present() {
+        report.note("the shipped rjq is not in the shared bin directory; register soundness skipped (CI runs test-register-schemas)");
         return;
     }
     let lib = repo_root.join("planning/scripts/register-lib.sh");

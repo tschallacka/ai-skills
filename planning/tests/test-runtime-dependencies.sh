@@ -166,7 +166,11 @@ while IFS= read -r script; do
 # comment naming it is not a call. Matching prose made the gate fail on a
 # library whose only mention of rjq was the sentence explaining where the
 # binary is found. A trailing comment on a real command still counts.
-done < <(awk '/^[[:space:]]*#/ { next } /(^|[^A-Za-z0-9_])rjq / { print FILENAME; nextfile }' \
+# A call is rjq in a command position (the start of a line, or after a pipe, a
+# separator, a backtick or a $( substitution). Shipped code now runs rjq through
+# a variable holding its path, so a call is found by the word in command position,
+# never by a name in a loop, a message, or a binary path.
+done < <(awk '/^[[:space:]]*#/ { next } /(^|[|;&`(]|\$\()[[:space:]]*rjq[[:space:]]+(-|\x27|")/ { print FILENAME; nextfile }' \
     "$scripts"/*.sh 2>/dev/null || true)
 
 [ "$(t_failures)" -eq 0 ] || exit 1

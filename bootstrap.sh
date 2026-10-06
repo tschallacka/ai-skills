@@ -14,11 +14,12 @@
 #   bootstrap.sh rjq --path-only        # print only the artifact's bin dir
 #   bootstrap.sh --help
 #
-# The rjq arm is a no-op when rjq is already on PATH or already built at
-# bin/<triple>/rjq. Without cargo it exits 69 and names the release
-# download, so a missing toolchain is never a silent dead end. --path-only is
-# for callers that prepend the dir themselves (run-tests.sh); informational
-# lines go to stderr either way.
+# The rjq arm is a no-op when rjq is already in the shared bin (or the one
+# AI_SKILLS_BIN_ROOT names), or already built at bin/<triple>/rjq. rjq is never
+# put on PATH: the printed directory is given to callers as AI_SKILLS_BIN_ROOT
+# (run-tests). Without cargo it exits 69 and names the release download, so a
+# missing toolchain is never a silent dead end. Informational lines go to
+# stderr either way.
 
 set -euo pipefail
 export LC_ALL=C
@@ -45,10 +46,16 @@ binary_name() {
 }
 
 arm_rjq() {
-    if command -v rjq >/dev/null 2>&1; then
-        printf 'rjq: already on PATH (%s)\n' "$(command -v rjq)" >&2
-        return 0
-    fi
+    # rjq is found by its shared-bin path, never PATH (see .agents/MAINTAINER.md 1.18):
+    # AI_SKILLS_BIN_ROOT first, then the shared install directory.
+    local dir
+    for dir in "${AI_SKILLS_BIN_ROOT:-}" "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin"; do
+        [ -n "$dir" ] || continue
+        if [ -x "$dir/rjq" ] || [ -x "$dir/rjq.exe" ]; then
+            printf 'rjq: already in the shared bin (%s)\n' "$dir" >&2
+            return 0
+        fi
+    done
     local t b out
     if ! t="$(triple)"; then
         printf 'bootstrap: no rjq artifact matches this host (%s:%s)\n' "$(uname -s)" "$(uname -m)" >&2
@@ -73,11 +80,9 @@ arm_rjq() {
     else
         printf 'rjq: already built at %s\n' "$out" >&2
     fi
-    if [ "$path_only" = 1 ]; then
-        printf '%s\n' "$repo_root/bin/$t"
-    else
-        printf 'export PATH="%s:$PATH"\n' "$repo_root/bin/$t"
-    fi
+    # The directory is printed for AI_SKILLS_BIN_ROOT, never as a PATH entry:
+    # rjq is a shipped tool that is run by its path (.agents/MAINTAINER.md 1.18).
+    printf '%s\n' "$repo_root/bin/$t"
 }
 
 usage() {

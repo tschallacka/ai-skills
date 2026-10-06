@@ -19,10 +19,10 @@ repo_root="$(cd "$tests_dir/.." && pwd)"
 source "$repo_root/planning/tests/lib-test.sh"
 t_begin
 
-# rjq is the reader for every register this test validates. When it is missing,
-# name the fix instead of dying with a bare command-not-found three lines in.
-if ! command -v rjq >/dev/null 2>&1; then
-    printf '%s\n' "rjq is required: run ./bootstrap.sh (builds it into the gitignored planning/bin path) or download it from the project releases page (queued as T70)." >&2
+# jq is the query tool this test uses; the dev shell provides it. When it is
+# missing, name the fix instead of dying with a bare command-not-found.
+if ! command -v jq >/dev/null 2>&1; then
+    printf '%s\n' "jq is required: run this test inside the dev shell (nix develop)." >&2
     exit 1
 fi
 
@@ -38,7 +38,7 @@ fi
     exit 1
 }
 
-package_version="$(rjq -r '.version' "$repo_root/package.json")"
+package_version="$(jq -r '.version' "$repo_root/package.json")"
 t_assert_eq 'package.json states a version' \
     "$(printf '%s' "$package_version" | grep -Ec '^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(\-[0-9A-Za-z][0-9A-Za-z.-]*)?$')" '1'
 
@@ -54,12 +54,12 @@ for skill in todo bug-report; do
 
     [ -f "$schema" ] || t_fail "$skill ships no schema.$package_version.json for the installed version"
     t_assert_eq "$skill: its schema is valid JSON" \
-        "$(rjq -e 'type == "object"' "$schema" >/dev/null 2>&1 && printf yes)" 'yes'
-    t_assert_eq "$skill: the schema names its own skill" "$(rjq -r '.schema' "$schema")" "$skill"
+        "$(jq -e 'type == "object"' "$schema" >/dev/null 2>&1 && printf yes)" 'yes'
+    t_assert_eq "$skill: the schema names its own skill" "$(jq -r '.schema' "$schema")" "$skill"
     t_assert_eq "$skill: the schema names the package version" \
-        "$(rjq -r '.version' "$schema")" "$package_version"
+        "$(jq -r '.version' "$schema")" "$package_version"
     t_assert_eq "$skill: the schema says what to do with a version it cannot upgrade" \
-        "$(rjq -r '.if_no_schema_for_a_version | length > 0' "$schema")" 'true'
+        "$(jq -r '.if_no_schema_for_a_version | length > 0' "$schema")" 'true'
 
     # The installer has to hand the schema over, or the agent that needs it never
     # sees one. skill_files() is the single list the manifest is built from.
@@ -84,18 +84,18 @@ for skill in todo bug-report; do
     skill_example "$skill" > "$example"
     # A positive control: an empty extraction would satisfy every check below.
     t_assert_eq "$skill: the SKILL.md example was extracted and parses" \
-        "$(rjq -e 'type == "object"' "$example" >/dev/null 2>&1 && printf yes)" 'yes'
+        "$(jq -e 'type == "object"' "$example" >/dev/null 2>&1 && printf yes)" 'yes'
 
-    item_key="$(rjq -r '.header.item_key' "$schema")"
+    item_key="$(jq -r '.header.item_key' "$schema")"
     t_assert_eq "$skill: the example holds items under the documented key" \
-        "$(rjq -r --arg k "$item_key" '(.[$k] | length) > 0' "$example")" 'true'
+        "$(jq -r --arg k "$item_key" '(.[$k] | length) > 0' "$example")" 'true'
     t_assert_eq "$skill: the example carries every required header field" \
-        "$(rjq -r --slurpfile s "$schema" \
+        "$(jq -r --slurpfile s "$schema" \
             '. as $doc | [$s[0].header.required[] as $f | select(($doc | has($f)) | not) | $f] | join(", ")' \
             "$example")" ''
     # Every item must carry the required fields and stay inside the enums. The
     # message names the offending id, because "an item is wrong" is not findable.
-    offenders="$(rjq -r --slurpfile s "$schema" --arg k "$item_key" '
+    offenders="$(jq -r --slurpfile s "$schema" --arg k "$item_key" '
         $s[0] as $schema
         | [ .[$k][] as $item
             | ( [$schema.item.required[] as $f | select(($item | has($f)) | not) | "\($item.id): missing \($f)"]
@@ -113,7 +113,7 @@ done
 # to run verbatim, so it is run verbatim here.
 schema="$repo_root/todo/schema.$package_version.json"
 t_assert_eq 'todo: the schema knows how to upgrade an unversioned file' \
-    "$(rjq -r '.upgrade_from | has("unversioned")' "$schema")" 'true'
+    "$(jq -r '.upgrade_from | has("unversioned")' "$schema")" 'true'
 
 cat > "$work/TODO.json" <<'JSON'
 {
@@ -126,26 +126,26 @@ cat > "$work/TODO.json" <<'JSON'
   ]
 }
 JSON
-recipe="$(rjq -r '.upgrade_from.unversioned.steps[] | select(startswith("now=") or startswith("rjq "))' "$schema")"
+recipe="$(jq -r '.upgrade_from.unversioned.steps[] | select(startswith("now=") or startswith("rjq "))' "$schema")"
 t_assert_eq 'todo: the upgrade recipe has runnable steps' \
     "$(printf '%s\n' "$recipe" | grep -c '^rjq ')" '1'
 ( cd "$work" && "$BASH" -c "set -euo pipefail; $recipe" )
 
 t_assert_eq 'todo: the upgraded file records the current version' \
-    "$(rjq -r '.skill_version' "$work/TODO.json")" "$package_version"
-t_assert_eq 'todo: the upgraded file names its schema' "$(rjq -r '.skill' "$work/TODO.json")" 'todo'
-t_assert_eq 'todo: no task was dropped in the upgrade' "$(rjq -r '.tasks | length' "$work/TODO.json")" '2'
+    "$(jq -r '.skill_version' "$work/TODO.json")" "$package_version"
+t_assert_eq 'todo: the upgraded file names its schema' "$(jq -r '.skill' "$work/TODO.json")" 'todo'
+t_assert_eq 'todo: no task was dropped in the upgrade' "$(jq -r '.tasks | length' "$work/TODO.json")" '2'
 t_assert_eq 'todo: the retired status is mapped into the current enum' \
-    "$(rjq -r '.tasks[] | select(.id == "X2") | .status' "$work/TODO.json")" 'dropped'
+    "$(jq -r '.tasks[] | select(.id == "X2") | .status' "$work/TODO.json")" 'dropped'
 t_assert_eq 'todo: the old evidence field survives as note' \
-    "$(rjq -r '.tasks[] | select(.id == "X2") | .note' "$work/TODO.json")" 'checked, nothing there'
+    "$(jq -r '.tasks[] | select(.id == "X2") | .note' "$work/TODO.json")" 'checked, nothing there'
 t_assert_eq 'todo: the nesting survives' \
-    "$(rjq -r '.tasks[] | select(.id == "X2") | .parent' "$work/TODO.json")" 'X1'
+    "$(jq -r '.tasks[] | select(.id == "X2") | .parent' "$work/TODO.json")" 'X1'
 t_assert_eq 'todo: every upgraded task carries the required fields' \
-    "$(rjq -r --slurpfile s "$schema" \
+    "$(jq -r --slurpfile s "$schema" \
         '[.tasks[] as $t | $s[0].item.required[] as $f | select(($t | has($f)) | not)] | length' \
         "$work/TODO.json")" '0'
 t_assert_eq 'todo: an upgraded task with no priority is given the default' \
-    "$(rjq -r '.tasks[] | select(.id == "X1") | .priority' "$work/TODO.json")" 'normal'
+    "$(jq -r '.tasks[] | select(.id == "X1") | .priority' "$work/TODO.json")" 'normal'
 
 t_end

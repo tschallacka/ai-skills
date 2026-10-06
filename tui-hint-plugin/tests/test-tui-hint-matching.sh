@@ -78,7 +78,9 @@ t_assert_eq 'tui_hint_rjq_bin resolves the installed shared copy' \
     "$(tui_hint_rjq_bin)" "$XDG_CONFIG_HOME/tsch-ai-skills/bin/rjq"
 
 rm -f "$XDG_CONFIG_HOME/tsch-ai-skills/bin/rjq"
-t_assert_eq 'tui_hint_rjq_bin falls back to an ambient rjq on PATH' \
-    "$(tui_hint_rjq_bin)" "$(command -v rjq)"
+# rjq is never resolved through PATH: with the shared copy gone the resolver
+# names nothing, even when an rjq is on PATH.
+t_assert_eq 'tui_hint_rjq_bin does not fall back to an ambient rjq on PATH' \
+    "$(tui_hint_rjq_bin || true)" ''
 
 t_end

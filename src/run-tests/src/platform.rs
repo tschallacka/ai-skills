@@ -102,15 +102,6 @@ pub fn to_native_path(printed: &str) -> String {
     printed.to_string()
 }
 
-/// `dir` in front of the current PATH, in the platform's own separator.
-pub fn prepend_to_path(dir: &str) -> Option<String> {
-    let mut parts = vec![PathBuf::from(dir)];
-    parts.extend(env::split_paths(&env::var_os("PATH").unwrap_or_default()));
-    env::join_paths(parts)
-        .ok()
-        .map(|joined| joined.to_string_lossy().into_owned())
-}
-
 /// The machine-wide temporary directory the lock file and the scratch scan
 /// live under: `/tmp` where there is one, the platform's own otherwise.
 pub fn system_tmp() -> PathBuf {

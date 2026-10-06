@@ -502,9 +502,6 @@ without a bin-like segment) never flag. Each registered command's first token
 teaches the detector that tool word, so registering `pytest -q` makes
 `pytest` a word — no per-language list to maintain.
 
-
-<!-- SKILL-LOAD-PROOF part=part-3 token=8ce589b7619c1e25 -->
-
 ### 3.3 Validate, then create progress trackers
 
 Run the validator before creating trackers or presenting the plan as ready:
@@ -522,6 +519,9 @@ never changes the exit status, so a plan is not blocked by it and its output doe
 not need clearing before the plan is ready. Read the warnings and judge each one:
 measured on real plans the count phrases were right 0 times in 24 hits, because a
 count that has drifted reads exactly like one that cannot. What *is* gated is the
+
+<!-- SKILL-LOAD-PROOF part=part-3 token=1140bbd20ae67ea6 -->
+
 part that can be decided: an acceptance criterion declaring a comparison in the
 step's `## Artifact comparisons` table is checked against
 `planning/artifact-comparisons.json`, so asking for `exact` on a PDF or an image
@@ -534,9 +534,6 @@ that changes module state, schema, or configuration (per
 mentioning a request or health check. The **command registry** WARNs on any
 command literal in a step or testing companion that is not registered in the
 plan's `commands.json` with its "when" context (and FAILs under
-
-<!-- SKILL-LOAD-PROOF part=part-3 token=45846548ffd310f5 -->
-
 `--complete`); register flagged literals with `register-command.sh`.
 
 `--propagation` encodes the surface rule (§ "Resolving a finding") and runs

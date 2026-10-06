@@ -213,12 +213,9 @@ the CI map.
   compiled `run-tests` and exits 69 without it. What a local run cannot show is
   the other platforms' compiled paths (macOS, Windows, aarch64): only the CI
   legs in section 3 exercise those.
-- **A machine's own `rjq` wins over the bundled one.** The plan helpers put
-  `plan_bin_dir` on PATH themselves when they load, but only if no `rjq` is
-  already on PATH (`planning/scripts/lib/document/99-facade.sh`), so an
-  operator's pinned `rjq`, or a test's injected stub, is never overridden. For
-  an interactive shell `setup-dev-env.sh` prints the `export PATH=` line for
-  this host.
+- **rjq is never put on PATH.** Nothing prepends a bin directory to PATH, and
+  shipped code resolves rjq by its full path. The rule and the test that
+  enforces it are in 1.18.
 - **The Rust toolchain is pinned by literal in several places.** `rust-toolchain.toml`
   says `1.98`, and so do the `dtolnay/rust-toolchain@1.98` steps in `ci.yml`,
   `windows.yml`, `render-artifacts.yml` and `release-installer.yml`; the `test`
@@ -628,6 +625,41 @@ the CI map.
   validator and the role-drift tests stay with you. They are the change
   checklist in section 2 below, plus `planning/MAINTAINER.md` section 4 for a
   change to the planning skill.
+
+### 1.18 Two JSON tools: rjq ships, jq is the dev shell's
+
+rjq and jq are used for two separate things, and the rules keep them apart.
+
+- **rjq is a shipped runtime tool.** The registers, the planning helpers and
+  the CI helpers run it while they work, so it is part of what the skills need
+  to *use*. Shipped code refers to it by its full path in the shared install
+  directory, `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/bin/rjq` (`.exe` on
+  Windows). The planning libraries resolve that path with `plan_rjq`
+  (`planning/scripts/lib/crypt/plan_bin_dir.sh`); a skill outside the planning
+  libraries resolves it itself, as `ci_rjq` does in `ci-failures`. The directory
+  is found by `plan_bin_dir`'s own order, `AI_SKILLS_BIN_ROOT` first, so a
+  checkout's build is reachable without anything on PATH.
+- **rjq is never on PATH.** No script prepends a bin directory to PATH for rjq,
+  and no shipped code looks it up with `command -v rjq`, `which rjq` or `type
+  rjq`. A bare `rjq` in shipped code is a dependency on whatever the machine has
+  first, which is the coupling the shared directory exists to remove.
+- **jq is a development dependency.** It is provided by the flake's dev shell
+  (`pkgs.jq` in `flake.nix`), and the build and the tests may use `jq` directly,
+  because they run inside that shell. A build or test script that needs a JSON
+  query uses `jq`, not rjq. The tests of rjq itself (`test-rjq-*`,
+  `src/rjq/tests/differential.rs`) keep invoking rjq, by its built path.
+- **The split is enforced by `tests/test-rjq-active-references.sh`, and only on
+  shipped files.** "Shipped" is the set the npm package baseline records
+  (`planning/tests/fixtures/overview/npm-package-baseline.tsv`), which the
+  release test checks against a real pack. The test fails on a bare `jq` word,
+  a bare `rjq` command in a shell position, or a PATH lookup of rjq, in any
+  shipped file. Build and test files (`tests/`, `planning/tests/`, `flake.nix`,
+  the root `bootstrap.sh`, `setup-dev-env-lib.sh`, `pre-push-check.sh`,
+  `installer/build-release.sh`, the CI workflows) are not scanned, so using jq
+  there is correct and never a finding.
+- **A new shipped file that needs rjq** takes the full-path form above. Adding
+  a `jq` call to shipped code is the mistake this rule exists to catch: a shipped
+  tool does not get jq from the dev shell, so it must not name it.
 
 ## 2. Change checklist (minimum, per change)
 

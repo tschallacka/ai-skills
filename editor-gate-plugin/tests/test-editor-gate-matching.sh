@@ -88,7 +88,9 @@ t_assert_eq 'editor_gate_rjq_bin resolves the installed shared copy' \
     "$(editor_gate_rjq_bin)" "$XDG_CONFIG_HOME/tsch-ai-skills/bin/rjq"
 
 rm -f "$XDG_CONFIG_HOME/tsch-ai-skills/bin/rjq"
-t_assert_eq 'editor_gate_rjq_bin falls back to an ambient rjq on PATH' \
-    "$(editor_gate_rjq_bin)" "$(command -v rjq)"
+# rjq is never resolved through PATH: with the shared copy gone the resolver
+# names nothing, even when an rjq is on PATH.
+t_assert_eq 'editor_gate_rjq_bin does not fall back to an ambient rjq on PATH' \
+    "$(editor_gate_rjq_bin || true)" ''
 
 t_end

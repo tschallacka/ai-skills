@@ -29,6 +29,23 @@ pub fn which(program: &str) -> bool {
     resolve(program).is_some()
 }
 
+/// Whether the shipped rjq is in the shared bin directory, or in the one
+/// AI_SKILLS_BIN_ROOT names. Looked up by path, never through PATH: rjq is a
+/// shipped runtime tool, and the register checks run it by that path.
+pub fn shipped_rjq_present() -> bool {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(root) = std::env::var_os("AI_SKILLS_BIN_ROOT") {
+        dirs.push(root.into());
+    }
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config")));
+    if let Some(config) = config {
+        dirs.push(config.join("tsch-ai-skills").join("bin"));
+    }
+    dirs.iter().any(|dir| dir.join("rjq").is_file() || dir.join("rjq.exe").is_file())
+}
+
 fn is_wsl_launcher(path: &Path) -> bool {
     let lowered = path
         .to_string_lossy()

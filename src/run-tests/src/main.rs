@@ -243,7 +243,7 @@ fn run() -> i32 {
             return 69;
         }
     };
-    let extra_path = bootstrap::effective_path(extra_dir.as_deref());
+    let extra_bin_root = bootstrap::bin_root_for_children(extra_dir.as_deref());
 
     let bash = platform::bash_program(&platform::bash_from_env())
         .to_string_lossy()
@@ -262,7 +262,7 @@ fn run() -> i32 {
         wrapper: wrapper.as_deref().and_then(|p| p.to_str()),
         bash: &bash,
         verbose: args.verbose,
-        extra_path: extra_path.as_deref(),
+        extra_bin_root: extra_bin_root.as_deref(),
         context_cache_set,
         refuse_unconfigured_cargo,
         tmpdir: &scratch.path,

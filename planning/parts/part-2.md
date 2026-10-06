@@ -99,8 +99,11 @@ hits). Use it before a paragraph-level edit to confirm the target is unique:
 
 **Worked examples:**
 ```bash
+# rjq is the shipped JSON tool, run from the shared install directory:
+RJQ="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/rjq"
+
 # every document mentioning a phrase, machine-readable:
-plan-content.sh find <plan> "<pattern>" --in all --format json | rjq -r '.matches[].document'
+plan-content.sh find <plan> "<pattern>" --in all --format json | "$RJQ" -r '.matches[].document'
 
 # did a fix land at THIS surface (not merely somewhere in the plan)?
 plan-content.sh find <plan> "<required wording>" --document step:<goal>/<step>
@@ -114,7 +117,7 @@ plan-content.sh find <plan> "<required wording>" --document step:<goal>/<step>
 zero **or** multiple matches — deliberately (a unique target is the goal).
 "Exit 1 with matches present" means *narrow the pattern*, not *error*, so a
 caller checking only the exit code will misread it. With `json`,
-`rjq '.matches | length'` gives the count directly.
+`"$RJQ" '.matches | length'` gives the count directly.
 
 **A fix is verified by finding the wording at the surface the finding named,
 never by finding it somewhere in the plan.** The plan-wide probe
@@ -301,9 +304,6 @@ composing or executing the dependent goal.
 Use `no` only for a genuinely untestable or research-only goal and explain why.
 When the table says `yes`, the goal must own at least one `test` or
 `verification` work unit. When a goal owns a test or verification work unit,
-
-<!-- SKILL-LOAD-PROOF part=part-2 token=27df58680dc89f87 -->
-
 the table must say `yes`.
 
 ### 2.4 Add working context when needed
@@ -328,6 +328,9 @@ Use `add-work-unit.sh` from section 2.2 to create the step together with its
 inventory row. It creates the mandatory headings, ownership fields, atomicity
 checks, and numbered narrative paragraphs. Update the objective, instructions,
 acceptance criteria, and handoff with `update-plan-content.sh`; do not patch a
+
+<!-- SKILL-LOAD-PROOF part=part-2 token=0e6de4e238af3be9 -->
+
 step file directly.
 
 When a goal declares `Test required: yes`, the step writer prints a reminder to

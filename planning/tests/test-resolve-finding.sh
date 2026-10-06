@@ -77,7 +77,7 @@ assert_eq "0" "$(claims_for AR-03)" "and records no claim, having no key"
 
 # 5. The session that minted the keys cannot claim them. The gate refuses this
 #    too, but refusing at the claim puts the error where the mistake is made.
-minter="$(rjq -r '.minted_by' "$plan/fix-keys.json")"
+minter="$(jq -r '.minted_by' "$plan/fix-keys.json")"
 assert_rc 70 "$scripts/resolve-finding.sh" "$plan" AR-02 --claimed-by "$minter"
 assert_eq "resolved" "$(status_of AR-02)" "a refused claim leaves the status alone"
 

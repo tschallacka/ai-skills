@@ -40,8 +40,8 @@ t_begin
 
 # reg_findings exits 69 without rjq rather than half-reading a register, so the
 # absence is reported as unconfigured instead of as a red register.
-if ! command -v rjq >/dev/null 2>&1; then
-    printf 'UNCONFIGURED (rjq)\n'
+if ! command -v jq >/dev/null 2>&1; then
+    printf 'UNCONFIGURED (jq)\n'
     exit 0
 fi
 
@@ -52,7 +52,7 @@ check_register() { # <kind> <file>
         t_fail "$name is missing from the repository root"
         return
     fi
-    if ! rjq -e '.' "$file" >/dev/null 2>&1; then
+    if ! jq -e '.' "$file" >/dev/null 2>&1; then
         t_fail "$name is not valid JSON — if it is mid-merge, resolve it with 'bugs resolve' / 'todo resolve'"
         return
     fi
@@ -66,7 +66,7 @@ check_register() { # <kind> <file>
         return
     fi
     printf '  %s: sound (%s entries)\n' "$name" \
-        "$(rjq -r --arg k "$([ "$kind" = bug ] && echo bugs || echo tasks)" '.[$k] | length' "$file")"
+        "$(jq -r --arg k "$([ "$kind" = bug ] && echo bugs || echo tasks)" '.[$k] | length' "$file")"
 }
 
 check_register bug "$repo_root/BUGS.json"

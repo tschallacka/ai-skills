@@ -43,7 +43,9 @@ pub struct RunConfig<'a> {
     pub wrapper: Option<&'a str>,
     pub bash: &'a str,
     pub verbose: bool,
-    pub extra_path: Option<&'a str>,
+    /// The bin directory the bootstrap located for rjq, handed to children as
+    /// AI_SKILLS_BIN_ROOT. Never on PATH.
+    pub extra_bin_root: Option<&'a str>,
     pub context_cache_set: bool,
     pub refuse_unconfigured_cargo: bool,
     /// Every child process inherits these three explicitly (rather than
@@ -74,8 +76,8 @@ fn label_for(test_path: &Path) -> String {
 }
 
 fn apply_child_env(command: &mut Command, config: &RunConfig) {
-    if let Some(path) = config.extra_path {
-        command.env("PATH", path);
+    if let Some(bin_root) = config.extra_bin_root {
+        command.env("AI_SKILLS_BIN_ROOT", bin_root);
     }
     command
         .env("TMPDIR", config.tmpdir)

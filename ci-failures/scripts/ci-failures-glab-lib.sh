@@ -13,6 +13,25 @@
 set -euo pipefail
 export LC_ALL=C
 
+# rjq is a shipped runtime tool. It is run from its shared-bin path (or the
+# AI_SKILLS_BIN_ROOT override), never looked up on PATH: a bare `rjq` depends on
+# whatever the machine has first. This lib is sourced on its own, so it resolves
+# the path itself rather than through the planning libraries.
+ci_rjq() {
+    local dir name
+    for dir in "${AI_SKILLS_BIN_ROOT:-}" "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin"; do
+        [ -n "$dir" ] || continue
+        for name in rjq rjq.exe; do
+            if [ -x "$dir/$name" ]; then
+                "$dir/$name" "$@"
+                return
+            fi
+        done
+    done
+    printf 'ci-failures: rjq is required; its shipped binary is not in the shared bin directory\n' >&2
+    return 69
+}
+
 # ═════════════════════════════════════════════════════════════════════════════
 # GitLab, via glab
 # ═════════════════════════════════════════════════════════════════════════════
@@ -64,7 +83,7 @@ glab_latest_pipeline_for() { # <branch> -> pipeline id
     local branch="$1" project id
     project="$(glab_encoded_project)"
     id="$(glab api "projects/$project/pipelines?ref=$branch&order_by=id&sort=desc&per_page=1" \
-        | rjq -r '.[0].id // empty')"
+        | ci_rjq -r '.[0].id // empty')"
     [ -n "$id" ] || { printf 'ci-failures: no pipelines for branch %s\n' "$branch" >&2; exit 66; }
     printf '%s\n' "$id"
 }
@@ -81,7 +100,7 @@ glab_resolve_pipeline() { # <target> -> pipeline id
     case "$want" in
         pr/*)
             head_branch="$(glab api "projects/$project/merge_requests/${want#pr/}" \
-                | rjq -r .source_branch)" \
+                | ci_rjq -r .source_branch)" \
                 || { printf 'ci-failures: no MR %s\n' "${want#pr/}" >&2; exit 66; }
             glab_latest_pipeline_for "$head_branch"
             return
@@ -104,7 +123,7 @@ glab_resolve_pipeline() { # <target> -> pipeline id
         return
     fi
     head_branch="$(glab api "projects/$project/merge_requests/$want" \
-        | rjq -r .source_branch)" \
+        | ci_rjq -r .source_branch)" \
         || { printf 'ci-failures: %s is neither a pipeline id nor an MR\n' "$want" >&2; exit 66; }
     glab_latest_pipeline_for "$head_branch"
 }
@@ -140,16 +159,16 @@ run_glab() {
     project="$(glab_encoded_project)"
     pipeline_id="$(glab_resolve_pipeline "$target")"
 
-    status="$(glab api "projects/$project/pipelines/$pipeline_id" | rjq -r .status)"
+    status="$(glab api "projects/$project/pipelines/$pipeline_id" | ci_rjq -r .status)"
     printf 'forge: glab\npipeline %s  %s  https://gitlab.com/%s/-/pipelines/%s\n' \
         "$pipeline_id" "$status" "$(glab_project_path)" "$pipeline_id"
 
     if [ "$want_all" = true ]; then
         jobs="$(glab api "projects/$project/pipelines/$pipeline_id/jobs?per_page=100" \
-            | rjq -r '.[] | (.id|tostring) + "\t" + .status + "\t" + .name')"
+            | ci_rjq -r '.[] | (.id|tostring) + "\t" + .status + "\t" + .name')"
     else
         jobs="$(glab api "projects/$project/pipelines/$pipeline_id/jobs?per_page=100" \
-            | rjq -r '.[] | select(.status == "failed") | (.id|tostring) + "\tfailed\t" + .name')"
+            | ci_rjq -r '.[] | select(.status == "failed") | (.id|tostring) + "\tfailed\t" + .name')"
     fi
 
     if [ -z "$jobs" ]; then

@@ -15,7 +15,9 @@ agent_identity_rjq_bin() {
         printf '%s\n' "$bin"
         return 0
     fi
-    command -v rjq
+    # Never PATH: the shipped rjq lives in the shared bin, and an ambient
+    # rjq is whatever the machine happens to have first.
+    return 1
 }
 
 # Builds the additionalContext string for a genuine subagent start, or fails
