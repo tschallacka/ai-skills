@@ -3552,6 +3552,52 @@
       "updated_at": "2026-10-05T16:09:41Z"
     },
     {
+      "id": "B396",
+      "title": "the review loop cannot converge: reviewers flag goal-tracker rows that no helper can fix",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "create a plan with one goal and two units and let the trackers be created; run a review cycle that yields a finding; fix it with update-work-unit.sh <plan> W01 --description '...'; validate-plan.sh <plan> passes; a fresh reviewer reports the W01 tracker row as stale; create-progress.sh <plan>/<goal> refuses because the file exists; --review-status <plan> approved is refused while the finding is open",
+      "observed": "Fresh reviewers check goal-tracker rows against the inventory and step objectives and raise stale rows as open findings. Cycle 2 reported stale tracker rows for W23, W33 and W25 (AR-04, AR-05). Cycle 3 raised them as AR-19. The coordinator deleted the goal trackers and recreated them with create-progress.sh, which the skill forbids. Cycle 4 verified AR-19 resolved only because of that write. Browser-discovery fixes made rows W01, W02, W08 and W34 stale again, and two trackers were deleted and recreated a second time. Cycle 7 kept AR-22 and AR-23 open partly over tracker rows (the goal 01 progress row for W08 still lacks printPath), although the substance of both fixes was verified correct. The coordinator then stopped and asked the human. Findings tied to tracker rows took part in 4 of 7 cycles, at roughly 120 to 230k tokens per cycle.",
+      "expected": "The review loop converges. A stale tracker description is either refreshed by the helper that changed the unit or step, derived and never a finding, flagged by validate-plan.sh with the fix command, or given a sanctioned outcome (for example tool-limited with a filed bug id). A finding whose only fix is a forbidden direct write is escalated, not approved around and not performed.",
+      "mechanism": "Tracker rows are written only at creation or when a unit moves. Description and objective edits by update-work-unit.sh and update-plan-content.sh change the inventory and step files but nothing re-derives the goal progress.md row text, so every normal review fix can make a row stale. The approval gate requires every finding resolved, no helper can refresh a row, and section 4.5 forbids direct writes, so a fix can create a new unfixable finding each cycle. The coordinator's only remaining options are to break 4.5, waive a finding it may not approve, or never finish. Contributing: the finding category is not scoped, so cycles judged it differently (cycles 2, 3 and 7 raised it; cycles 1 and 5 did not).",
+      "surfaces": [
+        "planning/parts/part-3.md",
+        "planning/parts/part-4.md",
+        "planning/scripts/validate-plan.sh",
+        "planning/scripts/update-progress.sh",
+        "planning/scripts/update-work-unit.sh"
+      ],
+      "fix": "87db3f37 (merged 48eb08ce): the reviewer's approved helper path refreshes a stale row (update-progress.sh --rows), so a reviewer's row finding can be cleared without a hand edit",
+      "verification": "planning/tests/test-progress-row-refresh.sh passes; planning/tests/test-artifact-comparisons.sh passes; full ./run-tests.sh 254/254",
+      "found_by": "coordinator session, review cycles 2 to 7 (AR-04, AR-05, AR-19, AR-22, AR-23)",
+      "notes": "Area: planning (review gate). Related to B394 (stale goal-tracker rows, the root staleness mechanism); this is the review-gate consequence of it, a peer and not a facet, so no parent. Not reproduced by the filer in a fresh plan; the reproduction is the reporter's sequence of helper calls. Fix options, any one or a combination: (1) helpers that change a unit description or step objective also rewrite the matching tracker row keeping its status (fix/plan-tracker-row-refresh does this); (2) reviewer scope says tracker descriptions are derived: grade status and membership only, never wording; (3) validate-plan.sh warns on a stale tracker row and names the command that fixes it; (4) a sanctioned finding outcome tool-limited with a filed bug id, accepted by the approval gate only when the finding names no plan content beyond derived artifacts; (5) part-4 section 4.5 adds: if the only fix for a finding is a direct write, stop and escalate; do not perform it and do not approve around it.",
+      "created_at": "2026-10-06T10:34:58Z",
+      "updated_at": "2026-10-06T13:50:30Z"
+    },
+    {
+      "id": "B397",
+      "title": "reopened plan cannot be re-approved without editing fixes.md by hand",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Approve a plan with a gated finding (WNN unit) and record fix claims with add-fix-claim.sh. Reopen with update-plan-content.sh --review-status <plan> pending, land a new review cycle (update-adversarial-review.sh), then run add-fix-claim.sh for the same pairs and --review-status approved. Every old pair is refused: 'already claimed with a different key in fixes.md -- remove that line'; verify-fix-keys.sh fails each old pair as 'forged or stale key'.",
+      "observed": "No helper clears or replaces a claim line in fixes.md. The new mint session makes every old claim fail verification and blocks a new claim for the same pair, so the approval gate cannot pass again. The refusal advises a direct write to a plan artifact, which section 4.5 forbids.",
+      "expected": "Reopening retires the existing claims (archived with the review cycle), or add-fix-claim.sh --replace swaps a claim whose key no longer matches the current mint session. Verification reports a claim from a superseded session as superseded, not as forged, and the refusal names a helper command rather than a line removal.",
+      "mechanism": null,
+      "surfaces": [
+        "planning"
+      ],
+      "fix": "a9979df6: --review-status pending moves fixes.md aside to fixes.superseded-<time>.md, so the next approval needs a fresh set of claims",
+      "verification": "planning/tests/test-reopen-retires-fix-claims.sh passes; planning/tests/test-adversarial-review-cycles.sh passes; full ./run-tests.sh 254/254",
+      "found_by": "coordinator agent, plan outfit-order-design-sync (proforto), skill 2.0.0-alpha.3 (1e6d58fedf28)",
+      "notes": "Reporter's suggested fixes: archive and clear fixes.md on --review-status pending; add --replace to add-fix-claim.sh; split the verify outcome into superseded-by-later-mint and mismatch-within-session; document the reopen path in parts 3.1 and 4.5.",
+      "created_at": "2026-10-06T11:53:08Z",
+      "updated_at": "2026-10-06T13:50:30Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -5308,6 +5354,60 @@
       "notes": "Why it went unnoticed: the B365 verification installed into a scratch HOME whose shared bin held no planning commands, so the sibling copy was the only candidate. On a long-lived machine most shared copies stay byte-identical to a fresh build because a planning command rarely changes, so a hash spot-check usually passes; here only 2 of 53 differed. Hand-fixed for this session by copy-then-mv of the two differing files, so reproducing now needs a deliberately older copy in the shared bin. Either direction closes it: the installer sweeps or refreshes planning commands it finds in the shared bin, or the picker prefers an installed skill sibling copy over the shared bin. The second reverses the ordering B365 chose and needs that decision revisited. Related: B391 (same picker, setup-dev-env side). Fix is on fix/b391-b392-b393-new-bugs; not yet merged to master.",
       "created_at": "2026-10-05T15:23:10Z",
       "updated_at": "2026-10-05T16:09:41Z"
+    },
+    {
+      "id": "B394",
+      "title": "No helper refreshes stale goal-tracker rows after a unit description or step objective changes",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "create-plan.sh, add-goal.sh, add-work-unit.sh for one unit; update-work-unit.sh <plan> W01 --description 'new text'; update-progress.sh <plan>/<goal>; read goal-progress:<goal> through plan-context.sh; then validate-plan.sh <plan>",
+      "observed": "update-work-unit.sh and update-plan-content.sh -sp <plan> <goal>/<step> 4.1 both report success and the inventory row / step objective change. update-progress.sh reports 'Updated ... progress.md (0/N steps)' and the goal tracker row keeps the old description. create-progress.sh refuses because the file exists. validate-plan.sh passes silently. A fresh reviewer raised the stale rows as AR-19; the agent could not resolve it through the helpers and deleted <goal>/progress.md with rm, then recreated it with create-progress.sh.",
+      "expected": "Editing a unit's description or a step's objective through a helper also updates that step's tracker row, keeping its status; or a documented helper-only command re-derives tracker rows from step files while keeping statuses. validate-plan.sh reports a tracker row whose description no longer matches its unit.",
+      "mechanism": "Tracker rows are written only when a row is created or a unit is moved (update-work-unit.sh --goal/--step). Description and objective edits change the inventory and step files but nothing re-derives the goal progress.md row text. update-progress.sh only recomputes the progress bar, rebuild-plan-progress.sh only touches the plan-level tracker, and add-work-unit.sh's 'goal progress was rebuilt from step files; existing statuses carried across' message describes a rebuild that does not run on description edits. validate-plan.sh has no drift check between tracker rows and unit text.",
+      "surfaces": [
+        "planning/scripts/update-work-unit.sh",
+        "planning/scripts/update-plan-content.sh",
+        "planning/scripts/update-progress.sh",
+        "planning/scripts/rebuild-plan-progress.sh",
+        "planning/scripts/create-progress.sh",
+        "planning/scripts/add-work-unit.sh",
+        "planning/scripts/validate-plan.sh",
+        "planning/SKILL.md",
+        "planning/parts/part-4.md"
+      ],
+      "fix": "87db3f37 (merged 48eb08ce): a unit or step edit refreshes its goal tracker row through update-progress.sh --rows, which keeps the statuses; validate-plan WARNs on a drifted row",
+      "verification": "planning/tests/test-progress-row-refresh.sh passes; planning/tests/test-artifact-comparisons.sh passes; full ./run-tests.sh 254/254",
+      "found_by": "fresh reviewer subagent (AR-19) during a planning session",
+      "notes": "Area: planning (plan artifacts, goal trackers). Contributing: (1) no refresh capability for tracker rows; (2) update-progress and rebuild-plan-progress names suggest they refresh rows but they do not; (3) validate-plan.sh has no drift check; (4) the rules 'resolve every finding' and 'helper-only mutations' (part-4 section 4.5) conflict with no escalation path, so the agent edited around them; (5) SKILL.md index frames part 4 as resume-only, not revision; (6) helper --help texts do not state the no-direct-edit rule. Fix direction: status-preserving row refresh in the update helpers or a --refresh-rows command; validate-plan.sh WARN for description drift with the fix command; part 4 index wording covering revision; a section 4.5 rule to stop and report a planning-skill gap instead of editing; create-progress.sh refusal naming the refresh command. Severity mapped to major: the bug-report vocabulary has no medium. No data lost, every step was still incomplete.",
+      "created_at": "2026-10-06T10:08:55Z",
+      "updated_at": "2026-10-06T13:50:30Z"
+    },
+    {
+      "id": "B395",
+      "title": "The planning skill does not promote the ai-text-editor, so agents edit plan and memory files with the built-in Edit tool",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "grep -c 'ai-text-editor' planning/skill-source.txt planning/SKILL.md planning/parts/part-*.md planning/roles/*.md  # every count is 0",
+      "observed": "An agent whose in-place shell edit was blocked by the editor-gate hook switched to the built-in Edit tool, not the ai-text-editor MCP the hook named, and kept using Edit for every later edit. Every planning-skill file counts 0 mentions of ai-text-editor. The editor-gate Edit/Write hint says the editor 'could also go through' and is 'Not required here'.",
+      "expected": "The planning skill says the ai-text-editor is the preferred editor for existing files, states its concrete advantages (verbosity-1 token saving, finer search modes, expected_text refusal on mismatch, a journal that survives a git checkout, revision-guarded edits), tells agents to load its tools with ToolSearch first, and the reviewer brief names its tools in the tool allowance when a reviewer may write, with writes made through them rather than here-documents.",
+      "mechanism": "The planning skill source never mentions the ai-text-editor. Its tool-discipline section covers only code-lookup tools, and the reviewer's writable-file paragraph names no editor. The editor's advantages appear only in ai-text-editor/SKILL.md, which an agent working a plan does not read. The editor-gate hint presents the editor as optional, and the MCP tools are deferred, so an agent that does not load them by ToolSearch never sees them as an option. A reviewer subagent brief named only codegraph and magequery, so its reviewer had no editor either and stopped when a here-document was blocked.",
+      "surfaces": [
+        "planning/skill-source.txt",
+        "planning/parts/part-1.md",
+        "planning/parts/part-3.md",
+        "planning/SKILL.md",
+        "editor-gate-plugin/hooks/pre-tool-use-edit-write.sh"
+      ],
+      "fix": "d96f10ee, 81279aa4 (merged 6ab80f66): the planning skill promotes the ai-text-editor for existing-file edits; npm baseline refreshed",
+      "verification": "full ./run-tests.sh 254/254 (includes the skill docs and npm package baseline)",
+      "found_by": "planning session during review (agent edits blocked by editor-gate, then built-in Edit used throughout)",
+      "notes": "The editor-gate hook wording is outside this repo's planning skill; the fix does not change it, only makes the skill say the editor is preferred. Not locally reproduced in a live session; reproduction is the grep count and the observed transcript. The editor-gate hook (editor-gate-plugin/hooks/pre-tool-use-edit-write.sh) is left unchanged by the fix; its wording is a separate decision. The skill text is what this entry's fix changes.",
+      "created_at": "2026-10-06T10:22:56Z",
+      "updated_at": "2026-10-06T13:50:30Z"
     },
     {
       "id": "B6",
