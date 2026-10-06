@@ -212,7 +212,7 @@ fn stage_primary(
 /// interactive-shell-mcp is its own crate but not its own skill: its binary
 /// ships in the interactive-shell skill's mcp-mode install
 /// (integration.tsv), so it lands in THAT skill's bin/<triple>/.
-/// chat-client-rs/chat-mcp/chat-server-rs/chat-spool-watch (per
+/// chat-client-rs/chat-mcp/chat-server-rs/chat-spool-watch/monitor-once (per
 /// chat/binaries.tsv) and ai-text-editor/ai-text-editor-mcp (per
 /// ai-text-editor/binaries.tsv) are the same shape: each is its own crate,
 /// not its own skill directory, and the installer reads a skill's binaries
@@ -223,7 +223,9 @@ fn skill_dir_for(crate_name: &str) -> Option<&str> {
     match crate_name {
         "bug-report" | "todo" | "interactive-shell" | "ci-failures" | "rjq" => Some(crate_name),
         "interactive-shell-mcp" => Some("interactive-shell"),
-        "chat-client-rs" | "chat-mcp" | "chat-server-rs" | "chat-spool-watch" => Some("chat"),
+        "chat-client-rs" | "chat-mcp" | "chat-server-rs" | "chat-spool-watch" | "monitor-once" => {
+            Some("chat")
+        }
         "ai-text-editor" | "ai-text-editor-mcp" => Some("ai-text-editor"),
         _ => None,
     }
@@ -282,6 +284,7 @@ mod tests {
             "chat-mcp",
             "chat-server-rs",
             "chat-spool-watch",
+            "monitor-once",
         ] {
             assert_eq!(skill_dir_for(crate_name), Some("chat"), "{crate_name}");
         }

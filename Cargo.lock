@@ -1027,6 +1027,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "monitor-once"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "monitor-read"
 version = "0.1.0"
 

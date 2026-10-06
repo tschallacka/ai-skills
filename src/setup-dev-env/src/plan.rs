@@ -26,6 +26,7 @@ const PRIMARY_ADD_AND_INFRA: &[Row] = &[
     ("chat-mcp", "chat-mcp"),
     ("chat-server-rs", "chat-server-rs"),
     ("chat-spool-watch", "chat-spool-watch"),
+    ("monitor-once", "monitor-once"),
     ("configure-ui-story-cache", "configure-ui-story-cache"),
     ("create-adversarial-review", "create-adversarial-review"),
     ("create-plan", "create-plan"),

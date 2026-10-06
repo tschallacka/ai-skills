@@ -344,12 +344,15 @@ case "$mode" in
                 || { printf '%s: cargo build chat-mcp failed\n' "${0##*/}" >&2; exit 66; }
             ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package chat-spool-watch ) \
                 || { printf '%s: cargo build chat-spool-watch failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$chat_dir" --package monitor-once ) \
+                || { printf '%s: cargo build monitor-once failed\n' "${0##*/}" >&2; exit 66; }
             mkdir -p "$repo_root/chat/bin/$chat_dir"
             chat_release="$repo_root/target/$chat_dir/release"
             cp "$chat_release/chat-server-rs$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-server-rs$skill_exe"
             cp "$chat_release/chat-client-rs$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-client-rs$skill_exe"
             cp "$chat_release/chat-mcp$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-mcp$skill_exe"
             cp "$chat_release/chat-spool-watch$skill_exe" "$repo_root/chat/bin/$chat_dir/chat-spool-watch$skill_exe"
+            cp "$chat_release/monitor-once$skill_exe" "$repo_root/chat/bin/$chat_dir/monitor-once$skill_exe"
         else
             # Prebuilt binaries must already be in place (CI build step).
             ls "$repo_root/chat/bin/"*/"chat-server-rs$skill_exe" >/dev/null 2>&1 \

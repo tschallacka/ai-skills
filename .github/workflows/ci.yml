@@ -214,6 +214,7 @@ jobs:
           cargo build --release --manifest-path src/chat-client-rs/Cargo.toml
           cargo build --release --manifest-path src/chat-mcp/Cargo.toml
           cargo build --release --manifest-path src/chat-spool-watch/Cargo.toml
+          cargo build --release --manifest-path src/monitor-once/Cargo.toml
           case "$(uname -s):$(uname -m)" in
             Linux:x86_64|Linux:amd64) dir=x86_64-unknown-linux-musl ;;
             Linux:aarch64|Linux:arm64) dir=aarch64-unknown-linux-musl ;;
@@ -227,6 +228,7 @@ jobs:
           cp "$GITHUB_WORKSPACE/target/release/chat-client-rs" "chat/bin/$dir/chat-client-rs"
           cp "$GITHUB_WORKSPACE/target/release/chat-mcp" "chat/bin/$dir/chat-mcp"
           cp "$GITHUB_WORKSPACE/target/release/chat-spool-watch" "chat/bin/$dir/chat-spool-watch"
+          cp "$GITHUB_WORKSPACE/target/release/monitor-once" "chat/bin/$dir/monitor-once"
 
       - name: Place the compiled register rungs
         run: |
@@ -1044,7 +1046,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for crate in src/chat-server-rs src/chat-client-rs src/chat-mcp src/chat-spool-watch; do
+          for crate in src/chat-server-rs src/chat-client-rs src/chat-mcp src/chat-spool-watch src/monitor-once; do
             printf '==> %s\n' "$crate"
             cargo build --manifest-path "$crate/Cargo.toml" --release --target "${{ matrix.target }}"
           done
@@ -1063,6 +1065,8 @@ jobs:
             target/${{ matrix.target }}/release/chat-mcp.exe
             target/${{ matrix.target }}/release/chat-spool-watch
             target/${{ matrix.target }}/release/chat-spool-watch.exe
+            target/${{ matrix.target }}/release/monitor-once
+            target/${{ matrix.target }}/release/monitor-once.exe
           if-no-files-found: error
 
       # ---- interactive-shell -----------------------------------------------

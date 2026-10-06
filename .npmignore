@@ -3039,6 +3039,9 @@ src/chat-spool-watch/Cargo.toml
 src/chat-spool-watch/src/lib.rs
 src/chat-spool-watch/src/main.rs
 src/chat-spool-watch/tests/watch_flow.rs
+src/monitor-once/Cargo.toml
+src/monitor-once/src/main.rs
+src/monitor-once/tests/lock_and_signals.rs
 src/ci-failures/Cargo.toml
 src/ci-failures/src/error.rs
 src/ci-failures/src/extract.rs
@@ -3138,15 +3141,19 @@ src/installer/src/profiles.rs
 src/installer/src/requirements.rs
 src/installer/src/shared_bin.rs
 src/installer/src/tools.rs
+src/installer/src/ui/buttons.rs
+src/installer/src/ui/emerald.rs
 src/installer/src/ui/input.rs
 src/installer/src/ui/layout.rs
 src/installer/src/ui/mascot.rs
 src/installer/src/ui/mod.rs
 src/installer/src/ui/model.rs
+src/installer/src/ui/progress.rs
 src/installer/src/ui/render.rs
 src/installer/src/ui/terminal.rs
 src/installer/src/ui/text.rs
 src/installer/src/ui/uninstall_picker.rs
+src/installer/src/ui/wizard.rs
 src/installer/src/uninstall.rs
 src/interactive-shell-mcp/Cargo.toml
 src/interactive-shell-mcp/src/lib.rs
@@ -3314,6 +3321,7 @@ src/rebuild-plan-progress/Cargo.toml
 src/rebuild-plan-progress/src/main.rs
 src/register-command/Cargo.toml
 src/register-command/src/main.rs
+src/register-command/tests/without_rjq_on_path.rs
 src/register-read/Cargo.toml
 src/register-read/src/main.rs
 src/register-rebuild/Cargo.toml
