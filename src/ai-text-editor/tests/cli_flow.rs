@@ -2029,6 +2029,89 @@ fn reload_catches_up_with_a_second_external_write_and_says_so() {
 }
 
 #[test]
+fn preserve_external_backs_up_before_reload_discards_it() {
+    // B399: `resolve_external`'s own `.take()` emptied `tab.pending_external`
+    // before dispatching on `action`, so `preserve_external` -- called from
+    // inside the `reload` branch when the request also carries
+    // `preserve_external: true` -- read a field that was already `None` and
+    // always failed with "no external bytes available". Nothing exercised
+    // `--preserve-external` before this test.
+    let harness = Harness::new("preservereload");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    harness.open(&file);
+    std::fs::write(&file, "external bytes\n").unwrap();
+    let armed = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&armed)["external_change_pending"],
+        json!(true),
+        "the external write must have armed the guard"
+    );
+    let backup_path = PathBuf::from(format!("{}.back", file.display()));
+    assert!(!backup_path.exists(), "no backup must exist yet");
+    let resolved = harness.client(&[
+        "resolve",
+        "-f",
+        file.to_str().unwrap(),
+        "-a",
+        "reload",
+        "--preserve-external",
+    ]);
+    assert!(resolved.status.success(), "{}", refusal_text(&resolved));
+    assert!(
+        backup_path.exists(),
+        "reload with --preserve-external must leave a backup of the external bytes"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&backup_path).unwrap(),
+        "external bytes\n",
+        "the backup must hold the external bytes that reload discarded"
+    );
+    // Reload itself still landed on the external file's content.
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "external bytes\n");
+}
+
+#[test]
+fn preserve_external_backs_up_before_force_save_overwrites_it() {
+    // B399, companion case: the same `.take()` emptied `pending_external`
+    // before `force_save`'s own `preserve_external` call too.
+    let harness = Harness::new("preserveforcesave");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    harness.open(&file);
+    std::fs::write(&file, "external bytes\n").unwrap();
+    let armed = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&armed)["external_change_pending"],
+        json!(true),
+        "the external write must have armed the guard"
+    );
+    let backup_path = PathBuf::from(format!("{}.back", file.display()));
+    assert!(!backup_path.exists(), "no backup must exist yet");
+    let resolved = harness.client(&[
+        "resolve",
+        "-f",
+        file.to_str().unwrap(),
+        "-a",
+        "force_save",
+        "--acknowledge-force-save",
+        "--preserve-external",
+    ]);
+    assert!(resolved.status.success(), "{}", refusal_text(&resolved));
+    assert!(
+        backup_path.exists(),
+        "force_save with --preserve-external must leave a backup of the external bytes"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&backup_path).unwrap(),
+        "external bytes\n",
+        "the backup must hold the external bytes that force_save overwrote"
+    );
+    // force_save overwrote disk with the tab's own (unedited) buffer.
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "alpha\nbeta\n");
+}
+
+#[test]
 fn an_ownerless_queued_job_does_not_pin_the_idle_watchdog() {
     // B199: every job-start leg of this file owns its job from a
     // short-lived client; when the watchdog pinned to any active job, the

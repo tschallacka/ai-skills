@@ -4422,7 +4422,7 @@ fn resolve_external(
     }
     match action {
         "reload" => {
-            if let Err(error_value) = preserve_external(tab, envelope) {
+            if let Err(error_value) = preserve_external(tab, envelope, &external) {
                 tab.pending_external = Some(external);
                 frames.push(error(&envelope.request_id, "backup_failed", error_value));
                 return;
@@ -4503,7 +4503,7 @@ fn resolve_external(
                 .and_then(Value::as_bool)
                 == Some(true) =>
         {
-            if let Err(error_value) = preserve_external(tab, envelope) {
+            if let Err(error_value) = preserve_external(tab, envelope, &external) {
                 tab.pending_external = Some(external);
                 frames.push(error(&envelope.request_id, "backup_failed", error_value));
                 return;
@@ -4629,6 +4629,7 @@ fn resolve_external(
 fn preserve_external(
     tab: &Tab,
     envelope: &ai_text_editor::protocol::Envelope,
+    external: &[u8],
 ) -> Result<(), String> {
     if envelope
         .payload
@@ -4638,10 +4639,6 @@ fn preserve_external(
     {
         return Ok(());
     }
-    let external = tab
-        .pending_external
-        .as_ref()
-        .ok_or_else(|| "no external bytes available".to_owned())?;
     write_external_backup(tab, envelope, external).map(|_| ())
 }
 
