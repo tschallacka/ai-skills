@@ -177,11 +177,28 @@ fn copy_dir_tree(from: &Path, to: &Path) -> io::Result<()> {
         let destination = to.join(entry.file_name());
         if path.is_dir() {
             copy_dir_tree(&path, &destination)?;
-        } else {
+        } else if !same_file(&path, &destination) {
             fs::copy(&path, &destination)?;
         }
     }
     Ok(())
+}
+
+/// True when `a` and `b` resolve (through any symlink) to the same file on
+/// disk. A dev setup that symlinks `~/.claude/skills/<board>` straight at
+/// this repo's own `mods/<board>` (so editing the mod needs no reinstall to
+/// see) makes `path` and `destination` the identical inode here; a plain
+/// `fs::copy` opens the destination for writing and truncates it before it
+/// finishes reading the (same) source, turning the "copy" into data loss.
+/// Confirmed reproducing 100% of the time against a real such setup -- not
+/// a one-off. Two paths that do not both resolve (one missing, say, on a
+/// first-ever install where nothing is there yet to collide with) are never
+/// considered the same file, so the ordinary copy path is untouched.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 pub fn install_editor_gate_plugin(source_root: &Path, target_root: &Path) -> io::Result<PathBuf> {
@@ -611,6 +628,47 @@ mod tests {
             .join("chat-board/hooks/register.tsx")
             .is_file());
         assert!(!target_root.path().join("ci-board").exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_destination_symlinked_back_at_the_source_is_left_untouched() {
+        // The regression this guards: a dev setup where `target_root/<board>`
+        // is a symlink straight at `source_root/mods/<board>` (so editing the
+        // mod needs no reinstall to see it live) made the old plain `fs::copy`
+        // truncate every file in the mod to zero bytes, reproducing on a real
+        // checkout 100% of the time -- confirmed by restoring from git twice
+        // in one session before this fix landed.
+        use std::os::unix::fs::symlink;
+
+        let source_root = tempfile::tempdir().unwrap();
+        write_mod(source_root.path(), "chat-board");
+        let original = fs::read_to_string(
+            source_root
+                .path()
+                .join("mods/chat-board/hooks/register.tsx"),
+        )
+        .unwrap();
+        let target_root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(target_root.path().join("chat")).unwrap();
+        symlink(
+            source_root.path().join("mods/chat-board"),
+            target_root.path().join("chat-board"),
+        )
+        .unwrap();
+
+        install_mods_claude(source_root.path(), target_root.path()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(
+                source_root
+                    .path()
+                    .join("mods/chat-board/hooks/register.tsx")
+            )
+            .unwrap(),
+            original,
+            "the symlinked-back source must survive its own \"install\" intact"
+        );
     }
 
     #[test]
