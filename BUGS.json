@@ -5410,6 +5410,27 @@
       "updated_at": "2026-10-06T13:50:30Z"
     },
     {
+      "id": "B398",
+      "title": "ai-text-editor: resolve(action=reload) reports success but leaves the tab buffer stale",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Open a tab on a file via ai-text-editor. While it stays open, have something else append/modify the file on disk (so disk_diverged/external_change_pending flip true on the next read). Call resolve with action=reload (returns success, e.g. {\"resolved\":\"reload\",\"revision\":1}). Then attempt a mutating call (e.g. insert/replace) at an offset computed from a FRESH on-disk search for a string near the end of the file.",
+      "observed": "The mutating call is refused again with an external_change error, even though resolve just reported a successful reload. A byte-offset check shows the editor's buffer stopped roughly 789 bytes short of the real file's current length (a search for a known trailing string landed at the SAME byte offset before and after the reload). Closing the tab (journal_action=clean) and reopening the same path as a fresh tab immediately returns the correct, current byte length.",
+      "expected": "resolve(action=reload) should make the tab's buffer byte-for-byte identical to the file currently on disk and bump the revision to match that real content -- a subsequent read/search against the reloaded tab should see the full current file, and a mutating call at a correct fresh offset should succeed without another external_change refusal.",
+      "mechanism": "Not isolated in this session (no access to the server's own logs). Symptom is consistent with resolve(reload) re-reading a stale cached view of the file, or bumping the revision without actually replacing the in-memory buffer contents.",
+      "surfaces": [
+        "src/ai-text-editor"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "",
+      "notes": "Reported by the user from a real session transcript (editing app/components/town/TownScene.client.vue in an unrelated project, ~159KB file). Workaround used: close the tab (journal_action=clean) and reopen fresh instead of trusting resolve(reload).",
+      "created_at": "2026-10-07T20:30:16Z",
+      "updated_at": "2026-10-07T20:30:16Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
