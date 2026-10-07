@@ -1,0 +1,14 @@
+{
+  "name": "decision-board",
+  "version": "0.1.0",
+  "description": "A pane with the project's open questions (DECISIONS.json), most urgent first, with buttons to answer one directly.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Decision board",
+      "description": "Register the decision-board command and its pane. Off removes both.",
+      "default": true
+    }
+  }
+}

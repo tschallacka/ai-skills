@@ -261,7 +261,7 @@ profile_files_for_release() {
 # names are plugins::MODS in src/installer/src/plugins.rs; the test that holds
 # the two equal is tests/test-mods-package.sh. loading is not listed: the boards
 # carry their own copy of it.
-MODS_BOARDS="chat-board ci-board plan-board brainstorm-board register-board tui-hint-board signal-bus"
+MODS_BOARDS="chat-board ci-board plan-board brainstorm-board register-board tui-hint-board signal-bus decision-board"
 
 mods_files() {
     local board

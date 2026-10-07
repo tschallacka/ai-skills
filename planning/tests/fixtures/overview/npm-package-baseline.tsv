@@ -11,7 +11,7 @@ package/.agents/profiles/maintainer.json	26207
 package/.agents/profiles/nitpicker.json	12892
 package/.agents/profiles/oracle.json	16193
 package/LICENSE	1068
-package/README.md	19711
+package/README.md	19963
 package/agent-identity-plugin/.claude-plugin/plugin.json	405
 package/agent-identity-plugin/README.md	3064
 package/agent-identity-plugin/hooks/hooks.json	192
@@ -58,6 +58,16 @@ package/ci-failures/docs/README.md	1146
 package/ci-failures/requires.tsv	1641
 package/ci-failures/scripts/ci-failures-glab-lib.sh	8321
 package/ci-failures/scripts/ci-failures.sh	6554
+package/decision-reminder-plugin/.claude-plugin/plugin.json	355
+package/decision-reminder-plugin/hooks/hooks.json	214
+package/decision-reminder-plugin/hooks/lib.sh	1953
+package/decision-reminder-plugin/hooks/session-start.sh	2925
+package/decision-reminder-plugin/tests/test-session-start-hook.sh	4831
+package/decisions/SKILL.md	4121
+package/decisions/binaries.tsv	826
+package/decisions/docs/README.md	2786
+package/decisions/requires.tsv	379
+package/decisions/schema.2.0.0-alpha.4.json	2160
 package/editor-gate-plugin/.claude-plugin/plugin.json	367
 package/editor-gate-plugin/README.md	2162
 package/editor-gate-plugin/hooks/editor-token	1067
@@ -158,6 +168,10 @@ package/mods/ci-board/hooks/hooks.json	36
 package/mods/ci-board/hooks/loading.tsx	12225
 package/mods/ci-board/hooks/register.tsx	20838
 package/mods/ci-board/types/index.d.ts	562
+package/mods/decision-board/.claude-plugin/plugin.json	439
+package/mods/decision-board/hooks/hooks.json	36
+package/mods/decision-board/hooks/register.tsx	8705
+package/mods/decision-board/types/index.d.ts	681
 package/mods/plan-board/.claude-plugin/plugin.json	1033
 package/mods/plan-board/hooks/hooks.json	36
 package/mods/plan-board/hooks/register.tsx	34823
@@ -173,7 +187,7 @@ package/mods/tui-hint-board/.claude-plugin/plugin.json	436
 package/mods/tui-hint-board/hooks/hooks.json	36
 package/mods/tui-hint-board/hooks/register.tsx	15890
 package/mods/tui-hint-board/types/index.d.ts	213
-package/package.json	2309
+package/package.json	2385
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	17811
 package/planning/REVIEWER.md	26888

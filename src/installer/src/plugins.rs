@@ -131,6 +131,7 @@ pub const MODS: &[(&str, &[&str])] = &[
     ("brainstorm-board", &["brainstorm"]),
     ("register-board", &["bug-report", "todo"]),
     ("tui-hint-board", &["interactive-shell"]),
+    ("decision-board", &["decisions"]),
     (
         "signal-bus",
         &[
