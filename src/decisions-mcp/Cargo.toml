@@ -1,0 +1,23 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "decisions-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP adapter for the question register: open/answered/closed/urgent questions as typed tool calls over DECISIONS.json"
+
+[lib]
+name = "decisions_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "decisions-mcp"
+path = "src/main.rs"
+
+[dependencies]
+decisions = { path = "../decisions" }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

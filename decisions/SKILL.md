@@ -27,7 +27,24 @@ exist yet, write it yourself first, as the skeleton below with an empty
   "skill": "decisions",
   "skill_version": "2.0.0-alpha.4",
   "comment": "Non-blocking questions raised during work.",
-  "questions": []
+  "questions": [
+    {
+      "id": "Q1",
+      "title": "Cache the parsed config, or re-read it every call?",
+      "status": "answered",
+      "priority": "normal",
+      "branch": "feature/config-reload",
+      "options": [
+        {"letter": "a", "label": "Cache"},
+        {"letter": "b", "label": "Re-read every call"}
+      ],
+      "context": "Stubbed with option b (re-read) while continuing.",
+      "chosen": "b",
+      "resolution": null,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  ]
 }
 ```
 

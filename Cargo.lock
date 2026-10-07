@@ -421,6 +421,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "decisions-mcp"
+version = "0.1.0"
+dependencies = [
+ "decisions",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "defmt"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
