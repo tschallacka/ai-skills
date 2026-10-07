@@ -147,8 +147,12 @@ pub const MODS: &[(&str, &[&str])] = &[
 ];
 
 /// Copies every mod whose companion skill is installed on `target_root` from
-/// `source_root/mods/<mod>` to `target_root/<mod>`. Returns the directories
-/// written; a mod with no installed companion is left alone.
+/// `source_root/mods/<mod>` to `target_root/<mod>`, then stamps it with the
+/// same `.version`/`.filehashes` bookkeeping a skill install writes
+/// (`cli_mode::version_marker_content`, `digest::record_digests`) -- a mod
+/// previously carried neither, so there was no way to tell what version was
+/// installed or whether a file had been hand-edited since. Returns the
+/// directories written; a mod with no installed companion is left alone.
 pub fn install_mods_claude(source_root: &Path, target_root: &Path) -> io::Result<Vec<PathBuf>> {
     let mut written = Vec::new();
     for (name, companions) in MODS {
@@ -163,25 +167,39 @@ pub fn install_mods_claude(source_root: &Path, target_root: &Path) -> io::Result
             continue;
         }
         let destination = target_root.join(name);
-        copy_dir_tree(&source, &destination)?;
+        let relative_paths = copy_dir_tree(&source, &destination, Path::new(""))?;
+        crate::digest::record_digests(&destination, &relative_paths)?;
+        fs::write(
+            destination.join(".version"),
+            crate::cli_mode::version_marker_content(source_root),
+        )?;
         written.push(destination);
     }
     Ok(written)
 }
 
-fn copy_dir_tree(from: &Path, to: &Path) -> io::Result<()> {
+/// Copies `from` onto `to`, returning every relative (forward-slash) file
+/// path copied -- skipped-as-same-file counts too, since the content at
+/// `to` is correct either way and `record_digests` needs the complete list
+/// to stamp.
+fn copy_dir_tree(from: &Path, to: &Path, prefix: &Path) -> io::Result<Vec<String>> {
     fs::create_dir_all(to)?;
+    let mut relative_paths = Vec::new();
     for entry in fs::read_dir(from)? {
         let entry = entry?;
         let path = entry.path();
         let destination = to.join(entry.file_name());
+        let relative = prefix.join(entry.file_name());
         if path.is_dir() {
-            copy_dir_tree(&path, &destination)?;
-        } else if !same_file(&path, &destination) {
-            fs::copy(&path, &destination)?;
+            relative_paths.extend(copy_dir_tree(&path, &destination, &relative)?);
+        } else {
+            if !same_file(&path, &destination) {
+                fs::copy(&path, &destination)?;
+            }
+            relative_paths.push(relative.to_string_lossy().replace('\\', "/"));
         }
     }
-    Ok(())
+    Ok(relative_paths)
 }
 
 /// True when `a` and `b` resolve (through any symlink) to the same file on
@@ -628,6 +646,27 @@ mod tests {
             .join("chat-board/hooks/register.tsx")
             .is_file());
         assert!(!target_root.path().join("ci-board").exists());
+    }
+
+    #[test]
+    fn an_installed_mod_carries_the_same_version_bookkeeping_a_skill_does() {
+        let source_root = tempfile::tempdir().unwrap();
+        write_mod(source_root.path(), "chat-board");
+        let target_root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(target_root.path().join("chat")).unwrap();
+
+        install_mods_claude(source_root.path(), target_root.path()).unwrap();
+
+        let dest = target_root.path().join("chat-board");
+        assert_eq!(
+            fs::read_to_string(dest.join(".version")).unwrap(),
+            crate::cli_mode::version_marker_content(source_root.path())
+        );
+        let hashes = fs::read_to_string(dest.join(".filehashes")).unwrap();
+        assert!(
+            hashes.contains("hooks/register.tsx"),
+            "the copied file must have a recorded digest: {hashes}"
+        );
     }
 
     #[test]
