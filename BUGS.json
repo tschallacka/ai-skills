@@ -5412,7 +5412,7 @@
     {
       "id": "B398",
       "title": "ai-text-editor: resolve(action=reload) reports success but leaves the tab buffer stale",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -5423,12 +5423,12 @@
       "surfaces": [
         "src/ai-text-editor"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "src/ai-text-editor/src/bin/ai-text-editor-server.rs, fn resolve_external: both reload branches now re-read current disk state before applying it (plain-text branch via a fresh fs::read instead of trusting the possibly-stale tab.pending_external snapshot; the large-file branch was already fresh via LargeFile::open) and call observe_external again afterward so a divergence landing in the gap is caught; the reload response now carries dirty/disk_diverged/external_change_pending, matching every other mutating response in this file. Commit 326276b2f857f1dcada54cb18a767e7b48b39c92 on master (not yet pushed).",
+      "verification": "cargo test -p ai-text-editor: 91 passed, 0 failed, including a new test (reload_catches_up_with_a_second_external_write_and_says_so) that simulates a second external write landing after the first divergence is observed but before resolve(reload) is called, and asserts the reload response itself reports disk_diverged=false/external_change_pending=false and that a follow-up read shows the second write's content. Mutation-verified: the new test was confirmed to fail against the pre-fix code (assertion on disk_diverged mismatched: left Null, right Bool(false)) and pass against the fix. cargo fmt --check and cargo clippy --all-targets -- -D warnings both clean.",
       "found_by": "",
       "notes": "Reported by the user from a real session transcript (editing app/components/town/TownScene.client.vue in an unrelated project, ~159KB file). Workaround used: close the tab (journal_action=clean) and reopen fresh instead of trusting resolve(reload).",
       "created_at": "2026-10-07T20:30:16Z",
-      "updated_at": "2026-10-07T20:30:16Z"
+      "updated_at": "2026-10-07T20:40:36Z"
     },
     {
       "id": "B6",
@@ -8377,6 +8377,27 @@
       "notes": "Not yet reproduced locally -- filed from a single observed CI failure on x86_64-apple-darwin, at the user's explicit request to investigate and write it up for them to test/confirm on their own Mac. Recommended fix direction (not yet attempted): make save_session's file creation atomic with its permissions, e.g. write to a sibling temp file opened via OpenOptions with mode 0o600 set BEFORE any bytes are written (not after), then rename() into place -- rename is atomic on POSIX, so no reader ever observes an intermediate mode. The existing restrict_to_owner(&path, 0o600) call after fs::write would then become redundant (or stay as a defensive no-op) rather than the only thing narrowing the window. To reproduce locally before fixing: loop 'cargo test -p interactive-shell --test protocol session_file_reuses_socket_and_command_without_repeating_arguments' under artificial scheduling pressure (e.g. 'sudo cpulimit' on the test process, or running many parallel 'cargo test' jobs concurrently to contend for CPU) and watch for the same assertion; if that doesn't reproduce it either, the race may need an actual SIGSTOP/SIGCONT around save_session's own write-then-chmod window (the same technique B384's own verification needed) to force the gap open on demand.",
       "created_at": "2026-10-01T14:51:45Z",
       "updated_at": "2026-10-04T15:46:03Z"
+    },
+    {
+      "id": "B399",
+      "title": "ai-text-editor: --preserve-external on resolve(reload/force_save) likely always fails",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Trigger an external_change_pending on a tab (edit the file outside the editor), then call resolve with action=reload or action=force_save and --preserve-external set.",
+      "observed": "Not confirmed by a real run (no test exercises --preserve-external today), but by inspection: fn preserve_external() reads tab.pending_external.as_ref(), while both the reload and force_save branches of resolve_external() already call tab.pending_external.take() at the top of the function, before preserve_external can run -- so pending_external is None by the time preserve_external reads it.",
+      "expected": "resolve with --preserve-external on reload or force_save should back up the external bytes exactly as it does for the other actions, regardless of call order inside resolve_external.",
+      "mechanism": "Found as a side effect of fixing B398 (resolve(action=reload) leaving the tab buffer stale): fn resolve_external() takes tab.pending_external at its own top (let Some(external) = tab.pending_external.take()), and preserve_external() later reads tab.pending_external.as_ref() expecting it still populated -- never verified against a real run since nothing tests --preserve-external today.",
+      "surfaces": [
+        "src/ai-text-editor"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "",
+      "notes": "Flagged by the subagent that fixed B398, deliberately left unfixed there to keep that change scoped; needs its own real repro (a test exercising --preserve-external on reload/force_save) before a fix lands.",
+      "created_at": "2026-10-07T20:40:45Z",
+      "updated_at": "2026-10-07T20:40:45Z"
     },
     {
       "id": "B59",
