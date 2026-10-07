@@ -31,8 +31,8 @@ guard="$repo_root/.github/registers-guard.sh"
 work="$(mktemp -d "${TMPDIR:-/tmp}/registers-guard.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-# A minimal pair of registers, sound, in their own directory: the guard reads
-# BUGS.json and TODO.json relative to the cwd, so the fixtures are cwd.
+# A sound trio of registers, in their own directory: the guard reads BUGS.json,
+# TODO.json and DECISIONS.json relative to the cwd, so the fixtures are cwd.
 fixture() { # <dir>
     mkdir -p "$1"
     cat > "$1/BUGS.json" <<'JSON'
@@ -54,6 +54,15 @@ JSON
   ]
 }
 JSON
+    cat > "$1/DECISIONS.json" <<'JSON'
+{
+  "skill": "decisions",
+  "skill_version": "test",
+  "questions": [
+    { "id": "Q1", "title": "one", "status": "open", "priority": "normal", "branch": "main", "options": [] }
+  ]
+}
+JSON
 }
 
 run_guard() { # <dir> <changed-paths...> -> echoes exit code, output in $work/out
@@ -72,6 +81,19 @@ fixture "$work/sound"
 rc="$(run_guard "$work/sound" BUGS.json)"
 t_assert_eq 'a register-only change with sound registers is allowed' "$rc" '0'
 t_assert_contains 'it says it may merge' 'may merge' "$(cat "$work/out")"
+
+# ---- 1b. a sound DECISIONS.json-only change is allowed ---------------------
+# The third register's own positive control: without the three-way key
+# dispatch (BUGS -> bugs, TODO -> tasks, else -> questions), this reads
+# DECISIONS.json's entries under "tasks" and refuses with "has no tasks
+# array" -- a push to the registers branch, allowed to carry nothing else,
+# would never be able to land a question at all.
+fixture "$work/decisions-sound"
+rc="$(run_guard "$work/decisions-sound" DECISIONS.json)"
+t_assert_eq 'a register-only change touching only DECISIONS.json is allowed' "$rc" '0'
+out="$(cat "$work/out")"
+t_assert_contains 'it says it may merge' 'may merge' "$out"
+t_assert_contains 'DECISIONS.json is itself checked, not silently skipped' 'DECISIONS.json' "$out"
 
 # ---- 2. a stray path is refused --------------------------------------------
 # The load-bearing refusal: this branch reaches master without review, so it
@@ -100,6 +122,29 @@ t_assert_eq 'a duplicate id is refused' "$rc" '1'
 out="$(cat "$work/out")"
 t_assert_contains 'the refusal names the duplicated id' 'B1' "$out"
 t_assert_contains 'the refusal names the cause' 'same next free id' "$out"
+
+# ---- 3b. a duplicate id in DECISIONS.json is refused, and named -----------
+# The regression case for the three-way key dispatch itself: before it, every
+# path but BUGS read as "tasks", so a DECISIONS.json duplicate either checked
+# the wrong array (TODO.json's own entries) or refused with "has no tasks
+# array" instead of naming the real duplicate.
+fixture "$work/decisions-dupe"
+python3 - "$work/decisions-dupe/DECISIONS.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["questions"].append({"id": "Q1", "title": "an unrelated question that took the same id", "status": "open", "priority": "normal", "branch": "main", "options": []})
+json.dump(d, open(p, "w"), indent=2)
+PY
+rc="$(run_guard "$work/decisions-dupe" DECISIONS.json)"
+t_assert_eq 'a duplicate id in DECISIONS.json is refused' "$rc" '1'
+out="$(cat "$work/out")"
+t_assert_contains 'the refusal names the duplicated id' 'Q1' "$out"
+t_assert_contains 'the refusal names the cause' 'same next free id' "$out"
+case "$out" in
+    *'has no tasks array'*) t_fail 'DECISIONS.json must never be read under the tasks key' ;;
+    *) : ;;
+esac
 
 # ---- 4. a parent that does not resolve is refused --------------------------
 fixture "$work/dangling"

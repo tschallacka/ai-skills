@@ -147,12 +147,38 @@ fn registers_branch_gate_blocks_with_its_own_exact_terminal_line() {
     assert!(!out.contains("git diff --check"));
 }
 
+#[test]
+fn decisions_json_modified_off_the_registers_branch_is_refused_the_same_way() {
+    let repo = Repo::new("registers-gate-decisions");
+    write_file(&repo.dir.join("README.md"), "hello\n");
+    repo.commit("initial");
+
+    write_file(&repo.dir.join("DECISIONS.json"), "[]\n");
+    write_file(&repo.dir.join("README.md"), "changed too\n");
+    git(&repo.dir, &["add", "-A"]);
+
+    let output = repo.run(&[]);
+    let out = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(out.contains("a register is modified outside the registers branch"));
+    assert!(out.contains("    DECISIONS.json"));
+    assert!(
+        !out.contains("    README.md"),
+        "only the register itself is listed, not the unrelated file alongside it: {out}"
+    );
+    assert!(
+        out.contains("pre-push-check: 1 failure(s) - registers changed off the registers branch")
+    );
+}
+
 /// A repository already on `registers`, with one committed file to diff from.
 fn registers_repo(tag: &str) -> Repo {
     let repo = Repo::new(tag);
     write_file(&repo.dir.join("README.md"), "hello\n");
     write_file(&repo.dir.join("BUGS.json"), "[]\n");
     write_file(&repo.dir.join("TODO.json"), "[]\n");
+    write_file(&repo.dir.join("DECISIONS.json"), "[]\n");
     repo.commit("initial");
     git(&repo.dir, &["checkout", "-q", "-b", "registers"]);
     repo
@@ -163,6 +189,7 @@ fn registers_branch_passes_on_register_changes_and_runs_no_other_gate() {
     let repo = registers_repo("registers-branch-ok");
     write_file(&repo.dir.join("BUGS.json"), "[ ]\n");
     write_file(&repo.dir.join("TODO.json"), "[ ]\n");
+    write_file(&repo.dir.join("DECISIONS.json"), "[ ]\n");
     git(&repo.dir, &["add", "BUGS.json"]);
 
     let output = repo.run(&[]);
@@ -170,7 +197,9 @@ fn registers_branch_passes_on_register_changes_and_runs_no_other_gate() {
 
     assert_eq!(output.status.code(), Some(0), "{out}");
     assert!(!out.contains("a register is modified outside"));
-    assert!(out.contains("only registers changed on the registers branch (BUGS.json, TODO.json)"));
+    assert!(out.contains(
+        "only registers changed on the registers branch (BUGS.json, DECISIONS.json, TODO.json)"
+    ));
     assert!(out.ends_with("pre-push-check: PASS\n"));
     // None of the ordinary gates ran: not whitespace, not cargo, not soundness.
     for gate in ["git diff --check", "PORTABILITY.md", "cargo", "soundness"] {
@@ -193,7 +222,9 @@ fn registers_branch_refuses_any_other_changed_file() {
     let out = stdout(&output);
 
     assert_eq!(output.status.code(), Some(1), "{out}");
-    assert!(out.contains("the registers branch may only change BUGS.json and TODO.json"));
+    assert!(
+        out.contains("the registers branch may only change BUGS.json, TODO.json or DECISIONS.json")
+    );
     assert!(out.contains("    README.md"));
     assert!(out.contains("    flake.nix"));
     assert!(

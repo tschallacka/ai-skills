@@ -40,8 +40,8 @@ index - and the gates run in this order:
                           fetch ends the run (PRE_PUSH_SKIP_FETCH=1 skips it,
                           for a throwaway clone or no network, and the change
                           set may then be stale)
-  registers-branch guard  BUGS.json or TODO.json changed on any branch but
-                          `registers` is refused and ends the run
+  registers-branch guard  BUGS.json, TODO.json or DECISIONS.json changed on
+                          any branch but `registers` is refused and ends the run
                           (PRE_PUSH_ALLOW_REGISTERS=1 accepts changes already
                           in flight; never use it to file an entry)
   git diff --check        whitespace, in the worktree, the index and the
@@ -76,8 +76,8 @@ index - and the gates run in this order:
                           installer/src/50-manifest.sh's skill_files() does
                           not declare fails
 On the `registers` branch none of the above runs, and neither does the nix
-re-entry: the one gate is that every changed path is BUGS.json or TODO.json,
-and anything else fails. The registers
+re-entry: the one gate is that every changed path is BUGS.json, TODO.json or
+DECISIONS.json, and anything else fails. The registers
 workflow (.github/workflows/registers.yml) checks ids and parents when the
 push lands.
 The registers update, the plan validator and the role-drift tests stay with

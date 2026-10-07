@@ -1,11 +1,11 @@
 // MODE: DEV
 // PACKAGE: PROD
 
-//! Gate 0: BUGS.json and TODO.json are filed on the `registers` branch and
-//! nowhere else, so ids are allocated in one place and no merge ever has to
-//! reconcile two sets of them. Fails immediately, before any other gate
-//! runs, with its own distinct terminal line (not the normal final summary
-//! line).
+//! Gate 0: BUGS.json, TODO.json and DECISIONS.json are filed on the
+//! `registers` branch and nowhere else, so ids are allocated in one place
+//! and no merge ever has to reconcile two sets of them. Fails immediately,
+//! before any other gate runs, with its own distinct terminal line (not the
+//! normal final summary line).
 //!
 //! The other half is `registers` itself: a push from that branch is checked
 //! for one thing only, that nothing but the two registers changed, and no
@@ -17,14 +17,14 @@ use std::env;
 use std::path::Path;
 
 const REGISTER_BRANCH: &str = "registers";
-const REGISTER_FILES: [&str; 2] = ["BUGS.json", "TODO.json"];
+const REGISTER_FILES: [&str; 3] = ["BUGS.json", "TODO.json", "DECISIONS.json"];
 
 pub fn on_register_branch(repo_root: &Path) -> bool {
     current_branch(repo_root) == REGISTER_BRANCH
 }
 
 /// The only gate a push from the `registers` branch runs: every changed path
-/// must be BUGS.json or TODO.json. Register changes reach master without
+/// must be BUGS.json, TODO.json or DECISIONS.json. Register changes reach master without
 /// review (.github/workflows/registers.yml), so a branch that could carry
 /// anything else is a protection bypass; that CI guard is the authority and
 /// this refuses the same thing before the push leaves the machine. Nothing
@@ -49,7 +49,7 @@ pub fn gate_register_branch_scope(repo_root: &Path, base: Option<&str>, report: 
         return;
     }
     report.bad(&format!(
-        "the {REGISTER_BRANCH} branch may only change BUGS.json and TODO.json"
+        "the {REGISTER_BRANCH} branch may only change BUGS.json, TODO.json or DECISIONS.json"
     ));
     for file in stray {
         println!("    {file}");
@@ -65,7 +65,7 @@ pub fn gate_registers_branch(
     base: Option<&str>,
     report: &mut Report,
 ) -> Result<(), i32> {
-    let mut register_changes = changed(repo_root, base, r"^(BUGS|TODO)\.json$");
+    let mut register_changes = changed(repo_root, base, r"^(BUGS|TODO|DECISIONS)\.json$");
     let branch = current_branch(repo_root);
 
     // PRE_PUSH_ALLOW_REGISTERS=1 is for transport, not authoring: never used
@@ -89,8 +89,9 @@ pub fn gate_registers_branch(
         report.note(&format!(
             "  git switch {REGISTER_BRANCH}   (git switch -c {REGISTER_BRANCH} origin/{REGISTER_BRANCH} if it is not local yet)"
         ));
-        report.note("  then file the entry with the shipped tools -- bin/<triple>/bugs add ... or");
-        report.note("  bin/<triple>/todo add ... -- and push; the entry reaches master from there");
+        report.note("  then file the entry with the shipped tools -- bin/<triple>/bugs add,");
+        report.note("  bin/<triple>/todo add or bin/<triple>/decisions add -- and push; the entry");
+        report.note("  reaches master from there");
         report
             .note("a fix's resolution keys (fix, verification, status) go the same way, after the");
         report.note("  code lands, so the id is allocated and closed in one place");

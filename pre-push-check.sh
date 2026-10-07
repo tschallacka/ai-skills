@@ -14,8 +14,8 @@
 #                           fetch ends the run (PRE_PUSH_SKIP_FETCH=1 skips it,
 #                           for a throwaway clone or no network, and the change
 #                           set may then be stale)
-#   registers-branch guard  BUGS.json or TODO.json changed on any branch but
-#                           `registers` is refused and ends the run
+#   registers-branch guard  BUGS.json, TODO.json or DECISIONS.json changed on
+#                           any branch but `registers` is refused and ends the run
 #                           (PRE_PUSH_ALLOW_REGISTERS=1 accepts changes already
 #                           in flight; never use it to file an entry)
 #   git diff --check        whitespace, in the worktree, the index and the
@@ -34,10 +34,11 @@
 #   cargo test              (skipped with a note when no crate changed)
 #   cargo clippy            the whole workspace, --all-targets -D warnings,
 #                           whenever any crate changed
-#   register soundness      TODO.json and BUGS.json through reg_findings, the
-#                           shipped implementation: ids, statuses, severities,
-#                           priorities, parents, timestamps, reproductions,
-#                           mechanism-on-confirmed, verification-on-fixed
+#   register soundness      TODO.json, BUGS.json and DECISIONS.json through
+#                           reg_findings, the shipped implementation: ids,
+#                           statuses, severities, priorities, parents,
+#                           timestamps, reproductions, mechanism-on-confirmed,
+#                           verification-on-fixed, decision title/options/branch
 #                           (needs the shipped rjq in the shared bin, not on PATH)
 #   npm package baseline    every pinned byte size in
 #                           planning/tests/fixtures/overview/npm-package-baseline.tsv
@@ -49,8 +50,8 @@
 #                           installer/src/50-manifest.sh's skill_files() does
 #                           not declare fails
 # On the `registers` branch none of the above runs, and neither does the nix
-# re-entry: the one gate is that every changed path is BUGS.json or TODO.json,
-# and anything else fails. The registers
+# re-entry: the one gate is that every changed path is BUGS.json, TODO.json or
+# DECISIONS.json, and anything else fails. The registers
 # workflow (.github/workflows/registers.yml) checks ids and parents when the
 # push lands.
 # The registers update, the plan validator and the role-drift tests are
@@ -218,13 +219,14 @@ changed() { # <pathspec-filter...> -> changed files matching the filter
 
 # ---- the registers branch: file scope only ----------------------------------
 # A push from `registers` carries register changes and nothing else, so this is
-# the only gate it runs: every changed path must be BUGS.json or TODO.json.
+# the only gate it runs: every changed path must be BUGS.json, TODO.json or
+# DECISIONS.json.
 # .github/workflows/registers.yml refuses the same thing before landing on
 # master, and checks ids and parents; this refuses it before the push leaves.
 if [ "$current_branch" = "$register_branch" ]; then
     printf 'pre-push-check (base: %s; registers branch)\n' \
         "${base_label:-no master or upstream; worktree only}"
-    stray="$(changed -v -E '^(BUGS|TODO)\.json$' || true)"
+    stray="$(changed -v -E '^(BUGS|TODO|DECISIONS)\.json$' || true)"
     if [ -z "$stray" ]; then
         files="$(changed -E '.' || true)"
         if [ -z "$files" ]; then
@@ -236,7 +238,7 @@ if [ "$current_branch" = "$register_branch" ]; then
         printf 'pre-push-check: PASS\n'
         exit 0
     fi
-    bad "the $register_branch branch may only change BUGS.json and TODO.json"
+    bad "the $register_branch branch may only change BUGS.json, TODO.json or DECISIONS.json"
     printf '%s\n' "$stray" | sed 's/^/    /'
     note "register changes reach master without review, so anything else is refused"
     note "put the other change on its own branch: git switch -c <name> from the commit before it"
@@ -247,8 +249,9 @@ fi
 printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; worktree only}"
 
 # ---- 0. the registers live on their own branch ------------------------------
-# BUGS.json and TODO.json are append-mostly arrays, so two branches that both
-# file an entry both take the same next free id. Git does not see that: the
+# BUGS.json, TODO.json and DECISIONS.json are append-mostly arrays, so two
+# branches that both file an entry both take the same next free id. Git does
+# not see that: the
 # additions land at different array positions, it merges them textually with NO
 # conflict, and the result carries two unrelated entries under one id,
 # invisible until reg_findings ran -- and the resolvers' advice in the
@@ -264,7 +267,7 @@ printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; workt
 # branch exists -- git refuses a ref and a ref directory of the same name, and
 # bugs/close-b95 is unmerged and checked out. Work branches use the `bug/`
 # prefix, so `registers` cannot collide with them either.
-register_changes="$(changed -E '^(BUGS|TODO)\.json$' || true)"
+register_changes="$(changed -E '^(BUGS|TODO|DECISIONS)\.json$' || true)"
 # PRE_PUSH_ALLOW_REGISTERS=1 is for transport, not authoring: the one-off
 # transition that introduces this rule while register work is already in
 # flight, and an integration branch that merges someone else's entries rather
@@ -281,8 +284,9 @@ if [ -n "$register_changes" ] && [ "$current_branch" != "$register_branch" ]; th
     note "branch: $current_branch"
     note "THE TARGET BRANCH IS: $register_branch"
     note "  git switch $register_branch   (git switch -c $register_branch origin/$register_branch if it is not local yet)"
-    note "  then file the entry with the shipped tools -- bin/<triple>/bugs add ... or"
-    note "  bin/<triple>/todo add ... -- and push; the entry reaches master from there"
+    note "  then file the entry with the shipped tools -- bin/<triple>/bugs add,"
+    note "  bin/<triple>/todo add or bin/<triple>/decisions add -- and push; the entry"
+    note "  reaches master from there"
     note "a fix's resolution keys (fix, verification, status) go the same way, after the"
     note "  code lands, so the id is allocated and closed in one place"
     printf 'pre-push-check: 1 failure(s) - registers changed off the %s branch\n' \
@@ -358,10 +362,11 @@ shipped_rjq_present() {
 if shipped_rjq_present; then
     # shellcheck source=planning/scripts/register-lib.sh
     source "$(cd "$(dirname "$0")/planning/scripts" && pwd)/register-lib.sh"
-    for reg in TODO.json BUGS.json; do
+    for reg in TODO.json BUGS.json DECISIONS.json; do
         [ -f "$reg" ] || continue
         kind=bug
         [ "$reg" = TODO.json ] && kind=todo
+        [ "$reg" = DECISIONS.json ] && kind=decision
         findings=''
         if ! findings="$(reg_findings "$kind" "$reg" 2>&1)"; then
             bad "$reg: the soundness check could not run: $findings"

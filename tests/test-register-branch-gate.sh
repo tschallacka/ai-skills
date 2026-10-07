@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # MODE: DEV
 # test-register-branch-gate.sh — pre-push-check refuses a register change made
-# off the `registers` branch; on it, checks only that nothing but the two
+# off the `registers` branch; on it, checks only that nothing but the three
 # registers changed, and does so without nix.
 #
-# BUGS.json and TODO.json are append-mostly arrays, so two branches that each
-# file an entry both take the same next free id. Git cannot see that collision:
+# BUGS.json, TODO.json and DECISIONS.json are append-mostly arrays, so two
+# branches that each file an entry both take the same next free id. Git cannot
+# see that collision:
 # the additions land at different array positions, so it merges them textually
 # with NO conflict and the result carries two unrelated entries under one id,
 # invisible until reg_findings ran, and the resolvers' advice in the textual
@@ -17,7 +18,7 @@
 # right one, and asserts the verdict flips. Delete the gate and case 1 fails.
 #
 # On `registers` the gate is the file scope and nothing else: a push carrying
-# any path but BUGS.json and TODO.json fails, and no other gate runs, nor does
+# any path but BUGS.json, TODO.json or DECISIONS.json fails, and no other gate runs, nor does
 # the nix re-entry -- the stale master flake it carries does not build a dev
 # shell on Apple Silicon (B333), and this script must still be able to refuse.
 #
@@ -153,6 +154,24 @@ case "$out" in
 esac
 fi
 
+# 1b. DECISIONS.json alongside the other two, on its own feature branch: the
+#     third register is refused the identical way, not silently let through
+#     because the repo's own root has no committed DECISIONS.json yet. A new,
+#     untracked file needs `git add` to appear in the change set at all (the
+#     same reason case 4 below stages stray-file.txt before testing it).
+#     The branch switch and the file itself need no nix, so they always run;
+#     only exercising the gate (run_gate) is skipped without it, the same as
+#     case 1 -- otherwise case 2 below would never see DECISIONS.json either.
+( cd "$clone" && git switch -q -c feature/a-question && printf '[]\n' >DECISIONS.json &&
+    git add DECISIONS.json )
+if [ "$have_nix" = 1 ]; then
+rc="$(run_gate 120)"
+out="$(cat "$work/out")"
+t_assert_eq 'a DECISIONS.json change off the registers branch is refused (exit 1)' "$rc" '1'
+t_assert_contains 'the refusal names the rule' "$gate_line" "$out"
+t_assert_contains 'the refusal names the changed register' 'DECISIONS.json' "$out"
+fi
+
 # 2. The same change on the registers branch passes, and nothing else runs: not
 #    another gate, and not nix. Both are read from the output and the stand-in,
 #    since an exit 0 alone would also come from a script that checked nothing.
@@ -161,6 +180,8 @@ rc="$(run_registers_gate 60)"
 out="$(cat "$work/out")"
 t_assert_eq 'a register-only change on the registers branch passes (exit 0)' "$rc" '0'
 t_assert_contains 'the pass names the registers it saw' 'only registers changed' "$out"
+t_assert_contains 'the pass sees DECISIONS.json too (carried over as a staged addition from case 1b)' \
+    'DECISIONS.json' "$out"
 t_assert_contains 'the pass says no other gate runs' 'no other gate runs' "$out"
 case "$out" in
     *"$gate_line"*) t_fail 'the gate fired on the registers branch, where register edits belong' ;;
@@ -178,7 +199,7 @@ fi
 rc="$(run_registers_gate 60)"
 out="$(cat "$work/out")"
 t_assert_eq 'a non-register change on the registers branch is refused (exit 1)' "$rc" '1'
-t_assert_contains 'the refusal names the rule' 'may only change BUGS.json and TODO.json' "$out"
+t_assert_contains 'the refusal names the rule' 'may only change BUGS.json, TODO.json or DECISIONS.json' "$out"
 t_assert_contains 'the refusal names a staged stray file' 'stray-file.txt' "$out"
 t_assert_contains 'the refusal names an unstaged stray edit' 'README.md' "$out"
 if [ -e "$work/nix-was-called" ]; then
@@ -187,7 +208,10 @@ fi
 ( cd "$clone" && git rm -q -f --cached stray-file.txt && rm -f stray-file.txt && git checkout -q -- README.md )
 
 # 5. Nothing changed on the registers branch is a pass, not a refusal.
-( cd "$clone" && git checkout -q -- TODO.json )
+#    DECISIONS.json is a newly staged, never-committed file (case 1b), so
+#    reverting it needs unstaging and removing, not a checkout -- a checkout
+#    of a path with no committed blob yet has nothing to restore it to.
+( cd "$clone" && git checkout -q -- TODO.json && git reset -q -- DECISIONS.json && rm -f DECISIONS.json )
 rc="$(run_registers_gate 60)"
 t_assert_eq 'no change at all on the registers branch passes (exit 0)' "$rc" '0'
 

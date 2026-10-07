@@ -2,19 +2,20 @@
 # MODE: DEV
 # registers-guard.sh — decide whether a `registers` push may reach master.
 #
-# The register branch exists because BUGS.json and TODO.json are append-mostly
-# arrays: two branches that each file an entry both take the same next free id,
-# and git cannot see that collision. The additions land at different array
-# positions, so it merges them textually with NO conflict and the result carries
-# two unrelated entries under one id, invisible until reg_findings ran. A
-# single writer removes the class, and this script is what makes that branch
-# safe to fast-forward.
+# The register branch exists because BUGS.json, TODO.json and DECISIONS.json
+# are append-mostly arrays: two branches that each file an entry both take the
+# same next free id, and git cannot see that collision. The additions land at
+# different array positions, so it merges them textually with NO conflict and
+# the result carries two unrelated entries under one id, invisible until
+# reg_findings ran. A single writer removes the class, and this script is what
+# makes that branch safe to fast-forward.
 #
 # Two refusals, and the second is the load-bearing one:
 #
-#   1. Every changed path must be BUGS.json or TODO.json. Register changes reach
-#      master without review by design, so a branch that could carry anything
-#      else is a protection bypass, not a convenience.
+#   1. Every changed path must be BUGS.json, TODO.json or DECISIONS.json.
+#      Register changes reach master without review by design, so a branch
+#      that could carry anything else is a protection bypass, not a
+#      convenience.
 #   2. Neither register may carry a duplicate id, and every parent must resolve.
 #      This is the check git cannot perform, so it is the reason CI runs at all.
 #
@@ -38,7 +39,7 @@ usage() {
     sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
-registers="BUGS.json TODO.json"
+registers="BUGS.json TODO.json DECISIONS.json"
 base=""
 files_from=""
 while [ "$#" -gt 0 ]; do
@@ -87,7 +88,7 @@ if [ "$count" -eq 0 ]; then
     exit 1
 fi
 if [ -n "$stray" ]; then
-    refuse "the registers branch may only change BUGS.json and TODO.json"
+    refuse "the registers branch may only change BUGS.json, TODO.json or DECISIONS.json"
     printf '%s' "$stray" | sed 's/^/  /' >&2
     printf 'registers-guard: register changes reach master without review, so a branch\n' >&2
     printf 'registers-guard: that can carry anything else is a protection bypass.\n' >&2
@@ -107,7 +108,12 @@ for register in $registers; do
 import json, sys
 
 path = sys.argv[1]
-key = "bugs" if path.startswith("BUGS") else "tasks"
+if path.startswith("BUGS"):
+    key = "bugs"
+elif path.startswith("TODO"):
+    key = "tasks"
+else:
+    key = "questions"
 
 def refuse(msg):
     sys.stderr.write("registers-guard: REFUSED: %s: %s\n" % (path, msg))

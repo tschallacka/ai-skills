@@ -50,12 +50,31 @@ reg_findings_todos_fold_program() {
         ) else empty end'
 }
 
-# reg_findings_entry_program: the per-entry structural checks shared by bugs
-# and tasks alike (status, severity/priority enums, timestamps, bug-only
-# reproduce/mechanism/verification requirements).
+# reg_findings_decision_fields_program: questions' own required-field checks
+# (title, options, priority, branch), split out of reg_findings_entry_program
+# the same way reg_findings_todos_fold_program already stands apart from it --
+# a kind-specific check that would otherwise push the shared one over
+# CODE-STYLE.md's 40-line cap. Recomputes $items rather than sharing the
+# binding reg_findings_entry_program builds, since each is its own top-level
+# jq expression in reg_findings()'s program.
+reg_findings_decision_fields_program() {
+    printf '%s\n' '
+        ((if $kind == "decision" then .questions else [] end) // [])[] as $e
+        | [
+            (if (($e.title // "") == "") then "\($e.id): missing title" else empty end),
+            (if (($e.options // []) | length) == 0 then "\($e.id): no options" else empty end),
+            (if (($e.priority // "") == "") then "\($e.id): missing priority" else empty end),
+            (if (($e.branch // "") == "") then "\($e.id): missing branch" else empty end)
+          ]
+        | .[]'
+}
+
+# reg_findings_entry_program: the per-entry structural checks shared by bugs,
+# tasks and questions alike (status, severity/priority enums, timestamps,
+# bug-only reproduce/mechanism/verification requirements).
 reg_findings_entry_program() {
     printf '%s\n' '
-        ((if $kind == "bug" then .bugs else .tasks end) // []) as $items
+        ((if $kind == "bug" then .bugs elif $kind == "todo" then .tasks else .questions end) // []) as $items
         | ($items | map(.id)) as $ids
         | [
             (if (($ids | length)) != (($ids | unique | length))
@@ -98,9 +117,12 @@ reg_findings() {
         'def st_enum:
             if $kind == "bug"
             then ["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"]
-            else ["open","done","blocked","partly","decided","dropped","obsolete"] end;'"
-        $(reg_findings_todos_fold_program),
-        $(reg_findings_entry_program)" "$file"
+            elif $kind == "todo"
+            then ["open","done","blocked","partly","decided","dropped","obsolete"]
+            else ["open","answered","closed","dropped","obsolete"] end;'"
+        ($(reg_findings_todos_fold_program)),
+        ($(reg_findings_entry_program)),
+        ($(reg_findings_decision_fields_program))" "$file"
 }
 
 # reg_sort <kind> <file>: reorder entries worst-first in place (temp+rename).
@@ -115,6 +137,11 @@ reg_sort() {
             def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
             def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
             .bugs |= sort_by(prank, srank, (.id | idnum))' "$file" > "$tmp"
+    elif [ "$kind" = decision ]; then
+        "$REG_RJQ" 'def idnum: [(. | scan("[0-9]+") | tonumber)?, .];
+            def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+            def srank: {open:0, answered:1, closed:2, dropped:3, obsolete:4}[.status // "open"] // 5;
+            .questions |= sort_by(srank, prank, (.id | idnum))' "$file" > "$tmp"
     else
         "$REG_RJQ" 'def idnum: [(. | scan("[0-9]+") | tonumber)?, .];
             def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
@@ -144,9 +171,10 @@ reg_in_linked_worktree() {
 reg_next_id() {
     local kind="$1" file="$2" prefix="B" next
     [ "$kind" = todo ] && prefix="T"
+    [ "$kind" = decision ] && prefix="Q"
     reg_require_jq
     next="$("$REG_RJQ" -r --arg p "$prefix" '
-        [(if $p == "B" then .bugs else .tasks end)[].id | capture("^[A-Z]*(?<number>\\d+)$").number | tonumber] | max // 0 | . + 1
+        [(if $p == "B" then .bugs elif $p == "T" then .tasks else .questions end)[].id | capture("^[A-Z]*(?<number>\\d+)$").number | tonumber] | max // 0 | . + 1
     ' "$file")"
     if reg_in_linked_worktree "$file"; then
         printf '%s: %s is a linked git worktree; %s is local to this copy of the register and may collide with an id minted concurrently in another worktree -- resolve a post-merge collision with bugs/todo resolve\n' \

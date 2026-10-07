@@ -258,7 +258,7 @@ package/planning/scripts/plan-table-lib.sh	14458
 package/planning/scripts/plans-board-lib.sh	10613
 package/planning/scripts/rebuild-plan-progress.sh	2079
 package/planning/scripts/register-command.sh	2075
-package/planning/scripts/register-lib.sh	8346
+package/planning/scripts/register-lib.sh	10054
 package/planning/scripts/register-read.sh	2259
 package/planning/scripts/remove-coverage.sh	1997
 package/planning/scripts/remove-plan.sh	2023
