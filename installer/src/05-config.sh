@@ -211,7 +211,7 @@ INTEGRATION_SELECTION_EOF
     printf 'default\n'
 }
 
-SKILL_NAMES=(planning project-specifics resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette question-etiquette ai-text-editor interactive-shell www ci-failures rjq)
+SKILL_NAMES=(planning project-specifics resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette question-etiquette ai-text-editor interactive-shell www ci-failures rjq decisions)
 # T102: agent profiles under .agents/profiles/, declared in profile_files()
 # (installer/src/50-manifest.sh) the same way SKILL_NAMES is declared in
 # skill_files() -- a separate list because a profile is not a skill (no
@@ -231,11 +231,13 @@ SKILL_DESCRIPTIONS=(
     'Conflicts resolved by what each side changed, and a merged tree you can trust.'
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
     'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
+    'Numbers every question and letters every option, so a partial answer like "Q7b" names exactly which parts are still open.'
     'Server-owned editor tabs for agents: bounded reads, explicit search modes, revision-aware edits, undo/redo, raw-byte and hex access, SQLite metadata, and Unix-socket or TCP transport.'
     'Drives unknown full-screen terminal programs through a PTY wrapper and a unix-socket input client.'
     'A brake the human can pull, and one the agent pulls on itself when it is thrashing: stop, answer three questions, then one reasoned step.'
     'What actually failed in a CI run or pipeline, from a run/pipeline id, a PR/MR number or a branch -- on GitHub or GitLab.'
     'Reads, filters and searches JSON with the shipped rjq binary, where no system JSON filter is installed.'
+    'A register of non-blocking questions an agent raises mid-work: lettered options, priority and branch, answered later from the CLI or a pane.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
