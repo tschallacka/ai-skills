@@ -1,0 +1,8 @@
+# MODE: PROD
+# What this skill needs on the target machine at runtime, and how badly.
+#
+# NO TOOL ROWS, and that is the point. The register's tools ship as a
+# prebuilt static binary (binaries.tsv), so reading or writing
+# DECISIONS.json asks the target machine for nothing -- not even a shell,
+# the same as bug-report's and todo's own empty tables.
+tool	condition	strength	why

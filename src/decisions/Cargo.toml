@@ -1,0 +1,23 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "decisions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The question register's tools: file, answer, stub and close DECISIONS.json, with the register's rules as types"
+
+[lib]
+name = "decisions"
+path = "src/lib.rs"
+
+[[bin]]
+name = "decisions"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
