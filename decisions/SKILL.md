@@ -84,6 +84,24 @@ reason: it does not vanish just because someone answered it. `close`/`apply`
 can withdraw a question from any status, with or without ever implementing
 it.
 
+## Install mode
+
+Which tools you have depends on the install mode (`integration.tsv`), same
+as `ai-text-editor`/`chat`. Unlike those two, the `decisions` CLI itself is
+never mode-gated -- `skill`-mode ships it alone; `mcp`-mode ships it
+alongside `decisions-mcp`, since the `decision-board` pane shells out to the
+CLI directly regardless of mode. The mode choice only ever decides whether
+`decisions-mcp` is installed and the agent is pointed at its tools instead
+of the CLI's own documented commands:
+
+```
+installer install --integration decisions=skill --skill decisions --target DIR --yes   # CLI only, no adapter
+installer install --integration decisions=mcp   --skill decisions --target DIR --yes   # CLI + decisions-mcp
+```
+
+With neither flag, a fresh install defaults to `mcp` (the same default every
+mode-offering skill in this repo uses).
+
 ## Other ways to reach the register
 
 - **The MCP adapter** (`decisions-mcp`, stdio only, no daemon, no port):

@@ -748,6 +748,101 @@ mod tests {
         assert!(!target_root.path().join("ai-text-editor/bin").exists());
     }
 
+    /// `decisions` is the one skill whose own CLI binary stays unlisted
+    /// (ships in every mode -- decision-board's pane shells out to it
+    /// regardless of mode) while `skill` is still a real, selectable choice
+    /// via a placeholder row bound to no real file (`binary` = `-`). This
+    /// proves both halves at once: the CLI survives a `skill`-mode install
+    /// and the adapter does not.
+    fn write_decisions_integration_tsv(source_root: &Path) {
+        write(
+            &source_root.join("decisions").join("integration.tsv"),
+            "mode\tbinary\twhy\n\
+             skill\t-\tNo binary of its own\n\
+             mcp\tdecisions-mcp\tMCP bridge\n",
+        );
+    }
+
+    #[test]
+    fn a_skill_mode_decisions_install_keeps_the_cli_and_drops_the_adapter() {
+        let source_root = tempfile::tempdir().unwrap();
+        write_decisions_integration_tsv(source_root.path());
+        write(
+            &source_root
+                .path()
+                .join(format!("decisions/bin/{}/decisions", current_target())),
+            "cli binary",
+        );
+        write(
+            &source_root
+                .path()
+                .join(format!("decisions/bin/{}/decisions-mcp", current_target())),
+            "mcp binary",
+        );
+        let target_root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+
+        install_skill(
+            source_root.path(),
+            "decisions",
+            target_root.path(),
+            home.path(),
+            Some("skill"),
+            false,
+        )
+        .unwrap();
+
+        let shared = shared_bin::shared_bin_dir(home.path());
+        assert!(
+            shared.join("decisions").is_file(),
+            "the CLI must survive skill mode"
+        );
+        assert!(
+            !shared.join("decisions-mcp").is_file(),
+            "the adapter must not ship in skill mode"
+        );
+    }
+
+    #[test]
+    fn an_mcp_mode_decisions_install_keeps_both_the_cli_and_the_adapter() {
+        let source_root = tempfile::tempdir().unwrap();
+        write_decisions_integration_tsv(source_root.path());
+        write(
+            &source_root
+                .path()
+                .join(format!("decisions/bin/{}/decisions", current_target())),
+            "cli binary",
+        );
+        write(
+            &source_root
+                .path()
+                .join(format!("decisions/bin/{}/decisions-mcp", current_target())),
+            "mcp binary",
+        );
+        let target_root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+
+        install_skill(
+            source_root.path(),
+            "decisions",
+            target_root.path(),
+            home.path(),
+            Some("mcp"),
+            false,
+        )
+        .unwrap();
+
+        let shared = shared_bin::shared_bin_dir(home.path());
+        assert!(
+            shared.join("decisions").is_file(),
+            "the CLI must still be present: decision-board's pane needs it regardless of mode"
+        );
+        assert!(
+            shared.join("decisions-mcp").is_file(),
+            "the adapter ships in mcp mode"
+        );
+    }
+
     #[test]
     fn switching_mode_removes_the_previous_modes_shared_binary_when_nothing_else_needs_it() {
         // B374: T72's own shared bin (one location for every skill's

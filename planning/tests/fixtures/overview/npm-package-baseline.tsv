@@ -64,9 +64,10 @@ package/decision-reminder-plugin/hooks/hooks.json	214
 package/decision-reminder-plugin/hooks/lib.sh	2843
 package/decision-reminder-plugin/hooks/session-start.sh	3660
 package/decision-reminder-plugin/tests/test-session-start-hook.sh	6909
-package/decisions/SKILL.md	5103
+package/decisions/SKILL.md	5952
 package/decisions/binaries.tsv	1444
-package/decisions/docs/README.md	3263
+package/decisions/docs/README.md	3514
+package/decisions/integration.tsv	2318
 package/decisions/requires.tsv	379
 package/decisions/schema.2.0.0-alpha.4.json	2160
 package/decisions/schema.2.0.0-alpha.5.json	3710
@@ -172,8 +173,8 @@ package/mods/ci-board/hooks/register.tsx	20838
 package/mods/ci-board/types/index.d.ts	562
 package/mods/decision-board/.claude-plugin/plugin.json	439
 package/mods/decision-board/hooks/hooks.json	36
-package/mods/decision-board/hooks/register.tsx	18728
-package/mods/decision-board/types/index.d.ts	861
+package/mods/decision-board/hooks/register.tsx	20803
+package/mods/decision-board/types/index.d.ts	924
 package/mods/plan-board/.claude-plugin/plugin.json	1033
 package/mods/plan-board/hooks/hooks.json	36
 package/mods/plan-board/hooks/register.tsx	34823

@@ -1,0 +1,38 @@
+# MODE: PROD
+# Which artifacts belong to which integration mode.
+#
+# A skill that offers more than one way to be driven declares it here, and
+# `install.sh --integration <skill>=<mode>` picks one without a prompt, so an
+# agent can choose its own interface headlessly.
+#
+# The rule is deliberately narrow: a binary named below installs ONLY in its
+# mode, and every file not named installs in every mode. So SKILL.md, the
+# schemas and the requirements table are never mode-dependent.
+#
+# `decisions` (the CLI) is deliberately UNLISTED, not `skill`-only -- unlike
+# chat-mcp/ai-text-editor-mcp, which link their own CLI as a library or
+# autostart a companion server, decisions-mcp is a separate stdio adapter
+# that does not help the decision-board MOD at all: the pane shells out to
+# the `decisions` binary directly for every button press (answer, implement),
+# regardless of which mode this skill is installed in. Removing it in mcp
+# mode would leave the pane's own buttons broken, not just the documented
+# CLI commands -- both modes need it, the same reason chat-server-rs and
+# ai-text-editor-server are unlisted in their own integration.tsv.
+#
+# Unlike those three skills, decisions has no second binary that is
+# genuinely skill-mode-exclusive to anchor a `skill` row to -- the CLI is
+# the one artifact both modes already share. `skill`'s row below names `-`,
+# a placeholder `file_allowed`/`binary_mode` can never match a real file (no
+# bin/ artifact is ever named that), purely so `skill` still appears in
+# `modes()` and `--integration decisions=skill` validates and means
+# something concrete: decisions-mcp is not installed, and the agent is
+# pointed at the CLI directly (SKILL.md/docs/README.md), not at MCP tools.
+#
+# `mcp` is the opt-in richer surface: list_open/list_decided/list_implemented/
+# list_closed/list_urgent, plus add/answer/stub/implement as typed tool
+# calls, for a harness that can register and call an MCP server -- the CLI
+# stays installed underneath either way (the pane still needs it), it is
+# just not what the agent is told to drive directly.
+mode	binary	why
+skill	-	No binary of its own (decisions, the CLI, is unlisted/always-on); this row exists only so `skill` validates as a real --integration choice
+mcp	decisions-mcp	MCP bridge an agent calls as typed tools instead

@@ -24,6 +24,10 @@ open.
 - **Three ways in.** The `decisions` CLI, the `decisions-mcp` stdio adapter
   (no daemon, no port) for an agent that wants typed tool calls, and the
   `decision-board` mod for a person to see and answer questions in a pane.
+  The CLI installs in every mode (the pane needs it either way); whether
+  `decisions-mcp` also installs and gets registered is an install-time
+  choice (`--integration decisions=skill|mcp`), for a harness that cannot
+  register an MCP server at all.
 - **Decided is not done.** A question's lifecycle is `open -> decided ->
   implemented`. The user answering it does not make it vanish: a decided
   question stays visible everywhere (the pane, the CLI, the session-start

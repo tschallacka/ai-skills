@@ -570,7 +570,7 @@ EOF
             esac
             ;;
         decisions)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
+            printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv integration.tsv \
                 schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json
             # The register's tools ship two prebuilt binaries per target --
             # the CLI and its stdio MCP adapter, the same pair shape
