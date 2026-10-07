@@ -119,7 +119,7 @@ reg_findings() {
             then ["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"]
             elif $kind == "todo"
             then ["open","done","blocked","partly","decided","dropped","obsolete"]
-            else ["open","answered","closed","dropped","obsolete"] end;'"
+            else ["open","decided","implemented","closed","dropped","obsolete"] end;'"
         ($(reg_findings_todos_fold_program)),
         ($(reg_findings_entry_program)),
         ($(reg_findings_decision_fields_program))" "$file"
@@ -140,7 +140,7 @@ reg_sort() {
     elif [ "$kind" = decision ]; then
         "$REG_RJQ" 'def idnum: [(. | scan("[0-9]+") | tonumber)?, .];
             def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
-            def srank: {open:0, answered:1, closed:2, dropped:3, obsolete:4}[.status // "open"] // 5;
+            def srank: {open:0, decided:1, implemented:2, closed:3, dropped:4, obsolete:5}[.status // "open"] // 6;
             .questions |= sort_by(srank, prank, (.id | idnum))' "$file" > "$tmp"
     else
         "$REG_RJQ" 'def idnum: [(. | scan("[0-9]+") | tonumber)?, .];

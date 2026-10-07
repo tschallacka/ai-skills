@@ -12,7 +12,16 @@ use crate::register::{Question, Register};
 /// The register version this binary writes. Tracks package.json's own
 /// version exactly, the same way bug-report's and todo's own SUPPORTED do;
 /// bump it in the same change that bumps the package version.
-pub const SUPPORTED: &str = "2.0.0-alpha.4";
+///
+/// Bumped for alpha.5: `Status::Answered` is renamed `Status::Decided` (to
+/// read the same way as `todo`'s own `decided` status) and a new terminal
+/// `Status::Implemented` is added, set once the chosen option has actually
+/// been carried out in the code. An alpha.4 register with an `answered`
+/// entry is not silently reinterpreted: that status name no longer exists
+/// in this enum, so `attempt` below reports it as unconvertible rather than
+/// archiving or guessing, the same honesty this module already gives any
+/// other foreign shape it cannot parse.
+pub const SUPPORTED: &str = "2.0.0-alpha.5";
 
 pub struct Unconvertible {
     pub id: String,
@@ -161,6 +170,30 @@ mod tests {
         assert_eq!(archived, vec!["Q2".to_string()]);
         assert_eq!(unconvertible.len(), 1);
         assert_eq!(unconvertible[0].id, "Q3");
+    }
+
+    #[test]
+    fn an_alpha_4_answered_entry_is_reported_unconvertible_not_silently_archived() {
+        // `answered` does not exist in the current Status enum (renamed to
+        // `decided` for alpha.5); a question this old, already decided but
+        // never closed, must not vanish into the backup the way a genuinely
+        // resolved `closed` entry does -- it still has outstanding work.
+        let value = json!({
+            "skill": "decisions",
+            "skill_version": "2.0.0-alpha.4",
+            "comment": "c",
+            "questions": [
+                {"id": "Q1", "title": "t", "status": "answered", "priority": "normal",
+                 "branch": "main", "options": [{"letter": "a", "label": "Yes"}],
+                 "context": "", "chosen": "a", "resolution": null,
+                 "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}
+            ]
+        });
+        let (carried, archived, unconvertible) = attempt(&value);
+        assert!(carried.is_empty());
+        assert!(archived.is_empty());
+        assert_eq!(unconvertible.len(), 1);
+        assert_eq!(unconvertible[0].id, "Q1");
     }
 
     #[test]

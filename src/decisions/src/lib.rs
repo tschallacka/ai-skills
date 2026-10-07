@@ -9,6 +9,6 @@ pub mod query;
 pub mod register;
 
 pub use migrate::SUPPORTED;
-pub use mutate::{add, answer, close, stub, NewQuestion};
+pub use mutate::{add, answer, close, implement, stub, NewQuestion};
 pub use query::{list, Filter};
 pub use register::{Choice, Priority, Question, Register, Status};

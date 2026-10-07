@@ -2,10 +2,12 @@
 # MODE: PROD
 # decision-reminder-plugin/hooks/lib.sh -- shared by hooks/session-start.sh.
 #
-# Two independent pieces of logic factored out so they can be tested directly
-# (same convention as chat-interrupt-plugin/hooks/lib.sh and
-# tui-hint-plugin/hooks/lib.sh): where the register lives, and where the
-# compiled `decisions` binary this hook shells out to lives.
+# Three independent pieces of logic factored out so they can be tested
+# directly (same convention as chat-interrupt-plugin/hooks/lib.sh and
+# tui-hint-plugin/hooks/lib.sh): where the register lives, where the compiled
+# `decisions` binary this hook shells out to lives, and turning a `decisions
+# list` output line into the "<id> -- <title>" form both the open-urgent and
+# decided sections of the reminder name questions by.
 
 # decision_reminder_hook_register_path -- DECISIONS.json's path, the same
 # fallback order the decisions binary's own resolve_path uses (src/decisions/
@@ -41,4 +43,23 @@ decision_reminder_hook_decisions_bin() {
         done
     done
     return 1
+}
+
+# decision_reminder_hook_named_lines <lines> -- one "<id> -- <title>" per
+# input line, where each input line is "ID [Priority/Status] Title (branch)"
+# (decisions list's own format). Title extraction strips through the first
+# "] " and the trailing " (...)"; a title that itself contains a
+# parenthesized group is the one case this heuristic can misread, the same
+# class of limitation tui-hint-plugin's own text matching already accepts.
+decision_reminder_hook_named_lines() {
+    local lines="$1" line id title
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        id="${line%% *}"
+        title="${line#*] }"
+        title="${title% (*}"
+        printf '%s -- %s\n' "$id" "$title"
+    done <<EOF
+$lines
+EOF
 }

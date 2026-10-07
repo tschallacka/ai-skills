@@ -1,6 +1,6 @@
 ---
 name: decisions
-description: Use when an agent needs to raise a non-blocking, multiple-choice question mid-work -- stub a reasonable solution, keep working, and let the user answer later from the CLI or the decision-board mod, or let any agent glean open, answered, closed, or urgent questions over the stdio MCP tool. Do not use for a blocking question that must be answered before the current turn can continue -- use the harness's own question/confirmation mechanism for that.
+description: Use when an agent needs to raise a non-blocking, multiple-choice question mid-work -- stub a reasonable solution, keep working, and let the user answer later from the CLI or the decision-board mod, or let any agent glean open, decided, implemented, closed, or urgent questions over the stdio MCP tool. A decided question is outstanding work for the agent, not just the user's to answer: implement it, then mark it so. Do not use for a blocking question that must be answered before the current turn can continue -- use the harness's own question/confirmation mechanism for that.
 ---
 <!-- MODE: PROD -->
 
@@ -25,13 +25,13 @@ exist yet, write it yourself first, as the skeleton below with an empty
 ```json
 {
   "skill": "decisions",
-  "skill_version": "2.0.0-alpha.4",
+  "skill_version": "2.0.0-alpha.5",
   "comment": "Non-blocking questions raised during work.",
   "questions": [
     {
       "id": "Q1",
       "title": "Cache the parsed config, or re-read it every call?",
-      "status": "answered",
+      "status": "decided",
       "priority": "normal",
       "branch": "feature/config-reload",
       "options": [
@@ -53,10 +53,11 @@ exist yet, write it yourself first, as the skeleton below with an empty
 ```
 decisions add --title T --option a:LABEL --option b:LABEL [--option c:LABEL ...]
               [--priority normal] [--context C] [--file PATH]
-decisions list [--status open|answered|closed|dropped|obsolete]
+decisions list [--status open|decided|implemented|closed|dropped|obsolete]
                [--priority urgent|high|normal|low|someday] [--branch B] [--file PATH]
 decisions answer <ID> <LETTER> [--file PATH]
 decisions stub <ID> <ASSUMPTION> [--file PATH]
+decisions implement <ID> [NOTE] [--file PATH]
 decisions apply <ID> <RESOLUTION> [--file PATH]
 decisions close <ID> <RESOLUTION> [--file PATH]   (an alias for apply)
 ```
@@ -73,18 +74,32 @@ A question raised while stubbing a solution should carry that stub in
 `--context`, so a later reader of an open question knows what was actually
 done in the meantime, not just that a question exists.
 
+A question's lifecycle is `open -> decided -> implemented`. `answer` moves
+it from open to decided once the user picks an option; that is still
+outstanding work -- the agent's, not the user's -- until `implement` records
+that the pick was actually carried out and moves it to implemented. A
+decided question stays visible (in `decisions list --status decided`, in the
+decision-board pane, and in the session-start reminder) for exactly that
+reason: it does not vanish just because someone answered it. `close`/`apply`
+can withdraw a question from any status, with or without ever implementing
+it.
+
 ## Other ways to reach the register
 
 - **The MCP adapter** (`decisions-mcp`, stdio only, no daemon, no port):
-  exposes `list_open`, `list_answered`, `list_closed`, `list_urgent`,
-  `answer`, `add`, and `stub` as typed tool calls, for an agent that wants
-  to glean open or urgent questions without shelling out.
-- **The `decision-board` mod**: lists open questions in a pane and lets a
-  person press a button to choose an answer option directly, instead of
-  running `decisions answer` by hand.
+  exposes `list_open`, `list_decided`, `list_implemented`, `list_closed`,
+  `list_urgent`, `answer`, `add`, `stub`, and `implement` as typed tool
+  calls, for an agent that wants to glean or act on questions without
+  shelling out.
+- **The `decision-board` mod**: shows open and decided questions in a pane
+  (toggle to "Implemented" to see what is already done), and lets a person
+  press a button to choose an answer option directly, instead of running
+  `decisions answer` by hand.
 - **The `decision-reminder-plugin`**: at session start, reads the register
-  and reminds the agent of open and urgent questions concisely, so a
-  question raised in an earlier session is not forgotten.
+  and reminds the agent of open and urgent questions to answer, and
+  separately names every decided question still awaiting implementation --
+  the agent's own outstanding work, not forgotten just because the session
+  changed.
 
 ## Migration
 

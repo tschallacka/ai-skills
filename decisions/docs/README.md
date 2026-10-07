@@ -24,6 +24,12 @@ open.
 - **Three ways in.** The `decisions` CLI, the `decisions-mcp` stdio adapter
   (no daemon, no port) for an agent that wants typed tool calls, and the
   `decision-board` mod for a person to see and answer questions in a pane.
+- **Decided is not done.** A question's lifecycle is `open -> decided ->
+  implemented`. The user answering it does not make it vanish: a decided
+  question stays visible everywhere (the pane, the CLI, the session-start
+  reminder) until an agent actually carries out the pick and marks it
+  `implemented` -- it is the agent's outstanding work, not just a record of
+  the user's choice.
 
 ## Quick start
 
@@ -38,19 +44,20 @@ Q1 [Normal/Open] Cache the parsed config, or re-read it every call? (whatever br
 
 decisions answer Q1 b
 
-decisions apply Q1 "Confirmed: re-read every call, parsing is cheap here"
+decisions implement Q1 "Confirmed: re-read every call, parsing is cheap here"
 ```
 
 A question can also be left open while recording what was assumed, rather
-than answered and closed in one step:
+than decided and implemented in one step:
 
 ```
 decisions stub Q1 "Assumed option b for now; revisit once load testing exists"
 decisions close Q1 "Withdrawn: load testing landed, caching is not worth it"
 ```
 
-`close` is an alias for `apply` — either name sets the resolution and moves
-the question to `closed`.
+`close`/`apply` can withdraw a question from any status, with or without
+ever implementing it — a decided question that turns out not to be worth
+doing is `close`d, not `implement`ed.
 
 ## Good to know
 

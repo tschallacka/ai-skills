@@ -77,7 +77,7 @@ pub fn add(register: &mut Register, new: NewQuestion) -> Result<String, String> 
 }
 
 /// Record the user's pick: sets `chosen` and moves the question to
-/// `Answered`. Refuses an unknown id or a letter the question did not offer.
+/// `Decided`. Refuses an unknown id or a letter the question did not offer.
 pub fn answer(register: &mut Register, id: &str, letter: &str) -> Result<(), String> {
     let question = register
         .find_mut(id)
@@ -88,7 +88,7 @@ pub fn answer(register: &mut Register, id: &str, letter: &str) -> Result<(), Str
         ));
     }
     question.chosen = Some(letter.to_string());
-    question.status = Status::Answered;
+    question.status = Status::Decided;
     question.updated_at = now();
     Ok(())
 }
@@ -117,6 +117,29 @@ pub fn close(register: &mut Register, id: &str, resolution: &str) -> Result<(), 
         .ok_or_else(|| format!("{id}: no such question"))?;
     question.resolution = Some(resolution.to_string());
     question.status = Status::Closed;
+    question.updated_at = now();
+    Ok(())
+}
+
+/// Mark a decided question as carried out in the code, optionally recording
+/// what was done. Refuses anything not currently `Decided`: there is nothing
+/// to implement before a pick exists, and a question that is open, already
+/// implemented, closed, dropped or obsolete has no further work for this to
+/// record -- `close` is the way to withdraw a question instead.
+pub fn implement(register: &mut Register, id: &str, note: &str) -> Result<(), String> {
+    let question = register
+        .find_mut(id)
+        .ok_or_else(|| format!("{id}: no such question"))?;
+    if question.status != Status::Decided {
+        return Err(format!(
+            "{id}: only a decided question can be marked implemented (status is {:?})",
+            question.status
+        ));
+    }
+    if !note.is_empty() {
+        question.resolution = Some(note.to_string());
+    }
+    question.status = Status::Implemented;
     question.updated_at = now();
     Ok(())
 }
@@ -228,5 +251,85 @@ mod tests {
         let question = register.find(&id).unwrap();
         assert_eq!(question.status, Status::Closed);
         assert_eq!(question.resolution.as_deref(), Some("Went with a"));
+    }
+
+    #[test]
+    fn answer_moves_a_question_to_decided_not_answered() {
+        let mut register = empty_register();
+        let id = add(
+            &mut register,
+            NewQuestion {
+                title: "Pick one".to_string(),
+                options: two_options(),
+                priority: Priority::Normal,
+                branch: "main".to_string(),
+                context: String::new(),
+            },
+        )
+        .unwrap();
+        answer(&mut register, &id, "a").unwrap();
+        assert_eq!(register.find(&id).unwrap().status, Status::Decided);
+    }
+
+    #[test]
+    fn implement_on_a_decided_question_records_the_note_and_moves_to_implemented() {
+        let mut register = empty_register();
+        let id = add(
+            &mut register,
+            NewQuestion {
+                title: "Pick one".to_string(),
+                options: two_options(),
+                priority: Priority::Normal,
+                branch: "main".to_string(),
+                context: String::new(),
+            },
+        )
+        .unwrap();
+        answer(&mut register, &id, "a").unwrap();
+        implement(&mut register, &id, "landed in src/thing.rs").unwrap();
+        let question = register.find(&id).unwrap();
+        assert_eq!(question.status, Status::Implemented);
+        assert_eq!(
+            question.resolution.as_deref(),
+            Some("landed in src/thing.rs")
+        );
+    }
+
+    #[test]
+    fn implement_before_a_pick_exists_is_refused() {
+        let mut register = empty_register();
+        let id = add(
+            &mut register,
+            NewQuestion {
+                title: "Pick one".to_string(),
+                options: two_options(),
+                priority: Priority::Normal,
+                branch: "main".to_string(),
+                context: String::new(),
+            },
+        )
+        .unwrap();
+        let err = implement(&mut register, &id, "").unwrap_err();
+        assert!(err.contains(&id));
+        assert_eq!(register.find(&id).unwrap().status, Status::Open);
+    }
+
+    #[test]
+    fn implement_on_an_already_implemented_question_is_refused() {
+        let mut register = empty_register();
+        let id = add(
+            &mut register,
+            NewQuestion {
+                title: "Pick one".to_string(),
+                options: two_options(),
+                priority: Priority::Normal,
+                branch: "main".to_string(),
+                context: String::new(),
+            },
+        )
+        .unwrap();
+        answer(&mut register, &id, "a").unwrap();
+        implement(&mut register, &id, "").unwrap();
+        assert!(implement(&mut register, &id, "again").is_err());
     }
 }

@@ -40,6 +40,7 @@ package/bug-report/schema.2.0.0-alpha.1.json	2499
 package/bug-report/schema.2.0.0-alpha.2.json	2756
 package/bug-report/schema.2.0.0-alpha.3.json	3005
 package/bug-report/schema.2.0.0-alpha.4.json	3254
+package/bug-report/schema.2.0.0-alpha.5.json	3503
 package/chat-interrupt-plugin/.claude-plugin/plugin.json	349
 package/chat-interrupt-plugin/README.md	2803
 package/chat-interrupt-plugin/hooks/hooks.json	211
@@ -60,14 +61,15 @@ package/ci-failures/scripts/ci-failures-glab-lib.sh	8321
 package/ci-failures/scripts/ci-failures.sh	6554
 package/decision-reminder-plugin/.claude-plugin/plugin.json	355
 package/decision-reminder-plugin/hooks/hooks.json	214
-package/decision-reminder-plugin/hooks/lib.sh	1953
-package/decision-reminder-plugin/hooks/session-start.sh	2925
-package/decision-reminder-plugin/tests/test-session-start-hook.sh	4831
-package/decisions/SKILL.md	4121
+package/decision-reminder-plugin/hooks/lib.sh	2843
+package/decision-reminder-plugin/hooks/session-start.sh	3660
+package/decision-reminder-plugin/tests/test-session-start-hook.sh	6909
+package/decisions/SKILL.md	5103
 package/decisions/binaries.tsv	1444
-package/decisions/docs/README.md	2786
+package/decisions/docs/README.md	3263
 package/decisions/requires.tsv	379
 package/decisions/schema.2.0.0-alpha.4.json	2160
+package/decisions/schema.2.0.0-alpha.5.json	3710
 package/editor-gate-plugin/.claude-plugin/plugin.json	367
 package/editor-gate-plugin/README.md	2162
 package/editor-gate-plugin/hooks/editor-token	1067
@@ -170,8 +172,8 @@ package/mods/ci-board/hooks/register.tsx	20838
 package/mods/ci-board/types/index.d.ts	562
 package/mods/decision-board/.claude-plugin/plugin.json	439
 package/mods/decision-board/hooks/hooks.json	36
-package/mods/decision-board/hooks/register.tsx	13134
-package/mods/decision-board/types/index.d.ts	632
+package/mods/decision-board/hooks/register.tsx	18728
+package/mods/decision-board/types/index.d.ts	861
 package/mods/plan-board/.claude-plugin/plugin.json	1033
 package/mods/plan-board/hooks/hooks.json	36
 package/mods/plan-board/hooks/register.tsx	34823
@@ -258,7 +260,7 @@ package/planning/scripts/plan-table-lib.sh	14458
 package/planning/scripts/plans-board-lib.sh	10613
 package/planning/scripts/rebuild-plan-progress.sh	2079
 package/planning/scripts/register-command.sh	2075
-package/planning/scripts/register-lib.sh	10054
+package/planning/scripts/register-lib.sh	10081
 package/planning/scripts/register-read.sh	2259
 package/planning/scripts/remove-coverage.sh	1997
 package/planning/scripts/remove-plan.sh	2023
@@ -313,6 +315,7 @@ package/todo/schema.2.0.0-alpha.1.json	2968
 package/todo/schema.2.0.0-alpha.2.json	3226
 package/todo/schema.2.0.0-alpha.3.json	3476
 package/todo/schema.2.0.0-alpha.4.json	3856
+package/todo/schema.2.0.0-alpha.5.json	4106
 package/tui-hint-plugin/.claude-plugin/plugin.json	391
 package/tui-hint-plugin/README.md	3932
 package/tui-hint-plugin/hooks/hooks.json	214

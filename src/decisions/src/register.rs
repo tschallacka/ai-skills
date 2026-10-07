@@ -51,7 +51,8 @@ pub struct Choice {
 #[serde(rename_all = "kebab-case")]
 pub enum Status {
     Open,
-    Answered,
+    Decided,
+    Implemented,
     Closed,
     Dropped,
     Obsolete,
@@ -70,6 +71,21 @@ pub enum Priority {
 impl Status {
     pub fn is_open(self) -> bool {
         matches!(self, Status::Open)
+    }
+
+    /// The user has picked an option, but the pick has not yet been carried
+    /// out in the code -- the one state this register keeps pinned and
+    /// visible until an agent acts on it.
+    pub fn is_decided(self) -> bool {
+        matches!(self, Status::Decided)
+    }
+
+    /// Still needs attention from someone: an answer (`Open`) or an
+    /// implementation (`Decided`). `Implemented`, `Closed`, `Dropped` and
+    /// `Obsolete` are all resting states -- nothing further is expected of
+    /// any of them.
+    pub fn is_pending(self) -> bool {
+        matches!(self, Status::Open | Status::Decided)
     }
 }
 
@@ -191,8 +207,12 @@ mod tests {
     fn status_and_priority_serialize_to_kebab_case() {
         assert_eq!(serde_json::to_string(&Status::Open).unwrap(), "\"open\"");
         assert_eq!(
-            serde_json::to_string(&Status::Answered).unwrap(),
-            "\"answered\""
+            serde_json::to_string(&Status::Decided).unwrap(),
+            "\"decided\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Status::Implemented).unwrap(),
+            "\"implemented\""
         );
         assert_eq!(
             serde_json::to_string(&Status::Closed).unwrap(),

@@ -27,8 +27,11 @@
 use crate::clock;
 use crate::register::{Register, Task};
 
-/// The register version this binary writes.
-pub const SUPPORTED: &str = "2.0.0-alpha.4";
+/// The register version this binary writes. Bumped for alpha.5 in lockstep
+/// with every other register skill's SUPPORTED and package.json's own
+/// version, though nothing about this register's own shape changed this
+/// release -- see decisions' migrate.rs for what actually did.
+pub const SUPPORTED: &str = "2.0.0-alpha.5";
 
 pub struct Unconvertible {
     pub id: String,

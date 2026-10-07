@@ -1,6 +1,6 @@
 // MODE: DEV
 //! End-to-end regression against the real compiled binary over stdio: add a
-//! question, see it in list_open, answer it, see it move to list_answered and
+//! question, see it in list_open, answer it, see it move to list_decided and
 //! drop out of list_open/list_closed. Parallel in spirit to
 //! src/chat-mcp/tests/mcp_flow.rs, but with no server of its own to start --
 //! every tool here is a direct, synchronous read-mutate-write of
@@ -32,7 +32,7 @@ fn scratch(name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).expect("scratch dir");
     std::fs::write(
         dir.join("DECISIONS.json"),
-        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.4","comment":"t","questions":[]}"#,
+        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.5","comment":"t","questions":[]}"#,
     )
     .expect("seed DECISIONS.json");
     dir
@@ -114,26 +114,43 @@ fn add_answer_and_the_status_filters_follow_it() {
     let open = adapter.tool("list_open", json!({}));
     assert!(text_of(&open).contains(&id), "{open}");
 
-    let answered_tool = adapter.tool("answer", json!({"id": id, "letter": "b"}));
-    assert!(answered_tool.get("error").is_none(), "{answered_tool}");
+    let decided_tool = adapter.tool("answer", json!({"id": id, "letter": "b"}));
+    assert!(decided_tool.get("error").is_none(), "{decided_tool}");
 
     let open_after = adapter.tool("list_open", json!({}));
     assert!(
         !text_of(&open_after).contains(&id),
-        "answered question must leave list_open: {open_after}"
+        "decided question must leave list_open: {open_after}"
     );
 
     let closed_after = adapter.tool("list_closed", json!({}));
     assert!(
         !text_of(&closed_after).contains(&id),
-        "an answered-but-not-closed question must not appear in list_closed: {closed_after}"
+        "a decided-but-not-closed question must not appear in list_closed: {closed_after}"
     );
 
-    let answered_list = adapter.tool("list_answered", json!({}));
-    let answered_text = text_of(&answered_list);
-    assert!(answered_text.contains(&id), "{answered_text}");
+    let decided_list = adapter.tool("list_decided", json!({}));
+    let decided_text = text_of(&decided_list);
+    assert!(decided_text.contains(&id), "{decided_text}");
     assert!(
-        answered_text.contains("\"chosen\":\"b\""),
-        "the recorded pick must be b: {answered_text}"
+        decided_text.contains("\"chosen\":\"b\""),
+        "the recorded pick must be b: {decided_text}"
     );
+
+    let implemented_tool = adapter.tool("implement", json!({"id": id, "note": "shipped"}));
+    assert!(
+        implemented_tool.get("error").is_none(),
+        "{implemented_tool}"
+    );
+
+    let decided_after_implement = adapter.tool("list_decided", json!({}));
+    assert!(
+        !text_of(&decided_after_implement).contains(&id),
+        "implemented question must leave list_decided: {decided_after_implement}"
+    );
+
+    let implemented_list = adapter.tool("list_implemented", json!({}));
+    let implemented_text = text_of(&implemented_list);
+    assert!(implemented_text.contains(&id), "{implemented_text}");
+    assert!(implemented_text.contains("shipped"), "{implemented_text}");
 }

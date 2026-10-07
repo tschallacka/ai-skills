@@ -6,7 +6,9 @@
 //! binaries are: no shell dependency, no `rjq` requirement to read or write
 //! the register, behaves the same everywhere this ships.
 
-use decisions::{add, answer, close, list, migrate, stub, Filter, NewQuestion, Priority, Register};
+use decisions::{
+    add, answer, close, implement, list, migrate, stub, Filter, NewQuestion, Priority, Register,
+};
 use std::io::{Read, Write};
 use std::process::ExitCode;
 
@@ -21,16 +23,22 @@ decisions — the question register's tools.
 Usage:
   decisions add --title T --option a:LABEL --option b:LABEL [--option c:LABEL ...]
                 [--priority normal] [--context C] [--file PATH]
-  decisions list [--status open|answered|closed|dropped|obsolete]
+  decisions list [--status open|decided|implemented|closed|dropped|obsolete]
                  [--priority urgent|high|normal|low|someday] [--branch B] [--file PATH]
   decisions answer <ID> <LETTER> [--file PATH]
   decisions stub <ID> <ASSUMPTION> [--file PATH]
+  decisions implement <ID> [NOTE] [--file PATH]
   decisions apply <ID> <RESOLUTION> [--file PATH]
   decisions close <ID> <RESOLUTION> [--file PATH]   (an alias for apply)
   decisions --help
 
 Any command takes --file PATH, which wins over everything else. Failing that
 the register is DECISIONS_JSON, else ./DECISIONS.json.
+
+A question's lifecycle is open -> decided -> implemented: `answer` records
+the user's pick and moves it to decided; `implement` then records that the
+pick was actually carried out in the code. `close`/`apply` can withdraw a
+question from any status, with or without ever implementing it.
 
 `add` records the current git branch automatically, as context on the
 question: it travels with the question, it is not a separate filter
@@ -78,6 +86,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Failure> {
         "list" => list_command(&path, argv),
         "answer" => answer_command(&path, argv),
         "stub" => stub_command(&path, argv),
+        "implement" => implement_command(&path, argv),
         "apply" | "close" => close_command(&path, argv),
         other => fail(format!("unknown command: {other}"), EX_USAGE),
     }
@@ -145,7 +154,7 @@ fn parse_priority(value: &str) -> Result<Priority, Failure> {
 fn parse_status(value: &str) -> Result<decisions::Status, Failure> {
     serde_json::from_value(serde_json::Value::String(value.to_lowercase())).map_err(|_| Failure {
         message: format!(
-            "unknown status {value}; one of open, answered, closed, dropped, obsolete"
+            "unknown status {value}; one of open, decided, implemented, closed, dropped, obsolete"
         ),
         code: EX_USAGE,
     })
@@ -244,6 +253,21 @@ fn stub_command(path: &str, argv: &[String]) -> Result<ExitCode, Failure> {
     let assumption = positional[1..].join(" ");
     let mut register = read(path)?;
     stub(&mut register, id, &assumption).map_err(|message| Failure {
+        message,
+        code: EX_DATAERR,
+    })?;
+    write(path, &register).map(|_| ExitCode::SUCCESS)
+}
+
+fn implement_command(path: &str, argv: &[String]) -> Result<ExitCode, Failure> {
+    let positional = positional(argv);
+    if positional.is_empty() {
+        return fail("implement needs an id", EX_USAGE);
+    }
+    let id = positional[0];
+    let note = positional[1..].join(" ");
+    let mut register = read(path)?;
+    implement(&mut register, id, &note).map_err(|message| Failure {
         message,
         code: EX_DATAERR,
     })?;

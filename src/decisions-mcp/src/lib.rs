@@ -5,15 +5,20 @@
 //! opens DECISIONS.json, does its work, and writes it back -- the same
 //! round trip the CLI makes, just without a process per call.
 
-use decisions::{add, answer, list, migrate, stub, Filter, NewQuestion, Priority, Status};
+use decisions::{
+    add, answer, implement, list, migrate, stub, Filter, NewQuestion, Priority, Status,
+};
 use serde_json::{json, Value};
 
 const INSTRUCTIONS: &str = "The question register (DECISIONS.json): non-blocking questions an agent \
-raised mid-work, with lettered options, a priority, and the branch they came from as context. Use \
-list_open/list_answered/list_closed/list_urgent to glean questions; add to raise one and keep \
-working with a stubbed assumption recorded via stub; answer records the user's pick. This never \
-replaces a harness's own blocking question or confirmation mechanism -- it is for the one that does \
-not have to be answered right now.";
+raised mid-work, with lettered options, a priority, and the branch they came from as context. A \
+question's lifecycle is open -> decided -> implemented. Use list_open/list_decided/list_implemented/ \
+list_closed/list_urgent to glean questions; add to raise one and keep working with a stubbed \
+assumption recorded via stub; answer records the user's pick (moves it to decided); once a decided \
+pick has actually been carried out in the code, call implement to record that and move it to \
+implemented -- a decided question is outstanding work for the agent, not just the user's to answer. \
+This never replaces a harness's own blocking question or confirmation mechanism -- it is for the one \
+that does not have to be answered right now.";
 
 pub fn handle(message: Value) -> Value {
     let id = message.get("id").cloned().unwrap_or(Value::Null);
@@ -38,7 +43,8 @@ fn tool_definitions() -> Vec<Value> {
     }});
     vec![
         json!({"name":"list_open","description":"Open questions: raised, not yet answered.","inputSchema":status_filter}),
-        json!({"name":"list_answered","description":"Questions the user has picked an option for, not yet closed.","inputSchema":status_filter}),
+        json!({"name":"list_decided","description":"Questions the user has picked an option for, not yet implemented -- outstanding work for the agent, not the user.","inputSchema":status_filter}),
+        json!({"name":"list_implemented","description":"Questions whose decided pick has already been carried out in the code.","inputSchema":status_filter}),
         json!({"name":"list_closed","description":"Questions with a recorded resolution.","inputSchema":status_filter}),
         json!({"name":"list_urgent","description":"Every question of urgent priority, regardless of status.","inputSchema":{"type":"object","properties":{}}}),
         json!({"name":"add","description":"Raise a non-blocking question: lettered options, a priority, and context (what you stubbed while it stays open). Records the current git branch automatically.","inputSchema":{
@@ -51,7 +57,7 @@ fn tool_definitions() -> Vec<Value> {
             },
             "required":["title","options"]
         }}),
-        json!({"name":"answer","description":"Record the user's pick for a question: sets it to answered.","inputSchema":{
+        json!({"name":"answer","description":"Record the user's pick for a question: sets it to decided.","inputSchema":{
             "type":"object",
             "properties":{"id":{"type":"string"},"letter":{"type":"string","description":"One of the question's own option letters."}},
             "required":["id","letter"]
@@ -60,6 +66,11 @@ fn tool_definitions() -> Vec<Value> {
             "type":"object",
             "properties":{"id":{"type":"string"},"assumption":{"type":"string"}},
             "required":["id","assumption"]
+        }}),
+        json!({"name":"implement","description":"Mark a decided question as carried out in the code, optionally recording what was done. Refused unless the question is currently decided.","inputSchema":{
+            "type":"object",
+            "properties":{"id":{"type":"string"},"note":{"type":"string","description":"What was implemented, for the record. Optional."}},
+            "required":["id"]
         }}),
     ]
 }
@@ -109,12 +120,14 @@ fn list_result(register: &decisions::Register, filter: &Filter) -> Value {
 
 const TOOL_NAMES: &[&str] = &[
     "list_open",
-    "list_answered",
+    "list_decided",
+    "list_implemented",
     "list_closed",
     "list_urgent",
     "add",
     "answer",
     "stub",
+    "implement",
 ];
 
 fn call_tool(id: Value, params: Value) -> Value {
@@ -133,11 +146,12 @@ fn call_tool(id: Value, params: Value) -> Value {
     };
 
     let result = match name {
-        "list_open" | "list_answered" | "list_closed" => {
+        "list_open" | "list_decided" | "list_implemented" | "list_closed" => {
             let mut filter = Filter {
                 status: Some(match name {
                     "list_open" => Status::Open,
-                    "list_answered" => Status::Answered,
+                    "list_decided" => Status::Decided,
+                    "list_implemented" => Status::Implemented,
                     _ => Status::Closed,
                 }),
                 priority: None,
@@ -163,6 +177,7 @@ fn call_tool(id: Value, params: Value) -> Value {
         "add" => add_tool(register, &arguments),
         "answer" => mutate_tool(register, &arguments, "id", "letter", answer),
         "stub" => mutate_tool(register, &arguments, "id", "assumption", stub),
+        "implement" => implement_tool(register, &arguments),
         _ => unreachable!("checked against TOOL_NAMES above"),
     };
 
@@ -223,6 +238,16 @@ fn mutate_tool(
     Ok(tool_result(question_id))
 }
 
+/// `note` is optional, unlike `answer`'s letter and `stub`'s assumption, so
+/// this does not go through `mutate_tool`, which requires its text key.
+fn implement_tool(mut register: decisions::Register, arguments: &Value) -> Result<Value, String> {
+    let question_id = string_argument(arguments, "id").ok_or("id is required")?;
+    let note = string_argument(arguments, "note").unwrap_or_default();
+    implement(&mut register, &question_id, &note)?;
+    save_register(&register)?;
+    Ok(tool_result(question_id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,7 +270,7 @@ mod tests {
         std::env::set_var("DECISIONS_JSON", dir.join("DECISIONS.json"));
         std::fs::write(
             dir.join("DECISIONS.json"),
-            r#"{"skill":"decisions","skill_version":"2.0.0-alpha.4","comment":"t","questions":[]}"#,
+            r#"{"skill":"decisions","skill_version":"2.0.0-alpha.5","comment":"t","questions":[]}"#,
         )
         .unwrap();
         guard
@@ -258,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_names_all_seven_tools() {
+    fn tools_list_names_every_tool() {
         let response = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}));
         let names: Vec<&str> = response["result"]["tools"]
             .as_array()
@@ -268,19 +293,21 @@ mod tests {
             .collect();
         for expected in [
             "list_open",
-            "list_answered",
+            "list_decided",
+            "list_implemented",
             "list_closed",
             "list_urgent",
             "add",
             "answer",
             "stub",
+            "implement",
         ] {
             assert!(names.contains(&expected), "missing {expected}: {names:?}");
         }
     }
 
     #[test]
-    fn add_then_list_open_then_answer_then_list_answered() {
+    fn add_then_list_open_then_answer_then_list_decided() {
         let dir = tempfile::tempdir().unwrap();
         let _guard = scratch_register(dir.path());
 
@@ -300,9 +327,9 @@ mod tests {
             .unwrap()
             .contains(&id));
 
-        let answered = handle(json!({"jsonrpc":"2.0","id":3,"method":"tools/call",
+        let decided = handle(json!({"jsonrpc":"2.0","id":3,"method":"tools/call",
             "params":{"name":"answer","arguments":{"id": id, "letter": "a"}}}));
-        assert!(answered.get("error").is_none(), "{answered}");
+        assert!(decided.get("error").is_none(), "{decided}");
 
         let open_after = handle(
             json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_open","arguments":{}}}),
@@ -312,13 +339,54 @@ mod tests {
             .unwrap()
             .contains(&id));
 
-        let answered_list = handle(
-            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_answered","arguments":{}}}),
+        let decided_list = handle(
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_decided","arguments":{}}}),
         );
-        assert!(answered_list["result"]["content"][0]["text"]
+        assert!(decided_list["result"]["content"][0]["text"]
             .as_str()
             .unwrap()
             .contains(&id));
+    }
+
+    #[test]
+    fn implement_requires_decided_then_moves_to_list_implemented() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = scratch_register(dir.path());
+
+        let add_response = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"add","arguments":{"title":"Pick one","options":[{"letter":"a","label":"Yes"}],"priority":"normal"}}}));
+        let id = add_response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let too_early = handle(json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
+            "params":{"name":"implement","arguments":{"id": id, "note": "too early"}}}));
+        assert!(too_early.get("error").is_some(), "{too_early}");
+
+        handle(json!({"jsonrpc":"2.0","id":3,"method":"tools/call",
+            "params":{"name":"answer","arguments":{"id": id, "letter": "a"}}}));
+
+        let implemented = handle(json!({"jsonrpc":"2.0","id":4,"method":"tools/call",
+            "params":{"name":"implement","arguments":{"id": id, "note": "landed in src/thing.rs"}}}));
+        assert!(implemented.get("error").is_none(), "{implemented}");
+
+        let decided_after = handle(
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_decided","arguments":{}}}),
+        );
+        assert!(!decided_after["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains(&id));
+
+        let implemented_list = handle(
+            json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"list_implemented","arguments":{}}}),
+        );
+        let implemented_text = implemented_list["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(implemented_text.contains(&id));
+        assert!(implemented_text.contains("landed in src/thing.rs"));
     }
 
     #[test]
