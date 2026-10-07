@@ -161,6 +161,7 @@ project-specifics/*-deviations.md
 bug-report/bin/*/
 todo/bin/*/
 rjq/bin/*/
+decisions/bin/*/
 
 # A local .env is where a credential ends up -- REGISTERS_PUSH_TOKEN was written
 # to one on 2026-09-04. It was NOT ignored, so one `git add -A` in this

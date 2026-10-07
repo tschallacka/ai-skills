@@ -108,6 +108,10 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
     printf 'agent-identity-plugin/hooks/hooks.json\n'
     printf 'agent-identity-plugin/hooks/lib.sh\n'
     printf 'agent-identity-plugin/hooks/subagent-start.sh\n'
+    printf 'decision-reminder-plugin/.claude-plugin/plugin.json\n'
+    printf 'decision-reminder-plugin/hooks/hooks.json\n'
+    printf 'decision-reminder-plugin/hooks/lib.sh\n'
+    printf 'decision-reminder-plugin/hooks/session-start.sh\n'
     # The mods: every tracked file of each board installer/build-release.sh's
     # mods_files() lists, the same way that function takes them.
     for board in $(sed -n 's/^MODS_BOARDS="\(.*\)"$/\1/p' "$repo_root/installer/build-release.sh"); do

@@ -64,7 +64,7 @@ package/decision-reminder-plugin/hooks/lib.sh	1953
 package/decision-reminder-plugin/hooks/session-start.sh	2925
 package/decision-reminder-plugin/tests/test-session-start-hook.sh	4831
 package/decisions/SKILL.md	4121
-package/decisions/binaries.tsv	826
+package/decisions/binaries.tsv	1444
 package/decisions/docs/README.md	2786
 package/decisions/requires.tsv	379
 package/decisions/schema.2.0.0-alpha.4.json	2160

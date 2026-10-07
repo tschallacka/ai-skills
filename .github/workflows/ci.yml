@@ -1061,6 +1061,29 @@ jobs:
           path: target/${{ matrix.target }}/release/ai-text-editor*
           if-no-files-found: warn
 
+      # ---- decisions ---------------------------------------------------------
+      # The question register's CLI and its stdio MCP adapter: same two-crate
+      # pair shape as ai-text-editor/ai-text-editor-mcp above. Unconditional
+      # (no scope gate): both crates build in a few seconds, so skipping them
+      # on an unrelated change buys negligible CI time against the cost of
+      # wiring a new ci-subjects.rs/ci-subjects.sh subject.
+      - name: Build the decisions binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          for crate in decisions decisions-mcp; do
+            manifest="src/$crate/Cargo.toml"
+            [ -f "$manifest" ] || continue
+            cargo build --manifest-path "$manifest" --release --target "${{ matrix.target }}"
+          done
+
+      - name: Upload the decisions binaries
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: decisions-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/decisions*
+          if-no-files-found: warn
+
       # ---- chat ------------------------------------------------------------
       - name: Build the chat server, client, MCP adapter and spool watcher
         if: needs.scope.outputs.chat == 'true'

@@ -572,21 +572,23 @@ EOF
         decisions)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
                 schema.2.0.0-alpha.4.json
-            # The register's tools ship as one prebuilt binary per target, the
-            # same existence-gated shape bug-report's and todo's own arms use:
-            # see todo's arm above for why a raw printf of the path is not
-            # safe here.
+            # The register's tools ship two prebuilt binaries per target --
+            # the CLI and its stdio MCP adapter, the same pair shape
+            # ai-text-editor's own arm above ships (server/client/mcp) -- the
+            # same existence-gated shape bug-report's and todo's own arms
+            # use: see todo's arm above for why a raw printf of the path is
+            # not safe here.
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    skill_artifact_files decisions bin/x86_64-unknown-linux-musl/decisions ;;
+                    skill_artifact_files decisions bin/x86_64-unknown-linux-musl/decisions bin/x86_64-unknown-linux-musl/decisions-mcp ;;
                 Linux:aarch64|Linux:arm64)
-                    skill_artifact_files decisions bin/aarch64-unknown-linux-musl/decisions ;;
+                    skill_artifact_files decisions bin/aarch64-unknown-linux-musl/decisions bin/aarch64-unknown-linux-musl/decisions-mcp ;;
                 Darwin:x86_64)
-                    skill_artifact_files decisions bin/x86_64-apple-darwin/decisions ;;
+                    skill_artifact_files decisions bin/x86_64-apple-darwin/decisions bin/x86_64-apple-darwin/decisions-mcp ;;
                 Darwin:arm64)
-                    skill_artifact_files decisions bin/aarch64-apple-darwin/decisions ;;
+                    skill_artifact_files decisions bin/aarch64-apple-darwin/decisions bin/aarch64-apple-darwin/decisions-mcp ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    skill_artifact_files decisions bin/x86_64-pc-windows-msvc/decisions.exe ;;
+                    skill_artifact_files decisions bin/x86_64-pc-windows-msvc/decisions.exe bin/x86_64-pc-windows-msvc/decisions-mcp.exe ;;
                 *)
                     printf 'skill_files: no decisions artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;

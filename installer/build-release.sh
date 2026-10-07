@@ -238,6 +238,20 @@ agent_identity_plugin_files() {
     printf 'agent-identity-plugin/hooks/subagent-start.sh\n'
 }
 
+# decision-reminder-plugin's own files, parallel to agent_identity_plugin_files
+# above (src/installer/src/plugins.rs's DECISION_REMINDER_PLUGIN_FILES carries
+# the identical list). Its fixture-driven test is NOT included here: it is
+# marked # MODE: DEV, and tests/test-release-package.sh refuses any MODE: DEV
+# content in this specific release artifact -- unlike the npm package
+# (package.json's own files list), which does ship it, the same as
+# chat-interrupt-plugin's own test ships there.
+decision_reminder_plugin_files() {
+    printf 'decision-reminder-plugin/.claude-plugin/plugin.json\n'
+    printf 'decision-reminder-plugin/hooks/hooks.json\n'
+    printf 'decision-reminder-plugin/hooks/lib.sh\n'
+    printf 'decision-reminder-plugin/hooks/session-start.sh\n'
+}
+
 # T102: agent profiles are not a skill (no entry in skill_files()) and their
 # canonical source is JSON, a format with no comment syntax a MODE marker
 # could sit in -- the same reason the three plugin-file functions above are
@@ -276,6 +290,7 @@ collect() {
         tui_hint_plugin_files
         editor_gate_plugin_files
         agent_identity_plugin_files
+        decision_reminder_plugin_files
         mods_files
         profile_files_for_release
         local path
@@ -421,6 +436,25 @@ case "$mode" in
                 && ls "$repo_root/ai-text-editor/bin/"*/"ai-text-editor-server$skill_exe" >/dev/null 2>&1 \
                 && ls "$repo_root/ai-text-editor/bin/"*/"ai-text-editor-mcp$skill_exe" >/dev/null 2>&1 || {
                 printf '%s: cargo not found and ai-text-editor/bin binaries absent\n' "${0##*/}" >&2
+                exit 66
+            }
+        fi
+        # decisions/decisions-mcp (the question register's CLI and its stdio
+        # MCP adapter): same cargo-then-require-prebuilt structure as the
+        # ai-text-editor pair above.
+        if command -v cargo >/dev/null 2>&1; then
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package decisions --bin decisions ) \
+                || { printf '%s: cargo build decisions failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package decisions-mcp ) \
+                || { printf '%s: cargo build decisions-mcp failed\n' "${0##*/}" >&2; exit 66; }
+            mkdir -p "$repo_root/decisions/bin/$skill_dir"
+            dec_release="$repo_root/target/$skill_dir/release"
+            cp "$dec_release/decisions$skill_exe" "$repo_root/decisions/bin/$skill_dir/decisions$skill_exe"
+            cp "$dec_release/decisions-mcp$skill_exe" "$repo_root/decisions/bin/$skill_dir/decisions-mcp$skill_exe"
+        else
+            ls "$repo_root/decisions/bin/"*/"decisions$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/decisions/bin/"*/"decisions-mcp$skill_exe" >/dev/null 2>&1 || {
+                printf '%s: cargo not found and decisions/bin binaries absent\n' "${0##*/}" >&2
                 exit 66
             }
         fi
