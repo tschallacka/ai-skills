@@ -1986,6 +1986,49 @@ fn a_replayed_tab_arms_the_external_change_guard() {
 }
 
 #[test]
+fn reload_catches_up_with_a_second_external_write_and_says_so() {
+    // B398: resolve(reload) applied the `pending_external` snapshot taken
+    // when the FIRST divergence was observed. A second external write
+    // landing before resolve was called left the buffer short of what disk
+    // actually held, and the reload response claimed plain success with no
+    // way to tell the tab might already be stale again.
+    let harness = Harness::new("reloadrace");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    harness.open(&file);
+    std::fs::write(&file, "alpha\nbeta\nFIRST\n").unwrap();
+    let armed = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(armed.status.success(), "{}", refusal_text(&armed));
+    assert_eq!(
+        first_payload(&armed)["external_change_pending"],
+        json!(true),
+        "the first write must have armed the guard"
+    );
+    // The second write lands before resolve is called — the race this bug
+    // report describes.
+    std::fs::write(&file, "alpha\nbeta\nFIRST\nSECOND\n").unwrap();
+    let resolved = harness.client(&["resolve", "-f", file.to_str().unwrap(), "-a", "reload"]);
+    assert!(resolved.status.success(), "{}", refusal_text(&resolved));
+    let payload = first_payload(&resolved);
+    assert_eq!(
+        payload["disk_diverged"],
+        json!(false),
+        "reload re-read the file, so its own response must say the tab is \
+         caught up rather than making the caller find out with another call: {payload}"
+    );
+    assert_eq!(
+        payload["external_change_pending"],
+        json!(false),
+        "{payload}"
+    );
+    let text = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&text.stdout),
+        "alpha\nbeta\nFIRST\nSECOND\n",
+        "reload must land on the SECOND write, not the stale snapshot taken from the first"
+    );
+}
+
+#[test]
 fn an_ownerless_queued_job_does_not_pin_the_idle_watchdog() {
     // B199: every job-start leg of this file owns its job from a
     // short-lived client; when the watchdog pinned to any active job, the

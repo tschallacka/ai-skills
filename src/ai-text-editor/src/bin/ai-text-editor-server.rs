@@ -4411,7 +4411,9 @@ fn resolve_external(
                 tab.revision,
                 updated.bytes as usize,
             );
-            frames.push(response(&envelope.request_id, json!({"resolved": "reload", "large_file": true, "revision": tab.revision, "history_event": "external_reload", "index_complete": false})));
+            // Disk may have moved again since LargeFile::open read it above.
+            observe_external(tab);
+            frames.push(response(&envelope.request_id, json!({"resolved": "reload", "large_file": true, "revision": tab.revision, "history_event": "external_reload", "index_complete": false, "dirty": tab_dirty(tab), "disk_diverged": tab_disk_diverged(tab), "external_change_pending": tab.pending_external.is_some()})));
         } else {
             tab.pending_external = Some(external);
             frames.push(error(&envelope.request_id, "large_file_resolution_requires_range", "merge and force_save require a bounded external range or an explicit large-file rewrite job; choose backup, reload, or keep for this alert"));
@@ -4425,10 +4427,24 @@ fn resolve_external(
                 frames.push(error(&envelope.request_id, "backup_failed", error_value));
                 return;
             }
+            // Re-read rather than trust `external`: it was captured when the
+            // divergence was first observed and may already be stale again.
+            let latest = match fs::read(&tab.path) {
+                Ok(bytes) => bytes,
+                Err(error_value) => {
+                    tab.pending_external = Some(external);
+                    frames.push(error(
+                        &envelope.request_id,
+                        "reload_failed",
+                        error_value.to_string(),
+                    ));
+                    return;
+                }
+            };
             let before = tab.document.clone();
             let mut after = before.clone();
             let length = before.bytes().len();
-            if let Err(error_value) = after.apply_bytes(0, length, &external) {
+            if let Err(error_value) = after.apply_bytes(0, length, &latest) {
                 tab.pending_external = Some(external);
                 frames.push(error(
                     &envelope.request_id,
@@ -4458,8 +4474,8 @@ fn resolve_external(
             tab.document = after.clone();
             tab.history.record(&before, &after);
             tab.revision = revision;
-            tab.base_bytes = external.clone();
-            tab.disk_digest = disk_state(&tab.path, None, &external);
+            tab.base_bytes = latest.clone();
+            tab.disk_digest = disk_state(&tab.path, None, &latest);
             tab.saved_digest = digest(tab.document.bytes());
             let _ = tab.metadata.record(
                 &tab.path,
@@ -4467,7 +4483,10 @@ fn resolve_external(
                 tab.revision,
                 tab.document.bytes().len(),
             );
-            frames.push(response(&envelope.request_id, json!({"resolved": "reload", "revision": tab.revision, "history_event": "external_reload"})));
+            // The disk may have moved again since the read above; surface
+            // that rather than letting the caller believe reload caught up.
+            observe_external(tab);
+            frames.push(response(&envelope.request_id, json!({"resolved": "reload", "revision": tab.revision, "history_event": "external_reload", "dirty": tab_dirty(tab), "disk_diverged": tab_disk_diverged(tab), "external_change_pending": tab.pending_external.is_some()})));
         }
         "keep" => {
             tab.disk_digest = disk_state(&tab.path, None, &external);
