@@ -1,17 +1,24 @@
 import type { Register } from 'claude-code'
+import { update } from 'claude-code'
 
 // The project's open questions (DECISIONS.json), most urgent first. The
 // register is read on every draw, the same way register-board reads
-// BUGS.json/TODO.json, so the pane always shows what is on disk; a 30-second
-// timer also forces a redraw, the same pattern ci-board's JOB_REFRESH_MS
-// uses, so a question answered elsewhere (the CLI, or an agent via MCP)
-// disappears from the open list without the person reopening the pane.
+// BUGS.json/TODO.json, so the pane always shows what is on disk; a timer
+// also forces a redraw, the same pattern ci-board's JOB_REFRESH_MS uses, so a
+// question answered elsewhere (the CLI, or an agent via MCP) disappears from
+// the open list without the person reopening the pane. The interval is short
+// (REFRESH_MS below): unlike ci-board's network-bound GitHub calls, this is a
+// single cheap local file read, so there is no reason to make a person wait
+// up to 30 seconds to see a question raised a moment ago.
 // Toggled by `enabled` in settings.json pluginConfigs["decision-board"].options.
 
 const PANE = 'decision-board'
 const TOOL = 'show_decision_board'
 const READ = 'read_decision_board'
 const ANSWER = 'answer_decision_board'
+
+const priorityFilterKey = { plugin: 'decision-board', key: 'priorityFilter' } as const
+const branchOnlyKey = { plugin: 'decision-board', key: 'branchOnly' } as const
 
 // The part of `$.fs` the reading needs.
 type Fs = {
@@ -20,9 +27,28 @@ type Fs = {
 }
 
 type Choice = { letter: string; label: string }
-type Question = { id: string; title: string; status: string; priority: string; branch: string; options: Choice[] }
+type Question = {
+  id: string
+  title: string
+  status: string
+  priority: string
+  branch: string
+  options: Choice[]
+  created_at: string
+}
 
 const PRIORITY_ORDER = ['urgent', 'high', 'normal', 'low', 'someday']
+
+// One color per priority, so the list reads at a glance without counting on
+// bold alone; a priority this register does not know about (future-proofing
+// against a schema addition) falls back to no color rather than guessing.
+const PRIORITY_COLOR: Record<string, string> = {
+  urgent: 'red',
+  high: 'yellow',
+  normal: 'cyan',
+  low: 'blue',
+  someday: 'gray',
+}
 
 function rank(value: string): number {
   const index = PRIORITY_ORDER.indexOf(value)
@@ -33,6 +59,22 @@ function rank(value: string): number {
 // the same priority keep the order the register itself lists them in.
 function sortQuestionsUrgentFirst(questions: Question[]): Question[] {
   return [...questions].sort((a, b) => rank(a.priority) - rank(b.priority))
+}
+
+// The open subset, then the person's own priority/branch filters, each
+// optional and independent of the other. Narrowing is the board's own
+// convenience: the agent-facing tools (show/read) never apply it, so an
+// agent always sees the whole truth regardless of what a person last picked
+// in the pane.
+function filterQuestions(
+  questions: Question[],
+  filter: { priority: string | null; branch: string | null },
+): Question[] {
+  return questions.filter(
+    q =>
+      (filter.priority === null || q.priority === filter.priority) &&
+      (filter.branch === null || q.branch === filter.branch),
+  )
 }
 
 // The project's open questions, read from its own DECISIONS.json, sorted
@@ -59,10 +101,42 @@ function answerArgs(bin: string, id: string, letter: string, file: string): stri
   return [bin, 'answer', id, letter, '--file', file]
 }
 
+// "Date when asked", in the loose relative phrasing a person reads faster
+// than a timestamp: same-day counts in minutes/hours, this month in days,
+// the next in "last month", older in whole months, then whole years. An
+// unparseable timestamp reads as '' rather than 'NaN years ago'.
+function relativeAge(iso: string, nowMs: number): string {
+  const then = Date.parse(iso)
+  if (!Number.isFinite(then)) return ''
+  const seconds = Math.max(0, Math.round((nowMs - then) / 1000))
+  const minute = 60
+  const hour = 3600
+  const day = 86400
+  const month = 2_592_000 // 30 days
+  const year = 31_536_000 // 365 days
+  if (seconds < minute) return 'just now'
+  if (seconds < hour) {
+    const n = Math.floor(seconds / minute)
+    return `${n} minute${n === 1 ? '' : 's'} ago`
+  }
+  if (seconds < day) {
+    const n = Math.floor(seconds / hour)
+    return `${n} hour${n === 1 ? '' : 's'} ago`
+  }
+  if (seconds < month) {
+    const n = Math.floor(seconds / day)
+    return n === 1 ? 'yesterday' : `${n} days ago`
+  }
+  if (seconds < month * 2) return 'last month'
+  if (seconds < year) return `${Math.floor(seconds / month)} months ago`
+  const n = Math.floor(seconds / year)
+  return n === 1 ? 'last year' : `${n} years ago`
+}
+
 // Exposes the pure functions above for a unit test to call directly, without
 // spawning the binary or driving the mod runtime -- nothing here is read by
 // Claude Code itself, which only ever reads the `register` export below.
-export const __test = { sortQuestionsUrgentFirst, answerArgs }
+export const __test = { sortQuestionsUrgentFirst, answerArgs, filterQuestions, relativeAge }
 
 export const register: Register = (on, options) => {
   if (options.enabled === false) return
@@ -106,6 +180,9 @@ export const register: Register = (on, options) => {
     return { text: 'Decision board opened.' }
   })
 
+  // The agent's tools (show/read/answer) deliberately never apply the pane's
+  // own priority/branch filters: an agent must always see the whole truth,
+  // regardless of what a person last narrowed the view to.
   on('tool.call', { tool: `mcp__decision-board__${TOOL}` }, async $ => {
     const root = await $.session.root()
     const fs: Fs = { exists: path => $.fs.exists(path), read: path => $.fs.read(path) }
@@ -154,7 +231,7 @@ export const register: Register = (on, options) => {
     return { result: run.exitCode === 0 ? `${id} answered ${letter}.` : (run.stderr.trim() || `decisions exited ${run.exitCode}`) }
   })
 
-  const REFRESH_MS = 30_000
+  const REFRESH_MS = 2_000
   let refresh: { cancel: () => void } | undefined
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -163,9 +240,21 @@ export const register: Register = (on, options) => {
     const home = (await $.env.get('HOME')) ?? ''
     const xdg = (await $.env.get('XDG_CONFIG_HOME')) ?? ''
     const fs: Fs = { exists: path => $.fs.exists(path), read: path => $.fs.read(path) }
-    const questions = await openQuestions(fs, root)
+    const all = await openQuestions(fs, root)
 
     if (!refresh) refresh = $.clock.every(REFRESH_MS, () => $.ui.invalidate('ui.render'))
+
+    const { value: priorityFilter } = await $.state.get(priorityFilterKey)
+    const { value: branchOnly } = await $.state.get(branchOnlyKey)
+    // Only asks git for the current branch when the toggle actually needs it:
+    // every other render costs one file read and nothing else.
+    let activeBranch: string | null = null
+    if (branchOnly) {
+      const head = await $.process.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD']).catch(() => undefined)
+      activeBranch = head && head.exitCode === 0 ? head.stdout.trim() : null
+    }
+    const questions = filterQuestions(all, { priority: priorityFilter ?? null, branch: activeBranch })
+    const now = Date.now()
 
     const answer = async (id: string, letter: string) => {
       const file = `${root}/DECISIONS.json`
@@ -185,18 +274,41 @@ export const register: Register = (on, options) => {
           </Button>
         </Box>
         <Text> </Text>
-        {questions.length === 0 && <Text dimColor>No open questions.</Text>}
+        <Box flexDirection="row">
+          <Text dimColor>Priority: </Text>
+          {PRIORITY_ORDER.map(p => (
+            <Box key={p} flexDirection="row">
+              <Button
+                variant={priorityFilter === p ? 'primary' : undefined}
+                onPress={() => update($, priorityFilterKey, () => (priorityFilter === p ? null : p))}
+              >
+                {p}
+              </Button>
+              <Text> </Text>
+            </Box>
+          ))}
+          <Button
+            variant={branchOnly ? 'primary' : undefined}
+            onPress={() => update($, branchOnlyKey, () => !branchOnly)}
+          >
+            this branch only
+          </Button>
+        </Box>
+        <Text> </Text>
+        {all.length === 0 && <Text dimColor>No open questions.</Text>}
+        {all.length > 0 && questions.length === 0 && <Text dimColor>No open questions match this filter.</Text>}
         {questions.map(q => (
           <Box key={q.id} flexDirection="column">
-            <Text bold color={q.priority === 'urgent' || q.priority === 'high' ? 'yellow' : undefined}>
+            <Text bold color={PRIORITY_COLOR[q.priority]}>
               {`${q.id}  [${q.priority}]  ${q.title}`}
             </Text>
-            <Text italic dimColor>{`   on ${q.branch || 'no branch recorded'}`}</Text>
-            <Box flexDirection="row">
+            <Text italic dimColor>
+              {`   on ${q.branch || 'no branch recorded'} · asked ${relativeAge(q.created_at, now) || 'at an unknown time'}`}
+            </Text>
+            <Box flexDirection="column">
               {q.options.map(option => (
                 <Box key={option.letter} flexDirection="row">
                   <Button onPress={() => answer(q.id, option.letter)}>{`${option.letter}: ${option.label}`}</Button>
-                  <Text> </Text>
                 </Box>
               ))}
             </Box>

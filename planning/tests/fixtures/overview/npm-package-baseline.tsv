@@ -170,8 +170,8 @@ package/mods/ci-board/hooks/register.tsx	20838
 package/mods/ci-board/types/index.d.ts	562
 package/mods/decision-board/.claude-plugin/plugin.json	439
 package/mods/decision-board/hooks/hooks.json	36
-package/mods/decision-board/hooks/register.tsx	8705
-package/mods/decision-board/types/index.d.ts	681
+package/mods/decision-board/hooks/register.tsx	13134
+package/mods/decision-board/types/index.d.ts	632
 package/mods/plan-board/.claude-plugin/plugin.json	1033
 package/mods/plan-board/hooks/hooks.json	36
 package/mods/plan-board/hooks/register.tsx	34823
