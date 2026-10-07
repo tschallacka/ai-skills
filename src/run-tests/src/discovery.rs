@@ -15,13 +15,14 @@ use std::path::{Path, PathBuf};
 #[cfg(not(windows))]
 use std::process::{Command, Stdio};
 
-pub const SUITES: [&str; 7] = [
+pub const SUITES: [&str; 8] = [
     "tests",
     "planning/tests",
     "editor-gate-plugin/tests",
     "tui-hint-plugin/tests",
     "agent-identity-plugin/tests",
     "chat-interrupt-plugin/tests",
+    "decision-reminder-plugin/tests",
     ".github/tests",
 ];
 

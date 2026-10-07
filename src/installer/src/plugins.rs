@@ -57,6 +57,14 @@ const CHAT_INTERRUPT_PLUGIN_FILES: &[&str] = &[
 ];
 const CHAT_INTERRUPT_PLUGIN_EXECUTABLES: &[&str] = &["hooks/lib.sh", "hooks/pre-tool-use.sh"];
 
+const DECISION_REMINDER_PLUGIN_FILES: &[&str] = &[
+    ".claude-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/lib.sh",
+    "hooks/session-start.sh",
+];
+const DECISION_REMINDER_PLUGIN_EXECUTABLES: &[&str] = &["hooks/lib.sh", "hooks/session-start.sh"];
+
 /// Copies `files` (relative to `source_root/plugin_name`) into
 /// `target_root/plugin_name`, then makes `executables` (a subset of `files`)
 /// executable on unix. A file the shipped tree does not have is silently
@@ -212,6 +220,22 @@ pub fn install_chat_interrupt_plugin_claude(
         "chat-interrupt-plugin",
         CHAT_INTERRUPT_PLUGIN_FILES,
         CHAT_INTERRUPT_PLUGIN_EXECUTABLES,
+        target_root,
+    )
+}
+
+/// Rides with `decisions`, Claude Code only: `SessionStart` is a Claude Code
+/// hook, and the reminder it shows is the question register's own open and
+/// urgent questions.
+pub fn install_decision_reminder_plugin_claude(
+    source_root: &Path,
+    target_root: &Path,
+) -> io::Result<PathBuf> {
+    copy_plugin_files(
+        source_root,
+        "decision-reminder-plugin",
+        DECISION_REMINDER_PLUGIN_FILES,
+        DECISION_REMINDER_PLUGIN_EXECUTABLES,
         target_root,
     )
 }
@@ -460,6 +484,39 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             for hook in ["hooks/lib.sh", "hooks/pre-tool-use.sh"] {
+                let mode = fs::metadata(destination.join(hook))
+                    .unwrap()
+                    .permissions()
+                    .mode();
+                assert_eq!(mode & 0o111, 0o111, "{hook}");
+            }
+        }
+    }
+
+    #[test]
+    fn decision_reminder_plugin_copies_its_own_file_set_and_marks_the_hook_executable() {
+        let source_root = tempfile::tempdir().unwrap();
+        let dir = source_root.path().join("decision-reminder-plugin");
+        write(&dir.join(".claude-plugin/plugin.json"), "{}");
+        write(&dir.join("hooks/hooks.json"), "{}");
+        write(&dir.join("hooks/lib.sh"), "#!/bin/sh\n");
+        write(&dir.join("hooks/session-start.sh"), "#!/bin/sh\n");
+        write(&dir.join("README.md"), "not shipped");
+        let target_root = tempfile::tempdir().unwrap();
+
+        let destination =
+            install_decision_reminder_plugin_claude(source_root.path(), target_root.path())
+                .unwrap();
+
+        assert!(destination.join(".claude-plugin/plugin.json").is_file());
+        assert!(destination.join("hooks/lib.sh").is_file());
+        assert!(destination.join("hooks/session-start.sh").is_file());
+        assert!(!destination.join("README.md").exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for hook in ["hooks/lib.sh", "hooks/session-start.sh"] {
                 let mode = fs::metadata(destination.join(hook))
                     .unwrap()
                     .permissions()

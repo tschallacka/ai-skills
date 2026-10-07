@@ -49,6 +49,7 @@ const CLAUDE_PLUGINS: &[(&str, &[&str])] = &[
         &["chat", "ai-text-editor", "interactive-shell"],
     ),
     ("chat-interrupt-plugin", &["chat"]),
+    ("decision-reminder-plugin", &["decisions"]),
 ];
 
 /// Every shared binary filename `skill`'s CURRENT install at `dest_dir`
@@ -626,6 +627,46 @@ mod tests {
             vec!["agent-identity-plugin".to_string()]
         );
         assert!(!target_root.path().join("agent-identity-plugin").exists());
+    }
+
+    #[test]
+    fn decision_reminder_plugin_is_removed_once_decisions_is_the_last_skill_that_needed_it() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(
+            &source_root.path().join("decisions").join("SKILL.md"),
+            "content",
+        );
+        let dir = source_root.path().join("decision-reminder-plugin");
+        write(&dir.join(".claude-plugin/plugin.json"), "{}");
+        write(&dir.join("hooks/hooks.json"), "{}");
+        write(&dir.join("hooks/lib.sh"), "#!/bin/sh\n");
+        write(&dir.join("hooks/session-start.sh"), "#!/bin/sh\n");
+        let target_root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        install_into(
+            source_root.path(),
+            "decisions",
+            target_root.path(),
+            home.path(),
+        );
+        plugins::install_decision_reminder_plugin_claude(source_root.path(), target_root.path())
+            .unwrap();
+        assert!(target_root.path().join("decision-reminder-plugin").is_dir());
+
+        let report = uninstall_skill(
+            source_root.path(),
+            "decisions",
+            target_root.path(),
+            home.path(),
+            Some("claude"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            report.removed_plugins,
+            vec!["decision-reminder-plugin".to_string()]
+        );
+        assert!(!target_root.path().join("decision-reminder-plugin").exists());
     }
 
     #[test]

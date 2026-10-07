@@ -1,0 +1,6 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "decision-reminder",
+  "version": "0.1.0",
+  "description": "At session start, reminds the agent of open questions in the question register (DECISIONS.json), naming any urgent ones by id and title, so a question stubbed and left open on a prior session is not forgotten."
+}

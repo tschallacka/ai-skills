@@ -82,6 +82,9 @@ Usage:
   installer install-chat-interrupt-plugin --source DIR --target DIR
                      install the vendor-shipped plugin that rides with chat
                      (Claude Code only)
+  installer install-decision-reminder-plugin --source DIR --target DIR
+                     install the vendor-shipped plugin that rides with
+                     decisions (Claude Code only)
   installer install-profiles --agent claude|opencode|codex --source DIR --target DIR
                      (re)install every shipped agent profile (.agents/profiles/),
                      translated into that agent's own custom-subagent format
@@ -144,6 +147,9 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         Some("install-editor-gate-plugin") => run_install_editor_gate_plugin(&argv[1..]),
         Some("install-agent-identity-plugin") => run_install_agent_identity_plugin(&argv[1..]),
         Some("install-chat-interrupt-plugin") => run_install_chat_interrupt_plugin(&argv[1..]),
+        Some("install-decision-reminder-plugin") => {
+            run_install_decision_reminder_plugin(&argv[1..])
+        }
         Some("install-profiles") => run_install_profiles(&argv[1..]),
         Some("set-claude-env") => run_set_claude_env(&argv[1..]),
         Some("print-skill-files") => run_print_skill_files(&argv[1..]),
@@ -1120,6 +1126,9 @@ fn run_remaining_post_install_steps(
     if skills.iter().any(|s| s == "chat") {
         run_chat_interrupt_plugin_post_install(known_roots, source, sink);
     }
+    if skills.iter().any(|s| s == "decisions") {
+        run_decision_reminder_plugin_post_install(known_roots, source, sink);
+    }
     run_profiles_post_install(known_roots, source, home, sink);
     run_mods_post_install(known_roots, source, sink);
 }
@@ -1315,6 +1324,35 @@ fn run_chat_interrupt_plugin_post_install(
                 destination.display()
             )),
             Err(e) => sink.log(&format!("chat-interrupt-plugin: {e}")),
+        }
+    }
+}
+
+/// A companion plugin for `decisions`, Claude Code only (`SessionStart` is a
+/// Claude Code hook): reminds the agent of open and urgent questions in the
+/// question register at the start of a session.
+fn run_decision_reminder_plugin_post_install(
+    roots: &[(&Path, &str)],
+    source: &Path,
+    sink: &mut dyn ui::progress::Sink,
+) {
+    let claude_roots: Vec<&Path> = roots
+        .iter()
+        .filter(|(_, k)| *k == "claude")
+        .map(|(p, _)| *p)
+        .collect();
+    if claude_roots.is_empty() {
+        return;
+    }
+    sink.log("");
+    sink.log("== question register reminder (SessionStart hook) ==");
+    for target in &claude_roots {
+        match plugins::install_decision_reminder_plugin_claude(source, target) {
+            Ok(destination) => sink.log(&format!(
+                "Installed: {} (reminds you of open questions at session start)",
+                destination.display()
+            )),
+            Err(e) => sink.log(&format!("decision-reminder-plugin: {e}")),
         }
     }
 }
@@ -2721,6 +2759,20 @@ fn run_install_chat_interrupt_plugin(argv: &[String]) -> Result<ExitCode, String
     Ok(ExitCode::SUCCESS)
 }
 
+fn run_install_decision_reminder_plugin(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_plugin_args("install-decision-reminder-plugin", argv)?;
+    let target = args
+        .target
+        .ok_or("install-decision-reminder-plugin: --target is required")?;
+    let destination = plugins::install_decision_reminder_plugin_claude(&args.source, &target)
+        .map_err(|e| e.to_string())?;
+    println!(
+        "Installed: {} (reminds you of open questions at session start)",
+        destination.display()
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
 /// `installer install-profiles --source DIR --target DIR --agent KIND` --
 /// reinstalls every `manifest::PROFILES` entry alone, mirroring
 /// `install-agent-identity-plugin`'s standalone precedent, for a caller that
@@ -3330,6 +3382,74 @@ mod tests {
         assert!(
             !skill_root.join(".claude/agents/chris.md").exists(),
             "profile must never land under a skill's own install root"
+        );
+    }
+
+    /// W24: the plugin rides with the `decisions` skill, gated at the call
+    /// site in `run_remaining_post_install_steps` the same way
+    /// `chat-interrupt-plugin` is gated on `chat` -- not inside the helper
+    /// itself, which (like `run_chat_interrupt_plugin_post_install`) always
+    /// installs onto every claude root it is given.
+    fn decision_reminder_plugin_source(source: &Path) {
+        let dir = source.join("decision-reminder-plugin");
+        std::fs::create_dir_all(dir.join("hooks")).unwrap();
+        std::fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
+        std::fs::write(dir.join(".claude-plugin/plugin.json"), "{}").unwrap();
+        std::fs::write(dir.join("hooks/hooks.json"), "{}").unwrap();
+        std::fs::write(dir.join("hooks/lib.sh"), "#!/bin/sh\n").unwrap();
+        std::fs::write(dir.join("hooks/session-start.sh"), "#!/bin/sh\n").unwrap();
+    }
+
+    #[test]
+    fn decision_reminder_plugin_rides_with_the_decisions_skill_and_only_that_skill() {
+        let source = tempfile::tempdir().unwrap();
+        decision_reminder_plugin_source(source.path());
+
+        let home = tempfile::tempdir().unwrap();
+        let skill_root = home.path().join(".claude/skills");
+        std::fs::create_dir_all(&skill_root).unwrap();
+        let roots_owned: Vec<(PathBuf, Option<String>)> =
+            vec![(skill_root.clone(), Some("claude".to_string()))];
+        let known_roots: [(&Path, &str); 1] = [(skill_root.as_path(), "claude")];
+        let mut confirms = Confirms::new(true);
+
+        run_remaining_post_install_steps(
+            &roots_owned,
+            source.path(),
+            &["decisions".to_string()],
+            &mut confirms,
+            &known_roots,
+            home.path(),
+            &mut ui::progress::PlainSink,
+        );
+        assert!(
+            skill_root
+                .join("decision-reminder-plugin/hooks/session-start.sh")
+                .is_file(),
+            "the plugin must be installed when decisions is among the selected skills"
+        );
+
+        // A fresh root, decisions not selected this time.
+        let other_root = home.path().join(".claude/skills-2");
+        std::fs::create_dir_all(&other_root).unwrap();
+        let other_roots_owned: Vec<(PathBuf, Option<String>)> =
+            vec![(other_root.clone(), Some("claude".to_string()))];
+        let other_known_roots: [(&Path, &str); 1] = [(other_root.as_path(), "claude")];
+        let mut confirms2 = Confirms::new(true);
+        run_remaining_post_install_steps(
+            &other_roots_owned,
+            source.path(),
+            &["todo".to_string()],
+            &mut confirms2,
+            &other_known_roots,
+            home.path(),
+            &mut ui::progress::PlainSink,
+        );
+        assert!(
+            !other_root
+                .join("decision-reminder-plugin/hooks/session-start.sh")
+                .exists(),
+            "the plugin must not be installed when decisions is not among the selected skills"
         );
     }
 
