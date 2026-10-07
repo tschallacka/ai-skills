@@ -5,9 +5,10 @@ import { update } from 'claude-code'
 // lifecycle is open -> decided -> implemented: the user answering one does
 // not make it vanish from this pane, since a decided question is still
 // outstanding work -- the agent's, not the user's -- until it is actually
-// carried out and marked implemented. The pane defaults to a "Pending" view
-// (open + decided) and can be toggled to "Implemented" to see what is
-// already done. The register is read on every draw, the same way
+// carried out and marked implemented. The pane's View toggle has one button
+// per status -- Open (needs the user's pick), Pending (decided, awaiting
+// the agent's implementation), Implemented (already done) -- and defaults
+// to Open. The register is read on every draw, the same way
 // register-board reads BUGS.json/TODO.json, so the pane always shows what is
 // on disk; a timer also forces a redraw, the same pattern ci-board's
 // JOB_REFRESH_MS uses, so a question answered or implemented elsewhere (the
@@ -27,6 +28,14 @@ const IMPLEMENT = 'implement_decision_board'
 const priorityFilterKey = { plugin: 'decision-board', key: 'priorityFilter' } as const
 const branchOnlyKey = { plugin: 'decision-board', key: 'branchOnly' } as const
 const viewKey = { plugin: 'decision-board', key: 'view' } as const
+const lastLoggedKey = { plugin: 'decision-board', key: 'lastLogged' } as const
+
+// How long the "decision logged" banner stays up after a person answers a
+// question from the pane, in milliseconds -- long enough to read and act on,
+// short enough that it is gone well before anyone forgets why it was there.
+// It piggybacks on the pane's own REFRESH_MS redraw rather than a timer of
+// its own, so it fades on the next tick past this window.
+const BANNER_MS = 8_000
 
 // The part of `$.fs` the reading needs.
 type Fs = {
@@ -49,7 +58,7 @@ type Question = {
   updated_at: string
 }
 
-type View = 'pending' | 'implemented'
+type View = 'open' | 'pending' | 'implemented'
 
 const PRIORITY_ORDER = ['urgent', 'high', 'normal', 'low', 'someday']
 
@@ -77,9 +86,20 @@ function sortQuestionsUrgentFirst(questions: Question[]): Question[] {
 
 // Open and decided are both still outstanding (an answer is not the same as
 // an implementation); implemented, closed, dropped and obsolete are resting
-// states this pane does not otherwise surface.
+// states this pane does not otherwise surface. `pendingQuestions` is the
+// agent-facing tools' own grouping (what still needs someone's attention,
+// open or decided alike); the pane's View toggle instead shows exactly one
+// status at a time, via `questionsForView`.
 function pendingQuestions(questions: Question[]): Question[] {
   return questions.filter(q => q.status === 'open' || q.status === 'decided')
+}
+
+function openQuestions(questions: Question[]): Question[] {
+  return questions.filter(q => q.status === 'open')
+}
+
+function decidedQuestions(questions: Question[]): Question[] {
+  return questions.filter(q => q.status === 'decided')
 }
 
 function implementedQuestions(questions: Question[]): Question[] {
@@ -87,7 +107,9 @@ function implementedQuestions(questions: Question[]): Question[] {
 }
 
 function questionsForView(questions: Question[], view: View): Question[] {
-  return view === 'implemented' ? implementedQuestions(questions) : pendingQuestions(questions)
+  if (view === 'implemented') return implementedQuestions(questions)
+  if (view === 'pending') return decidedQuestions(questions)
+  return openQuestions(questions)
 }
 
 // The pane's own priority/branch filters, each optional and independent of
@@ -188,6 +210,8 @@ export const __test = {
   implementArgs,
   filterQuestions,
   pendingQuestions,
+  openQuestions,
+  decidedQuestions,
   implementedQuestions,
   questionsForView,
   relativeAge,
@@ -304,8 +328,9 @@ export const register: Register = (on, options) => {
   })
 
   // The agent's way to record that a decided question's pick was carried
-  // out, the same underlying call the pane's own "Mark implemented" button
-  // makes (implementArgs).
+  // out. Deliberately agent-only: the pane itself offers no button for this
+  // -- a human picking an option is "decided", not "done", and only the
+  // agent that actually did the work can say when that is true.
   on('tool.call', { tool: `mcp__decision-board__${IMPLEMENT}` }, async ($, e) => {
     const root = await $.session.root()
     const home = (await $.env.get('HOME')) ?? ''
@@ -336,7 +361,9 @@ export const register: Register = (on, options) => {
     const { value: priorityFilter } = await $.state.get(priorityFilterKey)
     const { value: branchOnly } = await $.state.get(branchOnlyKey)
     const { value: viewValue } = await $.state.get(viewKey)
-    const view: View = viewValue === 'implemented' ? 'implemented' : 'pending'
+    const view: View = viewValue === 'pending' || viewValue === 'implemented' ? viewValue : 'open'
+    const { value: lastLogged } = await $.state.get(lastLoggedKey)
+    const showBanner = !!lastLogged && Date.now() - lastLogged.at < BANNER_MS
     // Only asks git for the current branch when the toggle actually needs it:
     // every other render costs one file read and nothing else.
     let activeBranch: string | null = null
@@ -351,18 +378,22 @@ export const register: Register = (on, options) => {
     const answer = async (id: string, letter: string) => {
       const file = `${root}/DECISIONS.json`
       const bin = decisionsBin(home, xdg)
-      await $.process.run(answerArgs(bin, id, letter, file))
+      const run = await $.process.run(answerArgs(bin, id, letter, file))
+      if (run.exitCode === 0) {
+        await update($, lastLoggedKey, () => ({ id, at: Date.now() }))
+      }
       $.ui.invalidate('ui.render')
     }
 
-    const implementPick = async (id: string) => {
-      const file = `${root}/DECISIONS.json`
-      const bin = decisionsBin(home, xdg)
-      await $.process.run(implementArgs(bin, id, '', file))
-      $.ui.invalidate('ui.render')
+    const HEADINGS: Record<View, string> = { open: 'Open questions', pending: 'Pending questions', implemented: 'Implemented questions' }
+    const heading = HEADINGS[view]
+    // Said once per view, not once per row -- a row's own line stays just
+    // "picked X", since repeating the explanation on every question in a
+    // long pending list is noise once the person already knows what the
+    // view means.
+    const SUBTITLES: Partial<Record<View, string>> = {
+      pending: 'Decided; the agent implements these and marks them, not the person.',
     }
-
-    const heading = view === 'implemented' ? 'Implemented questions' : 'Pending questions'
 
     return (
       <Box flexDirection="column">
@@ -374,9 +405,22 @@ export const register: Register = (on, options) => {
             Close
           </Button>
         </Box>
+        {SUBTITLES[view] && <Text dimColor>{SUBTITLES[view]}</Text>}
+        {showBanner && (
+          <Text color="#ffa500" bold>
+            {`Decision logged (${lastLogged!.id}). Please remind Claude in chat -- sadly this can't be automated.`}
+          </Text>
+        )}
         <Text> </Text>
         <Box flexDirection="row">
           <Text dimColor>View: </Text>
+          <Button
+            variant={view === 'open' ? 'primary' : undefined}
+            onPress={() => update($, viewKey, () => 'open')}
+          >
+            Open
+          </Button>
+          <Text> </Text>
           <Button
             variant={view === 'pending' ? 'primary' : undefined}
             onPress={() => update($, viewKey, () => 'pending')}
@@ -412,7 +456,11 @@ export const register: Register = (on, options) => {
           </Button>
         </Box>
         <Text> </Text>
-        {inView.length === 0 && <Text dimColor>{view === 'implemented' ? 'Nothing implemented yet.' : 'Nothing pending.'}</Text>}
+        {inView.length === 0 && (
+          <Text dimColor>
+            {{ open: 'No open questions.', pending: 'Nothing decided yet.', implemented: 'Nothing implemented yet.' }[view]}
+          </Text>
+        )}
         {inView.length > 0 && questions.length === 0 && <Text dimColor>No questions match this filter.</Text>}
         {questions.map(q => (
           <Box key={q.id} flexDirection="column">
@@ -432,12 +480,7 @@ export const register: Register = (on, options) => {
               </Box>
             )}
             {q.status === 'decided' && (
-              <Box flexDirection="column">
-                <Text dimColor>{`   picked ${chosenLabel(q)} · awaiting implementation`}</Text>
-                <Box flexDirection="row">
-                  <Button onPress={() => implementPick(q.id)}>Mark implemented</Button>
-                </Box>
-              </Box>
+              <Text dimColor>{`   picked ${chosenLabel(q)}`}</Text>
             )}
             {q.status === 'implemented' && (
               <Text dimColor>
