@@ -8381,7 +8381,7 @@
     {
       "id": "B399",
       "title": "ai-text-editor: --preserve-external on resolve(reload/force_save) likely always fails",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -8392,12 +8392,12 @@
       "surfaces": [
         "src/ai-text-editor"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "src/ai-text-editor/src/bin/ai-text-editor-server.rs: preserve_external's signature changed to fn preserve_external(tab: &Tab, envelope: &Envelope, external: &[u8]), dropping its internal re-read of tab.pending_external (which resolve_external had already taken/emptied before dispatching on action). Both call sites (the reload and force_save branches) now pass their own already-captured external bytes directly. Commit 6ea574cc467aa4ee8e83a606270f6c4691b27211 on master (not yet pushed).",
+      "verification": "Added two new tests in src/ai-text-editor/tests/cli_flow.rs: preserve_external_backs_up_before_reload_discards_it and preserve_external_backs_up_before_force_save_overwrites_it, both arming a real external_change_pending then calling resolve with --preserve-external on reload/force_save respectively, asserting success and that a .back file holds the discarded external bytes. Mutation-verified: both tests fail against the pre-fix code with exactly the predicted backup_failed/\"no external bytes available\" error, and pass with the fix restored. cargo test -p ai-text-editor: 69 lib unit tests + 89 cli_flow tests + 4 tcp_flow tests, all passing. cargo fmt --check and cargo clippy --all-targets -- -D warnings both clean.",
       "found_by": "",
       "notes": "Flagged by the subagent that fixed B398, deliberately left unfixed there to keep that change scoped; needs its own real repro (a test exercising --preserve-external on reload/force_save) before a fix lands.",
       "created_at": "2026-10-07T20:40:45Z",
-      "updated_at": "2026-10-07T20:40:45Z"
+      "updated_at": "2026-10-07T21:31:55Z"
     },
     {
       "id": "B59",
