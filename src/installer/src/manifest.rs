@@ -30,6 +30,7 @@ pub const SKILLS: &[Skill] = &[
     Skill { name: "interactive-shell", description: "Drives unknown full-screen terminal programs through a PTY wrapper and a unix-socket input client." },
     Skill { name: "www", description: "A brake the human can pull, and one the agent pulls on itself when it is thrashing: stop, answer three questions, then one reasoned step." },
     Skill { name: "ci-failures", description: "What actually failed in a CI run or pipeline, from a run/pipeline id, a PR/MR number or a branch -- on GitHub or GitLab." },
+    Skill { name: "decisions", description: "A register of non-blocking questions an agent raises mid-work: lettered options, priority and branch, answered later from the CLI or a pane." },
 ];
 
 pub fn known_skill(name: &str) -> Option<&'static Skill> {

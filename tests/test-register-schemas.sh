@@ -49,7 +49,7 @@ skill_example() { # <skill> → the first ```json block
     awk '/^```json$/ { inside = 1; next } inside && /^```$/ { exit } inside' "$repo_root/$1/SKILL.md"
 }
 
-for skill in todo bug-report; do
+for skill in todo bug-report decisions; do
     schema="$repo_root/$skill/schema.$package_version.json"
 
     [ -f "$schema" ] || t_fail "$skill ships no schema.$package_version.json for the installed version"
