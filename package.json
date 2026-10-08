@@ -57,7 +57,6 @@
     ".agents",
     "README.md",
     "LICENSE",
-    "!interactive-shell/TODO.json",
     "!interactive-shell/MODE-MANIFEST.tsv",
     "!planning/tests/**",
     "!planning/scripts/lib/**",
