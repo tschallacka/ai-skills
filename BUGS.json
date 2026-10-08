@@ -3600,7 +3600,7 @@
     {
       "id": "B401",
       "title": "A stale generated plan-core-lib.sh keeps setup-dev-env.sh on its bash fallback, which never refreshes plan-core-lib.sh, so the B391 and B371 fixes cannot reach an existing checkout",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3611,12 +3611,12 @@
       "surfaces": [
         "setup-dev-env.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "setup-dev-env.sh's compiled-binary-preference bootstrap now runs build-plan-libs.sh --check before trusting plan-core-lib.sh, and repairs it first (build-plan-libs.sh, no args) if stale -- the one call site where that is correct rather than drift-masking, since none of the five plan-star-lib.sh files are committed and plan-core-lib.sh itself governs which implementation answers the question next. Commits 1ebb8ba9, b398e979.",
+      "verification": "Reproduced live: spliced the exact pre-050aa18c pecbip_pick (no devbin/devroot lookup) into the real generated plan-core-lib.sh, confirmed build-plan-libs.sh --check reported it stale, then ran setup-dev-env.sh --check and confirmed it self-healed (devbin reference restored, build-plan-libs.sh --check passing again) before dispatching. New regression test planning/tests/test-setup-dev-env-stale-bundle.sh reproduces this automatically; confirmed it fails without the fix (reverted setup-dev-env.sh via git stash, re-ran) and passes with it. Full pre-push-check.sh gate suite passed on both commits before push.",
       "found_by": "rebuild after pulling 50bf29de, compile-and-install session 2026-10-08",
       "notes": "Why it went unnoticed: B371 and B372 were each verified by running the rebuilt setup-dev-env binary directly, never through the shell shim, and a fresh clone has no bundle to be stale. Only an existing checkout pulling the fix hits the loop, and the run still reports every binary built. Workaround: run planning/scripts/build-plan-libs.sh after the pull, before setup-dev-env.sh. Related: B391 (the selector this fix lives in), B371 (the freshness check the bash path lacks), B372.",
       "created_at": "2026-10-08T14:59:15Z",
-      "updated_at": "2026-10-08T14:59:21Z"
+      "updated_at": "2026-10-08T15:17:30Z"
     },
     {
       "id": "B402",
