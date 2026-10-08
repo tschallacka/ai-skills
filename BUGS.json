@@ -3598,6 +3598,27 @@
       "updated_at": "2026-10-06T13:50:30Z"
     },
     {
+      "id": "B401",
+      "title": "A stale generated plan-core-lib.sh keeps setup-dev-env.sh on its bash fallback, which never refreshes plan-core-lib.sh, so the B391 and B371 fixes cannot reach an existing checkout",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "# In a checkout whose generated planning/scripts/plan-core-lib.sh predates 050aa18c\n# (any checkout set up before 2026-10-05), with skills installed:\ngit pull --ff-only                      # brings 050aa18c (B391) and a164efa2 (B371)\nnix develop --command ./setup-dev-env.sh\nawk '/^pecbip_pick\\(\\)/,/^}/' planning/scripts/plan-core-lib.sh | head -4   # still the two-dir version\ncmp chat/bin/<triple>/chat-mcp bin/<triple>/chat-mcp; ls ci-failures/bin/<triple>/\n# Workaround, proving the cause:\nnix develop --command planning/scripts/build-plan-libs.sh\nnix develop --command ./setup-dev-env.sh  # now prints \"-> chat/bin/...\", \"-> ci-failures/bin/...\"\n",
+      "observed": "macOS arm64, master 50bf29de, 2026-10-08. After the pull, `nix develop --command ./setup-dev-env.sh` exited 0 with \"88 binary/binaries built\" but printed no \"-> chat/bin\", \"-> ai-text-editor/bin\" or \"-> ci-failures/bin\" lines. chat/bin/aarch64-apple-darwin/{chat-client-rs,chat-mcp} differed from bin/aarch64-apple-darwin (cmp), and ci-failures/bin/aarch64-apple-darwin/ did not exist. planning/scripts/plan-core-lib.sh still carried the pre-050aa18c pecbip_pick (`local dir candidate side`, loop over \"$1\" \"$side\"), while lib/core/plan_exec_compiled_binary_if_present.sh has the devbin-first version. After build-plan-libs.sh regenerated the bundle, the same setup-dev-env.sh run printed nine skill-dir staging lines, and every <skill>/bin/<triple>/ copy matched bin/<triple>/. Had the installer run before the regeneration, it would have shipped the stale plan-core-lib.sh to ~/.claude/skills and ~/.config/opencode/skills too.\n",
+      "expected": "After a pull, one ./setup-dev-env.sh run regenerates a stale plan-core-lib.sh and runs the compiled setup-dev-env, so every <skill>/bin/<triple>/ copy and every generated library matches the checkout, and an install from it ships current code.",
+      "mechanism": "setup-dev-env.sh:62-65 picks the compiled setup-dev-env through plan_exec_compiled_binary_if_present, which it sources from the GENERATED planning/scripts/plan-core-lib.sh, not from lib/core/. A bundle generated before 050aa18c carries the pecbip_pick that never looks in <checkout>/bin/<triple>/ (B391), so on a machine with skills installed the shim falls through to the bash implementation. That bash copy rebuilds the generated libraries only when one is missing (setup-dev-env.sh:249-271, \"Missing is built, present is left alone\"). The freshness check B371 added (build-plan-libs.sh --check) exists only in src/setup-dev-env/src/generated.rs, which this path never reaches. So the stale bundle selects the bash path, and the bash path keeps the stale bundle: the B391 and B371 fixes cannot reach an existing checkout through setup-dev-env.sh. Only a fresh clone (no bundle yet) or a manual build-plan-libs.sh breaks the loop.\n",
+      "surfaces": [
+        "setup-dev-env.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "rebuild after pulling 50bf29de, compile-and-install session 2026-10-08",
+      "notes": "Why it went unnoticed: B371 and B372 were each verified by running the rebuilt setup-dev-env binary directly, never through the shell shim, and a fresh clone has no bundle to be stale. Only an existing checkout pulling the fix hits the loop, and the run still reports every binary built. Workaround: run planning/scripts/build-plan-libs.sh after the pull, before setup-dev-env.sh. Related: B391 (the selector this fix lives in), B371 (the freshness check the bash path lacks), B372.",
+      "created_at": "2026-10-08T14:59:15Z",
+      "updated_at": "2026-10-08T14:59:21Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
