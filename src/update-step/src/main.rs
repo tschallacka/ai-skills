@@ -160,11 +160,20 @@ fn atomicity_check(
         .find(|row| table_cell(row, 2) == unit_id)
         .map(|row| table_cell(row, 4));
     let Some(declared_target) = declared_target else {
-        eprintln!("atomicity: {unit_id} has no file target; boxes left for manual confirmation");
+        eprintln!(
+            "atomicity: {unit_id} not found in the inventory; boxes left for manual confirmation"
+        );
         return;
     };
     if declared_target.is_empty() || declared_target == "N/A" {
-        eprintln!("atomicity: {unit_id} has no file target; boxes left for manual confirmation");
+        // B400: a verification/relocation unit's own inventory row declares no
+        // file target at all, so there is nothing to diff against -- tick the
+        // boxes on the step's own completion say-so instead of leaving them
+        // permanently unticked with no sanctioned way to tick them by hand.
+        tick_boxes(step_file, "");
+        eprintln!(
+            "atomicity: {unit_id} has no file target; boxes ticked on no-target confirmation"
+        );
         return;
     }
     // B354: a goal implemented in one sitting is normally landed in one
@@ -207,6 +216,21 @@ fn atomicity_check(
     } else {
         format!(" VIOLATION: also touched {}", extra.join(","))
     };
+    tick_boxes(step_file, &violation);
+    if extra.is_empty() {
+        eprintln!("atomicity: diff matches declared target {declared_target}; boxes ticked");
+    } else {
+        eprintln!("atomicity: VIOLATION — also touched: {} ", extra.join(" "));
+    }
+}
+
+/// Ticks every one of the three atomicity boxes in `step_file`, appending
+/// `violation` (already formatted with its own leading space, or empty) to
+/// the third. Reports, but does not fail the caller on, a missing step file
+/// or a box that was not found -- `atomicity_check` already treats those as
+/// soft diagnostics rather than a reason to abort `update-step`'s own status
+/// write, which has already happened by the time this runs.
+fn tick_boxes(step_file: &Path, violation: &str) {
     let Ok(content) = fs::read_to_string(step_file) else {
         eprintln!("atomicity: step file missing: {}", step_file.display());
         return;
@@ -218,7 +242,7 @@ fn atomicity_check(
             let mut value = line.to_string();
             for (index, wanted) in BOXES.iter().enumerate() {
                 if value == format!("- [ ] {wanted}") {
-                    value = format!("- [x] {wanted}{}", if index == 2 { &violation } else { "" });
+                    value = format!("- [x] {wanted}{}", if index == 2 { violation } else { "" });
                     found[index] = true;
                 }
             }
@@ -237,11 +261,6 @@ fn atomicity_check(
                 eprintln!("atomicity: box not found: {}", BOXES[index]);
             }
         }
-    }
-    if extra.is_empty() {
-        eprintln!("atomicity: diff matches declared target {declared_target}; boxes ticked");
-    } else {
-        eprintln!("atomicity: VIOLATION — also touched: {} ", extra.join(" "));
     }
 }
 
@@ -367,9 +386,110 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{all_declared_targets, read_progress_file, read_with_retry};
+    use super::{all_declared_targets, atomicity_check, read_progress_file, read_with_retry};
     use std::path::Path;
     use std::time::Duration;
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "update-step-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// B400: a verification/relocation unit's inventory row declares File as
+    /// N/A -- there is nothing to diff against, so the boxes must still be
+    /// ticked (on the step's own completion say-so) rather than left
+    /// permanently unticked with no sanctioned way to tick them by hand.
+    #[test]
+    fn a_unit_with_no_declared_file_target_still_ticks_the_boxes() {
+        let plan_root = scratch("b400-no-target");
+        let goal_dir = plan_root.join("08-goal");
+        std::fs::create_dir_all(&goal_dir).unwrap();
+        std::fs::write(
+            plan_root.join("work-unit-inventory.md"),
+            "| ID | Type | File | Scope | Subscope | Change | Depends on | Goal | Step |\n\
+             |---|---|---|---|---|---|---|---|---|\n\
+             | W30 | verification | N/A | scope | N/A | change | -- | 08-goal | some-step |\n",
+        )
+        .unwrap();
+        let step_file = plan_root.join("some-step.md");
+        std::fs::write(
+            &step_file,
+            "## Atomicity check\n\n\
+             - [ ] This step owns exactly one inventory work unit.\n\
+             - [ ] No other file, symbol, test target, or verification flow changes here.\n\
+             - [ ] Any follow-on target has a separately named work unit and step.\n",
+        )
+        .unwrap();
+
+        atomicity_check(
+            &goal_dir,
+            Path::new("/nonexistent-repo-root"),
+            "W30",
+            "HEAD",
+            &step_file,
+        );
+
+        let updated = std::fs::read_to_string(&step_file).unwrap();
+        assert!(updated.contains("- [x] This step owns exactly one inventory work unit."));
+        assert!(updated.contains(
+            "- [x] No other file, symbol, test target, or verification flow changes here."
+        ));
+        assert!(updated
+            .contains("- [x] Any follow-on target has a separately named work unit and step."));
+        assert!(
+            !updated.contains("VIOLATION"),
+            "nothing to diff, so no violation text"
+        );
+        assert!(!updated.contains("- [ ]"), "every box was ticked");
+
+        std::fs::remove_dir_all(&plan_root).ok();
+    }
+
+    /// A row the unit_id is not found in at all is a different case -- a
+    /// typo'd --unit, say -- and is left alone, unticked, rather than ticked
+    /// on no evidence whatsoever.
+    #[test]
+    fn a_unit_id_absent_from_the_inventory_leaves_the_boxes_unticked() {
+        let plan_root = scratch("b400-absent-unit");
+        let goal_dir = plan_root.join("08-goal");
+        std::fs::create_dir_all(&goal_dir).unwrap();
+        std::fs::write(
+            plan_root.join("work-unit-inventory.md"),
+            "| ID | Type | File | Scope | Subscope | Change | Depends on | Goal | Step |\n\
+             |---|---|---|---|---|---|---|---|---|\n\
+             | W01 | source | `src/foo.rs` | scope | N/A | change | -- | 08-goal | some-step |\n",
+        )
+        .unwrap();
+        let step_file = plan_root.join("some-step.md");
+        std::fs::write(
+            &step_file,
+            "- [ ] This step owns exactly one inventory work unit.\n\
+             - [ ] No other file, symbol, test target, or verification flow changes here.\n\
+             - [ ] Any follow-on target has a separately named work unit and step.\n",
+        )
+        .unwrap();
+
+        atomicity_check(
+            &goal_dir,
+            Path::new("/nonexistent-repo-root"),
+            "W99",
+            "HEAD",
+            &step_file,
+        );
+
+        let updated = std::fs::read_to_string(&step_file).unwrap();
+        assert!(updated.contains("- [ ] This step owns exactly one inventory work unit."));
+
+        std::fs::remove_dir_all(&plan_root).ok();
+    }
 
     #[test]
     fn read_progress_file_succeeds_on_a_present_file() {
