@@ -472,6 +472,7 @@ tests/test-plan-crypt.sh
 tests/test-roster-cross-reference.sh
 tests/test-runtime-dependencies.sh
 tests/test-self-hosted-plan.sh
+tests/test-setup-dev-env-stale-bundle.sh
 tests/test-step-atomicity-reset.sh
 tests/test-step-testing-reminder.sh
 tests/test-step-testing-sections.sh
