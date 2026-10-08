@@ -157,6 +157,11 @@ fn run() -> i32 {
     // maybe_reexec never returns when a re-exec happens; reaching here
     // means we are already inside the nix shell (or a marker was set).
 
+    // B402: make sure the process that is about to enumerate the plan is
+    // running the binary this exact source tree just built, not whatever was
+    // on disk before this invocation started.
+    reexec::maybe_reexec_after_self_rebuild(&repo_root, &host_triple, exe_suffix);
+
     let token = markers::new_token();
     if let Err(error) = markers::write_started(&repo_root, &token) {
         eprintln!("{PROGRAM}: could not write .setup-dev-env.started: {error}");

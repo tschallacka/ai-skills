@@ -104,74 +104,96 @@ pub struct BuildOutcome {
     pub failed: Vec<String>,
 }
 
+/// One row's own outcome: built and staged, skipped (no crate at that path
+/// in this checkout), or failed (already reported to stderr).
+pub enum StepOutcome {
+    Built,
+    Skipped,
+    Failed,
+}
+
+/// Builds and stages exactly one (crate, binary) row, printing the same
+/// progress line `run` always has. Pulled out of `run` so the self-hosting
+/// row (B402) can be built and staged on its own, ahead of the full plan.
+pub fn build_and_stage_one(
+    repo_root: &Path,
+    triple: &str,
+    exe_suffix: &str,
+    crate_name: &str,
+    binary: &str,
+) -> StepOutcome {
+    let src = repo_root.join("src").join(crate_name);
+    if !src.join("Cargo.toml").is_file() {
+        println!("  {crate_name:<16} no crate at src/{crate_name}; skipped");
+        return StepOutcome::Skipped;
+    }
+    print!("  {crate_name:<16} ");
+    let status = Command::new("cargo")
+        .arg("build")
+        .arg("--release")
+        .arg("--manifest-path")
+        .arg(src.join("Cargo.toml"))
+        .arg("--target")
+        .arg(triple)
+        .current_dir(repo_root)
+        // built_artifact() below assumes cargo's output lands under
+        // repo_root/target/ -- true by cargo's own default, but an
+        // inherited CARGO_TARGET_DIR (an absolute path, set process-wide
+        // rather than per invocation; this repo's own CI workflow sets
+        // one for the outer build) overrides that regardless of
+        // current_dir, silently redirecting this nested build's output
+        // elsewhere and making the staging read below fail with "No
+        // such file or directory". Pin it explicitly so this build's
+        // output location cannot depend on the calling environment.
+        .env("CARGO_TARGET_DIR", repo_root.join("target"))
+        .output();
+    match status {
+        Ok(output) if output.status.success() => {
+            if let Err(error) = stage_primary(repo_root, triple, exe_suffix, binary) {
+                println!("FAILED");
+                eprintln!("      | staging failed: {error}");
+                return StepOutcome::Failed;
+            }
+            println!("ok -> bin/{triple}/{binary}{exe_suffix}");
+            // A failure staging the sibling/skill-dir copies (rare: it
+            // would need permissions or disk-space trouble right after
+            // the primary copy just succeeded) is reported and this one
+            // crate is marked failed, but the run continues rather than
+            // aborting the entire remaining build over one crate's
+            // extra-copy failure -- the same per-crate failure isolation
+            // the primary copy and the build step above already have.
+            if let Err(error) = stage_extras(repo_root, triple, exe_suffix, crate_name, binary) {
+                eprintln!("      | staging failed: {error}");
+                return StepOutcome::Failed;
+            }
+            StepOutcome::Built
+        }
+        Ok(output) => {
+            println!("FAILED");
+            let combined = [output.stdout, output.stderr].concat();
+            for line in String::from_utf8_lossy(&combined).lines() {
+                eprintln!("      | {line}");
+            }
+            StepOutcome::Failed
+        }
+        Err(error) => {
+            println!("FAILED");
+            eprintln!("      | {error}");
+            StepOutcome::Failed
+        }
+    }
+}
+
 /// Runs the full build loop against `repo_root` for `triple`, printing one
 /// progress line per crate.
 pub fn run(repo_root: &Path, triple: &str, exe_suffix: &str) -> BuildOutcome {
     let mut built = 0u32;
     let mut failed = Vec::new();
     for (crate_name, binary) in plan::plan() {
-        let src = repo_root.join("src").join(crate_name);
-        if !src.join("Cargo.toml").is_file() {
-            println!("  {crate_name:<16} no crate at src/{crate_name}; skipped");
-            continue;
-        }
-        print!("  {crate_name:<16} ");
-        let status = Command::new("cargo")
-            .arg("build")
-            .arg("--release")
-            .arg("--manifest-path")
-            .arg(src.join("Cargo.toml"))
-            .arg("--target")
-            .arg(triple)
-            .current_dir(repo_root)
-            // built_artifact() below assumes cargo's output lands under
-            // repo_root/target/ -- true by cargo's own default, but an
-            // inherited CARGO_TARGET_DIR (an absolute path, set process-wide
-            // rather than per invocation; this repo's own CI workflow sets
-            // one for the outer build) overrides that regardless of
-            // current_dir, silently redirecting this nested build's output
-            // elsewhere and making the staging read below fail with "No
-            // such file or directory". Pin it explicitly so this build's
-            // output location cannot depend on the calling environment.
-            .env("CARGO_TARGET_DIR", repo_root.join("target"))
-            .output();
-        match status {
-            Ok(output) if output.status.success() => {
-                if let Err(error) = stage_primary(repo_root, triple, exe_suffix, binary) {
-                    println!("FAILED");
-                    eprintln!("      | staging failed: {error}");
-                    failed.push(crate_name.to_string());
-                    continue;
-                }
-                println!("ok -> bin/{triple}/{binary}{exe_suffix}");
-                // A failure staging the sibling/skill-dir copies (rare: it
-                // would need permissions or disk-space trouble right after
-                // the primary copy just succeeded) is reported and this one
-                // crate is marked failed, but the run continues rather than
-                // aborting the entire remaining build over one crate's
-                // extra-copy failure -- the same per-crate failure isolation
-                // the primary copy and the build step above already have.
-                if let Err(error) = stage_extras(repo_root, triple, exe_suffix, crate_name, binary)
-                {
-                    eprintln!("      | staging failed: {error}");
-                    failed.push(crate_name.to_string());
-                    continue;
-                }
-                built += 1;
-            }
-            Ok(output) => {
-                println!("FAILED");
-                let combined = [output.stdout, output.stderr].concat();
-                for line in String::from_utf8_lossy(&combined).lines() {
-                    eprintln!("      | {line}");
-                }
-                failed.push(crate_name.to_string());
-            }
-            Err(error) => {
-                println!("FAILED");
-                eprintln!("      | {error}");
-                failed.push(crate_name.to_string());
-            }
+        match build_and_stage_one(repo_root, triple, exe_suffix, crate_name, binary) {
+            StepOutcome::Built => built += 1,
+            StepOutcome::Skipped => {}
+            StepOutcome::Failed => failed.push(crate_name.to_string()),
         }
     }
     BuildOutcome { built, failed }
@@ -272,6 +294,7 @@ fn skill_dir_for(crate_name: &str) -> Option<&str> {
             Some("chat")
         }
         "ai-text-editor" | "ai-text-editor-mcp" => Some("ai-text-editor"),
+        "decisions" | "decisions-mcp" => Some("decisions"),
         _ => None,
     }
 }
@@ -340,6 +363,10 @@ mod tests {
                 Some("ai-text-editor"),
                 "{crate_name}"
             );
+        }
+        // B403: decisions' own two crates.
+        for crate_name in ["decisions", "decisions-mcp"] {
+            assert_eq!(skill_dir_for(crate_name), Some("decisions"), "{crate_name}");
         }
         // Pre-existing cases, unchanged by this fix.
         for crate_name in ["bug-report", "todo", "interactive-shell"] {
