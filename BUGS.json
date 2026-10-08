@@ -8078,6 +8078,30 @@
       "updated_at": "2026-10-05T11:10:51Z"
     },
     {
+      "id": "B400",
+      "title": "A verification/relocation work unit (File=N/A) can never pass validate-plan.sh --complete's atomicity check",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "In any plan, give a work unit type 'verification' or 'relocation' (inventory File column = N/A), e.g. goal 08's W30-W36 in .plans/register-and-plan-worktrees. Mark its step completed: update-step.sh <goal-dir> <step-name> completed --repo-root <repo> --unit W30. It prints 'atomicity: W30 has no file target; boxes left for manual confirmation' and leaves the step file's three Atomicity-check boxes unticked (by design -- src/update-step/src/main.rs's atomicity_check returns early whenever the inventory's declared target is empty or N/A, never touching the step file). Then try the only other apparent path: update-plan-content.sh -ss <plan-dir> '<goal>/<step>' atomicity-check -p '1.1: ...' -p '1.2: ...' -p '1.3: ...'.",
+      "observed": "update-plan-content.sh refuses: \"Section 'atomicity-check' is not a mutable narrative section for a step document. Closest match: atomicity-check. Valid step section ids: objective instructions acceptance-criteria handoff atomicity-check\" -- it lists atomicity-check as a valid section id in the same breath it refuses to let anything write to it. There is now no sanctioned tool path left to tick those three boxes; validate-plan.sh --plan-dir <plan> --complete reports FAIL 'has unticked atomicity box but its step is completed' for every such unit, permanently, with the step genuinely, correctly completed.",
+      "expected": "Either update-step.sh's --unit/--repo-root form accepts a no-file-target unit and ticks the three generic boxes after a plain human/agent confirmation (no git-diff comparison needed, since there is nothing to diff), or update-plan-content.sh's atomicity-check section accepts a real write for this one purpose, or validate-plan.sh's --complete gate stops demanding a ticked atomicity box from a work unit whose own inventory row declares no file target at all.",
+      "mechanism": "src/update-step/src/main.rs, atomicity_check(): when the unit's inventory row has an empty or 'N/A' declared target, the function eprintln!s a diagnostic and returns immediately, before ever reading or rewriting the step file's three '- [ ] ...' lines -- confirmed in-session, this session's own register-and-plan-worktrees plan, goal 08, units W30-W36. update-plan-content.sh's section-write path (-ss/--step-section) separately refuses 'atomicity-check' as a target section outright, confirmed by the exact refusal text above, even though its own error message names atomicity-check as one of the valid step section ids.",
+      "surfaces": [
+        "planning/scripts/update-step.sh",
+        "planning/scripts/update-plan-content.sh",
+        "src/update-step/src/main.rs",
+        "src/validate-plan/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "claude-sonnet-5-5 (this session)",
+      "notes": "Found while closing out .plans/register-and-plan-worktrees goal 08 (7 real fresh-checkout verification units, each type=verification with File=N/A). The underlying verification work itself is genuinely done and independently confirmed (real pty runs against fresh git clones); only the plan's own bookkeeping checkbox is stuck. User's own words: 'report that gap as a bug, we'll tackle that after this has been implemented.' Deferred by explicit instruction -- do not fix in this pass.",
+      "created_at": "2026-10-08T07:47:21Z",
+      "updated_at": "2026-10-08T07:47:21Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
