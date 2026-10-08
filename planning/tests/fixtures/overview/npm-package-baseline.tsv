@@ -206,7 +206,7 @@ package/mods/tui-hint-board/.claude-plugin/plugin.json	436
 package/mods/tui-hint-board/hooks/hooks.json	36
 package/mods/tui-hint-board/hooks/register.tsx	15890
 package/mods/tui-hint-board/types/index.d.ts	213
-package/package.json	2450
+package/package.json	2414
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	17811
 package/planning/REVIEWER.md	26888
