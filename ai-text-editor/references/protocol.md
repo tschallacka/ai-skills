@@ -520,8 +520,19 @@ while a resolution is pending does not re-arm it, because it is already armed.
 The next agent interaction receives an external-change alert. The error's
 `details` object contains the byte count, allowed choices, and required force-save
 acknowledgement; the agent chooses
-reload, merge, keep, or acknowledged `force_save`. `merge` creates a three-way
-working view and returns `merge_base_unavailable` if the base is absent.
+reload, merge, keep, or acknowledged `force_save`. On a `text_utf8` tab, `merge`
+diffs the buffer and the external bytes against the shared base and automerges
+when the two sides' changed line ranges neither overlap nor sit adjacent to one
+another (a zero-line gap still counts as a conflict); the success response adds
+`buffer_changed_lines` and `external_changed_lines`, each an array of
+`{"start", "end"}` 1-based inclusive base line ranges, naming exactly which
+lines each side touched. Overlapping or adjacent changes, or either side's
+bytes failing to decode as UTF-8 (the external side is read fresh from disk
+and is not otherwise validated), still refuse with `merge_conflict` -- the
+refusal message does not distinguish a genuine overlapping edit from an
+undecodable side, so a caller cannot tell the two apart from the error alone.
+A `raw_bytes` or `hex_view` tab, and a large tab, stay fast-forward-only as
+before: `merge` only succeeds there when one side made no changes since base.
 `backup` captures exact external bytes and leaves the alert pending so the
 agent can decide the subsequent resolution. `preserve_external` captures exact external bytes before an overwrite/discard
 using an exclusive atomic same-directory write to `<file>.back` by default or

@@ -37,6 +37,7 @@ thiserror.workspace = true
 unicode-normalization.workspace = true
 hmac.workspace = true
 getrandom.workspace = true
+similar.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

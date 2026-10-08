@@ -38,6 +38,7 @@ pub fn is_revision_guarded(method: &str) -> bool {
 
 pub mod auth;
 pub mod client;
+pub mod diff;
 pub mod document;
 pub mod history;
 pub mod index;

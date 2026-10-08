@@ -73,6 +73,13 @@ struct Rule {
     expires_at: Option<Instant>,
     last_fired: Option<Instant>,
     fired: u64,
+    /// Set only by `Engine::ensure_wait_rule`, never by `interrupt_add`: marks
+    /// a rule the adapter registered on the agent's behalf because it called
+    /// `wait`, not one the agent configured itself. Shown in `to_json` so
+    /// `interrupt_list` never hides where a rule came from; used by
+    /// `ensure_wait_rule`'s own dedup so it never mistakes an agent's rule for
+    /// one of these, or the reverse.
+    auto_wait: bool,
 }
 
 struct Timer {
@@ -363,6 +370,7 @@ impl Rule {
             "once": self.once,
             "expires_in_seconds": self.expires_at.map(|at| at.saturating_duration_since(now).as_secs()),
             "fired": self.fired,
+            "auto_wait": self.auto_wait,
         })
     }
 }
@@ -415,6 +423,69 @@ impl Engine {
         let id = self.next_id;
         self.next_id += 1;
         id
+    }
+
+    /// Makes sure a standing interrupt rule exists for this exact
+    /// (channel, mentions) shape -- what a `wait` call needs so the next
+    /// message still reaches the agent even if `wait` is never called
+    /// again. Agents routinely forget to re-arm a one-shot `wait`, and a
+    /// `wait` left unarmed does not merely answer late: the message that
+    /// arrives in the gap is missed outright, with nothing left listening.
+    /// Promoting every `wait` into a standing rule closes that gap, since
+    /// the interrupt engine's own `on_message` already runs for every
+    /// incoming message regardless of whether a `wait` is outstanding.
+    ///
+    /// Idempotent and returns the existing id unchanged when a matching
+    /// `auto_wait`-tagged rule is already active: a `wait` repeated on the
+    /// same scope never piles up duplicate rules. Only ever matches a rule
+    /// this method itself created (`auto_wait`); an agent's own
+    /// `interrupt_add` rule is never reused or silently repurposed here,
+    /// even if its filters happen to look identical.
+    ///
+    /// `chan: None` mirrors `wait`'s own "any channel this connection has
+    /// joined" meaning: an empty `channels` filter, same as a plain
+    /// `interrupt_add` with no `channels` argument.
+    ///
+    /// Known gap: `wait(mentions: true)` also wakes on a registered
+    /// `trigger_add` pattern (T104), which a `Rule` has no way to express,
+    /// since triggers are connection-local state `Engine` does not see.
+    /// The auto-registered rule therefore only re-arms the literal
+    /// `@nick`-mention half of that OR -- still the common case, and still
+    /// strictly better than nothing once `wait` itself is forgotten.
+    pub fn ensure_wait_rule(
+        &mut self,
+        chan: Option<&str>,
+        mentions: bool,
+        now: Instant,
+    ) -> (u64, bool) {
+        let channels: Vec<String> = match chan {
+            Some(c) => vec![c.to_lowercase()],
+            None => Vec::new(),
+        };
+        if let Some(existing) = self.rules.iter().find(|r| {
+            r.auto_wait
+                && r.enabled
+                && !r.expired(now)
+                && r.channels == channels
+                && r.mentions_me == mentions
+        }) {
+            return (existing.id, false);
+        }
+        let id = self.take_id();
+        let rule = Rule {
+            id,
+            name: match chan {
+                Some(c) => format!("auto-wait:{c}"),
+                None => "auto-wait".to_string(),
+            },
+            enabled: true,
+            channels,
+            mentions_me: mentions,
+            auto_wait: true,
+            ..Rule::default()
+        };
+        self.rules.push(rule);
+        (id, true)
     }
 
     /// A message arrived on a channel this connection is in. Returns what to
@@ -1449,5 +1520,100 @@ mod tests {
             engine_for("interrupt-test-b").lock().unwrap().rules.len(),
             0
         );
+    }
+
+    #[test]
+    fn ensure_wait_rule_registers_a_standing_rule_that_fires_like_the_wait_it_came_from() {
+        let now = Instant::now();
+        let mut engine = Engine::default();
+        let (id, created) = engine.ensure_wait_rule(Some("#a"), false, now);
+        assert!(created);
+        assert!(id > 0);
+        assert_eq!(engine.rules.len(), 1);
+        // No wait has happened yet -- the point is that the rule is already
+        // armed from the very first `wait`, not only after one has fired.
+        assert!(fires(&mut engine, now, "#a", "x", "anything at all"));
+        assert!(!fires(&mut engine, now, "#b", "x", "a different channel"));
+    }
+
+    #[test]
+    fn ensure_wait_rule_is_idempotent_for_the_same_wait_shape() {
+        let now = Instant::now();
+        let mut engine = Engine::default();
+        let (first_id, first_created) = engine.ensure_wait_rule(Some("#a"), true, now);
+        let (second_id, second_created) = engine.ensure_wait_rule(Some("#a"), true, now);
+        assert!(first_created);
+        assert!(!second_created);
+        assert_eq!(first_id, second_id);
+        assert_eq!(
+            engine.rules.len(),
+            1,
+            "repeated wait calls on the same scope must not pile up rules"
+        );
+    }
+
+    #[test]
+    fn ensure_wait_rule_is_distinct_per_channel_and_mentions_shape() {
+        let now = Instant::now();
+        let mut engine = Engine::default();
+        let (chan_id, _) = engine.ensure_wait_rule(Some("#a"), false, now);
+        let (other_chan_id, _) = engine.ensure_wait_rule(Some("#b"), false, now);
+        let (mentions_id, _) = engine.ensure_wait_rule(Some("#a"), true, now);
+        let (unscoped_id, _) = engine.ensure_wait_rule(None, false, now);
+        assert_eq!(engine.rules.len(), 4);
+        let ids = [chan_id, other_chan_id, mentions_id, unscoped_id];
+        for (i, a) in ids.iter().enumerate() {
+            for (j, b) in ids.iter().enumerate() {
+                assert!(i == j || a != b, "ids must be distinct: {ids:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn ensure_wait_rule_never_reuses_or_is_mistaken_for_an_agents_own_rule() {
+        let now = Instant::now();
+        let mut engine = Engine::default();
+        // The agent's own rule, with filters identical to what ensure_wait_rule
+        // would otherwise register for this exact shape.
+        engine
+            .apply(
+                "interrupt_add",
+                &json!({"channels": ["#a"], "mentions_me": false}),
+                now,
+            )
+            .unwrap();
+        assert_eq!(engine.rules.len(), 1);
+        assert!(!engine.rules[0].auto_wait);
+        let (_, created) = engine.ensure_wait_rule(Some("#a"), false, now);
+        assert!(
+            created,
+            "an identical-looking manual rule must never be mistaken for an auto_wait one"
+        );
+        assert_eq!(engine.rules.len(), 2);
+        assert!(engine.rules[1].auto_wait);
+    }
+
+    #[test]
+    fn ensure_wait_rule_is_shown_in_to_json_and_an_agents_own_rule_is_not() {
+        let now = Instant::now();
+        let mut engine = Engine::default();
+        engine.apply("interrupt_add", &json!({}), now).unwrap();
+        engine.ensure_wait_rule(Some("#a"), false, now);
+        let manual = engine.rules[0].to_json(now);
+        let auto = engine.rules[1].to_json(now);
+        assert_eq!(manual["auto_wait"], json!(false));
+        assert_eq!(auto["auto_wait"], json!(true));
+    }
+
+    #[test]
+    fn an_expired_auto_wait_rule_is_not_reused_a_fresh_one_is_registered_instead() {
+        let now = Instant::now();
+        let mut engine = Engine::default();
+        let (first_id, _) = engine.ensure_wait_rule(Some("#a"), false, now);
+        engine.rules[0].expires_at = Some(now);
+        let later = now + Duration::from_secs(1);
+        let (second_id, created) = engine.ensure_wait_rule(Some("#a"), false, later);
+        assert!(created);
+        assert_ne!(first_id, second_id);
     }
 }

@@ -94,6 +94,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "similar",
  "stale-lock",
  "tempfile",
  "thiserror",
@@ -202,8 +203,10 @@ dependencies = [
 name = "bug-report"
 version = "0.1.0"
 dependencies = [
+ "planning-core",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -415,6 +418,7 @@ dependencies = [
 name = "decisions"
 version = "0.1.0"
 dependencies = [
+ "planning-core",
  "serde",
  "serde_json",
  "tempfile",
@@ -425,6 +429,7 @@ name = "decisions-mcp"
 version = "0.1.0"
 dependencies = [
  "decisions",
+ "planning-core",
  "serde_json",
  "tempfile",
 ]
@@ -1204,11 +1209,18 @@ name = "plan-root"
 version = "0.1.0"
 dependencies = [
  "planning-core",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
 name = "planning-core"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "planning-document"
@@ -1789,6 +1801,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
+name = "similar"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
+dependencies = [
+ "bstr",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1960,8 +1981,10 @@ dependencies = [
 name = "todo-register"
 version = "0.1.0"
 dependencies = [
+ "planning-core",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

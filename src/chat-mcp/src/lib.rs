@@ -291,7 +291,7 @@ fn routing() -> &'static [ToolSpec] {
         ),
         (
             "wait",
-            "Block until a message arrives, then return it as read would. This is what the connection is held for: the message is delivered when it lands, not on a later poll. Answers timed_out rather than failing when nothing arrives.",
+            "Block until a message arrives, then return it as read would. This is what the connection is held for: the message is delivered when it lands, not on a later poll. Answers timed_out rather than failing when nothing arrives. Every call also registers a standing interrupt rule for this exact channel/mentions scope if one is not already active (note says so the first time), so the next message here still reaches you -- via interrupt_list/interrupt_remove, same as any other interrupt -- even if you forget to call wait again.",
             &["channel", "mentions", "timeout_seconds", "session", "agent"],
             &[],
         ),
@@ -846,10 +846,11 @@ fn beacon_port() -> u16 {
 fn discover(wait_seconds: u64) -> Value {
     let port = beacon_port();
     let found = chat_client_rs::discover_candidates(port, wait_seconds.clamp(1, 30));
+    let servers: Vec<&str> = found.iter().map(|a| a.server.as_str()).collect();
     json!({
         "tool": "discover",
         "beacon_port": port,
-        "servers": found,
+        "servers": servers,
         "note": if found.is_empty() {
             "no server announced itself; start ONE server rather than assuming a port"
         } else {
@@ -963,7 +964,7 @@ fn drop_held(session_key: &str) -> bool {
 /// latency on both ends and can lose with nothing wrong on the wire, worse
 /// on a contended CI host. A ceiling, not a sleep -- the common,
 /// uncontended case still returns on the very first attempt.
-fn discover_with_retries(port: u16) -> Vec<String> {
+fn discover_with_retries(port: u16) -> Vec<chat_client_rs::Announce> {
     let mut cands = Vec::new();
     for _ in 0..10 {
         cands = chat_client_rs::discover_candidates(port, 2);
@@ -974,19 +975,37 @@ fn discover_with_retries(port: u16) -> Vec<String> {
     cands
 }
 
+/// The first discovered candidate whose own home tag matches this state
+/// directory's -- never an unrelated one, even if it happens to answer
+/// first. `start_server` must never report "already running" for a server
+/// that has nothing to do with this AI_CHAT_HOME: finding only an unrelated
+/// server announcing is exactly the case where one of OUR OWN still needs
+/// to be started.
+fn matching_server(cands: &[chat_client_rs::Announce]) -> Option<&str> {
+    let my_home = chat_proto::home_tag(&state_dir());
+    cands
+        .iter()
+        .find(|a| a.home.as_deref() == Some(my_home.as_str()))
+        .map(|a| a.server.as_str())
+}
+
 /// Start a chat server, but only once the UDP beacon has had a chance to say
-/// one is already running: two servers on one machine split the channel, so
-/// this checks before it spawns, the same restraint the chat skill asks of a
-/// human running the CLI by hand. Always the loopback default -- there is no
+/// one is already running FOR THIS AI_CHAT_HOME: two servers sharing one
+/// state directory split that deployment's channel, so this checks before it
+/// spawns, the same restraint the chat skill asks of a human running the CLI
+/// by hand. A server announcing under a different AI_CHAT_HOME does not
+/// count as already running -- it is an unrelated deployment, and reporting
+/// it as this one would leave the caller using the wrong server for
+/// everything that follows. Always the loopback default -- there is no
 /// argument here that could widen the bind.
 fn start_server() -> Result<Value, String> {
     let port = beacon_port();
-    if let Some(server) = discover_with_retries(port).first() {
+    if let Some(server) = matching_server(&discover_with_retries(port)) {
         return Ok(json!({
             "tool": "start_server",
             "started": false,
             "server": server,
-            "note": "a server is already announcing; joining it instead of starting a second one",
+            "note": "a server for this AI_CHAT_HOME is already announcing; joining it instead of starting a second one",
         }));
     }
     let binary = server_binary_path()?;
@@ -1003,13 +1022,14 @@ fn start_server() -> Result<Value, String> {
         let mut child = child;
         let _ = child.wait();
     });
-    if let Some(server) = discover_with_retries(port).first() {
+    let cands = discover_with_retries(port);
+    if let Some(server) = matching_server(&cands) {
         return Ok(json!({
             "tool": "start_server",
             "started": true,
             "server": server,
             "pid": pid,
-            "note": "no other server answered the beacon, so a new one was started",
+            "note": "no server for this AI_CHAT_HOME answered the beacon, so a new one was started",
         }));
     }
     Err(format!(

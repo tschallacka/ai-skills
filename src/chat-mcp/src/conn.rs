@@ -125,6 +125,14 @@ pub enum Op {
         chan: Option<String>,
         mentions: bool,
     },
+    /// What `wait_by_polling` sends once, before it starts polling: makes
+    /// sure a standing interrupt rule exists for this exact (channel,
+    /// mentions) shape, so the agent keeps getting nudged even if it never
+    /// calls `wait` again. See `interrupt::Engine::ensure_wait_rule`.
+    EnsureWaitRule {
+        chan: Option<String>,
+        mentions: bool,
+    },
     Who {
         chan: String,
     },
@@ -310,22 +318,37 @@ impl Held {
         mentions: bool,
         timeout: Duration,
     ) -> Result<Answer, Failure> {
+        // Agents routinely forget to re-call `wait` once it returns, and a
+        // `wait` left unarmed does not merely answer late -- the next
+        // message is missed outright, with nothing left listening. Every
+        // `wait` therefore also makes sure a standing interrupt rule exists
+        // for this exact scope, so the interrupt engine's own always-on
+        // background loop (`Owner::interrupt_for`, run for every incoming
+        // message regardless of whether a `wait` is outstanding) keeps
+        // nudging the agent even if `wait` is never called again.
+        // Best-effort: a failure here must never block the wait itself.
+        let ensure_note = self
+            .submit_one(Op::EnsureWaitRule {
+                chan: chan.clone(),
+                mentions,
+            })
+            .ok()
+            .and_then(|answer| answer.note);
         let deadline = Instant::now() + timeout;
         loop {
-            let answer = self.submit_one(Op::Poll {
+            let mut answer = self.submit_one(Op::Poll {
                 chan: chan.clone(),
                 mentions,
             })?;
             if !answer.timed_out {
+                answer.note = Some(join_notes(answer.note, ensure_note.clone()));
                 return Ok(answer);
             }
             if Instant::now() >= deadline {
+                let timeout_note = format!("nothing arrived within {}s", timeout.as_secs().max(1));
                 return Ok(Answer {
                     timed_out: true,
-                    note: Some(format!(
-                        "nothing arrived within {}s",
-                        timeout.as_secs().max(1)
-                    )),
+                    note: Some(join_notes(Some(timeout_note), ensure_note.clone())),
                     ..Answer::empty()
                 });
             }
@@ -458,6 +481,7 @@ impl Owner {
             } => self.read(&chan, since, mentions),
             Op::Wait { .. } => Err("a wait is served as polls by Held::submit".to_string()),
             Op::Poll { chan, mentions } => self.poll(chan.as_deref(), mentions),
+            Op::EnsureWaitRule { chan, mentions } => self.ensure_wait_rule(chan, mentions),
             Op::Who { chan } => self.who(&chan),
             Op::TriggerAdd { pattern, sender } => self.trigger_add(pattern, sender),
             Op::TriggerRemove { id } => self.trigger_remove(id),
@@ -479,6 +503,29 @@ impl Owner {
         Ok(Answer {
             note: Some(reply.note),
             data: Some(reply.data),
+            ..Answer::empty()
+        })
+    }
+
+    /// What `wait_by_polling` sends once before it starts polling -- see
+    /// `interrupt::Engine::ensure_wait_rule`. Only reports a note when it just
+    /// created a rule, so a `wait` repeated on an already-covered scope stays
+    /// quiet instead of repeating itself every call.
+    fn ensure_wait_rule(&mut self, chan: Option<String>, mentions: bool) -> Result<Answer, String> {
+        let (id, created) = self
+            .engine
+            .lock()
+            .map_err(|_| "the interrupt state is poisoned; restart the adapter".to_string())?
+            .ensure_wait_rule(chan.as_deref(), mentions, Instant::now());
+        self.sync_active_marker();
+        Ok(Answer {
+            note: created.then(|| {
+                format!(
+                    "registered standing interrupt rule {id} for this wait's scope, so the next \
+                     message here still reaches you even if wait is never called again (see \
+                     interrupt_list/interrupt_remove)"
+                )
+            }),
             ..Answer::empty()
         })
     }
@@ -1014,6 +1061,18 @@ impl Owner {
         self.interrupt_for(&chan, &nick, &text);
         self.inbox.push(Push { chan, nick, text });
         true
+    }
+}
+
+/// Combines `wait_by_polling`'s own note (a woke-up/timed-out message) with
+/// the one-off `ensure_wait_rule` note, when both exist, rather than one
+/// silently overwriting the other.
+fn join_notes(primary: Option<String>, extra: Option<String>) -> String {
+    match (primary, extra) {
+        (Some(a), Some(b)) => format!("{a}; {b}"),
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => String::new(),
     }
 }
 

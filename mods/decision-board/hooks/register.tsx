@@ -43,6 +43,9 @@ type Fs = {
   read: (path: string) => Promise<string>
 }
 
+// The part of `$.process.run` the resolution needs.
+type ProcessRun = (argv: readonly string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+
 type Choice = { letter: string; label: string }
 type Question = {
   id: string
@@ -127,11 +130,11 @@ function filterQuestions(
   )
 }
 
-// Every question in the register, read from its own DECISIONS.json, sorted
-// urgent-first. No register file at all reads as no questions, the same as
-// register-board treats a missing BUGS.json/TODO.json.
-async function loadQuestions(fs: Fs, root: string): Promise<Question[]> {
-  const file = `${root}/DECISIONS.json`
+// Every question in the register, read from its own already-resolved
+// DECISIONS.json (see resolveDecisionsFile), sorted urgent-first. No
+// register file at all reads as no questions, the same as register-board
+// treats a missing BUGS.json/TODO.json.
+async function loadQuestions(fs: Fs, file: string): Promise<Question[]> {
   if (!(await fs.exists(file))) return []
   const parsed = JSON.parse(await fs.read(file)) as { questions?: Question[] }
   return sortQuestionsUrgentFirst(parsed.questions ?? [])
@@ -142,6 +145,22 @@ async function loadQuestions(fs: Fs, root: string): Promise<Question[]> {
 function decisionsBin(home: string, xdg: string): string {
   const bin = xdg ? `${xdg}/tsch-ai-skills/bin` : `${home}/.config/tsch-ai-skills/bin`
   return `${bin}/decisions`
+}
+
+// The DECISIONS.json path `decisions` itself actually reads and writes,
+// resolved once via `decisions resolve-path` per handler invocation (its
+// result is threaded through to every reader/writer that same invocation
+// needs, rather than re-resolved) -- an absolute worktree path is used as
+// is; the bare "DECISIONS.json" default is joined onto the session root,
+// exactly where this mod read and wrote it before this resolution existed.
+// A process-run failure (the binary missing, for example) falls back the
+// same way.
+async function resolveDecisionsFile(run: ProcessRun, home: string, xdg: string, root: string): Promise<string> {
+  const result = await run([decisionsBin(home, xdg), 'resolve-path']).catch(() => undefined)
+  if (!result || result.exitCode !== 0) return `${root}/DECISIONS.json`
+  const file = result.stdout.trim()
+  if (file === '') return `${root}/DECISIONS.json`
+  return file.startsWith('/') ? file : `${root}/${file}`
 }
 
 // The argument list `decisions answer <id> <letter> --file PATH` expects,
@@ -216,6 +235,9 @@ export const __test = {
   questionsForView,
   relativeAge,
   chosenLabel,
+  loadQuestions,
+  decisionsBin,
+  resolveDecisionsFile,
 }
 
 export const register: Register = (on, options) => {
@@ -277,8 +299,11 @@ export const register: Register = (on, options) => {
   // the whole truth, regardless of what a person last narrowed the view to.
   on('tool.call', { tool: `mcp__decision-board__${TOOL}` }, async $ => {
     const root = await $.session.root()
+    const home = (await $.env.get('HOME')) ?? ''
+    const xdg = (await $.env.get('XDG_CONFIG_HOME')) ?? ''
     const fs: Fs = { exists: path => $.fs.exists(path), read: path => $.fs.read(path) }
-    const all = await loadQuestions(fs, root)
+    const file = await resolveDecisionsFile(argv => $.process.run(argv), home, xdg, root)
+    const all = await loadQuestions(fs, file)
     const pending = pendingQuestions(all)
     await $.ui.open({ id: PANE, title: 'Questions' })
 
@@ -294,8 +319,11 @@ export const register: Register = (on, options) => {
   // The agent's read of the pending questions. Read-only; the pane is not opened.
   on('tool.call', { tool: `mcp__decision-board__${READ}` }, async $ => {
     const root = await $.session.root()
+    const home = (await $.env.get('HOME')) ?? ''
+    const xdg = (await $.env.get('XDG_CONFIG_HOME')) ?? ''
     const fs: Fs = { exists: path => $.fs.exists(path), read: path => $.fs.read(path) }
-    const all = await loadQuestions(fs, root)
+    const file = await resolveDecisionsFile(argv => $.process.run(argv), home, xdg, root)
+    const all = await loadQuestions(fs, file)
     const pending = pendingQuestions(all)
     const live = await $.ui.selection().catch(() => undefined)
 
@@ -320,7 +348,7 @@ export const register: Register = (on, options) => {
     const id = String(e.id ?? '').trim()
     const letter = String(e.letter ?? '').trim()
     if (!id || !letter) return { result: 'Both id and letter are required.' }
-    const file = `${root}/DECISIONS.json`
+    const file = await resolveDecisionsFile(argv => $.process.run(argv), home, xdg, root)
     const bin = decisionsBin(home, xdg)
     const run = await $.process.run(answerArgs(bin, id, letter, file))
     $.ui.invalidate('ui.render')
@@ -338,7 +366,7 @@ export const register: Register = (on, options) => {
     const id = String(e.id ?? '').trim()
     const note = String(e.note ?? '').trim()
     if (!id) return { result: 'id is required.' }
-    const file = `${root}/DECISIONS.json`
+    const file = await resolveDecisionsFile(argv => $.process.run(argv), home, xdg, root)
     const bin = decisionsBin(home, xdg)
     const run = await $.process.run(implementArgs(bin, id, note, file))
     $.ui.invalidate('ui.render')
@@ -354,7 +382,8 @@ export const register: Register = (on, options) => {
     const home = (await $.env.get('HOME')) ?? ''
     const xdg = (await $.env.get('XDG_CONFIG_HOME')) ?? ''
     const fs: Fs = { exists: path => $.fs.exists(path), read: path => $.fs.read(path) }
-    const all = await loadQuestions(fs, root)
+    const file = await resolveDecisionsFile(argv => $.process.run(argv), home, xdg, root)
+    const all = await loadQuestions(fs, file)
 
     if (!refresh) refresh = $.clock.every(REFRESH_MS, () => $.ui.invalidate('ui.render'))
 
@@ -376,7 +405,8 @@ export const register: Register = (on, options) => {
     const now = Date.now()
 
     const answer = async (id: string, letter: string) => {
-      const file = `${root}/DECISIONS.json`
+      // Reuses the `file` resolved once above for this render -- a second
+      // resolve-path call here would double the process cost per press.
       const bin = decisionsBin(home, xdg)
       const run = await $.process.run(answerArgs(bin, id, letter, file))
       if (run.exitCode === 0) {

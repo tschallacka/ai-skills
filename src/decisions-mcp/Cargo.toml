@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 decisions = { path = "../decisions" }
+planning-core = { path = "../planning-core" }
 serde_json.workspace = true
 
 [dev-dependencies]

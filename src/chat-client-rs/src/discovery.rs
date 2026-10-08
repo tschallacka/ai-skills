@@ -10,6 +10,17 @@ use std::time::{Duration, SystemTime};
 
 pub const DEFAULT_BEACON_PORT: u16 = 7780;
 
+/// One server's own announce beacon, as discovery reports it: the address to
+/// dial, and that server's own home tag if it sent one. `None` means an older
+/// server (or a packet that failed to parse that far), never "no tag" as a
+/// distinct value of its own -- it is treated as not matching any caller's
+/// own `AI_CHAT_HOME`, the same as a tag that genuinely differs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Announce {
+    pub server: String,
+    pub home: Option<String>,
+}
+
 // ---- server resolution ----------------------------------------------------
 // One ladder, tried in order until something answers a TCP connect:
 //   1. an explicit --server (used as-is; failures surface at connect)
@@ -60,15 +71,15 @@ fn cache_record(state_dir: &std::path::Path, server: &str) {
 // Listen for beacons and return candidate servers, LAN addresses before
 // loopback ones: a beacon whose host (or sender) is 127.0.0.1 is only
 // interesting when nothing routable announces.
-pub fn discover_candidates(beacon_port: u16, wait_s: u64) -> Vec<String> {
+pub fn discover_candidates(beacon_port: u16, wait_s: u64) -> Vec<Announce> {
     let sock = match std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, beacon_port)) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
     sock.set_read_timeout(Some(Duration::from_secs(1))).ok();
     let deadline = SystemTime::now() + Duration::from_secs(wait_s);
-    let mut lan: Vec<String> = Vec::new();
-    let mut local: Vec<String> = Vec::new();
+    let mut lan: Vec<Announce> = Vec::new();
+    let mut local: Vec<Announce> = Vec::new();
     let mut buf = [0u8; 4096];
     while SystemTime::now() < deadline {
         match sock.recv_from(&mut buf) {
@@ -85,14 +96,17 @@ pub fn discover_candidates(beacon_port: u16, wait_s: u64) -> Vec<String> {
                     addr.ip().to_string()
                 };
                 let cand = format!("{}:{}", host, port);
+                let home = json_field(&s, "home");
                 let is_local =
                     addr.ip().is_loopback() || host == "localhost" || host.starts_with("127.");
-                let seen = lan.contains(&cand) || local.contains(&cand);
+                let seen =
+                    lan.iter().any(|a| a.server == cand) || local.iter().any(|a| a.server == cand);
                 if !seen {
+                    let announce = Announce { server: cand, home };
                     if is_local {
-                        local.push(cand);
+                        local.push(announce);
                     } else {
-                        lan.push(cand);
+                        lan.push(announce);
                     }
                 }
             }
@@ -164,10 +178,32 @@ pub fn resolve_server(
             beacon_port
         );
     }
-    for cand in cands {
-        if tcp_alive(&cand) {
-            cache_record(state_dir, &cand);
-            return cand;
+    // Prefer a candidate whose own home tag matches this state directory's:
+    // the beacon is a machine/LAN-wide broadcast with no idea what
+    // AI_CHAT_HOME any particular listener is using, so without this a
+    // fresh identity (no saved session, no cache yet) under a deliberately
+    // distinct AI_CHAT_HOME could silently join an unrelated server just
+    // because it happened to answer first -- found live: a second,
+    // isolated chat deployment joined the host's other, already-running
+    // shared server instead of its own, with no error anywhere. `home ==
+    // None` (an older server, or a packet that didn't parse that far)
+    // never counts as a match.
+    let my_home = chat_proto::home_tag(state_dir);
+    let (matching, other) = partition_by_home(cands, &my_home);
+    for cand in matching {
+        if tcp_alive(&cand.server) {
+            cache_record(state_dir, &cand.server);
+            return cand.server;
+        }
+    }
+    for cand in other {
+        if tcp_alive(&cand.server) {
+            eprintln!(
+                "chat-client-rs: no server for this AI_CHAT_HOME announced itself; joining {} instead (a different AI_CHAT_HOME) -- messages posted here are visible to whoever else uses that server",
+                cand.server
+            );
+            cache_record(state_dir, &cand.server);
+            return cand.server;
         }
     }
     // Nothing answered: dial the session address anyway so the caller's own
@@ -177,5 +213,83 @@ pub fn resolve_server(
         String::new()
     } else {
         sess_server.to_string()
+    }
+}
+
+/// Splits `cands` into (matching `my_home`, everything else), preserving
+/// each half's own relative order (LAN before loopback, as `discover_candidates`
+/// produced it). A candidate with no home tag at all (`None`) never matches --
+/// it is treated the same as a tag that genuinely differs, never as a
+/// wildcard.
+fn partition_by_home(cands: Vec<Announce>, my_home: &str) -> (Vec<Announce>, Vec<Announce>) {
+    cands
+        .into_iter()
+        .partition(|a| a.home.as_deref() == Some(my_home))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn announce(server: &str, home: Option<&str>) -> Announce {
+        Announce {
+            server: server.to_string(),
+            home: home.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_matching_home_sorts_before_everything_else() {
+        let cands = vec![
+            announce("1.1.1.1:1", Some("other")),
+            announce("2.2.2.2:2", Some("mine")),
+            announce("3.3.3.3:3", None),
+        ];
+        let (matching, other) = partition_by_home(cands, "mine");
+        assert_eq!(matching, vec![announce("2.2.2.2:2", Some("mine"))]);
+        assert_eq!(
+            other,
+            vec![
+                announce("1.1.1.1:1", Some("other")),
+                announce("3.3.3.3:3", None),
+            ]
+        );
+    }
+
+    #[test]
+    fn no_home_tag_never_counts_as_a_match() {
+        let cands = vec![announce("1.1.1.1:1", None)];
+        let (matching, other) = partition_by_home(cands, "mine");
+        assert!(matching.is_empty());
+        assert_eq!(other.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_home_tag_is_not_treated_as_a_wildcard() {
+        // A caller whose own home_tag happened to be the empty string (it
+        // never is in practice -- the hash is always 12 hex digits -- but
+        // nothing here should rely on that) must not match a beacon that
+        // simply omitted the field.
+        let cands = vec![announce("1.1.1.1:1", None)];
+        let (matching, _) = partition_by_home(cands, "");
+        assert!(matching.is_empty());
+    }
+
+    #[test]
+    fn several_matches_keep_their_relative_order() {
+        let cands = vec![
+            announce("1.1.1.1:1", Some("mine")),
+            announce("2.2.2.2:2", Some("other")),
+            announce("3.3.3.3:3", Some("mine")),
+        ];
+        let (matching, other) = partition_by_home(cands, "mine");
+        assert_eq!(
+            matching,
+            vec![
+                announce("1.1.1.1:1", Some("mine")),
+                announce("3.3.3.3:3", Some("mine")),
+            ]
+        );
+        assert_eq!(other, vec![announce("2.2.2.2:2", Some("other"))]);
     }
 }

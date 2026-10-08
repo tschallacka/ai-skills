@@ -12,6 +12,12 @@
         "hooks": [
           { "type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-edit-write.sh" }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          { "type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use-read.sh" }
+        ]
       }
     ]
   }

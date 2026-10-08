@@ -277,6 +277,27 @@ fn the_beacon_carries_a_connectable_host_never_bare_localhost() {
         disco.contains(&format!(r#""port":{port}"#)),
         "the beacon port did not parse: {disco}"
     );
+    // The server's own home tag (chat_proto::home_tag of its AI_CHAT_HOME)
+    // rides along on the same beacon, so a fresh client under a distinct
+    // AI_CHAT_HOME can prefer a matching announcer over an unrelated one
+    // that merely answers first (see
+    // discovery_prefers_the_server_whose_home_tag_matches_this_clients_own
+    // below). Twelve lowercase hex characters, never empty.
+    let home = disco
+        .lines()
+        .find_map(|line| line.split(r#""home":""#).nth(1))
+        .and_then(|rest| rest.split('"').next())
+        .unwrap_or_default();
+    assert_eq!(
+        home.len(),
+        12,
+        "the beacon's home tag is not twelve characters: {disco}"
+    );
+    assert!(
+        home.chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+        "the beacon's home tag is not lowercase hex: {disco}"
+    );
 }
 
 // ---- 3. the ladder: dead session -> discovery -> healed session ----------
@@ -390,5 +411,108 @@ fn the_client_ladder_heals_a_dead_session_via_discovery() {
     assert!(
         explicit_err.contains("127.0.0.1:1"),
         "an explicit --server did not win: {explicit_err}"
+    );
+}
+
+// ---- 4. discovery prefers the server whose home tag matches this
+//         client's own AI_CHAT_HOME, not merely whichever answers first ---
+//
+// Found live, 2026-10-08: a fresh identity (no saved session, no cache yet)
+// under a deliberately isolated AI_CHAT_HOME silently joined the host's
+// OTHER, unrelated, already-running chat-server-rs instead of its own --
+// because the beacon is a machine/LAN-wide broadcast with no concept of
+// AI_CHAT_HOME at all, and the old ladder dialed whichever candidate
+// answered the TCP probe first. Two real servers, genuinely different
+// AI_CHAT_HOME directories, both announcing on the SAME beacon port
+// reproduces that collision deterministically -- this is the fix's own
+// regression test.
+#[test]
+fn discovery_prefers_the_server_whose_home_tag_matches_this_clients_own() {
+    let server_binary = resolve_workspace_binary("chat-server-rs");
+    let client_binary = resolve_workspace_binary("chat-client-rs");
+    let beacon_port = free_udp_port();
+    let beacon_port = beacon_port.as_str();
+
+    let home_mine = ScratchDir::new("resolution-home-mine");
+    let home_other = ScratchDir::new("resolution-home-other");
+
+    let spawn = |home: &std::path::Path| -> ChildGuard {
+        Command::new(&server_binary)
+            .env("AI_CHAT_HOME", home)
+            .env("CHAT_ANNOUNCE", "1")
+            .env("CHAT_ANNOUNCE_INTERVAL", "1")
+            .env("CHAT_BCAST", "127.0.0.1")
+            .env("CHAT_BEACON_PORT", beacon_port)
+            .env("CHAT_ANNOUNCE_HOST", "127.0.0.1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(ChildGuard)
+            .expect("spawning a home-tag server failed")
+    };
+    // Both announce on the SAME beacon port concurrently -- the exact
+    // multi-server-on-one-LAN shape that used to be resolved by pure race.
+    let _server_mine = spawn(home_mine.path());
+    let _server_other = spawn(home_other.path());
+    let port_mine =
+        wait_port(home_mine.path()).expect("the caller's own server did not report a port");
+    wait_port(home_other.path()).expect("the unrelated server did not report a port");
+
+    // A brand-new client identity: no saved session, no cache -- discovery
+    // is the ONLY thing that can resolve this call. Pointed at the SAME
+    // AI_CHAT_HOME as `home_mine`'s server, the realistic shape (a client is
+    // normally given the same AI_CHAT_HOME as the deployment it talks to).
+    let send = Command::new(&client_binary)
+        .args([
+            "send",
+            "--nick",
+            "home-tag-test",
+            "--chan",
+            "#home-tag-test",
+            "--text",
+            "hello",
+        ])
+        .env("AI_CHAT_HOME", home_mine.path())
+        .env("AI_CHAT_BEACON_PORT", beacon_port)
+        .output()
+        .expect("running chat-client-rs failed");
+    assert!(
+        send.status.success(),
+        "send did not resolve a server at all: {}",
+        String::from_utf8_lossy(&send.stderr)
+    );
+
+    let show = Command::new(&client_binary)
+        .args(["session", "show"])
+        .env("AI_CHAT_HOME", home_mine.path())
+        .output()
+        .expect("running chat-client-rs failed");
+    let show_text = String::from_utf8_lossy(&show.stdout).into_owned();
+    let resolved = show_text
+        .lines()
+        .find_map(|l| l.strip_prefix("server="))
+        .unwrap_or_default()
+        .to_string();
+    assert_eq!(
+        resolved,
+        format!("127.0.0.1:{port_mine}"),
+        "the client did not resolve to the server sharing its own AI_CHAT_HOME: {show_text}"
+    );
+
+    // Ground truth, independent of what the client claims: the message
+    // actually landed in the "mine" server's own channel store, never the
+    // unrelated one's.
+    let chan_mine = home_mine.path().join("channels").join("#home-tag-test.log");
+    let chan_other = home_other
+        .path()
+        .join("channels")
+        .join("#home-tag-test.log");
+    assert!(
+        chan_mine.is_file(),
+        "the message did not reach this client's own server's channel store"
+    );
+    assert!(
+        !chan_other.is_file(),
+        "the message leaked into the unrelated server's channel store"
     );
 }

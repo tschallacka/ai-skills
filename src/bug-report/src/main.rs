@@ -57,6 +57,8 @@ Usage:
   bugs dedupe    collapse duplicate ids a rebase left, closed beats open
   bugs migrate
   bugs resolve [<side>:<old-id>:<new-id> ...]   resolve a merge conflict
+  bugs resolve-path   print the register path a mutating command would use,
+                      with no prompting and nothing created
   bugs --help
 
 Any command takes --file PATH, which wins over everything else. Failing that
@@ -157,6 +159,13 @@ fn run(argv: &[String]) -> Result<ExitCode, Failure> {
         if let Err(message) = args.resolve_file_flag(name, file_flag) {
             return fail(message, EX_USAGE);
         }
+    }
+
+    // Dispatched before resolve_path itself runs: resolve_path may prompt and
+    // create a worktree as a side effect, and resolve-path's own entire point
+    // is to report where that would land WITHOUT ever doing either.
+    if args.command.as_str() == "resolve-path" {
+        return run_resolve_path_command(&args);
     }
 
     let path = resolve_path(args.flag("file").map(str::to_string));
@@ -718,6 +727,165 @@ fn resolve_path(explicit: Option<String>) -> String {
             return from_env;
         }
     }
+    if let Ok(project) = planning_core::project_root_for(None) {
+        if let Ok(candidate) = planning_core::registers_scoped_root(&project) {
+            if let Some(path) = resolved_registers_path(&project, &candidate) {
+                return path;
+            }
+        }
+    }
+    "BUGS.json".to_string()
+}
+
+/// Resolves the shared registers worktree's own BUGS.json for the bare-filename
+/// fallback case: a project's own tsch config is consulted first (never
+/// prompting for an explicit `registers_access` opinion), an already-recognized
+/// worktree is used silently, and only a genuinely undecided project reaches
+/// the interactive first-use prompt. `None` means "fall through to today's bare
+/// BUGS.json", whether because the project opted out, declined once already, or
+/// a worktree-creation attempt failed (disk full, permissions) -- a creation
+/// failure must never abort the command outright.
+fn resolved_registers_path(
+    project: &std::path::Path,
+    candidate: &std::path::Path,
+) -> Option<String> {
+    let cfg = planning_core::read_tsch_config(project);
+    if cfg.registers_access.as_deref() == Some("main-checkout") {
+        return None;
+    }
+    if cfg.registers_access.as_deref() == Some("dedicated-worktree") {
+        if planning_core::worktree_recognized(candidate) {
+            return Some(register_file(candidate));
+        }
+        let branch = cfg
+            .registers_branch
+            .unwrap_or_else(|| "registers".to_string());
+        return create_registers_worktree(project, candidate, &branch)
+            .then(|| register_file(candidate));
+    }
+    if planning_core::worktree_recognized(candidate) {
+        return Some(register_file(candidate));
+    }
+    if planning_core::is_declined(candidate) {
+        return None;
+    }
+    prompt_for_registers_worktree(project, candidate)
+}
+
+fn prompt_for_registers_worktree(
+    project: &std::path::Path,
+    candidate: &std::path::Path,
+) -> Option<String> {
+    use planning_core::PromptOutcome;
+    let outcome = planning_core::prompt_yes_no_with_default(
+        "No registers worktree is set up for this project yet. Create a \
+         dedicated sparse git worktree for BUGS.json/TODO.json/DECISIONS.json \
+         on branch \"registers\" (recommended -- avoids merge conflicts between \
+         concurrent agents)?",
+        true,
+        false,
+    );
+    match outcome {
+        PromptOutcome::Answered(true) | PromptOutcome::DefaultedNonInteractive(true) => {
+            if !create_registers_worktree(project, candidate, "registers") {
+                return None;
+            }
+            let _ = planning_core::write_tsch_config_patch(
+                project,
+                Some("dedicated-worktree"),
+                Some("registers"),
+                None,
+                None,
+            );
+            Some(register_file(candidate))
+        }
+        PromptOutcome::Answered(false) => {
+            match planning_core::prompt_branch_name(
+                "Use a different branch name instead (leave empty to decline entirely)",
+                "registers",
+            ) {
+                Some(name) => {
+                    if !create_registers_worktree(project, candidate, &name) {
+                        return None;
+                    }
+                    let _ = planning_core::write_tsch_config_patch(
+                        project,
+                        Some("dedicated-worktree"),
+                        Some(&name),
+                        None,
+                        None,
+                    );
+                    Some(register_file(candidate))
+                }
+                None => {
+                    let _ = planning_core::mark_declined(candidate);
+                    None
+                }
+            }
+        }
+        // A piped/non-interactive run never answered anything, so nothing is
+        // declined and no config is written -- the feature stays open for the
+        // next, possibly interactive, invocation (AR-04).
+        PromptOutcome::DefaultedNonInteractive(false) => None,
+    }
+}
+
+fn create_registers_worktree(
+    project: &std::path::Path,
+    candidate: &std::path::Path,
+    branch: &str,
+) -> bool {
+    match planning_core::create_sparse_worktree(
+        project,
+        candidate,
+        branch,
+        false,
+        &["/BUGS.json", "/TODO.json", "/DECISIONS.json"],
+    ) {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("bugs: could not create the registers worktree: {error}");
+            false
+        }
+    }
+}
+
+fn register_file(candidate: &std::path::Path) -> String {
+    candidate.join("BUGS.json").display().to_string()
+}
+
+/// `bugs resolve-path`: reports where a mutating command would read/write,
+/// without ever prompting, deciding or creating anything -- a mod shells out
+/// to this to find the real register file instead of hardcoding the session
+/// root.
+fn run_resolve_path_command(args: &cli::Args) -> Result<ExitCode, Failure> {
+    println!(
+        "{}",
+        resolve_path_preview(args.flag("file").map(str::to_string))
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn resolve_path_preview(explicit: Option<String>) -> String {
+    if let Some(path) = explicit.filter(|p| !p.is_empty()) {
+        return path;
+    }
+    if let Ok(from_env) = std::env::var("BUGS_JSON") {
+        if !from_env.is_empty() {
+            return from_env;
+        }
+    }
+    if let Ok(project) = planning_core::project_root_for(None) {
+        if let Ok(candidate) = planning_core::registers_scoped_root(&project) {
+            let cfg = planning_core::read_tsch_config(&project);
+            if cfg.registers_access.as_deref() == Some("main-checkout") {
+                return "BUGS.json".to_string();
+            }
+            if planning_core::worktree_recognized(&candidate) {
+                return register_file(&candidate);
+            }
+        }
+    }
     "BUGS.json".to_string()
 }
 
@@ -817,8 +985,6 @@ mod tests {
             resolve_path(Some(String::new())),
             "/from/the/environment.json"
         );
-        std::env::remove_var("BUGS_JSON");
-        assert_eq!(resolve_path(None), "BUGS.json");
     }
 
     fn scratch_path(tag: &str) -> String {

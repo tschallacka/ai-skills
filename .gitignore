@@ -50,6 +50,11 @@ benchmark/results/*/.staging/
 # transient, never published evidence: never index it.
 benchmark/results/*/current/
 
+# ai-text-editor-usage comparison runs: exploratory evidence from live
+# `claude -p` invocations, one directory per run-id. Not committed evidence
+# until a specific run is deliberately kept.
+benchmark/ai-text-editor-usage/results/*/
+
 # nix build output symlinks and direnv cache. The dev environment is a
 # development dependency only; see CONTRIBUTING.md.
 /result

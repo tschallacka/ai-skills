@@ -286,9 +286,12 @@ default gives you.
    Index block output is paged by default; use `--offset` and `--limit` to
    inspect further persisted blocks without requesting an unbounded response.
 10. Resolve external changes with backup, reload, merge, keep, or acknowledged
-    force-save; `backup` preserves external bytes and leaves resolution
-    pending, while other choices resolve the alert. External bytes can also be
-    preserved atomically as `.back` during a discard or overwrite.
+    force-save; on a text tab, `merge` automerges non-overlapping,
+    non-adjacent concurrent changes and reports which lines each side
+    touched, and still refuses as a conflict otherwise. `backup` preserves
+    external bytes and leaves resolution pending, while other choices resolve
+    the alert. External bytes can also be preserved atomically as `.back`
+    during a discard or overwrite.
     Large-tab backup and reload are file-backed; large merge and force-save
     require an acknowledged bounded rewrite job.
 11. Stream or page large results with restart delimiters after writes, or use

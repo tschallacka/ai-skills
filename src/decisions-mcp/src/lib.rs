@@ -79,8 +79,37 @@ fn tool_error(id: Value, message: &str) -> Value {
     json!({"jsonrpc":"2.0","id":id,"error":{"code":-32602,"message":message}})
 }
 
+/// `DECISIONS_JSON` beats everything, exactly as today. Otherwise, the
+/// shared registers worktree is used silently once ALREADY recognized, or
+/// an explicit `registers_access = "main-checkout"` opinion always wins even
+/// over a stray already-existing worktree. Nothing here ever prompts or
+/// creates a worktree: an MCP adapter has no attachable terminal, so
+/// `is_terminal()` is always false and a prompt would silently resolve to
+/// its own non-interactive default anyway -- the call is skipped entirely
+/// rather than invoked for nothing. The first-use prompt, and any worktree
+/// creation it leads to, is left to whichever CLI the person runs directly.
+fn resolved_register_path() -> String {
+    if let Ok(from_env) = std::env::var("DECISIONS_JSON") {
+        if !from_env.is_empty() {
+            return from_env;
+        }
+    }
+    if let Ok(project) = planning_core::project_root_for(None) {
+        let cfg = planning_core::read_tsch_config(&project);
+        if cfg.registers_access.as_deref() == Some("main-checkout") {
+            return "DECISIONS.json".to_string();
+        }
+        if let Ok(candidate) = planning_core::registers_scoped_root(&project) {
+            if planning_core::worktree_recognized(&candidate) {
+                return candidate.join("DECISIONS.json").display().to_string();
+            }
+        }
+    }
+    "DECISIONS.json".to_string()
+}
+
 fn load_register() -> Result<decisions::Register, String> {
-    let path = std::env::var("DECISIONS_JSON").unwrap_or_else(|_| "DECISIONS.json".to_string());
+    let path = resolved_register_path();
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
     let loose: Value = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
     let claimed = migrate::claimed_version(&loose);
@@ -92,7 +121,7 @@ fn load_register() -> Result<decisions::Register, String> {
 }
 
 fn save_register(register: &decisions::Register) -> Result<(), String> {
-    let path = std::env::var("DECISIONS_JSON").unwrap_or_else(|_| "DECISIONS.json".to_string());
+    let path = resolved_register_path();
     let mut text = serde_json::to_string_pretty(register).map_err(|e| e.to_string())?;
     text.push('\n');
     std::fs::write(&path, text).map_err(|e| format!("{path}: {e}"))

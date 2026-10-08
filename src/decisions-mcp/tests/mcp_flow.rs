@@ -76,6 +76,34 @@ impl Adapter {
     }
 }
 
+impl Adapter {
+    /// Starts the adapter the way `resolved_register_path` resolves it for
+    /// real: no `DECISIONS_JSON` override, cwd at `project`, and an isolated
+    /// `XDG_CONFIG_HOME`/`USER` so the registers-worktree resolution (W19) is
+    /// exercised instead of bypassed.
+    fn start_with_resolution(project: &Path, xdg_config_home: &Path) -> Adapter {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_decisions-mcp"))
+            .current_dir(project)
+            .env("XDG_CONFIG_HOME", xdg_config_home)
+            .env("USER", TEST_USER)
+            .env_remove("USERNAME")
+            .env_remove("DECISIONS_JSON")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("decisions-mcp starts");
+        let stdin = child.stdin.take().expect("adapter stdin");
+        let stdout = BufReader::new(child.stdout.take().expect("adapter stdout"));
+        Adapter {
+            child,
+            stdin,
+            stdout,
+            next_id: 1,
+        }
+    }
+}
+
 impl Drop for Adapter {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -153,4 +181,146 @@ fn add_answer_and_the_status_filters_follow_it() {
     let implemented_text = text_of(&implemented_list);
     assert!(implemented_text.contains(&id), "{implemented_text}");
     assert!(implemented_text.contains("shipped"), "{implemented_text}");
+}
+
+// --- Registers-worktree resolution (W20): with a recognized worktree
+// present, add/answer/implement read and write DECISIONS.json there, not in
+// the adapter's own working directory; with none recognized and no
+// override, behavior is unchanged from today (bare DECISIONS.json in the
+// adapter's own working directory).
+
+const TEST_USER: &str = "mcp-flow-test-user";
+
+fn run_git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .status()
+        .expect("git runs");
+    assert!(status.success(), "git {args:?} failed in {}", dir.display());
+}
+
+/// A real git project with one commit that already carries a seed
+/// DECISIONS.json, so a worktree later forked from HEAD (no origin/<branch>
+/// exists in these tests) checks one out too.
+fn init_registers_project(dir: &Path) {
+    run_git(dir, &["init", "-q"]);
+    std::fs::write(
+        dir.join("DECISIONS.json"),
+        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.5","comment":"t","questions":[]}"#,
+    )
+    .expect("seed register");
+    run_git(dir, &["add", "DECISIONS.json"]);
+    run_git(
+        dir,
+        &[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ],
+    );
+}
+
+/// The canonical registers-worktree path `decisions`/`decisions-mcp` would
+/// compute for `project`, given no git remote (the user/projectdir fallback).
+fn candidate_registers_root(xdg_config_home: &Path, project: &Path) -> PathBuf {
+    let project_dir = project.file_name().unwrap().to_str().unwrap();
+    xdg_config_home
+        .join("tsch-ai-skills")
+        .join("registers")
+        .join(TEST_USER)
+        .join(project_dir)
+}
+
+/// Creates a recognized registers worktree directly against real git -- the
+/// same shape the `decisions` CLI's own acceptance path produces (goal 06's
+/// relocation, or W15's own first-use accept) -- rather than through a real
+/// interactive prompt, which needs a pty this test has none of.
+fn make_recognized_worktree(project: &Path, candidate: &Path, branch: &str) {
+    run_git(
+        project,
+        &["worktree", "add", "-b", branch, candidate.to_str().unwrap()],
+    );
+    run_git(candidate, &["sparse-checkout", "init", "--no-cone"]);
+    run_git(
+        candidate,
+        &[
+            "sparse-checkout",
+            "set",
+            "/BUGS.json",
+            "/TODO.json",
+            "/DECISIONS.json",
+        ],
+    );
+}
+
+#[test]
+fn a_recognized_worktree_is_used_for_every_tool_call_not_the_working_directory() {
+    let project = tempfile::tempdir().unwrap();
+    init_registers_project(project.path());
+    let home = tempfile::tempdir().unwrap();
+    let candidate = candidate_registers_root(home.path(), project.path());
+    make_recognized_worktree(project.path(), &candidate, "registers");
+
+    let mut adapter = Adapter::start_with_resolution(project.path(), home.path());
+    let added = adapter.tool(
+        "add",
+        json!({
+            "title": "Which backend?",
+            "options": [{"letter": "a", "label": "sqlite"}, {"letter": "b", "label": "postgres"}],
+        }),
+    );
+    assert!(added.get("error").is_none(), "{added}");
+    let id = text_of(&added);
+    assert_eq!(id, "Q1");
+
+    let answered = adapter.tool("answer", json!({"id": id, "letter": "b"}));
+    assert!(answered.get("error").is_none(), "{answered}");
+    let implemented = adapter.tool("implement", json!({"id": id, "note": "shipped"}));
+    assert!(implemented.get("error").is_none(), "{implemented}");
+
+    let worktree_text = std::fs::read_to_string(candidate.join("DECISIONS.json")).unwrap();
+    assert!(worktree_text.contains(&id), "{worktree_text}");
+    assert!(worktree_text.contains("shipped"), "{worktree_text}");
+
+    let project_text = std::fs::read_to_string(project.path().join("DECISIONS.json")).unwrap();
+    assert!(
+        !project_text.contains(&id),
+        "the project's own working-tree copy must be untouched: {project_text}"
+    );
+}
+
+#[test]
+fn with_nothing_recognized_the_bare_file_in_the_working_directory_is_used_unchanged() {
+    let project = tempfile::tempdir().unwrap();
+    init_registers_project(project.path());
+    let home = tempfile::tempdir().unwrap();
+    // No worktree, no config -- genuinely undecided, but decisions-mcp never
+    // prompts or creates anything (W19), so this must stay on the bare file
+    // in the adapter's own working directory, exactly as it did before this
+    // plan.
+
+    let mut adapter = Adapter::start_with_resolution(project.path(), home.path());
+    let added = adapter.tool(
+        "add",
+        json!({
+            "title": "Which backend?",
+            "options": [{"letter": "a", "label": "sqlite"}, {"letter": "b", "label": "postgres"}],
+        }),
+    );
+    assert!(added.get("error").is_none(), "{added}");
+    let id = text_of(&added);
+    assert_eq!(id, "Q1");
+
+    let project_text = std::fs::read_to_string(project.path().join("DECISIONS.json")).unwrap();
+    assert!(project_text.contains(&id), "{project_text}");
+
+    let candidate = candidate_registers_root(home.path(), project.path());
+    assert!(!candidate.exists(), "nothing was ever created");
 }

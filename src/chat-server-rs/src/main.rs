@@ -1479,6 +1479,7 @@ fn announce_loop(
     port: u16,
     name: String,
     host: String,
+    home_tag: String,
     interval_secs: u64,
     beacon_port: u16,
     bcast: String,
@@ -1488,8 +1489,8 @@ fn announce_loop(
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let beacon = format!(
-        "{{\"proto\":\"ai-chat/1\",\"name\":\"{}\",\"host\":\"{}\",\"port\":{},\"started\":{}}}",
-        name, host, port, started
+        "{{\"proto\":\"ai-chat/1\",\"name\":\"{}\",\"host\":\"{}\",\"port\":{},\"started\":{},\"home\":\"{}\"}}",
+        name, host, port, started, home_tag
     );
     let sock = match std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)) {
         Ok(s) => s,
@@ -1778,12 +1779,13 @@ fn main() {
         if host_is_dialable(&host) {
             let bcast = announce_bcast(&host);
             let name = std::env::var("CHAT_NAME").unwrap_or_else(|_| format!("ai-chat/{}", host));
+            let home_tag = chat_proto::home_tag(home_path);
             eprintln!(
                 "chat-server-rs: announcing {}:{} every {}s on UDP {} via {}",
                 host, actual, interval, beacon_port, bcast
             );
             std::thread::spawn(move || {
-                announce_loop(actual, name, host, interval, beacon_port, bcast)
+                announce_loop(actual, name, host, home_tag, interval, beacon_port, bcast)
             });
         } else {
             eprintln!(

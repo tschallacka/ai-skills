@@ -16,6 +16,9 @@ type Fs = {
   read: (path: string) => Promise<string>
 }
 
+// The part of `$.process.run` the resolution needs.
+type ProcessRun = (argv: readonly string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+
 type Item = { id: string; title: string; status: string; priority: string; severity?: string }
 
 const PRIORITY_ORDER = ['urgent', 'high', 'normal', 'low', 'someday']
@@ -28,12 +31,47 @@ function rank(order: string[], value: string | undefined): number {
   return index === -1 ? order.length : index
 }
 
+// The bugs/todo binaries' own path, in the shared bin the installer puts
+// them in -- the same resolution decision-board's own decisionsBin uses.
+function bugsBin(home: string, xdg: string): string {
+  const bin = xdg ? `${xdg}/tsch-ai-skills/bin` : `${home}/.config/tsch-ai-skills/bin`
+  return `${bin}/bugs`
+}
+
+function todoBin(home: string, xdg: string): string {
+  const bin = xdg ? `${xdg}/tsch-ai-skills/bin` : `${home}/.config/tsch-ai-skills/bin`
+  return `${bin}/todo`
+}
+
+// The directory bugs/todo actually read and write BUGS.json/TODO.json in,
+// resolved once via `bugs resolve-path` -- both tools share one registers
+// worktree, so its own answer names the same directory todo would report.
+// `resolve-path` prints a bare filename with no directory component for
+// today's unresolved/session-root case, so splitting off the last path
+// segment naturally falls back to `root` there too; a process-run failure
+// (the binary missing, for example) falls back to the session root the
+// same way, matching this mod's own behavior before this resolution existed.
+async function registersDir(run: ProcessRun, home: string, xdg: string, root: string): Promise<string> {
+  const result = await run([bugsBin(home, xdg), 'resolve-path']).catch(() => undefined)
+  if (!result || result.exitCode !== 0) return root
+  const file = result.stdout.trim()
+  const slash = file.lastIndexOf('/')
+  return slash === -1 ? root : file.slice(0, slash)
+}
+
 // The open bugs and tasks of the project, read from its own registers.
-async function openItems(fs: Fs, root: string): Promise<{ bugs: Item[]; tasks: Item[] }> {
+async function openItems(
+  fs: Fs,
+  run: ProcessRun,
+  home: string,
+  xdg: string,
+  root: string,
+): Promise<{ bugs: Item[]; tasks: Item[] }> {
+  const dir = await registersDir(run, home, xdg, root)
   const bugs: Item[] = []
   const tasks: Item[] = []
-  const bugFile = `${root}/BUGS.json`
-  const taskFile = `${root}/TODO.json`
+  const bugFile = `${dir}/BUGS.json`
+  const taskFile = `${dir}/TODO.json`
   if (await fs.exists(bugFile)) {
     const register = JSON.parse(await fs.read(bugFile)) as { bugs?: Item[] }
     for (const bug of register.bugs ?? []) {
@@ -49,6 +87,17 @@ async function openItems(fs: Fs, root: string): Promise<{ bugs: Item[]; tasks: I
   bugs.sort((a, b) => rank(SEVERITY_ORDER, a.severity) - rank(SEVERITY_ORDER, b.severity))
   tasks.sort((a, b) => rank(PRIORITY_ORDER, a.priority) - rank(PRIORITY_ORDER, b.priority))
   return { bugs, tasks }
+}
+
+// Exposes the pure functions above for a unit test to call directly, without
+// spawning the binary or driving the mod runtime -- nothing here is read by
+// Claude Code itself, which only ever reads the `register` export below.
+export const __test = {
+  rank,
+  bugsBin,
+  todoBin,
+  registersDir,
+  openItems,
 }
 
 export const register: Register = (on, options) => {
@@ -85,11 +134,13 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: `mcp__register-board__${TOOL}` }, async $ => {
     const root = await $.session.root()
+    const home = (await $.env.get('HOME')) ?? ''
+    const xdg = (await $.env.get('XDG_CONFIG_HOME')) ?? ''
     const fs: Fs = {
       exists: path => $.fs.exists(path),
       read: path => $.fs.read(path),
     }
-    const { bugs, tasks } = await openItems(fs, root)
+    const { bugs, tasks } = await openItems(fs, argv => $.process.run(argv), home, xdg, root)
     await $.ui.open({ id: PANE, title: 'Open bugs and tasks' })
 
     return {
@@ -105,11 +156,13 @@ export const register: Register = (on, options) => {
   // The agent's read of the open items. Read-only; the pane is not opened.
   on('tool.call', { tool: `mcp__register-board__${READ}` }, async $ => {
     const root = await $.session.root()
+    const home = (await $.env.get('HOME')) ?? ''
+    const xdg = (await $.env.get('XDG_CONFIG_HOME')) ?? ''
     const fs: Fs = {
       exists: path => $.fs.exists(path),
       read: path => $.fs.read(path),
     }
-    const { bugs, tasks } = await openItems(fs, root)
+    const { bugs, tasks } = await openItems(fs, argv => $.process.run(argv), home, xdg, root)
     const live = await $.ui.selection().catch(() => undefined)
 
     return {
@@ -126,11 +179,13 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const root = await $.session.root()
+    const home = (await $.env.get('HOME')) ?? ''
+    const xdg = (await $.env.get('XDG_CONFIG_HOME')) ?? ''
     const fs: Fs = {
       exists: path => $.fs.exists(path),
       read: path => $.fs.read(path),
     }
-    const { bugs, tasks } = await openItems(fs, root)
+    const { bugs, tasks } = await openItems(fs, argv => $.process.run(argv), home, xdg, root)
 
     return (
       <Box flexDirection="column">

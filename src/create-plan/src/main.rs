@@ -240,7 +240,17 @@ fn keep_maintenance_in_the_foreground(repo: &Path) {
 fn initialise_git(plan: &Path, plans_root: &Path, bare_name: bool) {
     let existing = git_value(plan, &["rev-parse", "--show-toplevel"]).map(PathBuf::from);
     let repo = existing.as_ref().map(|top| {
-        if git_ignored(top, plan) {
+        // A linked worktree's own .git is always a FILE (pointing at the
+        // shared gitdir), never a directory -- unlike an ordinary repository
+        // root. Being inside one always means a real, legitimate repository
+        // context, never the "accidentally gitignored, needs its own fresh
+        // nested repo" case git_ignored exists for, so that check is skipped
+        // entirely here (the plans-branch cone-mode worktree inherits this
+        // repository's own tracked .gitignore excluding .plans/, which would
+        // otherwise misclassify it and spin up a stray nested repo).
+        if top.join(".git").is_file() {
+            top.clone()
+        } else if git_ignored(top, plan) {
             plans_root.to_path_buf()
         } else {
             top.clone()
@@ -265,10 +275,13 @@ fn initialise_git(plan: &Path, plans_root: &Path, bare_name: bool) {
     if created {
         keep_maintenance_in_the_foreground(&repo);
     }
+    // -f: a plan living inside the plans-branch worktree sits past this
+    // project's own inherited .gitignore rule excluding .plans/; harmless
+    // for every other, unignored case.
     let _ = Command::new("git")
         .args(["-C"])
         .arg(&repo)
-        .args(["add", "-A", "--"])
+        .args(["add", "-A", "-f", "--"])
         .arg(plan)
         .status();
     let _ = Command::new("git")
@@ -360,22 +373,32 @@ fn main() {
         .unwrap_or_else(|error| die(error.to_string(), 64));
     let snapshot = match git_value(&plan_root, &["rev-parse", "--show-toplevel"]) {
         Some(top) => {
-            // The repository that will hold this plan's history, decided the
-            // way `initialise_git` decides it: a plan git-ignores under some
-            // enclosing work tree (a project's `.plans`) gets its own
-            // repository at the plans root, so that repository is what is
-            // snapshotted; a plan tracked in the user's tree is theirs, and
-            // stays unpinned.
             let top = PathBuf::from(top);
-            let repo = if git_ignored(&top, &plan_root) {
-                root.clone()
+            if top.join(".git").is_file() {
+                // A linked plans-branch worktree's own root is never equal to
+                // `root` (root is always the WORKTREE/.plans subdirectory, a
+                // child of the worktree root, never the worktree root
+                // itself), so the repo==root comparison below would always
+                // silently produce an empty PLAN_SNAPSHOT_REPO for this case
+                // regardless -- recorded directly instead.
+                top.display().to_string()
             } else {
-                top
-            };
-            if repo == root {
-                root.display().to_string()
-            } else {
-                String::new()
+                // The repository that will hold this plan's history, decided
+                // the way `initialise_git` decides it: a plan git-ignores
+                // under some enclosing work tree (a project's `.plans`) gets
+                // its own repository at the plans root, so that repository is
+                // what is snapshotted; a plan tracked in the user's tree is
+                // theirs, and stays unpinned.
+                let repo = if git_ignored(&top, &plan_root) {
+                    root.clone()
+                } else {
+                    top
+                };
+                if repo == root {
+                    root.display().to_string()
+                } else {
+                    String::new()
+                }
             }
         }
         None if bare_name => root.display().to_string(),

@@ -589,13 +589,20 @@ fn tool_definitions() -> Vec<Value> {
     ));
     tools.push((
         "resolve",
-        "Resolve an external change with backup, reload, merge, keep, or acknowledged force_save.",
+        "Resolve an external change with backup, reload, merge, keep, or acknowledged force_save. \
+         On a text tab, merge automerges non-overlapping, non-adjacent concurrent changes and \
+         reports which lines each side touched (buffer_changed_lines/external_changed_lines); \
+         overlapping or adjacent changes still refuse as merge_conflict.",
         {
             let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 (
                     "action",
-                    string("backup, reload, merge, keep, or force_save."),
+                    string(
+                        "backup, reload, merge, keep, or force_save. merge automerges \
+                         non-overlapping, non-adjacent changes on a text tab and reports the \
+                         changed lines; it still refuses as merge_conflict otherwise.",
+                    ),
                 ),
                 (
                     "backup_path",

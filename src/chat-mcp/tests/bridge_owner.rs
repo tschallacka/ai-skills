@@ -101,6 +101,14 @@ impl Bridge {
             .env("AI_CHAT_HOME", &home)
             .env("CHAT_SESSION_ID", SESSION)
             .env("AI_CHAT_BEACON_PORT", beacon_port.to_string())
+            // `interrupt::spool_dir` prefers CLAUDE_CODE_SESSION_ID over the
+            // adapter's own session key when it is set, so that it reads it
+            // from the harness that is actually driving the agent rather
+            // than this test's own synthetic SESSION. Running this suite
+            // from inside a real Claude Code session would otherwise spool
+            // notices under THAT session's real id instead of the test's
+            // own, and the test would read an empty file forever.
+            .env_remove("CLAUDE_CODE_SESSION_ID")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -205,6 +213,45 @@ impl Drop for Bridge {
     }
 }
 
+/// This identity's interrupt spool file: `chat-mcp`'s own `state_dir()` is
+/// `AI_CHAT_HOME` (same resolution as `channels_home`), and no
+/// `CLAUDE_CODE_SESSION_ID` is set in this harness, so `interrupt::spool_dir`
+/// keys the directory by `SESSION` itself.
+fn spool_file(home: &Path) -> PathBuf {
+    home.join("interrupts")
+        .join(SESSION)
+        .join(format!("{SESSION}.log"))
+}
+
+/// Send a message as a nick the bridge never registered under, over a fresh
+/// connection with no session of its own -- the same pattern `Bridge::roster`
+/// uses. A message from the bridge's own nick is never pushed back to it
+/// (`Owner::take_push`'s own-message check), so a real external sender is the
+/// only way to prove the always-on background loop, not just a synchronous
+/// `wait` answer.
+fn send_as(home: &Path, port: u16, nick: &str, text: &str) {
+    let status = Command::new(bin_dir().join("chat-client-rs"))
+        .args([
+            "send",
+            "--no-session",
+            "--server",
+            &format!("127.0.0.1:{port}"),
+            "--nick",
+            nick,
+            "--chan",
+            CHAN,
+            "--text",
+            text,
+        ])
+        .env("AI_CHAT_HOME", home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("chat-client-rs send runs");
+    assert!(status.success(), "send as {nick} must succeed");
+}
+
 #[test]
 fn a_cli_send_and_names_are_answered_by_the_bridge_and_no_second_nick_appears() {
     // The server and the CLI are sibling binaries of the adapter. A per-crate
@@ -258,5 +305,96 @@ fn a_cli_send_and_names_are_answered_by_the_bridge_and_no_second_nick_appears() 
     assert!(
         !roster.contains(&format!("{NICK}-2")),
         "the server never renamed a second connection: {roster}"
+    );
+}
+
+#[test]
+fn a_forgotten_wait_still_reaches_the_agent_through_its_own_auto_registered_rule() {
+    for sibling in ["chat-server-rs", "chat-client-rs"] {
+        if !bin_dir()
+            .join(format!("{sibling}{}", std::env::consts::EXE_SUFFIX))
+            .is_file()
+        {
+            eprintln!("bridge_owner: SKIPPED — no {sibling} beside the adapter in this build");
+            return;
+        }
+    }
+    let home = scratch();
+    let mut bridge = Bridge::start(home);
+    bridge.call("join", json!({"channel": CHAN}));
+
+    // Nothing has been sent yet: this `wait` times out, but it must still
+    // register the standing rule and say so -- the point is that the rule is
+    // armed from the very first `wait`, not only after one has already fired.
+    let waited = bridge.call("wait", json!({"channel": CHAN, "timeout_seconds": 1}));
+    assert_eq!(waited["timed_out"], json!(true), "{waited}");
+    let note = waited["note"].as_str().unwrap_or_default();
+    assert!(
+        note.contains("registered standing interrupt rule"),
+        "the first wait on a scope must say so: {note}"
+    );
+
+    let spool = spool_file(&bridge.home);
+    assert!(
+        !spool.exists(),
+        "no notice must exist before anything was sent: {}",
+        spool.display()
+    );
+
+    // No second `wait` call here -- this is exactly the failure mode being
+    // fixed: an agent that forgot to re-arm. The message still has to reach
+    // it, through the standing rule the first `wait` registered.
+    send_as(
+        &bridge.home,
+        bridge.port,
+        "someone-else",
+        "did you see this",
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut spooled = String::new();
+    while Instant::now() < deadline {
+        if let Ok(text) = std::fs::read_to_string(&spool) {
+            spooled = text;
+            if !spooled.is_empty() {
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        spooled.contains("did you see this") && spooled.contains("someone-else"),
+        "the forgotten wait's own standing rule must have delivered the message: {spooled:?}"
+    );
+
+    // The rule itself, read back, confirms it is the auto-registered one and
+    // that it is the thing that actually fired.
+    let list = bridge.call("interrupt_list", json!({}));
+    let rules = list["state"]["rules"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let auto_rule = rules
+        .iter()
+        .find(|rule| rule["auto_wait"] == json!(true))
+        .unwrap_or_else(|| panic!("no auto_wait rule in {list}"));
+    assert!(
+        auto_rule["fired"].as_u64().unwrap_or(0) >= 1,
+        "the auto-registered rule itself must show it fired: {auto_rule}"
+    );
+
+    // A second `wait` on the same scope must not pile up a duplicate rule.
+    bridge.call("wait", json!({"channel": CHAN, "timeout_seconds": 1}));
+    let list = bridge.call("interrupt_list", json!({}));
+    let count = list["state"]["rules"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter(|rule| rule["auto_wait"] == json!(true))
+        .count();
+    assert_eq!(
+        count, 1,
+        "a repeated wait on the same scope must stay idempotent: {list}"
     );
 }

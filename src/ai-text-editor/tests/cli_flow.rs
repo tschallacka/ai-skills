@@ -2112,6 +2112,330 @@ fn preserve_external_backs_up_before_force_save_overwrites_it() {
 }
 
 #[test]
+fn merge_automerges_non_overlapping_concurrent_edits_and_reports_changed_lines() {
+    // Case A: equal-line-count edits on separate, non-adjacent regions
+    // combine cleanly, and the response names exactly which base lines each
+    // side touched.
+    let harness = Harness::new("mergeauto");
+    let file = harness.write("doc.txt", "one\ntwo\nthree\nfour\nfive\nsix\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let edited = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "TWO\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(edited.status.success(), "{}", refusal_text(&edited));
+    std::fs::write(&file, "one\ntwo\nthree\nfour\nFIVE\nsix\n").unwrap();
+    let armed = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&armed)["external_change_pending"],
+        json!(true),
+        "the external write must have armed the guard"
+    );
+    let resolved = harness.client(&["resolve", "-f", file.to_str().unwrap(), "-a", "merge"]);
+    assert!(resolved.status.success(), "{}", refusal_text(&resolved));
+    let payload = first_payload(&resolved);
+    assert_eq!(payload["resolved"], json!("merge"), "{payload}");
+    assert_eq!(
+        payload["buffer_changed_lines"],
+        json!([{"start": 2, "end": 2}]),
+        "{payload}"
+    );
+    assert_eq!(
+        payload["external_changed_lines"],
+        json!([{"start": 5, "end": 5}]),
+        "{payload}"
+    );
+    let merge_revision = payload["revision"].as_u64().unwrap().to_string();
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-r", &merge_revision]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "one\nTWO\nthree\nfour\nFIVE\nsix\n"
+    );
+
+    // Case B: the buffer's own edit replaces a different number of lines
+    // than it covers (2 base lines -> 3 replacement lines, a net +1 shift),
+    // so a naive splice of the external hunk into the buffer's shifted copy
+    // would land on the wrong line (AR-3/AR-4, pinned at the unit level by
+    // W21). The external edit touches a base line below the shift; the
+    // merged file must still be correct end to end through the real
+    // resolve_external call.
+    let harness2 = Harness::new("mergeautoshift");
+    let file2 = harness2.write("doc.txt", "one\ntwo\nthree\nfour\nfive\n");
+    let opened2 = harness2.open(&file2);
+    let revision2 = revision_of(&opened2).to_string();
+    let edited2 = harness2.client(&[
+        "replace",
+        "-f",
+        file2.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "2",
+        "-t",
+        "X\nY\nZ\n",
+        "-r",
+        &revision2,
+        "-p",
+        "structured",
+    ]);
+    assert!(edited2.status.success(), "{}", refusal_text(&edited2));
+    std::fs::write(&file2, "one\ntwo\nthree\nFOUR\nfive\n").unwrap();
+    let armed2 = harness2.client(&["open", "-f", file2.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&armed2)["external_change_pending"],
+        json!(true),
+        "the external write must have armed the guard"
+    );
+    let resolved2 = harness2.client(&["resolve", "-f", file2.to_str().unwrap(), "-a", "merge"]);
+    assert!(resolved2.status.success(), "{}", refusal_text(&resolved2));
+    let payload2 = first_payload(&resolved2);
+    let merge_revision2 = payload2["revision"].as_u64().unwrap().to_string();
+    let saved2 = harness2.client(&[
+        "save",
+        "-f",
+        file2.to_str().unwrap(),
+        "-r",
+        &merge_revision2,
+    ]);
+    assert!(saved2.status.success(), "{}", refusal_text(&saved2));
+    assert_eq!(
+        std::fs::read_to_string(&file2).unwrap(),
+        "X\nY\nZ\nthree\nFOUR\nfive\n"
+    );
+}
+
+#[test]
+fn merge_refuses_as_conflict_when_edits_touch_adjacent_lines() {
+    // The conservative adjacency rule: a zero-line gap between the buffer's
+    // own edit and the external edit is still a conflict, not an automerge.
+    let harness = Harness::new("mergeadjacent");
+    let file = harness.write("doc.txt", "one\ntwo\nthree\nfour\nfive\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let edited = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "TWO\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(edited.status.success(), "{}", refusal_text(&edited));
+    // The immediately adjacent line, a zero-line gap from the buffer's edit.
+    std::fs::write(&file, "one\ntwo\nTHREE\nfour\nfive\n").unwrap();
+    let armed = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&armed)["external_change_pending"],
+        json!(true),
+        "the external write must have armed the guard"
+    );
+    let refused = harness.client(&["resolve", "-f", file.to_str().unwrap(), "-a", "merge"]);
+    assert!(!refused.status.success());
+    let error = refusal_text(&refused);
+    assert!(error.contains("merge_conflict"), "refusal named: {error}");
+    // The pending external change must still be there for a later attempt.
+    let retried = harness.client(&["resolve", "-f", file.to_str().unwrap(), "-a", "reload"]);
+    assert!(
+        retried.status.success(),
+        "a conflict refusal must leave pending_external set, so a later \
+         resolve_external call can still be attempted: {}",
+        refusal_text(&retried)
+    );
+}
+
+#[test]
+fn merge_refuses_as_conflict_when_edits_overlap() {
+    // Previously untested existing behavior, now pinned: two edits touching
+    // the exact same base line are a conflict under both the old
+    // fast-forward-only check and the new hunk-diff path.
+    let harness = Harness::new("mergeoverlap");
+    let file = harness.write("doc.txt", "one\ntwo\nthree\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let edited = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "TWO\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(edited.status.success(), "{}", refusal_text(&edited));
+    std::fs::write(&file, "one\ndeux\nthree\n").unwrap();
+    let armed = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&armed)["external_change_pending"],
+        json!(true),
+        "the external write must have armed the guard"
+    );
+    let refused = harness.client(&["resolve", "-f", file.to_str().unwrap(), "-a", "merge"]);
+    assert!(!refused.status.success());
+    let error = refusal_text(&refused);
+    assert!(error.contains("merge_conflict"), "refusal named: {error}");
+}
+
+#[test]
+fn merge_still_fast_forwards_when_only_one_side_changed() {
+    // No regression to the preserved fast-forward paths from before this
+    // initiative: when only one side diverged from base, merge still
+    // succeeds without ever reaching the new hunk-diff logic.
+
+    // (a) only the external file changes; the buffer has no unsaved edits.
+    let harness = Harness::new("mergeffexternal");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    harness.open(&file);
+    std::fs::write(&file, "alpha\nbeta\nEXTERNAL\n").unwrap();
+    let armed = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&armed)["external_change_pending"],
+        json!(true),
+        "the external write must have armed the guard"
+    );
+    let resolved = harness.client(&["resolve", "-f", file.to_str().unwrap(), "-a", "merge"]);
+    assert!(resolved.status.success(), "{}", refusal_text(&resolved));
+    let payload = first_payload(&resolved);
+    assert_eq!(payload["buffer_changed_lines"], json!([]), "{payload}");
+    assert_eq!(payload["external_changed_lines"], json!([]), "{payload}");
+    let merge_revision = payload["revision"].as_u64().unwrap().to_string();
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-r", &merge_revision]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\nbeta\nEXTERNAL\n"
+    );
+
+    // (b) only the buffer has unsaved edits; the external file's own
+    // *content* is untouched (a metadata-only divergence, e.g. a rewrite of
+    // the identical bytes, is still enough to arm the guard).
+    let harness2 = Harness::new("mergeffbuffer");
+    let file2 = harness2.write("doc.txt", "alpha\nbeta\n");
+    let opened2 = harness2.open(&file2);
+    let revision2 = revision_of(&opened2).to_string();
+    let edited2 = harness2.client(&[
+        "replace",
+        "-f",
+        file2.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "ALPHA\n",
+        "-r",
+        &revision2,
+        "-p",
+        "structured",
+    ]);
+    assert!(edited2.status.success(), "{}", refusal_text(&edited2));
+    // Rewritten with the exact same bytes it already held -- content is
+    // identical to base, only the file's own metadata moved.
+    std::fs::write(&file2, "alpha\nbeta\n").unwrap();
+    let armed2 = harness2.client(&["open", "-f", file2.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&armed2)["external_change_pending"],
+        json!(true),
+        "a metadata-only rewrite must still arm the guard"
+    );
+    let resolved2 = harness2.client(&["resolve", "-f", file2.to_str().unwrap(), "-a", "merge"]);
+    assert!(resolved2.status.success(), "{}", refusal_text(&resolved2));
+    let payload2 = first_payload(&resolved2);
+    assert_eq!(payload2["buffer_changed_lines"], json!([]), "{payload2}");
+    assert_eq!(payload2["external_changed_lines"], json!([]), "{payload2}");
+    let merge_revision2 = payload2["revision"].as_u64().unwrap().to_string();
+    let saved2 = harness2.client(&[
+        "save",
+        "-f",
+        file2.to_str().unwrap(),
+        "-r",
+        &merge_revision2,
+    ]);
+    assert!(saved2.status.success(), "{}", refusal_text(&saved2));
+    assert_eq!(std::fs::read_to_string(&file2).unwrap(), "ALPHA\nbeta\n");
+}
+
+#[test]
+fn merge_on_a_raw_bytes_tab_stays_fast_forward_only() {
+    // The new hunk-diff path only engages for TextUtf8 tabs: a raw_bytes tab
+    // with the same non-overlapping-by-line-position edits as the success
+    // case above must still refuse merge_conflict, since a line-based diff
+    // is meaningless/unsafe for raw bytes.
+    let harness = Harness::new("mergerawbytes");
+    let file = harness.write("doc.bin", "one\ntwo\nthree\nfour\nfive\nsix\n");
+    let opened = harness.client(&[
+        "open",
+        "-f",
+        file.to_str().unwrap(),
+        "-M",
+        "raw_bytes",
+        "-p",
+        "structured",
+    ]);
+    assert!(opened.status.success(), "{}", refusal_text(&opened));
+    let revision = revision_of(&opened).to_string();
+    // "two\n" starts at byte offset 4; replace it in place, byte for byte.
+    let edited = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "4",
+        "-d",
+        "4",
+        "-t",
+        "TWO\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(edited.status.success(), "{}", refusal_text(&edited));
+    // An external edit on a separate, non-adjacent line ("five\n") -- exactly
+    // the shape that W10 proved automerges under TextUtf8.
+    std::fs::write(&file, "one\ntwo\nthree\nfour\nFIVE\nsix\n").unwrap();
+    let armed = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&armed)["external_change_pending"],
+        json!(true),
+        "the external write must have armed the guard"
+    );
+    let refused = harness.client(&["resolve", "-f", file.to_str().unwrap(), "-a", "merge"]);
+    assert!(
+        !refused.status.success(),
+        "a raw_bytes tab must stay fast-forward-only even though these edits \
+         would not have overlapped under a line-based diff"
+    );
+    let error = refusal_text(&refused);
+    assert!(error.contains("merge_conflict"), "refusal named: {error}");
+}
+
+#[test]
 fn an_ownerless_queued_job_does_not_pin_the_idle_watchdog() {
     // B199: every job-start leg of this file owns its job from a
     // short-lived client; when the watchdog pinned to any active job, the

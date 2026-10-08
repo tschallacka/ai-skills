@@ -205,7 +205,11 @@ lossless and refuses with a restoration conflict after a lossy edit.
 .SH SAFETY
 External changes alert at the next interaction. Backup, reload, merge, keep, and
 force-save require the agent to choose the operation; force-save requires an
-acknowledgement. External bytes can be preserved atomically as PATH.back by
+acknowledgement. On a text tab, merge automerges non-overlapping, non-adjacent
+concurrent changes and reports which lines each side touched as
+\fBbuffer_changed_lines\fR/\fBexternal_changed_lines\fR; overlapping or adjacent
+changes, or either side failing to decode as UTF-8, still refuse as
+\fBmerge_conflict\fR. External bytes can be preserved atomically as PATH.back by
 default. Backup failure or collision prevents the resolution. Closing a tab
 asks whether its journal is preserved or explicitly cleaned. TCP is a private
 loopback fallback; startup requires --auth-token or --auth-token-file. Each connection performs a

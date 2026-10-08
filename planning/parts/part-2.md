@@ -54,10 +54,52 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
    no marker file is written or read.
 4. Otherwise this is the first plan in the project: on an interactive
    terminal the user is asked whether to store globally under the tsch-ai-skills XDG home or
-   in the project's `./.plans`. When project storage is chosen the user is
-   then asked whether to add `/.plans` to the project's `.gitignore`. On a
+   in the project's `./.plans`. When project storage is chosen, and only then,
+   a second, opt-in question follows (see "Same-repo-branch plan storage"
+   below) before the `.gitignore` question. On a
    non-interactive run the installer defaults to project storage and prints a
    note.
+
+#### Same-repo-branch plan storage (opt-in)
+
+Project storage (step 4 above) is, by default, a fully separate, independent
+git repository at `<project>/.plans` — unchanged from before this existed, and
+still what anyone who never answers or declines the question below gets. A
+project may instead keep plan history as commits on a dedicated branch of the
+SAME parent repository, via the identical sparse-worktree mechanism the
+register skills (`bugs`/`todo`/`decisions`) use for their own dedicated
+worktree, cone-mode this time since `.plans/` is a whole directory tree rather
+than individual files.
+
+Reached only right after project storage is chosen (never as a third top-level
+choice at the first question), `plan-root.sh` asks once, on a real terminal
+only:
+
+```
+Keep plan history as commits on a dedicated branch of this same repository
+(branch "plans"), instead of a fully separate nested git repository?
+[y/n, default: n]
+```
+
+The interactive default is **no** — unlike the register skills' own
+recommended-yes, creating a new git worktree and branch with no human
+confirming it is a bigger, more surprising structural change for an
+unattended run, so the conservative default is kept either way. Accepting
+creates the cone-mode worktree at a canonical path (distinct from both the
+registers worktree and the existing global plans directory, so none of the
+three can ever collide) and remembers the choice: a later plan in the same
+project is recognized silently, no second prompt. Declining offers a
+different branch name instead of an immediate no; only an empty answer there
+is a real decline, and only a real decline is remembered — a non-interactive
+run never records one on your behalf, so a later interactive run still gets
+asked for real.
+
+Both the worktree choice and today's separate-repo default are also real,
+directly settable config values (no interactive prompt required): a project
+can pre-seed `plans_storage` (`same-repo-branch` or `separate-repo`) and
+`plans_branch` in its own tsch-ai-skills config file ahead of time — the same
+config file and mechanism the register skills use for their own
+`registers_access`/`registers_branch`.
 
 `create-plan.sh <planname>` places the new plan under the resolved root. Use
 the flagged `update-plan-content.sh` commands for narrative edits; the helpers
@@ -311,6 +353,9 @@ the table must say `yes`.
 Create `<goalname>/working-context.md` only when execution produces useful,
 goal-specific facts that do not belong in `goal.md`. Keep it concise and
 factual. Examples include test accounts, fixture IDs, routes, discovered file
+
+<!-- SKILL-LOAD-PROOF part=part-2 token=8f6e5cfcbbb045ca -->
+
 locations, environment quirks, limited commands, and user decisions.
 
 Update this file as facts are confirmed. Do not rewrite the original goal to
@@ -328,9 +373,6 @@ Use `add-work-unit.sh` from section 2.2 to create the step together with its
 inventory row. It creates the mandatory headings, ownership fields, atomicity
 checks, and numbered narrative paragraphs. Update the objective, instructions,
 acceptance criteria, and handoff with `update-plan-content.sh`; do not patch a
-
-<!-- SKILL-LOAD-PROOF part=part-2 token=0e6de4e238af3be9 -->
-
 step file directly.
 
 When a goal declares `Test required: yes`, the step writer prints a reminder to

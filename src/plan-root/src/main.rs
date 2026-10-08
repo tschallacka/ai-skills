@@ -101,6 +101,89 @@ fn append_gitignore(project: &Path) {
     writeln!(handle, "{prefix}/.plans").unwrap_or_else(|error| die(error.to_string()));
 }
 
+/// After `choose_root` resolves to project storage, decides whether the
+/// opt-in plans-same-repo-branch mode actually governs this run instead --
+/// an explicit config opinion always wins with no prompt; otherwise a
+/// recognized or freshly-accepted worktree's own `.plans` subdirectory is
+/// returned. `None` means "keep today's `project.join(\".plans\")` exactly
+/// as `choose_root` returned it, unchanged".
+fn plans_branch_storage(project: &Path, candidate: &Path) -> Option<PathBuf> {
+    let cfg = planning_core::read_tsch_config(project);
+    if cfg.plans_storage.as_deref() == Some("separate-repo") {
+        return None;
+    }
+    if cfg.plans_storage.as_deref() == Some("same-repo-branch") {
+        if planning_core::worktree_recognized(candidate) {
+            return Some(candidate.join(".plans"));
+        }
+        let branch = cfg.plans_branch.unwrap_or_else(|| "plans".to_string());
+        return create_plans_branch_worktree(project, candidate, &branch)
+            .then(|| candidate.join(".plans"));
+    }
+    if planning_core::is_declined(candidate) {
+        return None;
+    }
+    match planning_core::prompt_yes_no_with_default(
+        "Keep plan history as commits on a dedicated branch of this same repository \
+         (branch \"plans\"), instead of a fully separate nested git repository?",
+        false,
+        false,
+    ) {
+        planning_core::PromptOutcome::Answered(true)
+        | planning_core::PromptOutcome::DefaultedNonInteractive(true) => {
+            if !create_plans_branch_worktree(project, candidate, "plans") {
+                return None;
+            }
+            let _ = planning_core::write_tsch_config_patch(
+                project,
+                None,
+                None,
+                Some("same-repo-branch"),
+                Some("plans"),
+            );
+            Some(candidate.join(".plans"))
+        }
+        planning_core::PromptOutcome::Answered(false) => {
+            match planning_core::prompt_branch_name(
+                "Use a different branch name instead (leave empty to keep today's behavior)",
+                "plans",
+            ) {
+                Some(name) => {
+                    if !create_plans_branch_worktree(project, candidate, &name) {
+                        return None;
+                    }
+                    let _ = planning_core::write_tsch_config_patch(
+                        project,
+                        None,
+                        None,
+                        Some("same-repo-branch"),
+                        Some(&name),
+                    );
+                    Some(candidate.join(".plans"))
+                }
+                None => {
+                    let _ = planning_core::mark_declined(candidate);
+                    None
+                }
+            }
+        }
+        // A piped/non-interactive run never answered anything, so nothing is
+        // declined and no config is written -- the choice stays open for the
+        // next, possibly interactive, invocation (AR-04's own fix, mirrored).
+        planning_core::PromptOutcome::DefaultedNonInteractive(false) => None,
+    }
+}
+
+fn create_plans_branch_worktree(project: &Path, candidate: &Path, branch: &str) -> bool {
+    match planning_core::create_sparse_worktree(project, candidate, branch, true, &[".plans"]) {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("plan-root: could not create the plans-branch worktree: {error}");
+            false
+        }
+    }
+}
+
 fn resolve(directory: Option<&str>) {
     if let Some(root) = env::var_os("PLANS_ROOT") {
         println!("{}", PathBuf::from(root).display());
@@ -116,8 +199,22 @@ fn resolve(directory: Option<&str>) {
         println!("{}", scoped.display());
         return;
     }
+    // Rooted at a distinct tsch-ai-skills/plans-branch segment (AR-09): the
+    // preceding global_scoped_root(&project).is_dir() check above can never
+    // accidentally match it, so this short-circuit is always reached when
+    // the worktree is already there.
+    let plans_branch_candidate =
+        planning_core::plans_branch_scoped_root(&project).unwrap_or_else(|message| die(message));
+    if planning_core::worktree_recognized(&plans_branch_candidate) {
+        println!("{}", plans_branch_candidate.join(".plans").display());
+        return;
+    }
     let (root, answer, interactive) = choose_root(&project);
     if root == project.join(".plans") {
+        if let Some(branch_root) = plans_branch_storage(&project, &plans_branch_candidate) {
+            println!("{}", branch_root.display());
+            return;
+        }
         if !interactive && matches!(answer.as_str(), "y" | "Y" | "yes" | "YES") {
             append_gitignore(&project);
         } else if interactive {

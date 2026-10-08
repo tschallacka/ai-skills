@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# editor-gate-plugin/hooks/lib.sh -- shared by pre-tool-use-bash.sh and the
-# token minting/consuming helpers.
+# editor-gate-plugin/hooks/lib.sh -- shared by pre-tool-use-bash.sh,
+# pre-tool-use-edit-write.sh, pre-tool-use-read.sh, and the token
+# minting/consuming helpers.
 #
 # rjq is this repo's real JSON tool. install_shared_rjq (installer/src/
 # 20-runtime-tools.sh) copies it to a fixed, install-root-independent path
@@ -19,6 +20,16 @@ editor_gate_rjq_bin() {
     # Never PATH: the shipped rjq lives in the shared bin, and an ambient
     # rjq is whatever the machine happens to have first.
     return 1
+}
+
+# Emits a non-blocking PreToolUse additionalContext note through rjq -- the
+# safe way to build this JSON. A hand-rolled printf string breaks the moment
+# the note text contains a quote or an apostrophe, which the note text now
+# does ("Edit's own match check"); rjq's --arg does the escaping so the
+# note's wording is never shell-quoting-constrained again.
+editor_gate_emit_context() { # <rjq_bin> <additionalContext text>
+    "$1" -n -c --arg text "$2" \
+        '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow", additionalContext: $text}}'
 }
 #
 # gated() flags a Bash command line as an in-place shell edit: `sed -i`,

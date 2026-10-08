@@ -1,6 +1,7 @@
 // MODE: DEV
 // PACKAGE: PROD
 use ai_text_editor::auth;
+use ai_text_editor::diff;
 use ai_text_editor::document::{Document, DocumentError, DocumentMode};
 use ai_text_editor::history::History;
 use ai_text_editor::index::{LineIndex, DEFAULT_GRANULARITY};
@@ -4312,6 +4313,15 @@ fn close_tab(
     ));
 }
 
+/// Reports a hunk set as the merge response's `base_start`/`base_end` line
+/// ranges -- see `02-merge-arm-automerge/working-context.md` for the shape.
+fn hunk_ranges(hunks: &[diff::Hunk]) -> Value {
+    json!(hunks
+        .iter()
+        .map(|hunk| json!({"start": hunk.base_start, "end": hunk.base_end}))
+        .collect::<Vec<_>>())
+}
+
 fn resolve_external(
     envelope: &ai_text_editor::protocol::Envelope,
     tab: &mut Tab,
@@ -4561,10 +4571,33 @@ fn resolve_external(
         }
         "merge" => {
             let working = tab.document.bytes().to_vec();
+            let mut buffer_hunks: Vec<diff::Hunk> = Vec::new();
+            let mut external_hunks: Vec<diff::Hunk> = Vec::new();
             let merged = if working == tab.base_bytes {
                 external.clone()
             } else if external == tab.base_bytes {
                 working
+            } else if tab.document.mode == DocumentMode::TextUtf8 {
+                match (
+                    diff::diff_hunks(&tab.base_bytes, &working),
+                    diff::diff_hunks(&tab.base_bytes, &external),
+                ) {
+                    (Ok(b_hunks), Ok(e_hunks)) if !diff::hunks_conflict(&b_hunks, &e_hunks) => {
+                        let merged = diff::apply_merge(&tab.base_bytes, &b_hunks, &e_hunks);
+                        buffer_hunks = b_hunks;
+                        external_hunks = e_hunks;
+                        merged
+                    }
+                    _ => {
+                        tab.pending_external = Some(external);
+                        frames.push(error(
+                            &envelope.request_id,
+                            "merge_conflict",
+                            "working and external changes overlap; resolve manually",
+                        ));
+                        return;
+                    }
+                }
             } else {
                 tab.pending_external = Some(external);
                 frames.push(error(
@@ -4613,7 +4646,7 @@ fn resolve_external(
             tab.index = LineIndex::build(tab.document.bytes(), tab.index.granularity);
             tab.index_complete = true;
             persist_index(tab);
-            frames.push(response(&envelope.request_id, json!({"resolved": "merge", "revision": revision, "save_required": true, "history_event": "external_merge"})));
+            frames.push(response(&envelope.request_id, json!({"resolved": "merge", "revision": revision, "save_required": true, "history_event": "external_merge", "buffer_changed_lines": hunk_ranges(&buffer_hunks), "external_changed_lines": hunk_ranges(&external_hunks)})));
         }
         _ => {
             tab.pending_external = Some(external);

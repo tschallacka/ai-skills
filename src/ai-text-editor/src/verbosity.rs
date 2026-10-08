@@ -123,6 +123,11 @@ fn declared_tier(key: &str) -> Option<u8> {
         // A delete that crossed a line end changed more than the caller may
         // have meant; that belongs with the span it applies to.
         "spans_lines" => 1,
+        // `merge`'s own resolved spans: which base lines the buffer's and
+        // the external side's edits actually touched, the same
+        // verification-grade reasoning as offset/delete_len above -- a
+        // caller confirms what was combined without re-reading the file.
+        "buffer_changed_lines" | "external_changed_lines" => 1,
         // SKILL.md states the contract this level has to satisfy: "every
         // mutating and reading response carries three state flags you must
         // branch on" — dirty, disk_diverged, external_change_pending. A
