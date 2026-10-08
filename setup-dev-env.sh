@@ -60,6 +60,24 @@ sde_script_dir="$repo_root"
 # implementation (which itself builds plan-core-lib.sh, among other things)
 # when it is not.
 if [ -f "$sde_script_dir/planning/scripts/plan-core-lib.sh" ]; then
+    # B401: this is the one call site where staleness of plan-core-lib.sh
+    # itself is self-perpetuating, not merely drift to investigate later. A
+    # bundle generated before 050aa18c (B391) carries a pecbip_pick that
+    # never looks in <checkout>/bin/<triple>/ at all, so on a machine with
+    # skills installed globally it silently prefers an older SHARED binary
+    # over this checkout's own -- and the "missing is built, present is left
+    # alone" policy further down (deliberate there, so a regenerate-on-every-
+    # run habit cannot mask genuine drift) never fires for a bundle that
+    # already exists, merely stale. Left unchecked, that stale bundle keeps
+    # choosing the implementation that keeps it stale, across every later
+    # pull. Checked here, and ONLY here: build-plan-libs.sh --check compares
+    # against a fresh build of the checked-in templates (never against a
+    # committed copy -- none of the five plan-*-lib.sh files are committed),
+    # so repairing it before trusting it is not the drift-masking the later
+    # policy guards against.
+    if ! "$sde_script_dir/planning/scripts/build-plan-libs.sh" --check >/dev/null 2>&1; then
+        "$sde_script_dir/planning/scripts/build-plan-libs.sh" >/dev/null 2>&1 || true
+    fi
     source "$sde_script_dir/planning/scripts/plan-core-lib.sh"
     plan_exec_compiled_binary_if_present setup-dev-env "$sde_script_dir" "$@"
 fi
