@@ -3621,7 +3621,7 @@
     {
       "id": "B402",
       "title": "The first setup-dev-env run after a pull builds from the previous binary's crate list, so new crates are silently not built",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3632,17 +3632,17 @@
       "surfaces": [
         "src/setup-dev-env/src/plan.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Commit 7b544a88: added reexec::maybe_reexec_after_self_rebuild, called from main.rs right after the nix-shell reexec. It rebuilds and restages just the self-hosting (setup-dev-env, setup-dev-env) row via the new stage::build_and_stage_one, then re-execs the freshly staged bin/<triple>/setup-dev-env with the original arguments before the real build loop runs, guarded by SETUP_DEV_ENV_SELF_REFRESHED so the re-exec'd process does not repeat the step. A missing src/setup-dev-env crate (test fixtures) or a build failure both fall through to continuing with the binary already running, unchanged from before this fix.",
+      "verification": "cargo test --manifest-path src/setup-dev-env/Cargo.toml: 25 unit + 8 integration tests pass, including two new reexec.rs tests exercising both guard branches (already refreshed; no self crate in this tree) without reaching the real cargo build or exec. cargo clippy --workspace -D warnings and cargo fmt --check both clean. Full pre-push-check.sh PASS before push.",
       "found_by": "rebuild after pulling ff72ee66, compile-and-install session 2026-10-08",
       "notes": "Why it went unnoticed: on a fresh clone there is no previous binary, and on a pull that adds no crate the lists agree. The count in the summary is the running list's own, so it cannot show a crate it never knew about. Proposed fix direction, from Tschallacka: a cleanup step in setup-dev-env. When the run rebuilt setup-dev-env itself, re-exec the new binary once before building the rest, or compare the running plan against the checkout's plan.rs and fail naming the difference. Workaround: run setup-dev-env.sh twice after a pull. Related: B403 (the same pull's decisions crates also never reach decisions/bin), B401.",
       "created_at": "2026-10-08T15:17:07Z",
-      "updated_at": "2026-10-08T15:17:21Z"
+      "updated_at": "2026-10-08T15:56:54Z"
     },
     {
       "id": "B403",
       "title": "setup-dev-env never stages decisions and decisions-mcp into decisions/bin/<triple>/, so a checkout install ships the decisions skill with no binaries and no MCP server",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3653,12 +3653,12 @@
       "surfaces": [
         "src/setup-dev-env/src/stage.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Commit 7b544a88: added decisions/decisions-mcp to stage.rs's skill_dir_for, mapping both crates to the decisions skill directory, the same precedent B372 (chat) and B373 (ai-text-editor) each set.",
+      "verification": "Extended stage.rs's skill_dir_for_covers_every_multi_binary_skill test with decisions/decisions-mcp -> Some(\"decisions\"). cargo test/clippy/fmt all clean for setup-dev-env; full pre-push-check.sh PASS before push.",
       "found_by": "post-install MCP check, compile-and-install session 2026-10-08",
       "notes": "Third instance of one gap: B372 (chat) and B373 (ai-text-editor) were each fixed by adding names to skill_dir_for, which leaves the next new skill exposed. Proposed fix: derive the staging from each skill's binaries.tsv rather than a hand-kept match, plus a test that every binaries.tsv row for the host triple is staged, so a new skill cannot be missed. Tschallacka suggested a cleanup step in setup-dev-env; it belongs here as well, clearing <skill>/bin/<triple>/ before staging so a skill with nothing staged is visible as empty rather than holding old copies. Installer side, separate if wanted: it reports success when a skill's binaries.tsv names binaries for this triple and none were found. Workaround: copy the two binaries into decisions/bin/<triple>/ and reinstall the skill. Related: B402.",
       "created_at": "2026-10-08T15:17:07Z",
-      "updated_at": "2026-10-08T15:17:21Z"
+      "updated_at": "2026-10-08T15:56:58Z"
     },
     {
       "id": "B14",
@@ -3777,7 +3777,7 @@
     {
       "id": "B404",
       "title": "bugs looks for the registers worktree only at ~/.config/tsch-ai-skills/registers/<owner>/<repo>, so it offers a second registers checkout on every call",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "high",
       "parent": null,
@@ -3788,12 +3788,12 @@
       "surfaces": [
         "src/planning-core/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Commit e86fc769: new planning_core::is_on_branch(directory, branch), and resolved_registers_path (bug-report, todo, decisions, all three main.rs) now checks it on the project root FIRST, before any registers_access config or prompt. project_root_for(None) resolves from the current directory, so when the CLI is run from inside the real registers worktree directly -- wherever it actually lives, independent of the fixed candidate path registers_scoped_root computes -- the project root already IS that worktree, and this recognises it immediately rather than offering to create a second, colliding one.",
+      "verification": "Three new planning-core unit tests for is_on_branch (plain repo on the branch vs. another; not a git repo at all; a worktree checked out on the branch recognised from outside it). One new real end-to-end integration test per CLI (bug-report, todo, decisions) in each tests/cli_flow.rs, running the actual compiled binary from inside a worktree on the registers branch at a location distinct from the computed candidate, confirming no prompt and the worktree's own file used directly. Confirmed the new bug-report test fails with the exact reported prompt text when the fix is reverted (git stash), and passes restored. Full workspace cargo test + clippy --workspace -D warnings + fmt --check clean; pre-push-check.sh PASS before push.",
       "found_by": "filing B401-B403, compile-and-install session 2026-10-08",
       "notes": "Why it matters beyond the noise: in a backgrounded call with stdin open, bugs blocked on the prompt and wrote nothing, which looks like a hang. Agents filing from a script will hit that. The bugs CLI and the todo/decisions CLIs share this resolver (registers_scoped_root), so all three are likely affected; only bugs was observed. Decide which location is canonical first: the code (tsch-ai-skills/registers/<owner>/<repo>) or MAINTAINER 1.14 and the git-worktrees skill (~/.config/tsch-ai-worktrees/registers). Then make the other agree, and treat a cwd already on the registers branch as recognised.",
       "created_at": "2026-10-08T15:17:49Z",
-      "updated_at": "2026-10-08T15:17:55Z"
+      "updated_at": "2026-10-08T15:57:05Z"
     },
     {
       "id": "B1",
