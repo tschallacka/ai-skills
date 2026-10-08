@@ -3619,6 +3619,48 @@
       "updated_at": "2026-10-08T14:59:21Z"
     },
     {
+      "id": "B402",
+      "title": "The first setup-dev-env run after a pull builds from the previous binary's crate list, so new crates are silently not built",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "# A checkout whose bin/<triple>/setup-dev-env was built before a pull that adds crates\n# (here: built at 50bf29de, pulled to ff72ee66, which added src/decisions and src/decisions-mcp):\ngit pull --ff-only\nnix develop --command bash -c 'planning/scripts/build-plan-libs.sh && ./setup-dev-env.sh'\nls bin/<triple>/decisions bin/<triple>/decisions-mcp     # absent\n./setup-dev-env.sh --list | awk '/decision/'            # both listed\nnix develop --command ./setup-dev-env.sh                 # second run\nls bin/<triple>/decisions bin/<triple>/decisions-mcp     # now present\n",
+      "observed": "macOS arm64, 2026-10-08, pulled 50bf29de -> ff72ee66. The first run exited 0 with \"88 binary/binaries built\" and no failure line; bin/aarch64-apple-darwin/decisions and decisions-mcp did not exist, although `setup-dev-env.sh --list` and the newly built bin/<triple>/setup-dev-env --list both name them, and src/setup-dev-env/src/plan.rs:28-29 lists them. A second, otherwise identical run printed \"decisions ok -> bin/aarch64-apple-darwin/decisions\", \"decisions-mcp ok -> ...\" and \"90 binary/binaries built.\" An install between the two runs installed the decisions skill on both agents with no decisions binary and no decisions MCP server, and reported success.\n",
+      "expected": "One setup-dev-env run after a pull builds every crate the checkout's plan.rs lists, or fails naming the ones it did not build.",
+      "mechanism": "setup-dev-env.sh execs the compiled bin/<triple>/setup-dev-env that already exists (via plan_exec_compiled_binary_if_present). That process carries its crate list compiled in (plan::plan(), src/setup-dev-env/src/plan.rs), so it builds the crates its own, older source knew about. It rebuilds setup-dev-env along the way, which replaces the file on disk but not the running process, and nothing re-runs the new binary. A crate added by the pull is therefore built only on the next run, and the summary counts what the running list contained, so it reports success with the new crate missing. Inferred from the two runs, not traced in the code: the second run's 90 versus the first run's 88 matches exactly the two crates added between 50bf29de and ff72ee66.\n",
+      "surfaces": [
+        "src/setup-dev-env/src/plan.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "rebuild after pulling ff72ee66, compile-and-install session 2026-10-08",
+      "notes": "Why it went unnoticed: on a fresh clone there is no previous binary, and on a pull that adds no crate the lists agree. The count in the summary is the running list's own, so it cannot show a crate it never knew about. Proposed fix direction, from Tschallacka: a cleanup step in setup-dev-env. When the run rebuilt setup-dev-env itself, re-exec the new binary once before building the rest, or compare the running plan against the checkout's plan.rs and fail naming the difference. Workaround: run setup-dev-env.sh twice after a pull. Related: B403 (the same pull's decisions crates also never reach decisions/bin), B401.",
+      "created_at": "2026-10-08T15:17:07Z",
+      "updated_at": "2026-10-08T15:17:21Z"
+    },
+    {
+      "id": "B403",
+      "title": "setup-dev-env never stages decisions and decisions-mcp into decisions/bin/<triple>/, so a checkout install ships the decisions skill with no binaries and no MCP server",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "# After a setup-dev-env run that builds decisions and decisions-mcp:\nnix develop --command ./setup-dev-env.sh | awk '/decision/'   # \"ok -> bin/<triple>/...\" only, no \"-> decisions/bin/...\"\nls decisions/bin/<triple>/                                     # does not exist\n./target/release/installer install --agent claude --skill decisions --source . --integration mcp --yes\nls ~/.config/tsch-ai-skills/bin/decisions-mcp; jq '.mcpServers.decisions' ~/.claude.json\n",
+      "observed": "macOS arm64, master ff72ee66, 2026-10-08. setup-dev-env printed \"decisions ok -> bin/aarch64-apple-darwin/decisions\" and the same for decisions-mcp, but no \"-> decisions/bin/...\" staging line, and decisions/bin/ did not exist. `installer install --all --integration mcp` exited 0 and printed \"installed decisions -> ~/.claude/skills/decisions, integration mode: mcp\" for both agents. Yet neither decisions nor decisions-mcp was in ~/.config/tsch-ai-skills/bin, and neither ~/.claude.json nor opencode.json had a decisions MCP server. After copying both binaries into decisions/bin/aarch64-apple-darwin/ and reinstalling the one skill, both binaries landed in the shared bin and both agents registered decisions -> ~/.config/tsch-ai-skills/bin/decisions-mcp.\n",
+      "expected": "setup-dev-env stages every binary a skill's binaries.tsv declares for this triple into <skill>/bin/<triple>/, so an install from the checkout puts decisions and decisions-mcp in the shared bin and registers the decisions MCP server.",
+      "mechanism": "The installer takes a skill's binaries only from <skill>/bin/<triple>/. setup-dev-env stages a crate there only when skill_dir_for (src/setup-dev-env/src/stage.rs:267-277) maps the crate to a skill, and the decisions and decisions-mcp crates are not in that match, so they fall to None. The bash fallback's case list (setup-dev-env.sh) does not have them either. decisions/binaries.tsv and integration.tsv declare both binaries for the skill, but no test ties those declarations to skill_dir_for, which is how B372 (chat), B373 (ai-text-editor) and now decisions each shipped a new skill whose checkout install has no binaries. The installer does not warn when a skill declares binaries for this triple and finds none to copy, so the install reports success.\n",
+      "surfaces": [
+        "src/setup-dev-env/src/stage.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "post-install MCP check, compile-and-install session 2026-10-08",
+      "notes": "Third instance of one gap: B372 (chat) and B373 (ai-text-editor) were each fixed by adding names to skill_dir_for, which leaves the next new skill exposed. Proposed fix: derive the staging from each skill's binaries.tsv rather than a hand-kept match, plus a test that every binaries.tsv row for the host triple is staged, so a new skill cannot be missed. Tschallacka suggested a cleanup step in setup-dev-env; it belongs here as well, clearing <skill>/bin/<triple>/ before staging so a skill with nothing staged is visible as empty rather than holding old copies. Installer side, separate if wanted: it reports success when a skill's binaries.tsv names binaries for this triple and none were found. Workaround: copy the two binaries into decisions/bin/<triple>/ and reinstall the skill. Related: B402.",
+      "created_at": "2026-10-08T15:17:07Z",
+      "updated_at": "2026-10-08T15:17:21Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -3731,6 +3773,27 @@
       "notes": null,
       "created_at": "2026-09-07T09:24:19Z",
       "updated_at": "2026-09-07T11:32:16Z"
+    },
+    {
+      "id": "B404",
+      "title": "bugs looks for the registers worktree only at ~/.config/tsch-ai-skills/registers/<owner>/<repo>, so it offers a second registers checkout on every call",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "cd ~/.config/tsch-ai-worktrees/registers && ~/.config/tsch-ai-skills/bin/bugs next-id < /dev/null",
+      "observed": "bugs 2.0.0-alpha.5 (installed from master ff72ee66), 2026-10-08. Every call made with cwd = ~/.config/tsch-ai-worktrees/registers, the registers worktree that .agents/MAINTAINER.md 1.14 names as the only one and that is checked out on branch registers, printed: \"No registers worktree is set up for this project yet. Create a dedicated sparse git worktree for BUGS.json/TODO.json/DECISIONS.json on branch \"registers\" (recommended -- avoids merge conflicts between concurrent agents)? (non-interactive; defaulting to false)\". With stdin open in a backgrounded call it waited on that prompt and wrote nothing until stopped. With stdin closed it defaulted to false and wrote ./BUGS.json, so the entries (B401-B403) landed correctly.\n",
+      "expected": "bugs recognises an existing checkout of the registers branch (at least the one MAINTAINER.md 1.14 prescribes, and the one it is running in) and stays quiet; it never offers to create a second registers checkout, and never under tsch-ai-skills/.",
+      "mechanism": "resolve_path in the bug-report crate asks planning_core::registers_scoped_root (src/planning-core/src/lib.rs:451-455), which places the registers worktree at <tsch-ai-skills base>/registers/<owner>/<repo>, i.e. ~/.config/tsch-ai-skills/registers/tschallacka/ai-skills. worktree_recognized (lib.rs:463-480) then checks only that candidate path, so an existing registers checkout anywhere else, including the one the documentation prescribes and the one the command is running in, counts as \"not set up\" and triggers the offer. Two conflicts follow. The code's path is under tsch-ai-skills/, which the git-worktrees skill forbids for worktrees (that tree holds the chat server key and the installed binaries). And accepting the offer would try to check out registers a second time while it is already checked out at ~/.config/tsch-ai-worktrees/registers, which git refuses; if it succeeded, that would be a second, drifting registers checkout, the situation MAINTAINER 1.14 exists to prevent.\n",
+      "surfaces": [
+        "src/planning-core/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "filing B401-B403, compile-and-install session 2026-10-08",
+      "notes": "Why it matters beyond the noise: in a backgrounded call with stdin open, bugs blocked on the prompt and wrote nothing, which looks like a hang. Agents filing from a script will hit that. The bugs CLI and the todo/decisions CLIs share this resolver (registers_scoped_root), so all three are likely affected; only bugs was observed. Decide which location is canonical first: the code (tsch-ai-skills/registers/<owner>/<repo>) or MAINTAINER 1.14 and the git-worktrees skill (~/.config/tsch-ai-worktrees/registers). Then make the other agree, and treat a cwd already on the registers branch as recognised.",
+      "created_at": "2026-10-08T15:17:49Z",
+      "updated_at": "2026-10-08T15:17:55Z"
     },
     {
       "id": "B1",
