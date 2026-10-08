@@ -8164,7 +8164,7 @@
     {
       "id": "B400",
       "title": "A verification/relocation work unit (File=N/A) can never pass validate-plan.sh --complete's atomicity check",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -8178,12 +8178,12 @@
         "src/update-step/src/main.rs",
         "src/validate-plan/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Commit e2f4cb40: update-step's atomicity_check now ticks the three atomicity boxes on the step's own completion say-so when the unit's inventory row declares File as N/A or empty (nothing to diff against), via a new shared tick_boxes helper also used by the normal git-diff path. update-plan-content's 'valid step section ids' list for a step document no longer names atomicity-check, since it was never actually accepted there (section_spec never matched it) and the self-contradictory refusal ('lists it as valid, refuses to write it') is gone.",
+      "verification": "Two new update-step unit tests: a no-file-target unit (File=N/A) ticks all three boxes with no VIOLATION text; a unit id absent from the inventory entirely is left alone, unticked (a different, likely-a-typo case, deliberately not auto-ticked). Confirmed the fix-sensitive test fails with the original early-return behavior restored (temporary edit, reverted) and passes with the fix in place. Manually ran the real update-plan-content binary against a scratch step file with -ss atomicity-check and confirmed the refusal message no longer lists atomicity-check as a valid section id. cargo test/clippy --workspace -D warnings/fmt --check all clean; full pre-push-check.sh PASS before push.",
       "found_by": "claude-sonnet-5-5 (this session)",
       "notes": "Found while closing out .plans/register-and-plan-worktrees goal 08 (7 real fresh-checkout verification units, each type=verification with File=N/A). The underlying verification work itself is genuinely done and independently confirmed (real pty runs against fresh git clones); only the plan's own bookkeeping checkbox is stuck. User's own words: 'report that gap as a bug, we'll tackle that after this has been implemented.' Deferred by explicit instruction -- do not fix in this pass.",
       "created_at": "2026-10-08T07:47:21Z",
-      "updated_at": "2026-10-08T07:47:21Z"
+      "updated_at": "2026-10-08T16:19:53Z"
     },
     {
       "id": "B25",
