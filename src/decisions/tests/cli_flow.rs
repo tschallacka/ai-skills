@@ -301,6 +301,50 @@ fn a_pre_existing_recognized_worktree_is_used_silently() {
 }
 
 #[test]
+fn a_worktree_on_the_registers_branch_elsewhere_is_recognised_from_inside_it_with_no_prompt() {
+    // B404: a worktree on the registers branch at some location OTHER than
+    // the fixed candidate path registers_scoped_root itself would compute --
+    // exactly MAINTAINER.md 1.14's own prescribed location, which has
+    // nothing to do with tsch-ai-skills/registers/<owner>/<repo>. Running
+    // FROM INSIDE it must recognize it on the spot, not offer to create a
+    // second, colliding worktree at the fixed candidate path.
+    let project = tempfile::tempdir().unwrap();
+    init_registers_project(project.path());
+    let home = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let worktree = elsewhere.path().join("registers-worktree");
+    make_recognized_worktree(project.path(), &worktree, "registers");
+
+    let candidate = candidate_registers_root(home.path(), project.path());
+    assert!(
+        !candidate.exists(),
+        "the fixed scoped-root candidate was never created"
+    );
+
+    let (code, out, err) = run_resolution(
+        &worktree,
+        home.path(),
+        &[
+            "add", "--title", "T", "--option", "a:Yes", "--option", "b:No",
+        ],
+        &[],
+    );
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(err.is_empty(), "no prompt output: {err}");
+    assert_eq!(out, "Q1");
+
+    let text = std::fs::read_to_string(worktree.join("DECISIONS.json")).unwrap();
+    assert!(
+        text.contains("Q1"),
+        "the worktree's own file got the new entry"
+    );
+    assert!(
+        !candidate.exists(),
+        "no second worktree was ever offered or created"
+    );
+}
+
+#[test]
 fn resolve_path_reports_the_same_path_a_mutating_command_actually_used() {
     let project = tempfile::tempdir().unwrap();
     init_registers_project(project.path());

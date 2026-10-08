@@ -798,6 +798,18 @@ fn resolved_registers_path(
     candidate: &std::path::Path,
 ) -> Option<String> {
     let cfg = planning_core::read_tsch_config(project);
+    // B404: `project` is `project_root_for(None)`, resolved from the CURRENT
+    // DIRECTORY -- so when the CLI is run from inside a registers worktree
+    // directly (the one MAINTAINER.md 1.14 and the git-worktrees skill
+    // prescribe, which may live nowhere near `candidate`'s own fixed
+    // tsch-ai-skills/ path), `project` IS that worktree. Recognise it on the
+    // spot rather than asking to create a second, colliding one at
+    // `candidate` -- this is ground truth from where the command is actually
+    // running, so it is checked before any config opinion or prompt.
+    let branch = cfg.registers_branch.as_deref().unwrap_or("registers");
+    if planning_core::is_on_branch(project, branch) {
+        return Some(register_file(project));
+    }
     if cfg.registers_access.as_deref() == Some("main-checkout") {
         return None;
     }

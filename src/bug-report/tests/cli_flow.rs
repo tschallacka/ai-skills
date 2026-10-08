@@ -251,6 +251,37 @@ fn a_preseeded_dedicated_worktree_config_creates_and_resolves_with_no_prompt() {
 }
 
 #[test]
+fn a_worktree_on_the_registers_branch_elsewhere_is_recognised_from_inside_it_with_no_prompt() {
+    // B404: a worktree on the registers branch at some location OTHER than
+    // the fixed candidate path registers_scoped_root itself would compute --
+    // exactly MAINTAINER.md 1.14's own prescribed location, which has
+    // nothing to do with tsch-ai-skills/registers/<owner>/<repo>. Running
+    // FROM INSIDE it must recognize it on the spot, not offer to create a
+    // second, colliding worktree at the fixed candidate path.
+    let project = tempfile::tempdir().unwrap();
+    init_project(project.path());
+    let home = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let worktree = elsewhere.path().join("registers-worktree");
+    make_recognized_worktree(project.path(), &worktree, "registers");
+
+    let candidate = candidate_registers_root(home.path(), project.path());
+    assert!(
+        !candidate.exists(),
+        "the fixed scoped-root candidate was never created"
+    );
+
+    let (code, out, err) = run(&worktree, home.path(), &["fmt"], &[]);
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(err.is_empty(), "no prompt output: {err}");
+    assert_eq!(out, worktree.join("BUGS.json").display().to_string());
+    assert!(
+        !candidate.exists(),
+        "no second worktree was ever offered or created"
+    );
+}
+
+#[test]
 fn a_preseeded_main_checkout_config_never_prompts_and_stays_on_the_bare_file() {
     let project = tempfile::tempdir().unwrap();
     init_project(project.path());

@@ -479,6 +479,18 @@ pub fn worktree_recognized(path: &Path) -> bool {
     candidate_common == project_common
 }
 
+/// Whether `directory` is checked out on `branch` right now (B404). A caller
+/// resolving a registers-style scoped worktree at some fixed, computed path
+/// (e.g. [`registers_scoped_root`]) uses this to recognise, FIRST, the case
+/// where it is already running from inside the real worktree directly --
+/// which may live nowhere near that fixed path -- rather than asking to
+/// create a second, colliding one at the computed location. `directory` not
+/// being a git repository at all (or having no commits yet) answers `false`,
+/// never a panic or a prompt.
+pub fn is_on_branch(directory: &Path, branch: &str) -> bool {
+    git_value(directory, &["rev-parse", "--abbrev-ref", "HEAD"]).as_deref() == Some(branch)
+}
+
 /// Runs a git subcommand with its output CAPTURED rather than inherited, so a
 /// caller of [`create_sparse_worktree`] never sees git's own informational
 /// chatter ("Preparing worktree...", "HEAD is now at...") leak into its own
@@ -706,11 +718,11 @@ fn prompt_branch_name_from(prompt: &str, default: &str, reader: &mut impl Read) 
 mod tests {
     use super::{
         atomic_write, command_for, create_sparse_worktree, declined_marker_path, exe_name,
-        git_remote_namespace, global_scoped_root, is_declined, is_wsl_launcher, mark_declined,
-        parse_git_remote_namespace, plans_branch_scoped_root, prompt_branch_name_from,
-        prompt_yes_no_with_default_from, read_tsch_config, registers_scoped_root,
-        require_safe_value, shell_quote, shell_unquote, simplified, tsch_config_path,
-        worktree_recognized, write_tsch_config_patch, PromptOutcome,
+        git_remote_namespace, global_scoped_root, is_declined, is_on_branch, is_wsl_launcher,
+        mark_declined, parse_git_remote_namespace, plans_branch_scoped_root,
+        prompt_branch_name_from, prompt_yes_no_with_default_from, read_tsch_config,
+        registers_scoped_root, require_safe_value, shell_quote, shell_unquote, simplified,
+        tsch_config_path, worktree_recognized, write_tsch_config_patch, PromptOutcome,
     };
     use std::fs;
     use std::io::Cursor;
@@ -1000,6 +1012,45 @@ mod tests {
         let recognized = worktree_recognized(unrelated.path());
         std::env::set_current_dir(original).unwrap();
         assert!(!recognized);
+    }
+
+    #[test]
+    fn is_on_branch_is_true_for_the_checked_out_branch_and_false_for_another() {
+        let project = tempfile::tempdir().unwrap();
+        init_repo_with_commit(project.path());
+        run_git(project.path(), &["branch", "registers"]);
+        run_git(project.path(), &["checkout", "-q", "registers"]);
+        assert!(is_on_branch(project.path(), "registers"));
+        assert!(!is_on_branch(project.path(), "main"));
+        assert!(!is_on_branch(project.path(), "master"));
+    }
+
+    #[test]
+    fn is_on_branch_is_false_for_a_path_that_is_not_a_git_repo_at_all() {
+        let not_a_repo = tempfile::tempdir().unwrap();
+        assert!(!is_on_branch(not_a_repo.path(), "registers"));
+    }
+
+    #[test]
+    fn is_on_branch_recognises_a_worktree_checked_out_on_that_branch_from_outside_it() {
+        // The scenario B404 reports: a dedicated worktree on the registers
+        // branch, checked without ever changing into it.
+        let project = tempfile::tempdir().unwrap();
+        init_repo_with_commit(project.path());
+        let worktree_parent = tempfile::tempdir().unwrap();
+        let worktree_path = worktree_parent.path().join("registers-worktree");
+        run_git(
+            project.path(),
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "registers",
+                worktree_path.to_str().unwrap(),
+            ],
+        );
+        assert!(is_on_branch(&worktree_path, "registers"));
+        assert!(!is_on_branch(project.path(), "registers"));
     }
 
     #[test]
