@@ -1,0 +1,13 @@
+{
+  "name": "bugs-board",
+  "version": "0.1.0",
+  "description": "A pane with the project's own open bugs from BUGS.json, most severe first.",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Bugs board",
+      "description": "Register the bugs-board command and its pane. Off removes both.",
+      "default": true
+    }
+  }
+}

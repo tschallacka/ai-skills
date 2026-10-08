@@ -1,0 +1,13 @@
+{
+  "name": "todo-board",
+  "version": "0.1.0",
+  "description": "A pane with the project's own open tasks from TODO.json, most urgent first.",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Todo board",
+      "description": "Register the todo-board command and its pane. Off removes both.",
+      "default": true
+    }
+  }
+}

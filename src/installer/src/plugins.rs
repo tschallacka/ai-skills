@@ -130,6 +130,8 @@ pub const MODS: &[(&str, &[&str])] = &[
     ("plan-board", &["planning"]),
     ("brainstorm-board", &["brainstorm"]),
     ("register-board", &["bug-report", "todo"]),
+    ("bugs-board", &["bug-report"]),
+    ("todo-board", &["todo"]),
     ("tui-hint-board", &["interactive-shell"]),
     ("decision-board", &["decisions"]),
     (
@@ -142,6 +144,19 @@ pub const MODS: &[(&str, &[&str])] = &[
             "bug-report",
             "todo",
             "interactive-shell",
+        ],
+    ),
+    (
+        "boards",
+        &[
+            "chat",
+            "ci-failures",
+            "planning",
+            "brainstorm",
+            "bug-report",
+            "todo",
+            "interactive-shell",
+            "decisions",
         ],
     ),
 ];

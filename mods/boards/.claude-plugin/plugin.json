@@ -1,0 +1,13 @@
+{
+  "name": "boards",
+  "version": "0.1.0",
+  "description": "A pane listing every board the project ships; click one to open it.",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Boards launcher",
+      "description": "Register the boards command and its pane. Off removes both.",
+      "default": true
+    }
+  }
+}

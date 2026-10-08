@@ -248,6 +248,12 @@ export const register: Register = (on, options) => {
       name: 'decision-board',
       description: 'Show the project’s questions in a pane; `/decision-board close` hides it',
     })
+    // questions-board is an alias: the same board, under the name that matches
+    // bugs-board/todo-board's own naming scheme.
+    await $.command.register({
+      name: 'questions-board',
+      description: 'Alias for /decision-board: show the project’s questions in a pane; `/questions-board close` hides it',
+    })
     await $.tool.register({
       name: TOOL,
       description: 'Show the project’s pending (open + decided) questions to the person, in a pane, and return them as text for the chat.',
@@ -286,6 +292,16 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'decision-board' }, async ($, e) => {
+    if (e.args.trim().toLowerCase() === 'close') {
+      await $.ui.close({ id: PANE })
+      return { text: 'Decision board closed.' }
+    }
+    await $.ui.open({ id: PANE, title: 'Questions' })
+    return { text: 'Decision board opened.' }
+  })
+
+  // questions-board is an alias for decision-board, opening the same pane.
+  on('command.run', { command: 'questions-board' }, async ($, e) => {
     if (e.args.trim().toLowerCase() === 'close') {
       await $.ui.close({ id: PANE })
       return { text: 'Decision board closed.' }
