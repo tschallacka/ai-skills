@@ -1,4 +1,4 @@
-<!-- MODE: PROD -->
+<!-- MODE: DEV -->
 # chat-interrupt-plugin
 
 A Claude Code plugin with one `PreToolUse` hook, for the chat skill's interrupts.

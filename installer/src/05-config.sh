@@ -211,7 +211,7 @@ INTEGRATION_SELECTION_EOF
     printf 'default\n'
 }
 
-SKILL_NAMES=(planning project-specifics resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette question-etiquette ai-text-editor interactive-shell www ci-failures rjq decisions)
+SKILL_NAMES=(planning project-specifics resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette question-etiquette ai-text-editor interactive-shell www ci-failures rjq decisions tailpipe)
 # T102: agent profiles under .agents/profiles/, declared in profile_files()
 # (installer/src/50-manifest.sh) the same way SKILL_NAMES is declared in
 # skill_files() -- a separate list because a profile is not a skill (no
@@ -238,6 +238,7 @@ SKILL_DESCRIPTIONS=(
     'What actually failed in a CI run or pipeline, from a run/pipeline id, a PR/MR number or a branch -- on GitHub or GitLab.'
     'Reads, filters and searches JSON with the shipped rjq binary, where no system JSON filter is installed.'
     'A register of non-blocking questions an agent raises mid-work: lettered options, priority and branch, answered later from the CLI or a pane.'
+    'A less/tail for agents: pipe a command into a named stream, read/search/tail it by id from anywhere, gzip-snapshotted on a 15-minute idle timeout.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept

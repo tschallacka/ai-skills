@@ -87,12 +87,17 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
 
 {
     printf 'README.md\nLICENSE\npackage.json\n'
-    # tui-hint-plugin/editor-gate-plugin: neither is a skill (no skill_files()
-    # entry) and most of their files have no comment syntax a MODE marker
-    # could sit in (.json, .js), so this list is a third, deliberate copy of
-    # the same file set installer/build-release.sh's own
-    # tui_hint_plugin_files/editor_gate_plugin_files hardcode -- same
-    # reasoning as the five names on the line above.
+    # These five plugins are not a skill (no skill_files() entry) and most of
+    # their files have no comment syntax a MODE marker could sit in (.json,
+    # .js), so this list is a third, deliberate copy of the same file sets
+    # installer/build-release.sh's own tui_hint_plugin_files/
+    # editor_gate_plugin_files/agent_identity_plugin_files/
+    # decision_reminder_plugin_files/chat_interrupt_plugin_files hardcode.
+    # B1/B2: chat-interrupt-plugin was missing from this list entirely, and
+    # editor-gate-plugin/hooks/pre-tool-use-read.sh was missing from it --
+    # this test's own independent copy agreed with the two-then-wrong
+    # mechanisms it exists to catch drift against, so neither gap was caught
+    # here either until both were fixed together.
     printf 'tui-hint-plugin/.claude-plugin/plugin.json\n'
     printf 'tui-hint-plugin/hooks/hooks.json\n'
     printf 'tui-hint-plugin/hooks/lib.sh\n'
@@ -104,6 +109,7 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
     printf 'editor-gate-plugin/hooks/editor-token\n'
     printf 'editor-gate-plugin/hooks/pre-tool-use-bash.sh\n'
     printf 'editor-gate-plugin/hooks/pre-tool-use-edit-write.sh\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-read.sh\n'
     printf 'agent-identity-plugin/.claude-plugin/plugin.json\n'
     printf 'agent-identity-plugin/hooks/hooks.json\n'
     printf 'agent-identity-plugin/hooks/lib.sh\n'
@@ -112,6 +118,10 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
     printf 'decision-reminder-plugin/hooks/hooks.json\n'
     printf 'decision-reminder-plugin/hooks/lib.sh\n'
     printf 'decision-reminder-plugin/hooks/session-start.sh\n'
+    printf 'chat-interrupt-plugin/.claude-plugin/plugin.json\n'
+    printf 'chat-interrupt-plugin/hooks/hooks.json\n'
+    printf 'chat-interrupt-plugin/hooks/lib.sh\n'
+    printf 'chat-interrupt-plugin/hooks/pre-tool-use.sh\n'
     # The mods: every tracked file of each board installer/build-release.sh's
     # mods_files() lists, the same way that function takes them.
     for board in $(sed -n 's/^MODS_BOARDS="\(.*\)"$/\1/p' "$repo_root/installer/build-release.sh"); do

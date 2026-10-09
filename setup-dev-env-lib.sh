@@ -226,6 +226,7 @@ verify-both-shells	verify-both-shells
 ci-subjects	ci-subjects
 ci-scope	ci-scope
 ci-test-scope	ci-test-scope
+pre-release-check	pre-release-check
 test-mermaid-accuracy	test-mermaid-accuracy
 generate-postmortem	generate-postmortem
 PLAN

@@ -32,7 +32,7 @@ fn scratch(name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).expect("scratch dir");
     std::fs::write(
         dir.join("DECISIONS.json"),
-        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.5","comment":"t","questions":[]}"#,
+        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.6","comment":"t","questions":[]}"#,
     )
     .expect("seed DECISIONS.json");
     dir
@@ -208,7 +208,7 @@ fn init_registers_project(dir: &Path) {
     run_git(dir, &["init", "-q"]);
     std::fs::write(
         dir.join("DECISIONS.json"),
-        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.5","comment":"t","questions":[]}"#,
+        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.6","comment":"t","questions":[]}"#,
     )
     .expect("seed register");
     run_git(dir, &["add", "DECISIONS.json"]);

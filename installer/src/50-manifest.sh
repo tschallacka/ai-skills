@@ -520,7 +520,8 @@ EOF
         todo)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
                 schema.1.4.2.json schema.2.0.0-alpha.1.json schema.2.0.0-alpha.2.json \
-                schema.2.0.0-alpha.3.json schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json
+                schema.2.0.0-alpha.3.json schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json \
+                schema.2.0.0-alpha.6.json
             # The queue's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its queue instead of being told
             # to hand-edit JSON. Only the host's row is emitted, existence-gated
@@ -548,7 +549,8 @@ EOF
         bug-report)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
                 schema.1.4.2.json schema.2.0.0-alpha.1.json schema.2.0.0-alpha.2.json \
-                schema.2.0.0-alpha.3.json schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json
+                schema.2.0.0-alpha.3.json schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json \
+                schema.2.0.0-alpha.6.json
             # The register's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its register instead of being
             # told to hand-edit JSON. Only the host's row is emitted,
@@ -572,7 +574,7 @@ EOF
             ;;
         decisions)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv integration.tsv \
-                schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json
+                schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json schema.2.0.0-alpha.6.json
             # The register's tools ship two prebuilt binaries per target --
             # the CLI and its stdio MCP adapter, the same pair shape
             # ai-text-editor's own arm above ships (server/client/mcp) -- the
@@ -801,6 +803,27 @@ ISHEOF
                     skill_artifact_files rjq bin/x86_64-pc-windows-msvc/rjq.exe ;;
                 *)
                     printf 'skill_files: no rjq artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
+            ;;
+        tailpipe)
+            printf '%s\n' SKILL.md integration.tsv
+            # Three binaries per target -- the server, the reader, and the
+            # MCP consumer -- the same existence-gated shape ai-text-editor's
+            # own arm above ships (server/client/mcp).
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    skill_artifact_files tailpipe bin/x86_64-unknown-linux-musl/tailpipe-server-rs bin/x86_64-unknown-linux-musl/tailpipe-client-rs bin/x86_64-unknown-linux-musl/tailpipe-mcp ;;
+                Linux:aarch64|Linux:arm64)
+                    skill_artifact_files tailpipe bin/aarch64-unknown-linux-musl/tailpipe-server-rs bin/aarch64-unknown-linux-musl/tailpipe-client-rs bin/aarch64-unknown-linux-musl/tailpipe-mcp ;;
+                Darwin:x86_64)
+                    skill_artifact_files tailpipe bin/x86_64-apple-darwin/tailpipe-server-rs bin/x86_64-apple-darwin/tailpipe-client-rs bin/x86_64-apple-darwin/tailpipe-mcp ;;
+                Darwin:arm64)
+                    skill_artifact_files tailpipe bin/aarch64-apple-darwin/tailpipe-server-rs bin/aarch64-apple-darwin/tailpipe-client-rs bin/aarch64-apple-darwin/tailpipe-mcp ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    skill_artifact_files tailpipe bin/x86_64-pc-windows-msvc/tailpipe-server-rs.exe bin/x86_64-pc-windows-msvc/tailpipe-client-rs.exe bin/x86_64-pc-windows-msvc/tailpipe-mcp.exe ;;
+                *)
+                    printf 'skill_files: no tailpipe artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
             esac
             ;;

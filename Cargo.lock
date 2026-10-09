@@ -1408,6 +1408,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pre-release-check"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde_json",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1872,6 +1880,33 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "tailpipe-client-rs"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tailpipe-server-rs",
+]
+
+[[package]]
+name = "tailpipe-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tailpipe-client-rs",
+ "tailpipe-server-rs",
+]
+
+[[package]]
+name = "tailpipe-server-rs"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "regex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

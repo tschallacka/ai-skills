@@ -53,7 +53,7 @@ register() { # <name> <json body>
 # ---- some open (one urgent), one decided, one implemented, one closed ------
 mixed="$(register mixed.json '{
   "skill": "decisions",
-  "skill_version": "2.0.0-alpha.5",
+  "skill_version": "2.0.0-alpha.6",
   "comment": "t",
   "questions": [
     {"id": "Q1", "title": "Cache the config, or re-read it every call?", "status": "open", "priority": "urgent", "branch": "main", "options": [{"letter": "a", "label": "cache"}, {"letter": "b", "label": "re-read"}], "context": "", "chosen": null, "resolution": null, "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
@@ -94,7 +94,7 @@ esac
 # ---- nothing open, one decided: still non-silent, decided-only wording -----
 decided_only="$(register decided-only.json '{
   "skill": "decisions",
-  "skill_version": "2.0.0-alpha.5",
+  "skill_version": "2.0.0-alpha.6",
   "comment": "t",
   "questions": [
     {"id": "Q1", "title": "Pick the backend", "status": "decided", "priority": "low", "branch": "main", "options": [{"letter": "a", "label": "x"}], "context": "", "chosen": "a", "resolution": null, "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}
@@ -111,7 +111,7 @@ t_assert_contains 'the decided-only reminder names the title' 'Pick the backend'
 # ---- everything implemented/closed: silent, no additionalContext at all ----
 all_closed="$(register all-closed.json '{
   "skill": "decisions",
-  "skill_version": "2.0.0-alpha.5",
+  "skill_version": "2.0.0-alpha.6",
   "comment": "t",
   "questions": [
     {"id": "Q1", "title": "Resolved", "status": "closed", "priority": "urgent", "branch": "main", "options": [{"letter": "a", "label": "x"}], "context": "", "chosen": "a", "resolution": "done", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},

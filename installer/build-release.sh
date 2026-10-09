@@ -225,6 +225,7 @@ editor_gate_plugin_files() {
     printf 'editor-gate-plugin/hooks/editor-token\n'
     printf 'editor-gate-plugin/hooks/pre-tool-use-bash.sh\n'
     printf 'editor-gate-plugin/hooks/pre-tool-use-edit-write.sh\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-read.sh\n'
 }
 
 # The exact files src/installer/src/plugins.rs's own
@@ -252,6 +253,23 @@ decision_reminder_plugin_files() {
     printf 'decision-reminder-plugin/hooks/session-start.sh\n'
 }
 
+# chat-interrupt-plugin's own files, parallel to the four functions above
+# (src/installer/src/plugins.rs's own CHAT_INTERRUPT_PLUGIN_FILES carries the
+# identical list). B1: this function did not exist before it was added here: the
+# plugin had no entry in collect() at all since its own introduction, so
+# every release tarball cut since then silently omitted it -- the exact
+# tui-hint-plugin/editor-gate-plugin failure mode the comment above warns
+# about, just never caught for this one. The npm package was unaffected
+# (package.json's own bare "chat-interrupt-plugin" files entry ships the
+# whole directory regardless of this function), which is why only a real
+# tarball-based install ever would have shown the gap.
+chat_interrupt_plugin_files() {
+    printf 'chat-interrupt-plugin/.claude-plugin/plugin.json\n'
+    printf 'chat-interrupt-plugin/hooks/hooks.json\n'
+    printf 'chat-interrupt-plugin/hooks/lib.sh\n'
+    printf 'chat-interrupt-plugin/hooks/pre-tool-use.sh\n'
+}
+
 # T102: agent profiles are not a skill (no entry in skill_files()) and their
 # canonical source is JSON, a format with no comment syntax a MODE marker
 # could sit in -- the same reason the three plugin-file functions above are
@@ -275,7 +293,7 @@ profile_files_for_release() {
 # names are plugins::MODS in src/installer/src/plugins.rs; the test that holds
 # the two equal is tests/test-mods-package.sh. loading is not listed: the boards
 # carry their own copy of it.
-MODS_BOARDS="chat-board ci-board plan-board brainstorm-board register-board bugs-board todo-board tui-hint-board signal-bus decision-board boards"
+MODS_BOARDS="chat-board ci-board plan-board brainstorm-board register-board bugs-board todo-board tui-hint-board signal-bus decision-board boards tailpipe-board"
 
 mods_files() {
     local board
@@ -291,6 +309,7 @@ collect() {
         editor_gate_plugin_files
         agent_identity_plugin_files
         decision_reminder_plugin_files
+        chat_interrupt_plugin_files
         mods_files
         profile_files_for_release
         local path

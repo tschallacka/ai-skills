@@ -1,0 +1,24 @@
+# MODE: PROD
+# Which artifacts belong to which integration mode.
+#
+# A skill that offers more than one way to be driven declares it here, and
+# `install.sh --integration <skill>=<mode>` picks one without a prompt, so an
+# agent can choose its own interface headlessly.
+#
+# The rule is deliberately narrow: a binary named below installs ONLY in its
+# mode, and every file not named installs in every mode. So SKILL.md and the
+# binaries registry are never mode-dependent.
+#
+# `skill` is the default: tailpipe-client-rs is the reader AND the ingest
+# path (piping stdin into a stream is inherently a shell operation, not
+# something an MCP tool call can do), so it ships regardless of mode. `mcp`
+# additionally installs tailpipe-mcp -- the consumer an agent calls as typed
+# tools instead of shelling out for every read/search/wait/save.
+#
+# tailpipe-server-rs is deliberately UNLISTED, not skill-only. Somebody has
+# to run the server, and in mcp mode that somebody is the same agent: the
+# adapter finds a server (via TAILPIPE_ENDPOINT or its own default path) and
+# does not start one.
+mode	binary	why
+skill	tailpipe-client-rs	Reader and ingest path the skill's own instructions drive
+mcp	tailpipe-mcp	MCP consumer an agent calls as typed tools instead

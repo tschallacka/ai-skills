@@ -33,11 +33,13 @@ const EDITOR_GATE_PLUGIN_FILES: &[&str] = &[
     "hooks/editor-token",
     "hooks/pre-tool-use-bash.sh",
     "hooks/pre-tool-use-edit-write.sh",
+    "hooks/pre-tool-use-read.sh",
 ];
 const EDITOR_GATE_PLUGIN_EXECUTABLES: &[&str] = &[
     "hooks/editor-token",
     "hooks/lib.sh",
     "hooks/pre-tool-use-bash.sh",
+    "hooks/pre-tool-use-read.sh",
     "hooks/pre-tool-use-edit-write.sh",
 ];
 
@@ -134,6 +136,7 @@ pub const MODS: &[(&str, &[&str])] = &[
     ("todo-board", &["todo"]),
     ("tui-hint-board", &["interactive-shell"]),
     ("decision-board", &["decisions"]),
+    ("tailpipe-board", &["tailpipe"]),
     (
         "signal-bus",
         &[
@@ -466,20 +469,27 @@ mod tests {
         write(&dir.join("hooks/editor-token"), "#!/bin/sh\n");
         write(&dir.join("hooks/pre-tool-use-bash.sh"), "#!/bin/sh\n");
         write(&dir.join("hooks/pre-tool-use-edit-write.sh"), "#!/bin/sh\n");
+        write(&dir.join("hooks/pre-tool-use-read.sh"), "#!/bin/sh\n");
         let target_root = tempfile::tempdir().unwrap();
 
         let destination =
             install_editor_gate_plugin(source_root.path(), target_root.path()).unwrap();
         assert!(destination.join("hooks/editor-token").is_file());
+        // B2: pre-tool-use-read.sh (the Read-matcher hook hooks.json wires
+        // in) was missing from EDITOR_GATE_PLUGIN_FILES entirely, so no
+        // install path ever delivered it.
+        assert!(destination.join("hooks/pre-tool-use-read.sh").is_file());
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(destination.join("hooks/editor-token"))
-                .unwrap()
-                .permissions()
-                .mode();
-            assert_eq!(mode & 0o111, 0o111);
+            for hook in ["hooks/editor-token", "hooks/pre-tool-use-read.sh"] {
+                let mode = fs::metadata(destination.join(hook))
+                    .unwrap()
+                    .permissions()
+                    .mode();
+                assert_eq!(mode & 0o111, 0o111, "{hook}");
+            }
         }
     }
 

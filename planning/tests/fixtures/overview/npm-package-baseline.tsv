@@ -11,13 +11,12 @@ package/.agents/profiles/maintainer.json	26207
 package/.agents/profiles/nitpicker.json	12892
 package/.agents/profiles/oracle.json	16193
 package/LICENSE	1068
-package/README.md	19963
+package/README.md	20306
 package/agent-identity-plugin/.claude-plugin/plugin.json	405
 package/agent-identity-plugin/README.md	3064
 package/agent-identity-plugin/hooks/hooks.json	192
 package/agent-identity-plugin/hooks/lib.sh	2904
 package/agent-identity-plugin/hooks/subagent-start.sh	1286
-package/agent-identity-plugin/tests/test-agent-identity-injection.sh	1934
 package/ai-text-editor/SKILL.md	24995
 package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	19707
@@ -41,12 +40,12 @@ package/bug-report/schema.2.0.0-alpha.2.json	2756
 package/bug-report/schema.2.0.0-alpha.3.json	3005
 package/bug-report/schema.2.0.0-alpha.4.json	3254
 package/bug-report/schema.2.0.0-alpha.5.json	3503
+package/bug-report/schema.2.0.0-alpha.6.json	3752
 package/chat-interrupt-plugin/.claude-plugin/plugin.json	349
-package/chat-interrupt-plugin/README.md	2803
+package/chat-interrupt-plugin/README.md	2802
 package/chat-interrupt-plugin/hooks/hooks.json	211
 package/chat-interrupt-plugin/hooks/lib.sh	2668
 package/chat-interrupt-plugin/hooks/pre-tool-use.sh	4811
-package/chat-interrupt-plugin/tests/test-chat-interrupt-hook.sh	7992
 package/chat/SKILL.md	49983
 package/chat/binaries.tsv	3330
 package/chat/docs/README.md	1927
@@ -63,7 +62,6 @@ package/decision-reminder-plugin/.claude-plugin/plugin.json	355
 package/decision-reminder-plugin/hooks/hooks.json	214
 package/decision-reminder-plugin/hooks/lib.sh	2843
 package/decision-reminder-plugin/hooks/session-start.sh	3660
-package/decision-reminder-plugin/tests/test-session-start-hook.sh	6909
 package/decisions/SKILL.md	5952
 package/decisions/binaries.tsv	1444
 package/decisions/docs/README.md	5445
@@ -71,6 +69,7 @@ package/decisions/integration.tsv	2318
 package/decisions/requires.tsv	379
 package/decisions/schema.2.0.0-alpha.4.json	2160
 package/decisions/schema.2.0.0-alpha.5.json	3710
+package/decisions/schema.2.0.0-alpha.6.json	3984
 package/editor-gate-plugin/.claude-plugin/plugin.json	475
 package/editor-gate-plugin/README.md	3583
 package/editor-gate-plugin/hooks/editor-token	1067
@@ -79,8 +78,6 @@ package/editor-gate-plugin/hooks/lib.sh	6338
 package/editor-gate-plugin/hooks/pre-tool-use-bash.sh	4383
 package/editor-gate-plugin/hooks/pre-tool-use-edit-write.sh	1820
 package/editor-gate-plugin/hooks/pre-tool-use-read.sh	1226
-package/editor-gate-plugin/tests/test-editor-gate-context.sh	2481
-package/editor-gate-plugin/tests/test-editor-gate-matching.sh	4196
 package/git-merge-resolving/SKILL.md	9341
 package/git-merge-resolving/docs/README.md	2835
 package/git-merge-resolving/requires.tsv	1321
@@ -198,6 +195,11 @@ package/mods/signal-bus/.claude-plugin/plugin.json	484
 package/mods/signal-bus/hooks/hooks.json	36
 package/mods/signal-bus/hooks/register.tsx	3906
 package/mods/signal-bus/types/index.d.ts	538
+package/mods/tailpipe-board/.claude-plugin/plugin.json	449
+package/mods/tailpipe-board/hooks/hooks.json	36
+package/mods/tailpipe-board/hooks/register.test.ts	1449
+package/mods/tailpipe-board/hooks/register.tsx	9194
+package/mods/tailpipe-board/types/index.d.ts	303
 package/mods/todo-board/.claude-plugin/plugin.json	355
 package/mods/todo-board/hooks/hooks.json	36
 package/mods/todo-board/hooks/register.test.ts	3205
@@ -206,7 +208,7 @@ package/mods/tui-hint-board/.claude-plugin/plugin.json	436
 package/mods/tui-hint-board/hooks/hooks.json	36
 package/mods/tui-hint-board/hooks/register.tsx	15890
 package/mods/tui-hint-board/types/index.d.ts	213
-package/package.json	2414
+package/package.json	2773
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	17811
 package/planning/REVIEWER.md	26888
@@ -257,7 +259,6 @@ package/planning/scripts/create-ui-validation.sh	1839
 package/planning/scripts/create-work-unit-inventory.sh	1927
 package/planning/scripts/generate-postmortem.sh	1622
 package/planning/scripts/generate-reviewer.sh	2208
-package/planning/scripts/generate-skill-docs.sh	3570
 package/planning/scripts/mint-fix-keys.sh	2148
 package/planning/scripts/monitor-read.sh	2342
 package/planning/scripts/overview-state.sh	1842
@@ -300,7 +301,6 @@ package/planning/scripts/validate-plan.sh	3028
 package/planning/scripts/verify-fix-keys.sh	2691
 package/planning/scripts/verify-skill-load.sh	2722
 package/planning/scripts/verify-target.sh	3449
-package/planning/skill-source.txt	100255
 package/planning/state-change-registry.json	1096
 package/planning/telemetry-schema.json	888
 package/post-implementation-review/SKILL.md	12077
@@ -320,6 +320,8 @@ package/rjq/SKILL.md	2537
 package/rjq/binaries.tsv	758
 package/rjq/docs/README.md	859
 package/rjq/requires.tsv	360
+package/tailpipe/SKILL.md	5954
+package/tailpipe/integration.tsv	1255
 package/text-etiquette/SKILL.md	3897
 package/text-etiquette/docs/README.md	1083
 package/text-etiquette/requires.tsv	1187
@@ -333,13 +335,13 @@ package/todo/schema.2.0.0-alpha.2.json	3226
 package/todo/schema.2.0.0-alpha.3.json	3476
 package/todo/schema.2.0.0-alpha.4.json	3856
 package/todo/schema.2.0.0-alpha.5.json	4106
+package/todo/schema.2.0.0-alpha.6.json	4356
 package/tui-hint-plugin/.claude-plugin/plugin.json	391
 package/tui-hint-plugin/README.md	3932
 package/tui-hint-plugin/hooks/hooks.json	214
 package/tui-hint-plugin/hooks/lib.sh	6834
 package/tui-hint-plugin/hooks/pre-tool-use.sh	3132
 package/tui-hint-plugin/opencode/tui-hint-plugin.js	6697
-package/tui-hint-plugin/tests/test-tui-hint-matching.sh	4101
 package/www/SKILL.md	3158
 package/www/docs/README.md	962
 package/www/requires.tsv	1187

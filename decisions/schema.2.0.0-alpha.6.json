@@ -1,0 +1,44 @@
+{
+  "schema": "decisions",
+  "version": "2.0.0-alpha.6",
+  "file": "DECISIONS.json",
+  "comment": "Machine-readable shape of DECISIONS.json at skill version 2.0.0-alpha.6. Read this when a DECISIONS.json records a different skill_version than the installed skill: there is no backwards compatibility, so the agent holding the file upgrades it or rewrites it.",
+  "supersedes": "2.0.0-alpha.5",
+  "header": {
+    "required": ["skill", "skill_version", "questions"],
+    "optional": ["comment"],
+    "skill": "decisions",
+    "item_key": "questions"
+  },
+  "item": {
+    "required": ["id", "title", "status", "priority", "branch", "options", "context", "created_at", "updated_at"],
+    "optional": ["chosen", "resolution"],
+    "fields": {
+      "id": {"type": "string"},
+      "title": {"type": "string", "note": "the question, stated as a question"},
+      "status": {"type": "string", "enum": ["open", "decided", "implemented", "closed", "dropped", "obsolete"], "note": "the lifecycle is open -> decided -> implemented; closed/dropped/obsolete can withdraw a question from any of those three, with or without ever implementing it"},
+      "priority": {"type": "string", "enum": ["urgent", "high", "normal", "low", "someday"]},
+      "branch": {"type": "string", "note": "the git branch the question was raised on, as context -- not a filter key other fields key off"},
+      "options": {"type": "array", "items": {"type": "object", "fields": {"letter": {"type": "string"}, "label": {"type": "string"}}}},
+      "context": {"type": "string", "note": "why the question was raised, and what the agent stubbed or assumed while it stayed open"},
+      "chosen": {"type": ["string", "null"], "note": "the letter the user picked, once decided"},
+      "resolution": {"type": ["string", "null"], "note": "set when the question is implemented (what was done) or closed (why it was withdrawn)"},
+      "created_at": {"type": "string", "format": "%Y-%m-%dT%H:%M:%SZ"},
+      "updated_at": {"type": "string", "format": "%Y-%m-%dT%H:%M:%SZ"}
+    }
+  },
+  "invariants": ["ids are unique", "every option has a distinct letter", "chosen, when set, names one of the question's own options", "a question only reaches implemented from decided", "every write sets updated_at"],
+  "upgrade_from": {
+    "2.0.0-alpha.5": {
+      "describes": "A question register written by skill version 2.0.0-alpha.5.",
+      "loses": "nothing",
+      "steps": ["rjq '.skill_version = \"2.0.0-alpha.6\"' DECISIONS.json > DECISIONS.json.tmp && mv DECISIONS.json.tmp DECISIONS.json"]
+    },
+    "2.0.0-alpha.4": {
+      "describes": "A question register written by skill version 2.0.0-alpha.4, whose Status enum had `answered` instead of `decided` and no `implemented` state at all.",
+      "loses": "an answered-but-not-closed question cannot be renamed in place by a mechanical recipe, because its answer (chosen) and context are worth a human or agent's own re-filing rather than a blind field rewrite -- re-raise it with `decisions add`, carrying its old title, options, priority and context across, then `decisions answer` it again with its old chosen letter. An already-closed, dropped or obsolete entry needs nothing: those status names are unchanged, and this version's own `decisions` binary archives them exactly as the previous one did.",
+      "steps": ["Read the backup this upgrade produced and find every entry with status \"answered\".", "For each: decisions add --title \"...\" --option a:... --option b:... --priority <urgent|high|normal|low|someday> --context \"...\" (carrying the old entry's own fields)", "decisions answer <new-id> <old-chosen-letter>", "Everything else in the register (open, closed, dropped, obsolete entries) is carried forward automatically; only answered entries need this manual step."]
+    }
+  },
+  "if_no_schema_for_a_version": "Rewrite the file by hand against the closest schema.*.json this skill ships, correcting field by field; do not guess at an intermediate shape."
+}

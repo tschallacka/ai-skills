@@ -1,6 +1,6 @@
 {
   "name": "@tschallacka/ai-skills",
-  "version": "2.0.0-alpha.5",
+  "version": "2.0.0-alpha.6",
   "description": "Reusable skills and an installer for coding agents",
   "license": "MIT",
   "repository": {
@@ -27,6 +27,7 @@
     "mods/plan-board",
     "mods/register-board",
     "mods/signal-bus",
+    "mods/tailpipe-board",
     "mods/todo-board",
     "mods/tui-hint-board",
     "planning",
@@ -54,6 +55,7 @@
     "decision-reminder-plugin",
     "www",
     "ci-failures",
+    "tailpipe",
     ".agents",
     "README.md",
     "LICENSE",
@@ -61,6 +63,9 @@
     "!planning/tests/**",
     "!planning/scripts/lib/**",
     "!planning/scripts/build-plan-libs.sh",
+    "!planning/scripts/generate-skill-docs.sh",
+    "!planning/scripts/generate-skill-docs",
+    "!planning/skill-source.txt",
     "!planning/ARCHITECTURE.md",
     "!planning/MAINTAINER.md",
     "!planning/PACKAGE-MAP.tsv",
@@ -72,7 +77,12 @@
     "!.agents/skill-loading-experiment/**",
     "!.agents/skill-loading-findings.md",
     "!**/.ci-bin",
-    "!project-specifics/*-deviations.md"
+    "!project-specifics/*-deviations.md",
+    "!agent-identity-plugin/tests/**",
+    "!chat-interrupt-plugin/tests/**",
+    "!decision-reminder-plugin/tests/**",
+    "!editor-gate-plugin/tests/**",
+    "!tui-hint-plugin/tests/**"
   ],
   "engines": {
     "node": ">=14"

@@ -64,6 +64,7 @@ for a persistent `ai-skills-install` command on `PATH` instead of `npx`.
 | CI failures | What actually failed in a CI run or pipeline, from a run/pipeline id, a PR/MR number, or a branch: GitHub and GitLab detected from the git remote, named rather than chosen silently, with just the failing lines extracted per job. | [docs](ci-failures/docs/README.md) |
 | Decisions | A register of non-blocking questions raised mid-work: `Q#` ids, lettered options, priority and the branch they came from as context, so a question can be stubbed and left open without blocking a turn. | [docs](decisions/docs/README.md) |
 | rjq | Parses, filters and searches JSON with the shipped `rjq` binary, a jq-compatible tool, on machines without `jq`. | [docs](rjq/docs/README.md) |
+| Tailpipe | A less/tail for agents: pipe a command's output into a named, server-held stream with chat-style message ids; a reader lists/reads/searches/tails it from anywhere, an MCP adapter offers the same as typed tools, and a board mod shows it to a human. Idle streams are gzip-snapshotted after 15 minutes. | [docs](tailpipe/SKILL.md) |
 
 Use a skill only when its frontmatter trigger matches the task or when the
 user explicitly requests it. Each skill documents when not to activate.
