@@ -9,16 +9,26 @@
 # mode, and every file not named installs in every mode. So SKILL.md and the
 # binaries registry are never mode-dependent.
 #
-# `skill` is the default: tailpipe-client-rs is the reader AND the ingest
-# path (piping stdin into a stream is inherently a shell operation, not
-# something an MCP tool call can do), so it ships regardless of mode. `mcp`
-# additionally installs tailpipe-mcp -- the consumer an agent calls as typed
-# tools instead of shelling out for every read/search/wait/save.
+# `tailpipe-client-rs` is deliberately UNLISTED, not `skill`-only -- it is
+# the reader AND the ingest path (piping stdin into a stream is inherently a
+# shell operation, not something an MCP tool call can do), so it ships
+# regardless of mode. Naming it directly in a `skill` row here (as an
+# earlier version of this file did) made the installer's generic
+# bin/-gating logic (file_allowed in src/installer/src/integration.rs)
+# treat it as skill-mode-EXCLUSIVE instead, silently dropping it from every
+# mcp-mode install -- confirmed for real installing the published
+# v2.0.0-alpha.6 release. `skill`'s row below names `-`, a placeholder
+# file_allowed/binary_mode can never match a real file, purely so `skill`
+# still appears in modes() and `--integration tailpipe=skill` validates and
+# means something concrete -- the same precedent decisions/integration.tsv
+# already set for its own always-on CLI binary. `mcp` additionally installs
+# tailpipe-mcp -- the consumer an agent calls as typed tools instead of
+# shelling out for every read/search/wait/save.
 #
-# tailpipe-server-rs is deliberately UNLISTED, not skill-only. Somebody has
-# to run the server, and in mcp mode that somebody is the same agent: the
-# adapter finds a server (via TAILPIPE_ENDPOINT or its own default path) and
-# does not start one.
+# tailpipe-server-rs is likewise deliberately UNLISTED, not skill-only.
+# Somebody has to run the server, and in mcp mode that somebody is the same
+# agent: the adapter finds a server (via TAILPIPE_ENDPOINT or its own
+# default path) and does not start one.
 mode	binary	why
-skill	tailpipe-client-rs	Reader and ingest path the skill's own instructions drive
+skill	-	No binary of its own beyond tailpipe-client-rs (unlisted/always-on); this row exists only so `skill` validates as a real --integration choice
 mcp	tailpipe-mcp	MCP consumer an agent calls as typed tools instead
