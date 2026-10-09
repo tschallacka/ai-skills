@@ -271,7 +271,20 @@ mod tests {
             line: "second".into(),
         });
 
-        std::thread::sleep(Duration::from_millis(100));
+        // A bounded poll rather than a fixed sleep: tail_since's own poll
+        // interval is 20ms, so this is a generous ceiling for the healthy
+        // case, not a bet against CI-runner scheduling contention
+        // (github-ci-runners.md "a readiness budget is a ceiling, not a
+        // sleep" -- a fixed 100ms wait here was observed failing for real
+        // on a contended macOS CI runner, received still 0, not because
+        // the line was lost but because the tailer thread had not yet been
+        // scheduled to notice it).
+        for _ in 0..200 {
+            if received.load(Ordering::SeqCst) >= 1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
         stop.store(true, Ordering::SeqCst);
         tailer.join().unwrap();
 
