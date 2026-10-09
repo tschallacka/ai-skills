@@ -521,7 +521,7 @@ EOF
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
                 schema.1.4.2.json schema.2.0.0-alpha.1.json schema.2.0.0-alpha.2.json \
                 schema.2.0.0-alpha.3.json schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json \
-                schema.2.0.0-alpha.6.json
+                schema.2.0.0-alpha.6.json schema.2.0.0-alpha.7.json
             # The queue's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its queue instead of being told
             # to hand-edit JSON. Only the host's row is emitted, existence-gated
@@ -550,7 +550,7 @@ EOF
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
                 schema.1.4.2.json schema.2.0.0-alpha.1.json schema.2.0.0-alpha.2.json \
                 schema.2.0.0-alpha.3.json schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json \
-                schema.2.0.0-alpha.6.json
+                schema.2.0.0-alpha.6.json schema.2.0.0-alpha.7.json
             # The register's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its register instead of being
             # told to hand-edit JSON. Only the host's row is emitted,
@@ -574,7 +574,8 @@ EOF
             ;;
         decisions)
             printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv integration.tsv \
-                schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json schema.2.0.0-alpha.6.json
+                schema.2.0.0-alpha.4.json schema.2.0.0-alpha.5.json schema.2.0.0-alpha.6.json \
+                schema.2.0.0-alpha.7.json
             # The register's tools ship two prebuilt binaries per target --
             # the CLI and its stdio MCP adapter, the same pair shape
             # ai-text-editor's own arm above ships (server/client/mcp) -- the

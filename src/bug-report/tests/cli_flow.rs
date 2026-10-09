@@ -30,7 +30,7 @@ fn init_project(dir: &Path) {
     run_git(dir, &["init", "-q"]);
     std::fs::write(
         dir.join("BUGS.json"),
-        r#"{"skill":"bugs","skill_version":"2.0.0-alpha.6","comment":"t","bugs":[]}"#,
+        r#"{"skill":"bugs","skill_version":"2.0.0-alpha.7","comment":"t","bugs":[]}"#,
     )
     .expect("seed register");
     run_git(dir, &["add", "BUGS.json"]);
@@ -179,7 +179,7 @@ fn an_explicit_override_wins_over_a_recognized_worktree() {
     let override_path = project.path().join("elsewhere.json");
     std::fs::write(
         &override_path,
-        r#"{"skill":"bugs","skill_version":"2.0.0-alpha.6","comment":"t","bugs":[]}"#,
+        r#"{"skill":"bugs","skill_version":"2.0.0-alpha.7","comment":"t","bugs":[]}"#,
     )
     .unwrap();
     let override_display = override_path.display().to_string();

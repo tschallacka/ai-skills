@@ -41,6 +41,7 @@ package/bug-report/schema.2.0.0-alpha.3.json	3005
 package/bug-report/schema.2.0.0-alpha.4.json	3254
 package/bug-report/schema.2.0.0-alpha.5.json	3503
 package/bug-report/schema.2.0.0-alpha.6.json	3752
+package/bug-report/schema.2.0.0-alpha.7.json	4001
 package/chat-interrupt-plugin/.claude-plugin/plugin.json	349
 package/chat-interrupt-plugin/README.md	2802
 package/chat-interrupt-plugin/hooks/hooks.json	211
@@ -70,6 +71,7 @@ package/decisions/requires.tsv	379
 package/decisions/schema.2.0.0-alpha.4.json	2160
 package/decisions/schema.2.0.0-alpha.5.json	3710
 package/decisions/schema.2.0.0-alpha.6.json	3984
+package/decisions/schema.2.0.0-alpha.7.json	4258
 package/editor-gate-plugin/.claude-plugin/plugin.json	475
 package/editor-gate-plugin/README.md	3583
 package/editor-gate-plugin/hooks/editor-token	1067
@@ -336,6 +338,7 @@ package/todo/schema.2.0.0-alpha.3.json	3476
 package/todo/schema.2.0.0-alpha.4.json	3856
 package/todo/schema.2.0.0-alpha.5.json	4106
 package/todo/schema.2.0.0-alpha.6.json	4356
+package/todo/schema.2.0.0-alpha.7.json	4606
 package/tui-hint-plugin/.claude-plugin/plugin.json	391
 package/tui-hint-plugin/README.md	3932
 package/tui-hint-plugin/hooks/hooks.json	214

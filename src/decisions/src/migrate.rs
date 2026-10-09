@@ -22,10 +22,11 @@ use crate::register::{Question, Register};
 /// archiving or guessing, the same honesty this module already gives any
 /// other foreign shape it cannot parse.
 ///
-/// Bumped again for alpha.6 in lockstep with every other register skill's
+/// Bumped again for alpha.7 in lockstep with every other register skill's
 /// SUPPORTED and package.json's own version; this register's own shape did
-/// not change this release.
-pub const SUPPORTED: &str = "2.0.0-alpha.6";
+/// not change this release (a packaging/installer fix, not a data-format
+/// change).
+pub const SUPPORTED: &str = "2.0.0-alpha.7";
 
 pub struct Unconvertible {
     pub id: String,

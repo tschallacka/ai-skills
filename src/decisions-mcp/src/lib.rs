@@ -299,7 +299,7 @@ mod tests {
         std::env::set_var("DECISIONS_JSON", dir.join("DECISIONS.json"));
         std::fs::write(
             dir.join("DECISIONS.json"),
-            r#"{"skill":"decisions","skill_version":"2.0.0-alpha.6","comment":"t","questions":[]}"#,
+            r#"{"skill":"decisions","skill_version":"2.0.0-alpha.7","comment":"t","questions":[]}"#,
         )
         .unwrap();
         guard

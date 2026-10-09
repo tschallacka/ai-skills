@@ -44,7 +44,7 @@ the path comes from `TODO_JSON`, then `./TODO.json`.
 ```json
 {
   "skill": "todo",
-  "skill_version": "2.0.0-alpha.6",
+  "skill_version": "2.0.0-alpha.7",
   "comment": "What this queue is for, in one line.",
   "tasks": [
     {

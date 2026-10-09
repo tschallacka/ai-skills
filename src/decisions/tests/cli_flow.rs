@@ -24,7 +24,7 @@ fn add_list_answer_list_apply_list_round_trips_the_whole_lifecycle() {
     let home = tempfile::tempdir().expect("scratch home");
     std::fs::write(
         home.path().join("DECISIONS.json"),
-        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.6","comment":"t","questions":[]}"#,
+        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.7","comment":"t","questions":[]}"#,
     )
     .expect("seed register");
 
@@ -80,7 +80,7 @@ fn stub_appends_context_without_changing_status() {
     let home = tempfile::tempdir().expect("scratch home");
     std::fs::write(
         home.path().join("DECISIONS.json"),
-        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.6","comment":"t","questions":[]}"#,
+        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.7","comment":"t","questions":[]}"#,
     )
     .expect("seed register");
     let (_, out) = run(
@@ -104,7 +104,7 @@ fn add_answer_implement_list_implemented_round_trips_the_other_terminal_path() {
     let home = tempfile::tempdir().expect("scratch home");
     std::fs::write(
         home.path().join("DECISIONS.json"),
-        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.6","comment":"t","questions":[]}"#,
+        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.7","comment":"t","questions":[]}"#,
     )
     .expect("seed register");
 
@@ -168,7 +168,7 @@ fn init_registers_project(dir: &Path) {
     run_git(dir, &["init", "-q"]);
     std::fs::write(
         dir.join("DECISIONS.json"),
-        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.6","comment":"t","questions":[]}"#,
+        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.7","comment":"t","questions":[]}"#,
     )
     .expect("seed register");
     run_git(dir, &["add", "DECISIONS.json"]);
@@ -379,7 +379,7 @@ fn an_explicit_override_wins_over_a_recognized_worktree() {
     let override_path = project.path().join("elsewhere.json");
     std::fs::write(
         &override_path,
-        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.6","comment":"t","questions":[]}"#,
+        r#"{"skill":"decisions","skill_version":"2.0.0-alpha.7","comment":"t","questions":[]}"#,
     )
     .unwrap();
     let override_display = override_path.display().to_string();

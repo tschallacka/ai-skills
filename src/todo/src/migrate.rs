@@ -27,10 +27,11 @@
 use crate::clock;
 use crate::register::{Register, Task};
 
-/// The register version this binary writes. Bumped for alpha.6 in lockstep
+/// The register version this binary writes. Bumped for alpha.7 in lockstep
 /// with every other register skill's SUPPORTED and package.json's own
-/// version; no register's own shape changed this release.
-pub const SUPPORTED: &str = "2.0.0-alpha.6";
+/// version; no register's own shape changed this release (a packaging/
+/// installer fix, not a data-format change).
+pub const SUPPORTED: &str = "2.0.0-alpha.7";
 
 pub struct Unconvertible {
     pub id: String,
