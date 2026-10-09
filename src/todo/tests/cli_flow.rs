@@ -275,7 +275,17 @@ fn a_worktree_on_the_registers_branch_elsewhere_is_recognised_from_inside_it_wit
     let (code, out, err) = run(&worktree, home.path(), &["fmt"], &[]);
     assert_eq!(code, 0, "stderr: {err}");
     assert!(err.is_empty(), "no prompt output: {err}");
-    assert_eq!(out, worktree.join("TODO.json").display().to_string());
+    // resolve_path canonicalizes the cwd (via project_root_for) before
+    // joining TODO.json onto it, so the expected side must go through the
+    // same canonicalization -- otherwise this compares a resolved path
+    // against the tempdir's own pre-canonicalization spelling, which differ
+    // wherever the OS hands back a non-canonical temp path (macOS's
+    // /var -> /private/var symlink, a Windows 8.3 short name).
+    let canonical_worktree = planning_core::canonicalize(&worktree).unwrap();
+    assert_eq!(
+        out,
+        canonical_worktree.join("TODO.json").display().to_string()
+    );
     assert!(
         !candidate.exists(),
         "no second worktree was ever offered or created"

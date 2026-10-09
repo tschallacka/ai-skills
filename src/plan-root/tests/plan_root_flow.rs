@@ -269,7 +269,14 @@ fn a_preseeded_separate_repo_config_never_disturbs_todays_default() {
         !err.contains("Keep plan history"),
         "no new prompt output: {err}"
     );
-    assert_eq!(out, project.path().join(".plans").display().to_string());
+    // The resolver canonicalizes the cwd (via project_root_for) before
+    // joining .plans onto it, so the expected side must go through the same
+    // canonicalization -- otherwise this compares a resolved path against
+    // the tempdir's own pre-canonicalization spelling, which differ wherever
+    // the OS hands back a non-canonical temp path (macOS's /var ->
+    // /private/var symlink, a Windows 8.3 short name).
+    let canonical_project = planning_core::canonicalize(project.path()).unwrap();
+    assert_eq!(out, canonical_project.join(".plans").display().to_string());
 
     let candidate = candidate_plans_branch_root(home.path(), project.path());
     assert!(!candidate.exists(), "no plans-branch worktree ever created");
