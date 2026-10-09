@@ -18,3 +18,6 @@ path = "src/main.rs"
 [dependencies]
 tailpipe-server-rs = { path = "../tailpipe-server-rs" }
 serde_json.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true

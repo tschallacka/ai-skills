@@ -17,9 +17,27 @@ struct Server {
     dir: PathBuf,
 }
 
+/// A unix domain socket's sun_path has a small platform-defined limit (104
+/// bytes on macOS, 108 on Linux). macOS's own $TMPDIR is already ~49 bytes
+/// before anything of this test's own naming is added (github-ci-
+/// runners.md "$TMPDIR is long enough to break Unix sockets"), so plain
+/// /tmp is used directly on unix instead -- matching
+/// planning-server/src/endpoint.rs's own short_root, and
+/// verify-both-shells.sh's own per-test /tmp/t.XXXXX.
+fn short_temp_dir() -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from("/tmp")
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::temp_dir()
+    }
+}
+
 impl Server {
     fn start(extra_args: &[&str]) -> Self {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = short_temp_dir().join(format!(
             "tailpipe-server-flow-{}-{}",
             std::process::id(),
             unique()

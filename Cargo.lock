@@ -1886,6 +1886,7 @@ dependencies = [
 name = "tailpipe-client-rs"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "serde_json",
  "tailpipe-server-rs",
 ]

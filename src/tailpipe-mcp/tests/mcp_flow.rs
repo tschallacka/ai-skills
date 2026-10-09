@@ -12,15 +12,109 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
-fn bin_dir() -> PathBuf {
+/// A unix domain socket's sun_path has a small platform-defined limit (104
+/// bytes on macOS, 108 on Linux). macOS's own $TMPDIR is already ~49 bytes
+/// before anything of this test's own naming is added (github-ci-
+/// runners.md "$TMPDIR is long enough to break Unix sockets"), so plain
+/// /tmp is used directly on unix instead -- matching
+/// planning-server/src/endpoint.rs's own short_root, and
+/// verify-both-shells.sh's own per-test /tmp/t.XXXXX.
+fn short_temp_dir() -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from("/tmp")
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::temp_dir()
+    }
+}
+
+/// Workspace sibling binaries all land in the same target/{debug,release}
+/// directory this test binary itself was built into.
+fn sibling_bin_dir() -> PathBuf {
     Path::new(env!("CARGO_BIN_EXE_tailpipe-mcp"))
         .parent()
         .expect("the adapter binary lives in a directory")
         .to_path_buf()
 }
 
+/// Builds `name` into `bin_dir` if it is not there yet -- see
+/// src/tailpipe-client-rs/src/client.rs's own `ensure_built` (mirrored
+/// here, same reasoning: tailpipe-server-rs/tailpipe-client-rs are library
+/// dependencies of this crate, not bin/artifact ones, so cargo gives no
+/// guarantee their [[bin]] targets exist yet when this crate's own tests
+/// run in isolation -- observed for real in CI, "No such file or
+/// directory" starting tailpipe-server-rs, but never locally where a prior
+/// full build had already staged it).
+fn ensure_built(bin_dir: &Path, name: &str) -> PathBuf {
+    let program = bin_dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    if program.is_file() {
+        return program;
+    }
+    let mut cmd = Command::new(env!("CARGO"));
+    cmd.arg("build").arg("-p").arg(name);
+    if let Some(triple) = bin_dir
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .filter(|name| *name != "target")
+    {
+        cmd.arg("--target").arg(triple);
+    }
+    let mut workspace_root = bin_dir.to_path_buf();
+    loop {
+        let popped = workspace_root.file_name().map(|n| n.to_os_string());
+        if !workspace_root.pop() {
+            panic!("bin_dir has no 'target' ancestor: {}", bin_dir.display());
+        }
+        if popped.as_deref() == Some(std::ffi::OsStr::new("target")) {
+            break;
+        }
+    }
+    static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = BUILDING.lock().unwrap_or_else(|p| p.into_inner());
+    if program.is_file() {
+        return program;
+    }
+    let output = cmd
+        .arg("--message-format=json-render-diagnostics")
+        .current_dir(&workspace_root)
+        .output()
+        .unwrap_or_else(|error| panic!("could not build {name}: {error}"));
+    assert!(
+        output.status.success(),
+        "building {name} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if !program.is_file() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let built = stdout
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|message| {
+                message["reason"] == "compiler-artifact" && message["target"]["name"] == name
+            })
+            .filter_map(|message| message["executable"].as_str().map(PathBuf::from))
+            .next_back();
+        if let Some(built) = built.filter(|path| path.is_file()) {
+            std::fs::copy(&built, &program).unwrap_or_else(|error| {
+                panic!("copy {} to {}: {error}", built.display(), program.display())
+            });
+        }
+    }
+    assert!(
+        program.is_file(),
+        "{name} still missing at {} after building it; cargo reported:\n{}\n{}",
+        program.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    program
+}
+
 fn scratch() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = short_temp_dir().join(format!(
         "tailpipe-mcp-flow-{}-{}",
         std::process::id(),
         unique()
@@ -51,7 +145,7 @@ impl Harness {
         let endpoint = dir.join("tailpipe.sock");
         let snapshot_dir = dir.join("snapshots");
 
-        let server = Command::new(bin_dir().join("tailpipe-server-rs"))
+        let server = Command::new(ensure_built(&sibling_bin_dir(), "tailpipe-server-rs"))
             .arg(&endpoint)
             .arg("--snapshot-dir")
             .arg(&snapshot_dir)
@@ -116,7 +210,7 @@ impl Harness {
     /// Ingests via the real compiled client binary, matching how W16's own
     /// integration test drives it.
     fn ingest(&self, stream: &str, line: &str) {
-        let mut child = Command::new(bin_dir().join("tailpipe-client-rs"))
+        let mut child = Command::new(ensure_built(&sibling_bin_dir(), "tailpipe-client-rs"))
             .args([
                 "ingest",
                 "--endpoint",
