@@ -125,6 +125,9 @@ chat-mcp	chat-mcp
 chat-server-rs	chat-server-rs
 decisions	decisions
 decisions-mcp	decisions-mcp
+tailpipe-server-rs	tailpipe-server-rs
+tailpipe-client-rs	tailpipe-client-rs
+tailpipe-mcp	tailpipe-mcp
 chat-spool-watch	chat-spool-watch
 monitor-once	monitor-once
 configure-ui-story-cache	configure-ui-story-cache

@@ -477,6 +477,29 @@ case "$mode" in
                 exit 66
             }
         fi
+        # tailpipe-server-rs/tailpipe-client-rs/tailpipe-mcp (the log-pipe
+        # server, its reader/ingest CLI, and its stdio MCP adapter): same
+        # cargo-then-require-prebuilt structure as the decisions pair above.
+        if command -v cargo >/dev/null 2>&1; then
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package tailpipe-server-rs ) \
+                || { printf '%s: cargo build tailpipe-server-rs failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package tailpipe-client-rs ) \
+                || { printf '%s: cargo build tailpipe-client-rs failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package tailpipe-mcp ) \
+                || { printf '%s: cargo build tailpipe-mcp failed\n' "${0##*/}" >&2; exit 66; }
+            mkdir -p "$repo_root/tailpipe/bin/$skill_dir"
+            tp_release="$repo_root/target/$skill_dir/release"
+            cp "$tp_release/tailpipe-server-rs$skill_exe" "$repo_root/tailpipe/bin/$skill_dir/tailpipe-server-rs$skill_exe"
+            cp "$tp_release/tailpipe-client-rs$skill_exe" "$repo_root/tailpipe/bin/$skill_dir/tailpipe-client-rs$skill_exe"
+            cp "$tp_release/tailpipe-mcp$skill_exe" "$repo_root/tailpipe/bin/$skill_dir/tailpipe-mcp$skill_exe"
+        else
+            ls "$repo_root/tailpipe/bin/"*/"tailpipe-server-rs$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/tailpipe/bin/"*/"tailpipe-client-rs$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/tailpipe/bin/"*/"tailpipe-mcp$skill_exe" >/dev/null 2>&1 || {
+                printf '%s: cargo not found and tailpipe/bin binaries absent\n' "${0##*/}" >&2
+                exit 66
+            }
+        fi
         # The two register binaries and ci-failures' are release-built and never
         # committed, the same as the chat pair above, and skill_files() lists
         # the host's row for each -- so the copy loop below requires them for
