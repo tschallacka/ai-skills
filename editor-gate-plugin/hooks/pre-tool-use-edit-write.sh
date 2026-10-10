@@ -27,4 +27,9 @@ case "$tool_name" in
     *) printf '{}'; exit 0 ;;
 esac
 
-editor_gate_emit_context "$rjq_bin" "This edit could also go through the ai-text-editor MCP/skill. Edit's own match check only confirms the string is unique in what you already read -- it does not re-check the file against disk, so a change landing between your read and this write (another process, a formatter, a teammate) gets silently edited over. ai-text-editor's expected_text and revision guard catch exactly that case and refuse instead; its journal also survives a git checkout that would discard this edit. Not required here; just worth knowing."
+reminder="$(editor_gate_reminder EDITOR_GATE_EDIT_WRITE_TEXT "This edit could also go through the ai-text-editor MCP/skill. Edit's own match check only confirms the string is unique in what you already read -- it does not re-check the file against disk, so a change landing between your read and this write (another process, a formatter, a teammate) gets silently edited over. ai-text-editor's expected_text and revision guard catch exactly that case and refuse instead; its journal also survives a git checkout that would discard this edit. Not required here; just worth knowing.")"
+if [ -z "$reminder" ]; then
+    printf '{}'
+    exit 0
+fi
+editor_gate_emit_context "$rjq_bin" "$reminder"

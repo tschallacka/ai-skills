@@ -21,4 +21,9 @@ case "$tool_name" in
     *) printf '{}'; exit 0 ;;
 esac
 
-editor_gate_emit_context "$rjq_bin" "Before reading the whole file: ai-text-editor's search (exact, regex, or fuzzy) can often find what you need directly without pulling the whole file into context, and a hit's own byte_start/byte_end addresses a later replace --range-start-byte/--range-end-byte directly -- no need to re-quote the matched text as an old_string the way Edit requires. Not required here; just worth knowing."
+reminder="$(editor_gate_reminder EDITOR_GATE_READ_TEXT "Before reading the whole file: ai-text-editor's search (exact, regex, or fuzzy) can often find what you need directly without pulling the whole file into context, and a hit's own byte_start/byte_end addresses a later replace --range-start-byte/--range-end-byte directly -- no need to re-quote the matched text as an old_string the way Edit requires. Not required here; just worth knowing.")"
+if [ -z "$reminder" ]; then
+    printf '{}'
+    exit 0
+fi
+editor_gate_emit_context "$rjq_bin" "$reminder"

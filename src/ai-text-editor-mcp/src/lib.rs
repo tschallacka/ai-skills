@@ -76,7 +76,22 @@ pub fn handle(message: Value) -> Value {
         "initialize" => {
             // Seed the stamp for this session before answering.
             let _ = adapter_replaced();
-            json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{"subscribe":false,"listChanged":false}},"serverInfo":{"name":"ai-text-editor","version":"0.1.0"}}})
+            let mut result = json!({"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{"subscribe":false,"listChanged":false}},"serverInfo":{"name":"ai-text-editor","version":"0.1.0"}});
+            // Unset by default -- no top-level `instructions` field, exactly
+            // today's shipped shape. Set (to a non-empty string) only by
+            // benchmark/ai-text-editor-usage's hook-matrix sweep, to measure
+            // whether the one lever this server never used -- an MCP
+            // server-level pitch, the same mechanism chat-mcp and
+            // decisions-mcp already carry as their own INSTRUCTIONS consts --
+            // changes unprompted adoption, independent of editor-gate-
+            // plugin's two hooks and the task prompt, which the sweep holds
+            // fixed throughout.
+            if let Ok(instructions) = std::env::var("AI_TEXT_EDITOR_MCP_INSTRUCTIONS") {
+                if !instructions.is_empty() {
+                    result["instructions"] = json!(instructions);
+                }
+            }
+            json!({"jsonrpc":"2.0","id":id,"result":result})
         }
         "notifications/initialized" => Value::Null,
         "tools/list" => json!({"jsonrpc":"2.0","id":id,"result":{"tools": tool_definitions()}}),

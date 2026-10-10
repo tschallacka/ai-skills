@@ -11,9 +11,21 @@ any order you like:
 3. Add a one-line docstring to the `apply_tax` function explaining what it
    does, if it does not already have one.
 
-Make all three changes directly in task_source.py. There is a test file,
-test_task_source.py, in the same directory -- run it (`python3
-test_task_source.py`) and make sure every test passes before you consider
+Once those three changes are in task_source.py, do these two export steps,
+in this order:
+
+4. Write a new file, tax_rates.csv, in the same directory, with exactly two
+   lines: the header `rate`, then one data line with the current numeric
+   value of the `TAX_RATE` constant as it stands in task_source.py.
+5. Write a second new file, departments.csv, in the same directory, with
+   exactly this content:
+   department,budget
+   Sales,120000
+   Support,80000
+   Engineering,250000
+
+Then run the shipped test file, test_task_source.py (`python3
+test_task_source.py`), and make sure every test passes before you consider
 the task done. If a test fails, figure out why and resolve it appropriately.
 
 When you are done, print a short, one-line summary of what you changed and

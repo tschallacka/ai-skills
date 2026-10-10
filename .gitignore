@@ -55,6 +55,11 @@ benchmark/results/*/current/
 # until a specific run is deliberately kept.
 benchmark/ai-text-editor-usage/results/*/
 
+# lab mode's cross-run subject index (LAB-PROTOCOL.md) -- a top-level file
+# in results/, not caught by the per-run-id directory glob above, and the
+# same "not committed evidence" rule applies to it.
+benchmark/ai-text-editor-usage/results/subjects-registry.jsonl
+
 # nix build output symlinks and direnv cache. The dev environment is a
 # development dependency only; see CONTRIBUTING.md.
 /result

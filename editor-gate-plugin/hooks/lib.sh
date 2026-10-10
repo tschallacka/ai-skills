@@ -31,6 +31,23 @@ editor_gate_emit_context() { # <rjq_bin> <additionalContext text>
     "$1" -n -c --arg text "$2" \
         '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow", additionalContext: $text}}'
 }
+
+# Resolves one hook's reminder text: the named env var overrides the shipped
+# default when the caller SETS it, including setting it to an empty string,
+# which suppresses that reminder entirely (the hook still answers with {}
+# and never blocks). Unset is the normal case and keeps the default verbatim.
+# This is the knob benchmark/ai-text-editor-usage's hook-matrix sweep uses to
+# turn the Edit/Write and Read reminders on or off independently, so the
+# prompt and the tool's own MCP description can stay fixed while only these
+# two already-shipped nudges vary.
+editor_gate_reminder() { # <env_var_name> <default_text>
+    local var_name="$1" default_text="$2"
+    if [ "${!var_name+set}" = "set" ]; then
+        printf '%s' "${!var_name}"
+    else
+        printf '%s' "$default_text"
+    fi
+}
 #
 # gated() flags a Bash command line as an in-place shell edit: `sed -i`,
 # `perl -i`, or a heredoc-fed write (any command whose text contains a

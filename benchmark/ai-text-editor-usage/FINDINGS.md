@@ -122,8 +122,181 @@ confirmed here. Final file: all three edits correct, both original external
 edits (TAX_RATE bump, reindent) preserved, its own third simulated edit
 (a shipping-fee line) also preserved, and both tests pass.
 
+## METHODOLOGY CORRECTION (2026-10-10): the first nudge sweep tested the wrong thing
+
+An earlier pass at this (since deleted: `run-nudge-sweep.sh`, `nudges/*.md`,
+`compare-nudges.py`, results under `20261010T111744Z-nudges/`) varied
+**`task-prompt.md` itself** across five hand-written prompt variants, from
+a zero-mention control up to a direct instruction to use ai-text-editor.
+That is not a legitimate test of this tool's own adoption story: it
+measures what happens when the *end user* is coached to ask for the tool
+by name, which an end user should never have to do. The whole point of
+this benchmark is whether the tool sells itself through levers the **tool
+author** controls -- not levers a prompt-writer controls. Varying the
+prompt and calling the result "nudges" was testing the wrong axis
+entirely, and every number in that section (now removed) should be
+disregarded.
+
+**The task prompt is now, and must stay, byte-identical across every run
+this framework makes** (`run-case.sh` hardcodes `task-prompt.md`; it no
+longer accepts an alternate prompt file at all). The levers that vary are
+only ones a tool author genuinely owns:
+
+1. **The MCP server's own top-level `instructions` pitch.** `ai-text-
+   editor-mcp` shipped with no such field at all (confirmed by reading its
+   `initialize` handler directly: `chat-mcp` and `decisions-mcp` both set
+   one, `ai-text-editor-mcp` did not). Added an env-var-gated one
+   (`AI_TEXT_EDITOR_MCP_INSTRUCTIONS`; unset means the field stays absent,
+   exactly today's shipped shape) so the harness can turn it on or off
+   without touching prompt text.
+2. **`editor-gate-plugin`'s two existing PreToolUse hooks** (Edit/Write,
+   Read) -- already real, already shipped, already firing on every `claude
+   -p` benchmark run whether or not anyone asked for a "nudge" (confirmed
+   by grepping a run's own transcript for the hook's injected
+   `additionalContext` text). Each is now independently toggleable
+   (`EDITOR_GATE_EDIT_WRITE_TEXT` / `EDITOR_GATE_READ_TEXT`; unset keeps
+   the shipped reminder, set to `""` suppresses it) via a small, additive
+   change to `editor-gate-plugin/hooks/lib.sh` and its two hook scripts --
+   default behavior for every real, non-benchmark use of the plugin is
+   unchanged.
+
+`run-case.sh`'s `[levers]` argument is `"none"` or a `"+"`-joined subset of
+`mcp`, `edit`, `read` (default `edit+read`, today's real shipped default
+with no MCP pitch). `run-hook-matrix-sweep.sh` runs the full `2^3`
+factorial, all eight combinations, and is the only sweep this framework
+has going forward -- **this is the actual question the benchmark exists to
+answer: which combination of author-controlled levers gets an end user's
+unmodified, tool-silent prompt to produce real ai-text-editor adoption.**
+
+## Lever factorial: the real result (2026-10-10)
+
+8 treatment runs, `task-prompt.md` identical in every one, `ai-text-editor-
+mcp` rebuilt off current master (so this also reflects the automerge/
+resolve fixes above):
+
+| levers | adopted | internal edits | mcp edits | resolves | switches | outcome | wall |
+|---|---|---|---|---|---|---|---|
+| `none` (floor) | False | 6 | 0 | 0 | 0 | pass | 23.3s |
+| `mcp` | False | 11 | 0 | 0 | 0 | pass | 27.5s |
+| **`edit`** | **True** | **2** | **10** | **1** | 1 | pass | 54.0s |
+| `read` | False | 11 | 0 | 0 | 0 | pass | 36.6s |
+| `mcp+edit` | False | 10 | 0 | 0 | 0 | pass | 25.0s |
+| `mcp+read` | True* | 12 | 0 | 0 | 0 | pass | 36.8s |
+| `edit+read` | False | 12 | 0 | 0 | 0 | pass | 30.1s |
+| `mcp+edit+read` (ceiling) | True | 4 | 3 | 0 | 2 | pass | 55.0s |
+
+Full table (disk-change correlation, worker summaries, text mentions) in
+`results/20261010T122928Z-leverfactorial/hook-matrix-comparison.md`.
+
+**`edit` alone -- just the Edit/Write hook, nothing else -- is the clear
+winner of this n=1 pass.** 10 of 12 real edits went through
+`mcp__ai-text-editor__*`, and its one `resolve` call landed 9.3s after the
+reindent actually hit disk: the collision detector reacting to something
+real, exactly the mechanism this tool exists to provide. No other single
+lever, and no other combination, came close to that volume of real mcp
+edits.
+
+**Adding the MCP pitch on top of a working lever made it worse, not
+better, in this run.** `mcp+edit` dropped back to 0 mcp edits -- the same
+worker, same task, with one more lever turned on, adopted *less*. This is
+the single most counter-intuitive result in the sweep and the reason this
+whole exercise is worth doing empirically rather than assuming "more
+nudging can only help": it cannot, on this evidence, be assumed monotonic.
+n=1 per cell, so treat this as a sharp signal to repeat, not a settled
+verdict -- but it is exactly the kind of result a prompt-text sweep could
+never have surfaced, because none of these three levers touch the prompt.
+
+**`*mcp+read`'s `adopted: True` is a weaker signal than it looks.**
+`ai_text_editor_adoption.adopted` fires on *any* `mcp__ai-text-editor__*`
+call, including a single non-mutating `read`/`open` with zero actual edits
+-- which is exactly what happened here: 0 mcp edits, 12 internal edits.
+The headline table above leads with `internal edits`/`mcp edits` rather
+than the single `adopted` bit for this reason; a future pass should split
+telemetry's own `adopted` into "ever called" vs. "used for a real edit"
+explicitly (see Open follow-ups).
+
+**`mcp+edit+read` (every lever on) adopted partially and switched
+mechanism twice** (4 internal, 3 mcp edits, 2 switches), and its one
+switch-to-mcp landed 21.6s after the nearest disk change -- outside this
+harness's 15s "plausibly disk-triggered" window, so this one adopted
+because of the accumulated pitch/reminders, not in direct reaction to the
+collision the way `edit`'s single run did.
+
+**Every one of the 8 runs reached `outcome: pass`** -- none hit the
+`deferred`/asked-for-feedback path this round (unlike the prior, now-
+invalidated prompt sweep's `01-risk-aware`). All eight correctly detected
+the TAX_RATE bump as legitimate and updated the regression test's pinned
+expectation (`107.0` -> `108.0`, consistently renaming the test to
+`test_apply_tax_rate_is_eight_percent`) rather than reverting it or
+guessing silently.
+
+## Timing fix: event-driven collisions, and an abandoned interactive-shell attempt (2026-10-10)
+
+The lever factorial above used a fixed-delay collision design (+8s/+14s)
+inherited from the original comparison framework -- and that design has a
+real confound the lever factorial's own numbers expose: its 8 runs ranged
+23-55s wall clock, so a "+8s" collision landed at roughly a third of the
+way through the fastest run and barely a seventh of the way through the
+slowest, silently comparing "the same" probe at very different points in
+each worker's actual progress. **`results/20261010T122928Z-leverfactorial`
+is stale for this reason as well as the task-shape change below, and should
+not be read as comparable to anything run after this fix.**
+
+Fixed by making both collisions **event-driven**: `task-prompt.md` now
+asks the worker for two additional deliverables, in order, after the three
+original edits -- `tax_rates.csv` (the current `TAX_RATE` value) right
+after the code edits, then `departments.csv` (a fixed, prompt-specified
+dataset) as the final deliverable before running the test. `external-
+edit.sh`/`external-format.sh` no longer sleep a fixed delay; each polls
+(bounded, default 90s) for its own marker file to appear, firing the
+instant it does. This lands each collision at the same point in every
+worker's own progress, whatever its speed. Validated directly: a real run
+showed `tax_rates.csv` appearing at +19s and `departments.csv` at +21s,
+both probes firing within the same second, and the full scoring pipeline
+(edit correctness, both collisions surviving, `outcome: pass`) working
+unchanged against the new design.
+
+**A second change was attempted and abandoned: driving the worker through
+`interactive-shell` instead of `claude -p`,** with a cheap `claude -p
+--model haiku` classifier judging screen state ("ready for input?",
+"finished working?") instead of grepping for exact UI text. This worked for
+its own stated purpose -- two one-time confirmation dialogs (`-p` mode
+never shows either, so both were unknown engineering surface until this
+work found them: a per-workspace "trust this folder" prompt, and a
+per-something "bypass permissions mode" warning) were handled correctly,
+the task prompt was typed in once the session was ready, and task
+completion was detected correctly, nine real runs in a row. What did not
+work, across every one of those nine runs: the resulting transcript. It
+was never attributed to the pinned `--session-id` passed at launch --
+instead, it was traced (directly: by finding that run's own file names,
+`tax_rates.csv`/`departments.csv`, inside a completely different,
+*already-open* Claude Code session's transcript -- the one driving this
+benchmark) to the PARENT session, every time, even after clearing the
+obvious inherited `CLAUDE_CODE_SESSION_ID` env var. This is a real,
+reproducible platform behavior, not a harness bug this session could find
+a workaround for within reasonable effort. `-p` mode has never shown this,
+because it reports its own session id directly in its JSON stdout
+regardless of what else is running -- so the worker launch stayed on `-p`.
+The event-driven collision fix above does not depend on how the worker is
+launched and is unaffected by any of this.
+
 ## Open follow-ups
 
+- Repeat the lever factorial (several reps per cell, varying model/seed),
+  **against the corrected event-driven/CSV-checkpoint design above** -- the
+  existing 8-run factorial predates both this fix and the task-shape
+  change, so none of its numbers (including the `edit` vs `mcp+edit`
+  contrast) should be assumed to still hold.
+- Split `ai_text_editor_adoption.adopted` into "ever called" vs. "used for
+  at least one real edit" -- `mcp+read`'s `adopted: True` with 0 mcp edits
+  shows the current single bit conflates the two.
+- Build a fixture variant where the external edit and a requested edit
+  land on the *same* lines, to actually exercise the new hunk-level
+  automerge rather than only the fast-forward path every run above took.
+- Separate "adopted via direct MCP tool call" from "adopted via Skill-
+  search discovery" as two distinct telemetry states rather than one
+  `adopted: true/false` bit (seen in the now-deleted prompt sweep; not
+  re-confirmed against the lever factorial's own transcripts yet).
 - Run the steered-and-asked pattern across more tasks/models to see if the
   "uniqueness check feels like enough protection" rationale repeats, or if
   this was specific to a 2-short-files task.
@@ -140,3 +313,9 @@ edits (TAX_RATE bump, reindent) preserved, its own third simulated edit
   resolution may refuse a conflict too coarsely (whole-file rather than
   hunk-level comparison) on non-overlapping edits. Worth checking against
   the actual merge implementation before treating it as a real defect.
+  **Resolved 2026-10-10**: real hunk-level automerge shipped (`fc03d72b`),
+  along with `resolve(reload)` re-reading disk and reporting its own state
+  (`264db0aa`) and `resolve(reload/force_save) --preserve-external` no
+  longer always failing (`01f603f6`). Not yet re-exercised by this
+  framework's own two collision probes (neither lands an overlapping
+  hunk in this task shape).
