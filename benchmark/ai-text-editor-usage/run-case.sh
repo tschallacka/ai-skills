@@ -134,20 +134,42 @@ fi
 # editor_gate_reminder). These are this process's own exports, inherited by
 # the `claude -p` child below and, through it, by the hook scripts -- never
 # global or persisted.
+#
+# EDIT_WORDING_OVERRIDE / READ_WORDING_OVERRIDE / MCP_WORDING_OVERRIDE (unset
+# by default) let a caller substitute a DIFFERENT wording for a lever that is
+# already "on", instead of the one shipped/baked-in text each lever otherwise
+# always uses -- this is run-wording-sweep.sh's own knob, testing which
+# phrasing of an already-effective lever moves adoption furthest, with the
+# other two levers off so the comparison stays isolated to one lever's
+# wording at a time. Leaving all three unset reproduces today's exact
+# existing on/off behavior; a lever that is "off" ignores its override
+# entirely, since there is nothing to reword.
 AI_TEXT_EDITOR_MCP_PITCH="Durable editor tabs with disk-change detection: unlike Read/Edit/Write, this tool notices when a file changed on disk since you last read it and refuses or offers resolution instead of silently overwriting a concurrent change. Prefer it over Read/Edit/Write when a file might be touched by another process while you work, or for span-addressed edits that need no re-quoting of matched text."
 
 if [ "$want_mcp" = true ]; then
-    export AI_TEXT_EDITOR_MCP_INSTRUCTIONS="$AI_TEXT_EDITOR_MCP_PITCH"
+    if [ -n "${MCP_WORDING_OVERRIDE+set}" ]; then
+        export AI_TEXT_EDITOR_MCP_INSTRUCTIONS="$MCP_WORDING_OVERRIDE"
+    else
+        export AI_TEXT_EDITOR_MCP_INSTRUCTIONS="$AI_TEXT_EDITOR_MCP_PITCH"
+    fi
 else
     export AI_TEXT_EDITOR_MCP_INSTRUCTIONS=""
 fi
 if [ "$want_edit" = true ]; then
-    unset EDITOR_GATE_EDIT_WRITE_TEXT
+    if [ -n "${EDIT_WORDING_OVERRIDE+set}" ]; then
+        export EDITOR_GATE_EDIT_WRITE_TEXT="$EDIT_WORDING_OVERRIDE"
+    else
+        unset EDITOR_GATE_EDIT_WRITE_TEXT
+    fi
 else
     export EDITOR_GATE_EDIT_WRITE_TEXT=""
 fi
 if [ "$want_read" = true ]; then
-    unset EDITOR_GATE_READ_TEXT
+    if [ -n "${READ_WORDING_OVERRIDE+set}" ]; then
+        export EDITOR_GATE_READ_TEXT="$READ_WORDING_OVERRIDE"
+    else
+        unset EDITOR_GATE_READ_TEXT
+    fi
 else
     export EDITOR_GATE_READ_TEXT=""
 fi

@@ -1,0 +1,1 @@
+ai-text-editor supports exact, regex, wildcard, and fuzzy search, with byte ranges you can hand straight to a later replace -- no re-quoting of the matched text required.

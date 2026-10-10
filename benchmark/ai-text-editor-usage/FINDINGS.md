@@ -280,13 +280,97 @@ regardless of what else is running -- so the worker launch stayed on `-p`.
 The event-driven collision fix above does not depend on how the worker is
 launched and is unaffected by any of this.
 
+## A stale installed hook silently disabled the edit/read lever toggle (2026-10-10)
+
+Found while building a wording-variant sweep (testing several phrasings of
+each lever's own text, not just on/off): a smoke test set
+`EDIT_WORDING_OVERRIDE` and ran `run-case.sh ... edit print`, expecting the
+custom text to fire instead of the shipped default. It did not -- the
+shipped default fired, 12 times, as if the override env var did not exist
+at all. Direct invocation of this repo's own `editor-gate-plugin/hooks/
+pre-tool-use-edit-write.sh` with the same env var set worked correctly,
+which narrowed it immediately: the live worker was not running *this
+repo's* copy of the hook.
+
+It wasn't. `diff`-ing this repo's `editor-gate-plugin/hooks/{lib.sh,
+pre-tool-use-edit-write.sh,pre-tool-use-read.sh}` against the actually-
+installed copy at `~/.claude/skills/editor-gate-plugin/hooks/` showed the
+installed copy entirely missing `editor_gate_reminder()` -- the function
+every lever-toggling mechanism in this benchmark depends on for both
+Edit/Write and Read. The installed copy unconditionally emits the shipped
+text with no env var check whatsoever. It had simply never been refreshed
+since that function was added earlier this session; `mtime` showed the
+install predated the feature.
+
+**This means the `edit` and `read` dimensions of every lever-related run
+this session -- the original 8-run factorial, every `run-case.sh ...
+lab` run, and this smoke test itself -- almost certainly ran with those
+two hooks ALWAYS firing their shipped default text, regardless of what
+`[levers]` requested.** Only the `mcp` dimension was reliable, because it
+reads `AI_TEXT_EDITOR_MCP_INSTRUCTIONS` via a binary (`target/release/
+ai-text-editor-mcp`) built straight from this repo's own tree, with no
+separate "installed copy" to go stale. Fixed by copying the three hook
+files from this repo to the installed path (content only -- no
+registration, permission, or manifest change); re-ran the same smoke test
+afterward and confirmed the custom wording fired 20/20 times with zero
+shipped-default or off-lever leakage.
+
+This is a dev-workflow gap, not a shipped-product bug: a real end user's
+install is a one-time `installer install`, not a hook file edited in a
+live dev tree hours after installing. It only bit this benchmark because
+the benchmark edits the plugin's own source and expects the already-
+installed copy to reflect that immediately. Anyone editing
+`editor-gate-plugin/hooks/` and then benchmarking against it should
+refresh `~/.claude/skills/editor-gate-plugin/hooks/` (or wherever it is
+installed) first, or the lever will look inert when it is only stale.
+
+## Wording sweep: no single lever moved adoption, regardless of phrasing (2026-10-10)
+
+15 live treatment runs (`run-wording-sweep.sh`), run immediately after the
+install-staleness fix above and confirmed via the same mechanism that
+caught that bug (a direct smoke test showing a custom wording actually
+reaching the live hook). Five genuinely distinct wordings per lever --
+terse, risk-framed, directive, feature-list, question-prompt -- for each of
+the three levers (`mcp`, `edit`, `read`), one lever on at a time, the other
+two off, `task-prompt.md` byte-identical across all 15 as always.
+
+**Every single one of the 15 runs reported `adopted: False`, `mcp_edit_count:
+0`, and zero mentions of ai-text-editor anywhere in the worker's own
+reasoning.** Not "mostly no effect with one exception" -- a clean,
+unanimous null across every wording of every lever, independent of
+rhetorical approach. The worker consistently did the same thing regardless:
+replaced `legacy_log` with `logger.info`, added `calculate_discount` and
+the `apply_tax` docstring via plain Edit, wrote both CSVs, noticed the
+external `TAX_RATE` bump and reformat, and updated the shipped test rather
+than reverting the external change -- all without ever reaching for
+ai-text-editor, and without the tool entering its reasoning even as
+something considered and rejected.
+
+This directly contradicts the old, already-doubly-caveated 8-run factorial's
+headline (`edit` alone supposedly producing 10/12 ai-text-editor edits).
+Given that factorial's `edit`/`read` dimension is now independently suspect
+for the installed-hook-staleness reason documented above, and this sweep
+used the verified-working mechanism, **this sweep's null result is the one
+to trust going forward, not the old factorial's claimed `edit` win.** A
+single author-controlled lever, however worded, does not appear sufficient
+on its own to move unprompted adoption for this task shape -- if anything
+does, it is more likely a *combination* of levers, which is exactly what
+the (also stale, also needing a credible re-run) 2^3 factorial was built to
+test. Full per-variant data, including every worker's own final summary and
+wording text side by side: `wording-sweep-comparison.md` under that sweep's
+own results directory.
+
 ## Open follow-ups
 
 - Repeat the lever factorial (several reps per cell, varying model/seed),
-  **against the corrected event-driven/CSV-checkpoint design above** -- the
-  existing 8-run factorial predates both this fix and the task-shape
-  change, so none of its numbers (including the `edit` vs `mcp+edit`
-  contrast) should be assumed to still hold.
+  **against the corrected event-driven/CSV-checkpoint design above, and
+  only after confirming the installed editor-gate-plugin hooks are not
+  stale (see the section above)** -- the existing 8-run factorial predates
+  both the timing fix and the task-shape change, AND its `edit`/`read`
+  lever results specifically are now suspect for the separate reason that
+  the installed hook may not have honored the toggle at all. None of its
+  numbers (including the `edit` vs `mcp+edit` contrast) should be assumed
+  to still hold for either reason.
 - Split `ai_text_editor_adoption.adopted` into "ever called" vs. "used for
   at least one real edit" -- `mcp+read`'s `adopted: True` with 0 mcp edits
   shows the current single bit conflates the two.

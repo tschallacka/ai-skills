@@ -1,0 +1,1 @@
+ai-text-editor: durable editor tabs with disk-change detection and revision-guarded edits.

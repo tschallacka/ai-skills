@@ -1,0 +1,1 @@
+Edit's match check does not look at disk -- if this file changed since your last read, this edit can silently overwrite that change. ai-text-editor's revision guard would refuse instead of letting that happen.

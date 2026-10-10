@@ -1,0 +1,1 @@
+ai-text-editor's search can often find this without reading the whole file.

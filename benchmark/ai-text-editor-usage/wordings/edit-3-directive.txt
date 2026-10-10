@@ -1,0 +1,1 @@
+Prefer ai-text-editor over Edit/Write for this change: open the file, apply the edit with expected_text, then save. It refuses on a stale revision instead of overwriting it.

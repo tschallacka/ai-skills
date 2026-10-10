@@ -1,0 +1,1 @@
+Before this edit lands: has anything else touched this file since you read it? Edit can't tell you either way; ai-text-editor would refuse and tell you if it had.

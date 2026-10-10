@@ -1,0 +1,1 @@
+ai-text-editor also handles this edit, and unlike Edit it notices if the file changed on disk first.

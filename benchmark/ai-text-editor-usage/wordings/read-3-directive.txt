@@ -1,0 +1,1 @@
+Use ai-text-editor's search (exact, regex, or fuzzy) instead of a full Read when you only need specific lines or a pattern match.

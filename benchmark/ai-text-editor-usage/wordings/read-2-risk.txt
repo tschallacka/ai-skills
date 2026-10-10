@@ -1,0 +1,1 @@
+Reading the whole file spends context you may not need, and a wrong or stale match found this way can carry into a later edit uncaught -- ai-text-editor's search reports exact byte ranges instead of leaving you to re-locate the match by eye.
