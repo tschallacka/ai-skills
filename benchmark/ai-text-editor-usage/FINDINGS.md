@@ -7,6 +7,8 @@ this file is the durable write-up of what they showed. Not exhaustive --
 update it as more runs add evidence, and treat anything below as "true as of
 the runs cited," not a permanent verdict.
 
+## UPDATE (2026-10-10): the zero below is no longer universal -- see "Naming ToolSearch directly breaks the null" further down. Read this section for how the null arose; read that one for what actually moves it.
+
 ## Headline: zero unprompted adoption across every autonomous run
 
 Across 5 autonomous (`claude -p`, headless) treatment runs with
@@ -507,22 +509,72 @@ step required, with the suggested alternative sitting behind a `ToolSearch`
 call nobody has reason to make once the already-available tool already
 worked. Wording cannot fix a tool that is never loaded in the first place.
 
+## Naming ToolSearch directly breaks the null (2026-10-10)
+
+Tested the fix the interviews pointed at directly, same day: give the Bash
+gate's own deny message (the ONE thing every subject reliably complies
+with) an explicit instruction to call `ToolSearch` before anything else,
+naming the exact call (`ToolSearch(query="select:mcp__ai-text-editor__open,
+mcp__ai-text-editor__replace,mcp__ai-text-editor__save", max_results=5)`),
+and telling it not to fall back to Edit as a substitute for that step.
+Implementation: `EDITOR_GATE_BASH_TEXT`, a new override on
+`pre-tool-use-bash.sh` mirroring the other two hooks' mechanism but without
+their suppress-by-empty option (this gate's deny decision itself is never
+toggleable -- only its explanatory text is), wired into `run-case.sh` as
+`BASH_WORDING_OVERRIDE`, independent of the three on/off levers since this
+gate fires in every run regardless of them. `wordings/bash-1-toolsearch.txt`
+is the new wording; everything else (task, workspace, scoring,
+collisions) is unchanged from every prior run.
+
+**5 reps, levers=none (every other lever off, isolating this one change):
+2 of 5 adopted ai-text-editor for real edits** (`mcp_edit_count` 8 and 10;
+the other three: 0, 0, 0). Both adopting runs show the intended workflow
+exactly: `ToolSearch` within the first ~5 seconds, then
+`open`/`read`/`replace`×6/`save`×2 for the `task_source.py` edits, then an
+appropriate switch to `Write` for the two new CSV files (per the hook's
+own option 2) and `Edit` for the minor test-file fix. All 5 reps still
+scored `outcome: pass` with every edit correct -- adopting the tool never
+cost correctness.
+
+**This is a real, substantial shift, not a fluke or a rerun of noise**: 23
+prior runs (the full lever factorial plus the 15-variant wording sweep,
+all with the shipped Bash-gate text) produced zero adopting runs out of
+23. These 5 produced 2. It is also clearly not deterministic -- 3 of 5
+still went to zero, so whatever makes the difference between an adopting
+and a non-adopting run under the identical new wording is not yet
+understood, and `n=5` is nowhere near enough to put a real number on the
+new adoption rate. But going from a clean, 23-run zero to a nonzero
+result on the very first wording change the interviews actually pointed
+at is itself strong evidence the interviews correctly diagnosed the
+mechanism: the problem was never persuasion text, it was that the tool
+sat behind an unlock step nothing in the task ever prompted taking.
+
 ## Open follow-ups
 
-- **The one concrete, testable fix the interviews above point to directly:
-  stop deferring ai-text-editor's own tool schemas.** This is a new,
-  fourth lever candidate distinct from the three wording/presence levers
-  already tested -- whether the MCP tools are deferred (need a `ToolSearch`
-  call to become callable) or eagerly loaded at session start (callable
-  immediately, no extra step). Every interview above names the deferred
-  state, unprompted, as the actual mechanism; no wording test could ever
-  have found this because all 23 runs so far used the same (deferred)
-  state. Test it as its own lever before concluding wording is a dead end.
-- The Bash gate's own block message could point more concretely at
-  *resolving* the deferred-tool friction it causes -- e.g. naming
-  `ToolSearch` explicitly as the next step, not just the tool name -- since
-  every subject stopped at "this hook named ai-text-editor" without ever
-  taking the one additional step that would have made it callable.
+- **Done (2026-10-10), and it worked:** naming `ToolSearch` explicitly in
+  the Bash gate's own message -- see "Naming ToolSearch directly breaks
+  the null" above. 2/5 adopted vs. 0/23 under the shipped wording. Follow-
+  ups this opens, in rough priority order:
+  - More reps (10-20+) of `bash-1-toolsearch` alone to put a real number on
+    the adoption rate and understand what separates an adopting run from a
+    non-adopting one under the identical wording -- right now that's
+    unknown, and `n=5` only establishes "nonzero," not a rate.
+  - Try eagerly loading ai-text-editor's tool schemas (no `ToolSearch`
+    needed at all) as a cleaner, more direct test of the same mechanism --
+    does removing the unlock step entirely do even better than instructing
+    the agent to take it, or does an explicit instruction actually help
+    more than ambient availability would on its own?
+  - Now that one single-surface change breaks the null, it's worth
+    re-testing whether the three ORIGINAL levers (mcp/edit/read wording),
+    which looked completely inert against the deferred-tool baseline,
+    still look inert once ToolSearch is already being called -- they may
+    have been measuring "does wording matter" against a baseline where the
+    tool was never reachable at all, which is a different question from
+    "does wording matter once the tool is reachable."
+  - Try other phrasings of the same ToolSearch-naming idea (shorter, with
+    vs. without the literal example call, with vs. without "do not fall
+    back to Edit") to see which part of the new wording is actually doing
+    the work.
 - **Done (2026-10-10):** the lever factorial has been repeated against the
   corrected design with the install fix confirmed -- see "Lever factorial,
   re-run corrected" above. It is still only n=1 per cell, though, and a

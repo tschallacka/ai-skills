@@ -15,7 +15,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=editor-gate-plugin/hooks/lib.sh
 source "$script_dir/lib.sh"
 
-MESSAGE='In-place shell editing is gated -- the ai-text-editor MCP/skill is the better tool.
+DEFAULT_MESSAGE='In-place shell editing is gated -- the ai-text-editor MCP/skill is the better tool.
 
 Before retrying, ask which of these you are doing:
 
@@ -48,6 +48,17 @@ matched, so a typo looks like success. A heredoc stacks the shell'"'"'s escaping
 on top of the target file'"'"'s own syntax. Neither verifies what it replaces,
 while the editor'"'"'s expected_text refuses on mismatch and its journal
 survives a git checkout that had discarded a shell rewrite.'
+
+# Unlike EDITOR_GATE_EDIT_WRITE_TEXT/EDITOR_GATE_READ_TEXT (lib.sh's
+# editor_gate_reminder), this gate's own deny decision is never
+# suppressible -- only its explanatory text is overridable, and an empty
+# override falls back to the shipped default rather than denying with no
+# reason. benchmark/ai-text-editor-usage's wording sweep uses this to test
+# whether naming the concrete unblocking step (ToolSearch, for a session
+# where these MCP tools are deferred) changes what happens after the deny,
+# since every interviewed subject stopped at "this hook named
+# ai-text-editor" without ever taking that step.
+MESSAGE="${EDITOR_GATE_BASH_TEXT:-$DEFAULT_MESSAGE}"
 
 emit_deny() { # <reason>
     "$rjq_bin" -n -c --arg reason "$1" \

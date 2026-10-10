@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-LEVER_ORDER = ["mcp", "edit", "read"]
+LEVER_ORDER = ["mcp", "edit", "read", "bash"]
 
 
 def load_json(path):

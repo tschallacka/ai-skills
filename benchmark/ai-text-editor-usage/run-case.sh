@@ -174,6 +174,17 @@ else
     export EDITOR_GATE_READ_TEXT=""
 fi
 
+# The Bash sed/heredoc gate is unconditional -- not one of the three on/off
+# levers above, since it fires in every run regardless of [levers] and its
+# deny decision is never suppressible (see pre-tool-use-bash.sh's own
+# comment on why). BASH_WORDING_OVERRIDE, when set, swaps only its
+# explanatory text; unset reproduces the shipped default exactly.
+if [ -n "${BASH_WORDING_OVERRIDE+set}" ]; then
+    export EDITOR_GATE_BASH_TEXT="$BASH_WORDING_OVERRIDE"
+else
+    unset EDITOR_GATE_BASH_TEXT
+fi
+
 FRAMEWORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$FRAMEWORK_DIR/../.." && pwd)"
 PROMPT_FILE="$FRAMEWORK_DIR/task-prompt.md"

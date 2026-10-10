@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 # MODE: DEV
 # Runs one treatment-only case per WORDING VARIANT under wordings/, for each
-# of the three author-controlled nudge levers (mcp, edit, read). This is a
-# different question than run-hook-matrix-sweep.sh's: that sweep asks
-# whether a lever helps at all; this one asks, given a lever is already on,
-# which PHRASING of it moves unprompted adoption furthest. Exactly one
-# lever is on per run (levers=mcp, edit, or read -- never combined), the
-# other two off, so the comparison stays isolated to a single lever's own
-# wording. task-prompt.md stays byte-identical across every row, as always
-# -- only author-controlled text varies.
+# of the four author-controlled nudge surfaces (mcp, edit, read -- the three
+# on/off levers -- and bash, the always-on sed/heredoc gate's own
+# explanatory text). This is a different question than
+# run-hook-matrix-sweep.sh's: that sweep asks whether a lever helps at all;
+# this one asks, given a surface is already in play, which PHRASING of it
+# moves unprompted adoption furthest. For mcp/edit/read, exactly one lever
+# is on per run, the other two off; bash has no on/off state (it always
+# fires), so a bash-* variant runs with all three toggleable levers off,
+# varying only the gate's own text. task-prompt.md stays byte-identical
+# across every row, as always -- only author-controlled text varies.
 #
 # Usage: run-wording-sweep.sh [results-base-dir] [edit-timeout-seconds] [reformat-timeout-seconds]
 #
 # Requires: the same things run-hook-matrix-sweep.sh does, plus the
 # wordings/ directory this script reads from -- one *.txt file per variant,
-# named "<lever>-<N>-<label>.txt" (lever is "mcp", "edit", or "read").
+# named "<surface>-<N>-<label>.txt" (surface is "mcp", "edit", "read", or
+# "bash").
 #
 # The edit/read levers depend on editor-gate-plugin's INSTALLED hooks (e.g.
 # ~/.claude/skills/editor-gate-plugin/hooks/), not this repo's own copy --
@@ -40,22 +43,27 @@ echo "run-wording-sweep.sh: sweep-id=$SWEEP_ID results=$SWEEP_DIR" >&2
 
 for wording_file in "$WORDINGS_DIR"/*.txt; do
     variant_name="$(basename "$wording_file" .txt)"   # e.g. edit-1-terse
-    lever="${variant_name%%-*}"                        # mcp / edit / read
+    lever="${variant_name%%-*}"                        # mcp / edit / read / bash
 
-    unset MCP_WORDING_OVERRIDE EDIT_WORDING_OVERRIDE READ_WORDING_OVERRIDE
+    unset MCP_WORDING_OVERRIDE EDIT_WORDING_OVERRIDE READ_WORDING_OVERRIDE BASH_WORDING_OVERRIDE
     wording_text="$(cat "$wording_file")"
+    levers_arg="$lever"
     case "$lever" in
         mcp)  export MCP_WORDING_OVERRIDE="$wording_text" ;;
         edit) export EDIT_WORDING_OVERRIDE="$wording_text" ;;
         read) export READ_WORDING_OVERRIDE="$wording_text" ;;
+        bash)
+            export BASH_WORDING_OVERRIDE="$wording_text"
+            levers_arg="none"   # the gate itself has no on/off lever
+            ;;
         *)
-            echo "run-wording-sweep.sh: $wording_file does not start with mcp-/edit-/read-, skipping" >&2
+            echo "run-wording-sweep.sh: $wording_file does not start with mcp-/edit-/read-/bash-, skipping" >&2
             continue
             ;;
     esac
 
     echo "run-wording-sweep.sh: --- variant=$variant_name lever=$lever ---" >&2
-    "$FRAMEWORK_DIR/run-case.sh" treatment "$SWEEP_DIR" "$variant_name" "$EDIT_TIMEOUT" "$REFORMAT_TIMEOUT" "$lever"
+    "$FRAMEWORK_DIR/run-case.sh" treatment "$SWEEP_DIR" "$variant_name" "$EDIT_TIMEOUT" "$REFORMAT_TIMEOUT" "$levers_arg"
 done
 
 python3 "$FRAMEWORK_DIR/compare-wording-sweep.py" "$SWEEP_DIR"
