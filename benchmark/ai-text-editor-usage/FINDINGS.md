@@ -704,6 +704,59 @@ ack-presence) is the more promising automatic check to add to
 worth splitting out as its own telemetry field rather than inferred after
 the fact from transcripts, given `bash-7-challenge-rep1` above.
 
+## Spike: making `expected_revision` optional did not flip the decline (2026-10-10)
+
+**Unshipped, n=8, directional only.** The `bash-7-challenge-rep1` decline
+above justified itself with "a full rewrite with Write is simpler than
+about ten revision-guarded replaces." The user proposed the PhpStorm
+analogy -- silent normal editing, a conflict dialog only on real
+divergence -- and asked to test whether making `expected_revision`
+optional (server trusts its own tracked `tab.revision` when the caller
+omits one; a supplied revision still checked exactly as before) removes
+that counted overhead. Patched on a local, unpushed `spike/optional-
+revision` branch (`ai-text-editor-server.rs`'s revision-guard block,
+`ai-text-editor-mcp`'s `mutating_required()` emptied so the MCP schema no
+longer marks the field `required`), built, pointed `run-case.sh`'s
+`$REPO_ROOT/target/release/ai-text-editor-mcp` at the spike build, ran
+`bash-7-challenge` x4, `bash-2-terse` x2, `bash-4-directive` x2 (same
+mechanism as the 30-rep trial above), then rebuilt from `master` and
+confirmed the schema's `required` list was back to `["expected_revision"]`
+before finishing.
+
+**Result: `bash-7-challenge` went 0/4 (was 2/5 under the mandatory-
+revision server), `bash-2-terse` 1/2 and `bash-4-directive` 2/2 (both
+consistent with their prior near-ceiling rate at this small n).** The
+interesting part is *how* the three `bash-7-challenge` declines happened:
+all three that called `ToolSearch` loaded the now-optional-revision schema
+and still went straight to `Write` with an **empty thinking block and no
+stated reason at all** -- unlike the original rep1, which gave the
+"revision-guarded replaces" rationale explicitly. Removing the thing it
+named as the cost didn't make it choose the tool; it just removed the
+reason it had given for a decision that looks, from this small sample,
+already made on other grounds (file is small, already read, Write is
+simpler, full stop).
+
+**Confound worth flagging before reading this as a real negative result:**
+`ai-text-editor-mcp`'s `revision_guard()` schema *description string* was
+left unchanged -- it still reads "REQUIRED for this operation" even though
+`required` no longer lists it. Every adopting run in this spike (the
+`bash-2-terse`/`bash-4-directive` reps that did call `replace`) kept
+supplying `expected_revision` anyway, tracking 1, 2, 3... itself exactly as
+before -- consistent with the description text, not the schema's
+`required` array, being what the model actually reads. So this spike did
+not cleanly test "no revision-tracking overhead at all"; it tested
+"revision-tracking overhead that the tool's own text still describes as
+required," which is a weaker version of the hypothesis. A real test needs
+the description text rewritten to match (e.g. "optional; supply it if you
+have it, the server already tracks the current revision"), not just the
+schema's `required` array emptied.
+
+Not committed to `master` except this note; the code patch stays on
+`spike/optional-revision` for the user to revisit, either as a cleaner
+re-run (fix the description-text confound first) or via the full
+planning-skill track if the direction still looks worth pursuing after
+that.
+
 ## Open follow-ups
 
 - **Done (2026-10-10), and it worked:** naming `ToolSearch` explicitly in
