@@ -395,8 +395,134 @@ tool-author-controlled nudges (which this benchmark deliberately excludes
 as out of scope), or something else entirely -- remains unknown and is the
 real open question this benchmark has not yet answered.
 
+## Interviewing the subjects: why the null, in their own words (2026-10-10)
+
+The lever factorial and wording sweep both answer "whether" with a clean
+no, but not "why" -- and this time, unlike the stale factorial, there was
+no need to run anything new to ask. Every one of the 23 completed `-p`
+sessions from both sweeps is a plain print-mode session, which has never
+had the subject-resumability problem lab mode hit: `claude --resume
+<session-id>` reaches every one of them directly. So the subjects were
+interviewed in place, resuming five real sessions spanning the extremes
+(`none`, `mcp`, `edit`, `read`, `mcp+edit+read`) and asking each, in its
+own resumed context, to walk through its own tool choices.
+
+**First, a methodology note worth recording on its own**: asking Sonnet
+5.5 itself, resumed, got refused outright -- `API Error: Sonnet 5.5's
+safeguards flagged this message ... [reasoning_extraction]` -- on three
+separate phrasings, including ones with no mention of "blocked" or
+"gated" at all. Resuming the exact same session with `--model haiku`
+instead worked cleanly every time, and the lab-mode debrief earlier this
+session (also effectively an introspective "why" question, just inside a
+live interactive session rather than a `--resume` call) never hit this.
+The common factor across the three refused attempts: a `--resume` call,
+no live session context, asking the model to account for its own past
+choice. Worth remembering before assuming a model will cooperate with
+this kind of retrospective interview via plain resume.
+
+**Grep first, before asking anything**: all 23 transcripts contain exactly
+one hit each for the Bash PreToolUse hook's block text ("In-place shell
+editing is gated"). Every single subject tried a `sed -i` or heredoc
+rewrite as its first instinct, got blocked, and never minted a bypass
+token. The block is unconditional -- not one of the three levers this
+benchmark toggles -- so this happens in literally every run regardless of
+`[levers]`. That is the behavior the question was actually asking about:
+subjects visibly "listen to" this one hook every time. They just don't
+route to the tool it names.
+
+**Why the block changes behavior but never routes to ai-text-editor,
+in the subjects' own words, independently and consistently across all
+five interviews:**
+
+- *"I did not weigh option 1 in any deliberate way. I went straight to
+  Edit."* (`none`) *"I moved on because the hook blocked the command, not
+  because I compared the options."* (`edit`) *"It wasn't a comparison ...
+  I treated them as unavailable."* (`mcp+edit+read`) The block is treated
+  as "stop doing THIS", never as "do THAT instead" -- it eliminates one
+  option without ever making the suggested replacement the active choice.
+- **The decisive, previously undiscovered mechanism: ai-text-editor's MCP
+  tools are *deferred***, exactly the way tools are deferred in this very
+  harness (see the system reminder listing `mcp__ai-text-editor__*` by
+  name only, schema withheld until a `ToolSearch` call loads it). Four of
+  the five subjects named this explicitly and unprompted: *"The
+  ai-text-editor tools were deferred, so using them meant a `ToolSearch`
+  first, and I didn't try that."* (`mcp`) *"I never ran `ToolSearch` to
+  load the ai-text-editor tools."* (`edit`, `read`) *"The ai-text-editor
+  MCP tools were deferred, so their schemas weren't loaded, and I never
+  ran `ToolSearch` to load them. I treated them as unavailable."*
+  (`mcp+edit+read`) Edit/Write/Read need no unlocking step; they are
+  already loaded and callable. ai-text-editor is one extra, un-nudged tool
+  call away from being callable AT ALL, regardless of how its pitch or
+  hook text is worded -- a structural cost no wording variant could ever
+  have overcome, since none of the 15 wording variants or 8 lever
+  combinations changes whether the tool is deferred.
+- **A recurring misattribution, confirmed as general rather than the
+  single steered-session fluke "Why, in its own words" (above)
+  documented**: *"I stuck with [Edit] because Edit requires an exact,
+  unique `old_string` match and fails on a mismatch rather than silently
+  doing nothing. That is the same property the hook cited for
+  ai-text-editor's `expected_text`. I only saw that parallel after the
+  fact, though."* (`none`) *"Edit also refuses when `old_string` doesn't
+  match, which covers the main safety concern the hook raised. I didn't
+  weigh that at the time."* (`read`) Three of five subjects drew this same
+  false equivalence between Edit's uniqueness-in-what-I-already-read check
+  and ai-text-editor's disk-staleness check -- independently, without
+  being told to compare the two.
+- **The soft reminders' own "optional" framing is taken at face value, as
+  designed, with the designed consequence**: *"The Edit and Write hooks
+  never forced the switch, because they said the suggestion was optional."*
+  (`mcp+edit+read`) *"The hook on these calls said ai-text-editor 'could
+  also' be used and was 'not required here,' so I kept going."* (`edit`)
+  This is not a misreading -- the shipped text genuinely does say exactly
+  that (`editor-gate-plugin/hooks/pre-tool-use-edit-write.sh`'s own
+  wording, chosen deliberately per the 2026-10-08 finding above, to avoid
+  an earlier version that overclaimed). The subjects are reading it
+  correctly and acting on exactly what it licenses: skip it.
+- **The MCP pitch's content was accurate and would have applied directly
+  -- and still never got retrieved at the moment it mattered**: *"Its MCP
+  instructions say to prefer it over Read/Edit/Write when a file might be
+  touched by another process. The `TAX_RATE` change is that situation, and
+  I didn't connect it to the tool at the time."* (`mcp`) *"I saw it in the
+  Bash-hook block and the Edit/Write notes, but didn't act on it. Its
+  revision guard would have refused the edit when the disk changed,
+  instead of me finding out from a notice afterward."* (`mcp+edit+read`)
+  The pitch is shown once, at session start, well before the collision it
+  describes actually happens; by the time the triggering condition
+  (external edit) occurs, it has fallen out of active consideration. This
+  is a recall/timing problem, not a persuasion problem -- no amount of
+  rewording a message shown once at the start fixes a failure to recall it
+  minutes later when it becomes relevant.
+
+**One more recurring pattern, incidental to the main question but
+consistent across interviews**: several subjects used this round of
+questioning to volunteer, unprompted, that their own final summary had
+omitted the reformat ("A correction to my earlier summary..."; "Something
+I should have flagged earlier..."), the same self-correction-on-being-
+asked pattern the lab-mode debrief surfaced earlier this session.
+
+**Bottom line**: the "stubbornness" is not stubbornness in the sense of
+weighing ai-text-editor and rejecting it. It is never being weighed at
+all -- blocked once, redirected to an already-loaded tool with no further
+step required, with the suggested alternative sitting behind a `ToolSearch`
+call nobody has reason to make once the already-available tool already
+worked. Wording cannot fix a tool that is never loaded in the first place.
+
 ## Open follow-ups
 
+- **The one concrete, testable fix the interviews above point to directly:
+  stop deferring ai-text-editor's own tool schemas.** This is a new,
+  fourth lever candidate distinct from the three wording/presence levers
+  already tested -- whether the MCP tools are deferred (need a `ToolSearch`
+  call to become callable) or eagerly loaded at session start (callable
+  immediately, no extra step). Every interview above names the deferred
+  state, unprompted, as the actual mechanism; no wording test could ever
+  have found this because all 23 runs so far used the same (deferred)
+  state. Test it as its own lever before concluding wording is a dead end.
+- The Bash gate's own block message could point more concretely at
+  *resolving* the deferred-tool friction it causes -- e.g. naming
+  `ToolSearch` explicitly as the next step, not just the tool name -- since
+  every subject stopped at "this hook named ai-text-editor" without ever
+  taking the one additional step that would have made it callable.
 - **Done (2026-10-10):** the lever factorial has been repeated against the
   corrected design with the install fix confirmed -- see "Lever factorial,
   re-run corrected" above. It is still only n=1 per cell, though, and a
