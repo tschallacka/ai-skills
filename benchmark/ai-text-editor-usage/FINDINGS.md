@@ -757,6 +757,51 @@ re-run (fix the description-text confound first) or via the full
 planning-skill track if the direction still looks worth pursuing after
 that.
 
+### Follow-up: fixing the description-text confound, re-run (2026-10-10)
+
+**Still unshipped, n=9, still directional -- but the clean version of the
+test.** Rewrote `revision_guard()`'s description on the same
+`spike/optional-revision` branch (no longer "REQUIRED"; now states the
+field is optional and the server tracks the tab's own current revision
+when it is omitted) and fixed the one other place the adapter's own tool
+description still said "every mutation needs a current revision"
+(the per-tool reconnection blurb). Rebuilt, confirmed via a direct
+`tools/list` probe that `replace`'s schema now says OPTIONAL with no
+contradicting sentence anywhere, then re-ran `bash-7-challenge` x5,
+`bash-2-terse` x2, `bash-4-directive` x2 -- same mechanism, same
+`run-case.sh` path.
+
+**Result: `bash-7-challenge` went 3/5 adopted** (up from 2/5 under the
+original mandatory-revision server, and up from the confounded pass's
+0/4); `bash-2-terse` and `bash-4-directive` both held 2/2. More
+importantly, this pass shows the mechanism actually engaging rather than
+riding on the baseline's own noise: every `replace` call across all three
+adopting `bash-7-challenge` reps (10 calls total, plus every call in the
+`bash-2-terse`/`bash-4-directive` reps) **omitted `expected_revision`
+entirely**, several substituting `expected_text` instead -- the opposite
+of the confounded pass, where adopting runs kept tracking a revision
+counter out of habit. The two declines (`rep2`, `rep3`) didn't even call
+`ToolSearch` this time -- straight to `Edit` with no thinking and no text,
+the same reflexive skim-to-`Edit` pattern the 30-rep wording trial found,
+not a deliberated rejection like the original rep1's "ten revision-guarded
+replaces" line. Nothing broke: `score.json`'s `all_three_edits_correct`/
+`tax_rate_external_edit_preserved`/`external_reformat_preserved` were all
+`true` across every one of the 9 reps, adopted or not.
+
+So, at this still-small n: removing the argument's enforcement alone
+(first pass) didn't move adoption and only erased the model's own stated
+reason for declining; removing the enforcement *and* fixing the
+contradictory description (this pass) did move it, and the agents that
+adopted demonstrably stopped tracking the revision themselves. Whether
+that's real signal or n=5-vs-n=4 noise on an already-noisy wording
+(`bash-7-challenge` was the worst-performing of the six in the original
+30-rep trial) is the open question — worth more reps before treating 3/5
+as a settled rate. Master's binaries were rebuilt from `master` and
+reconfirmed (`required: ["expected_revision"]`, description says
+"REQUIRED" again) before finishing; the description fix is committed to
+`spike/optional-revision` only (`991ef66d`), still unpushed, still not on
+`master`.
+
 ## Open follow-ups
 
 - **Done (2026-10-10), and it worked:** naming `ToolSearch` explicitly in
