@@ -360,20 +360,61 @@ test. Full per-variant data, including every worker's own final summary and
 wording text side by side: `wording-sweep-comparison.md` under that sweep's
 own results directory.
 
+## Lever factorial, re-run corrected: the null holds even at the ceiling (2026-10-10)
+
+The full 2^3 factorial (`run-hook-matrix-sweep.sh`), re-run immediately
+after the install fix above, against the current event-driven/CSV-
+checkpoint task design, with the installed editor-gate-plugin hooks
+confirmed in sync. This is the credible version of the run the earlier,
+doubly-caveated `results/20261010T122928Z-leverfactorial` was never able
+to be.
+
+**All eight conditions -- `none`, `mcp`, `edit`, `read`, `mcp+edit`,
+`mcp+read`, `edit+read`, and `mcp+edit+read` (every lever on at once, the
+ceiling) -- reported `adopted: False`, `mcp_edit_count: 0`, and zero
+mentions of ai-text-editor anywhere in the worker's own reasoning.** This
+is the single most important result this benchmark has produced: even with
+the MCP server's own top-level pitch, the Edit/Write reminder, and the
+Read reminder ALL firing on the same run, Sonnet still never called the
+tool, never named it, and solved the task identically to the `none`
+condition in every observable way (`internal_edit_count` differs by at
+most one between rows, which is noise, not signal). This directly
+contradicts the stale factorial's headline (`edit` alone supposedly
+producing 10/12 ai-text-editor edits) and confirms the wording sweep's own
+null above was not a wording-specific fluke -- it holds at the maximum
+combination of every lever this benchmark currently has, not just at each
+one in isolation.
+
+This now matches, and reinforces with far more rigor, the very first
+"Headline" finding at the top of this document from 5 early autonomous
+runs with no levers at all: zero unprompted adoption. The intervening
+weeks of lever-building, wording-variance testing, and lab-mode
+instrumentation have not moved that number. Whatever would actually move
+it -- a different task shape, a different model, prompting rather than
+tool-author-controlled nudges (which this benchmark deliberately excludes
+as out of scope), or something else entirely -- remains unknown and is the
+real open question this benchmark has not yet answered.
+
 ## Open follow-ups
 
-- Repeat the lever factorial (several reps per cell, varying model/seed),
-  **against the corrected event-driven/CSV-checkpoint design above, and
-  only after confirming the installed editor-gate-plugin hooks are not
-  stale (see the section above)** -- the existing 8-run factorial predates
-  both the timing fix and the task-shape change, AND its `edit`/`read`
-  lever results specifically are now suspect for the separate reason that
-  the installed hook may not have honored the toggle at all. None of its
-  numbers (including the `edit` vs `mcp+edit` contrast) should be assumed
-  to still hold for either reason.
+- **Done (2026-10-10):** the lever factorial has been repeated against the
+  corrected design with the install fix confirmed -- see "Lever factorial,
+  re-run corrected" above. It is still only n=1 per cell, though, and a
+  null this clean across all 8 cells is itself worth a few repeats (varying
+  seed/model) before treating "no lever moves it" as fully settled rather
+  than "no lever moved it in this one sample per cell."
+- Given the lever factorial's null now looks robust, the more promising
+  next lever to test is outside this benchmark's current scope entirely:
+  the task prompt itself (deliberately excluded so far, since this
+  benchmark's whole premise is tool-author-controlled nudges, never
+  end-user prompting) -- or a different task shape/model where the
+  tool's own value proposition (disk-change detection) is more clearly
+  load-bearing than it is in this fixture's two small, fast collisions.
 - Split `ai_text_editor_adoption.adopted` into "ever called" vs. "used for
   at least one real edit" -- `mcp+read`'s `adopted: True` with 0 mcp edits
-  shows the current single bit conflates the two.
+  (seen in the now-stale pre-fix factorial) showed the current single bit
+  conflates the two; worth keeping even though the corrected re-run above
+  no longer has any `adopted: True` rows to exercise the distinction on.
 - Build a fixture variant where the external edit and a requested edit
   land on the *same* lines, to actually exercise the new hunk-level
   automerge rather than only the fast-forward path every run above took.
