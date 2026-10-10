@@ -549,6 +549,52 @@ at is itself strong evidence the interviews correctly diagnosed the
 mechanism: the problem was never persuasion text, it was that the tool
 sat behind an unlock step nothing in the task ever prompted taking.
 
+### What actually separates the 2 adopting runs from the 3 non-adopting ones
+
+Read directly from each transcript's own `thinking`/`text` content blocks
+at the exact turn right after the Bash gate fires -- more reliable than
+asking, since this is the unedited record, not a retrospective account --
+then cross-checked by resuming three of the five (via `--model haiku`,
+`--resume`, per the pattern established earlier) and asking each
+specifically about that one turn:
+
+- **Both adopting runs produced a one-line acknowledgment before acting**:
+  *"Use the editor tool."* / *"Hook directs me to the ai-text-editor
+  tools; loading them."* -- then immediately `ToolSearch`, `open`, `read`.
+- **All three non-adopting runs show an EMPTY thinking block and no text
+  at all at that exact turn** -- straight to a tool call, zero visible
+  engagement with the hook's content, verified directly in the raw JSONL
+  (`sed -n` on the exact line, not a summary). Asked afterward, their own
+  accounts converge exactly on this: *"I didn't weigh the hook's options
+  ... I never considered them as alternatives ... the tool was listed as
+  deferred, and I never loaded its schema with ToolSearch, so I didn't
+  consider it."* (the run that chose `Write` for the whole file -- a
+  legitimate reading of the hook's own option 2, not pure habit, but
+  arrived at the same way: without registering option 1 at all) *"I
+  didn't stop to compare the options the hook listed ... I took the
+  nearest non-shell option without checking whether the one the hook
+  recommended was actually available."* (the two runs that went straight
+  to `Edit`)
+- **The adopting run's own retrospective account is honest about how fast
+  its own choice was too**: *"Option 1 matched the situation, so I didn't
+  weigh the others for long."* -- not a deliberated comparison that came
+  out in ai-text-editor's favor, just a faster convergence on the same
+  option the hook named.
+
+The working hypothesis this supports: the fork isn't a reasoned
+accept/reject of the ToolSearch instruction. It's whether that turn
+processes the hook's full message closely enough to register the new
+instruction buried in it at all, or pattern-matches only the gist ("shell
+editing blocked, something about ai-text-editor") and reacts from habit
+before reaching the part of the message that changed. A message that gets
+skimmed can't act on an instruction it never reads as instructing
+anything specific. This is a hypothesis from `n=5`, not a settled
+mechanism -- the concrete next step is more reps, specifically watching
+whether presence/absence of that one-line acknowledgment predicts the
+outcome at a larger sample, and whether shortening the message (so there
+is less to skim past before reaching the ToolSearch instruction) changes
+the split.
+
 ## Open follow-ups
 
 - **Done (2026-10-10), and it worked:** naming `ToolSearch` explicitly in
@@ -559,6 +605,19 @@ sat behind an unlock step nothing in the task ever prompted taking.
     the adoption rate and understand what separates an adopting run from a
     non-adopting one under the identical wording -- right now that's
     unknown, and `n=5` only establishes "nonzero," not a rate.
+  - Test the "skimmed vs. processed" hypothesis directly ("What actually
+    separates the 2 adopting runs" above): at a larger sample, does a
+    one-line text acknowledgment right after the gate fires actually
+    predict adoption, or was that a coincidence at `n=5`? If it holds, try
+    a much shorter message (same ToolSearch instruction, far less to read
+    past to reach it) and see if the adoption rate goes up -- this bears
+    directly on whether length/skimmability, not content, is the next
+    thing to fix.
+  - `extract_edit_timeline.py` could grow a cheap, automatic check for this
+    -- whether the assistant turn immediately after a Bash-gate deny
+    carries a non-empty `thinking` or `text` block before its next
+    `tool_use` -- so future sweeps get this signal for free instead of it
+    requiring a manual `sed -n`/interview pass each time.
   - Try eagerly loading ai-text-editor's tool schemas (no `ToolSearch`
     needed at all) as a cleaner, more direct test of the same mechanism --
     does removing the unlock step entirely do even better than instructing
