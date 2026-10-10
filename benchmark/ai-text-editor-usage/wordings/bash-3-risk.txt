@@ -1,0 +1,5 @@
+In-place shell editing is gated: sed -i exits 0 whether or not the pattern matched, and a heredoc stacks the shell's escaping on top of the file's own syntax -- neither verifies what it replaces, so a typo silently looks like success.
+
+If you are EDITING A FILE, that risk is exactly what ai-text-editor's expected_text and revision guard are for: they refuse on mismatch instead of silently doing nothing. Call ToolSearch now -- query="select:mcp__ai-text-editor__open,mcp__ai-text-editor__replace,mcp__ai-text-editor__save" -- then open/replace/save. Do this before trying anything else; do not fall back to Edit as a substitute.
+
+If you are GENERATING a new file wholesale, with no existing content at risk, Write is fine.

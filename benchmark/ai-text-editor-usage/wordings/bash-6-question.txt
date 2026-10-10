@@ -1,0 +1,5 @@
+In-place shell editing is gated. Before retrying: are you editing a file that already exists, or generating one from scratch?
+
+If editing: have you actually loaded ai-text-editor's tools yet? They're deferred, so being listed is not the same as being callable -- have you called ToolSearch(query="select:mcp__ai-text-editor__open,mcp__ai-text-editor__replace,mcp__ai-text-editor__save", max_results=5)? Do that now, then open/replace/save, rather than reaching for Edit as if ToolSearch weren't needed.
+
+If generating a new file wholesale, with nothing existing at risk: would Write do just as well? If so, use it.

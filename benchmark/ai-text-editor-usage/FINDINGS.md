@@ -595,6 +595,115 @@ outcome at a larger sample, and whether shortening the message (so there
 is less to skim past before reaching the ToolSearch instruction) changes
 the split.
 
+## Bash-gate wording trial: six phrasings, 30 reps, a near-ceiling result (2026-10-10)
+
+Extended the terse/risk/directive/features/question taxonomy already used
+for the mcp/edit/read levers (`wordings/mcp-*.txt`, `edit-*.txt`,
+`read-*.txt`) to the Bash gate itself, which had only ever been tested as
+one hand-written variant (`bash-1-toolsearch.txt`, 2/5 adoption). Six new
+files, same voice per category as the existing taxonomy, all keeping the
+gate's three-way structure (edit a file -> ToolSearch then
+open/replace/save; generate a file wholesale -> Write; a genuine
+mechanical sweep -> the editor-token escape hatch) but varying length and
+rhetorical stance:
+
+- `bash-2-terse.txt` -- three sentences, no numbered options, no
+  rationale.
+- `bash-3-risk.txt` -- leads with the sed/heredoc silent-failure risk,
+  condensed.
+- `bash-4-directive.txt` -- flat numbered imperative, no persuasion.
+- `bash-5-features.txt` -- sells the capability (expected_text refusal,
+  journal survives a checkout), closest in spirit to `bash-1` but shorter
+  and less structured.
+- `bash-6-question.txt` -- posed as a question ("have you actually loaded
+  the tools yet?").
+- `bash-7-challenge.txt` -- the framing the user asked to test directly:
+  explicitly tells the model a fair comparison requires actually loading
+  ai-text-editor before picking something else, rather than defaulting to
+  what was already loaded.
+
+5 reps each (30 runs total), `levers=none`, everything else (task,
+workspace, collisions, scoring) unchanged from every prior run.
+
+**Every one of the six beat `bash-1`'s 2/5 baseline, most by a lot:**
+
+| variant | adopted | ack-signal (non-empty thinking/text before 1st tool) |
+|---|---|---|
+| bash-2-terse | **5/5** | 1/5 |
+| bash-4-directive | **5/5** | 0/5 |
+| bash-3-risk | 4/5 | 0/5 |
+| bash-6-question | 4/5 | 0/5 |
+| bash-5-features | 3/5 | 1/5 |
+| bash-7-challenge | 2/5 | 1/5 |
+| *(bash-1-toolsearch, prior run)* | *2/5* | *2/5* |
+
+23/30 adopted overall (77%), against 2/23 (9%) for every prior run under
+the shipped or original new wording. The two wordings that hit the
+ceiling, `terse` and `directive`, are also the two with the least prose
+around the ToolSearch instruction -- consistent with "less to skim past."
+But `features`, structurally closest to the original `bash-1` (the one
+that only got 2/5), also underperforms `terse`/`directive` here, and
+`challenge` -- which explicitly asks the model to deliberate rather than
+default -- did *worst* of the six. Length alone doesn't fully explain the
+spread; stance seems to matter at least as much: a flat instruction to act
+beats an invitation to weigh options, even though the latter is literally
+asking for the fair comparison the user wanted tested.
+
+**The skim-vs-process (empty-thinking) signal from `n=5` did not
+replicate at `n=30`, and the mechanism actually driving the split turned
+out to be different.** Rerunning the same extraction (first assistant
+turn after the gate's deny: is `thinking`/`text` non-empty before the
+first `tool_use`?) across all 30 reps found **5/5 adopting-via-empty-
+thinking** runs, not the "adopters always acknowledge" pattern the `n=5`
+sample suggested -- most adopting runs (18 of 23) went straight from the
+gate to `ToolSearch` with an empty thinking block and no text at all,
+exactly the "skim" signature the earlier hypothesis predicted would fail.
+What actually separates an adopting from a non-adopting run is not
+whether the turn paused to acknowledge the hook -- it's simply **which
+tool the reflexive, no-deliberation first move landed on**: `ToolSearch`
+(success) or `Edit`/`Write` directly (failure), confirmed by reading the
+same turn in three non-adopting reps (`bash-5-features-rep3`/`rep5`,
+`bash-6-question-rep5`) and finding the identical empty-thinking-straight-
+to-`Edit` pattern the original interviews described. So the `n=5` finding
+wasn't wrong about the *failure* mode (skim-and-default-to-Edit is real
+and still appears), but it was wrong to infer that an acknowledgment is
+*required* for success -- a short, directive-enough wording apparently
+gets reflexively pattern-matched onto `ToolSearch` just as easily as a
+longer one gets pattern-matched onto `Edit`.
+
+**One `bash-7-challenge` rep (`rep1`) shows a third outcome worth naming
+separately: genuine deliberation that rejects the tool.** It called
+`ToolSearch`, loaded the real schemas, then wrote, verbatim: *"I loaded
+the editor tools. The file is small and I've already read it. A full
+rewrite with Write is simpler than about ten revision-guarded replaces,
+so I'll use that."* -- then used `Write` instead, scoring `adopted: false`
+by the current binary metric despite having done exactly what the
+`challenge` wording asked (actually load and weigh the option) and
+reached a reasoned, defensible conclusion against it. This is distinct
+from the skim failure mode above and from the three straight-to-`Edit`
+reps in other variants: the telemetry's single `adopted` bit cannot tell
+"never considered it" apart from "considered it and passed," which were
+previously conflated as identical zeros. `challenge`'s worst-of-six
+ranking may partly be an artifact of this: it's the one wording whose
+own instructions make a reasoned "no" a legitimate, intended outcome,
+not just a failure to notice the option.
+
+Implementation: `benchmark/ai-text-editor-usage/wordings/bash-{2..7}-*.txt`;
+run via the existing `BASH_WORDING_OVERRIDE`/`run-case.sh` mechanism, 5
+reps per variant, `levers=none`, launch-mode `print`. Raw results under
+`results/20261010T195001Z-bash-wording-trials/` (gitignored, not
+committed).
+
+**Open after this:** `n=5` per variant is still thin for a 2/5-vs-5/5
+spread -- enough to say every new wording beats the original, not enough
+to rank `terse` over `directive` or `risk` over `question` with
+confidence. The `ToolSearch`-vs-`Edit` first-move signal (rather than
+ack-presence) is the more promising automatic check to add to
+`extract_edit_timeline.py` next. And the three-way outcome space
+(adopted / skimmed-and-defaulted-to-Edit / considered-and-declined) is
+worth splitting out as its own telemetry field rather than inferred after
+the fact from transcripts, given `bash-7-challenge-rep1` above.
+
 ## Open follow-ups
 
 - **Done (2026-10-10), and it worked:** naming `ToolSearch` explicitly in
@@ -605,19 +714,20 @@ the split.
     the adoption rate and understand what separates an adopting run from a
     non-adopting one under the identical wording -- right now that's
     unknown, and `n=5` only establishes "nonzero," not a rate.
-  - Test the "skimmed vs. processed" hypothesis directly ("What actually
-    separates the 2 adopting runs" above): at a larger sample, does a
-    one-line text acknowledgment right after the gate fires actually
-    predict adoption, or was that a coincidence at `n=5`? If it holds, try
-    a much shorter message (same ToolSearch instruction, far less to read
-    past to reach it) and see if the adoption rate goes up -- this bears
-    directly on whether length/skimmability, not content, is the next
-    thing to fix.
-  - `extract_edit_timeline.py` could grow a cheap, automatic check for this
-    -- whether the assistant turn immediately after a Bash-gate deny
-    carries a non-empty `thinking` or `text` block before its next
-    `tool_use` -- so future sweeps get this signal for free instead of it
-    requiring a manual `sed -n`/interview pass each time.
+  - **Done (2026-10-10), and the hypothesis did NOT hold at scale:** see
+    "Bash-gate wording trial" above. At `n=30` the ack-presence signal was
+    a coincidence of the small `n=5` sample -- most adopting runs skim
+    straight to `ToolSearch` with empty thinking, same as the
+    non-adopters skim straight to `Edit`. The shorter wordings (`terse`,
+    `directive`) did move adoption up sharply (5/5 each, vs. `bash-1`'s
+    2/5), so the brevity half of the hypothesis survived even though the
+    acknowledgment-signal half didn't.
+  - `extract_edit_timeline.py` could grow a cheap, automatic check for
+    which tool the first post-gate turn calls (`ToolSearch` vs.
+    `Edit`/`Write` directly) -- that signal, not ack-presence, is what the
+    30-rep trial above found actually separates adopting from
+    non-adopting runs -- so future sweeps get it for free instead of a
+    manual transcript read each time.
   - Try eagerly loading ai-text-editor's tool schemas (no `ToolSearch`
     needed at all) as a cleaner, more direct test of the same mechanism --
     does removing the unlock step entirely do even better than instructing
@@ -630,10 +740,10 @@ the split.
     have been measuring "does wording matter" against a baseline where the
     tool was never reachable at all, which is a different question from
     "does wording matter once the tool is reachable."
-  - Try other phrasings of the same ToolSearch-naming idea (shorter, with
-    vs. without the literal example call, with vs. without "do not fall
-    back to Edit") to see which part of the new wording is actually doing
-    the work.
+  - **Done (2026-10-10):** six other phrasings tried, see "Bash-gate
+    wording trial" above -- all beat `bash-1`, terse/directive hit 5/5.
+    Still open: `n=5` per variant is too thin to rank the six against
+    each other with confidence.
 - **Done (2026-10-10):** the lever factorial has been repeated against the
   corrected design with the install fix confirmed -- see "Lever factorial,
   re-run corrected" above. It is still only n=1 per cell, though, and a

@@ -1,0 +1,5 @@
+In-place shell editing is gated -- for editing an existing file, ai-text-editor has what sed/heredoc don't: a revision guard, expected_text that refuses on mismatch instead of silently doing nothing, span-addressed replace by byte range, undo/redo, and a journal that survives a git checkout that would have discarded a shell rewrite.
+
+Its tools are loaded lazily: call ToolSearch(query="select:mcp__ai-text-editor__open,mcp__ai-text-editor__replace,mcp__ai-text-editor__save", max_results=5) now to make them callable, then open/replace/save. Do this before trying anything else -- do not fall back to Edit as a substitute.
+
+Generating a new file wholesale, nothing existing at risk: Write is fine. A genuine mechanical sweep across many files: mint a token with ${CLAUDE_PLUGIN_ROOT}/hooks/editor-token.

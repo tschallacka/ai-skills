@@ -1,0 +1,5 @@
+In-place shell editing is gated. A fair comparison between your options requires actually loading the one this message names before picking a different one -- not defaulting to the tool you already had loaded just because it was available first.
+
+Editing a file: call ToolSearch(query="select:mcp__ai-text-editor__open,mcp__ai-text-editor__replace,mcp__ai-text-editor__save", max_results=5) and let mcp__ai-text-editor__open/replace/save actually enter consideration before you choose Edit over them. Judging an option you never loaded is not a comparison. Do this now, before trying anything else.
+
+Generating a new file wholesale, with no existing content at risk: Write was never gated, so there is nothing to compare there -- use it.
