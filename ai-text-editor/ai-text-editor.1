@@ -19,10 +19,13 @@ with \fB--save-session-token PATH\fR and reuse it with \fB--session-token PATH\f
 requests without the current token are rejected before mutation.
 .PP
 Mutating commands \fBinsert\fR, \fBreplace\fR, \fBmove\fR, \fBcopy\fR,
-\fBlarge-edit\fR, \fBrestore\fR, \fBundo\fR, \fBredo\fR, and \fBsave\fR require
-\fB--expected-revision\fR. A
-missing or stale value is refused; read \fBopen\fR or \fBhistory\fR again before
-retrying. The server has no project-root jail: the session token grants the
+\fBlarge-edit\fR, \fBrestore\fR, \fBundo\fR, \fBredo\fR, and \fBsave\fR carry a
+revision guard, but the client fills it in automatically when
+\fB-r\fR/\fB--expected-revision\fR is omitted \- the ordinary case needs no
+revision bookkeeping at all. The flag remains available as an explicit,
+optional override for an advanced or scripted caller with its own reason to
+pin a specific revision; an explicitly-supplied stale value is still refused,
+same as always. The server has no project-root jail: the session token grants the
 server process's normal filesystem permissions, so keep the endpoint private
 and use operating-system isolation when stronger confinement is needed.
 .SH STARTING

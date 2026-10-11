@@ -155,16 +155,8 @@ fn boolean(description: &str) -> Value {
     json!({"type": "boolean", "description": description})
 }
 
-fn revision_guard() -> Value {
-    string("Server revision guard; REQUIRED for this operation and must be the revision most recently returned by open, history, or a completed mutation. Missing revisions are refused, stale ones never merged.")
-}
-
 fn number(description: &str) -> Value {
     json!({"type": "number", "description": description})
-}
-
-fn mutating_required() -> Vec<&'static str> {
-    vec!["expected_revision"]
 }
 
 /// T127 (Codex prompts for approval on every ai-text-editor call, unlike a
@@ -222,8 +214,10 @@ type ToolSpec = (
 /// payload. `path` (B310/T124) IS here: it is a synonym a caller may send
 /// instead of `file`, coalesced into `file` before the strip loop below runs
 /// so the server only ever sees the one key it understands.
-/// `expected_revision` is not here either — it is declared on the mutating
-/// tools only, and `mutating_required` is what pins that.
+/// `expected_revision` is not declared on any tool's schema at all any more
+/// (ai-text-editor-automatic-revision-guard): the client auto-fills the
+/// revision for the ordinary case, so it is not a payload key a caller is
+/// offered in the first place.
 pub const ADAPTER_ARGUMENTS: &[&str] = &[
     "endpoint",
     "agent",
@@ -338,7 +332,7 @@ fn tool_definitions() -> Vec<Value> {
         properties
     };
     let mut tools: Vec<ToolSpec> = Vec::new();
-    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors, and get the revision a mutation must carry. Opens the file if the workspace does not have it yet, starting a server when none runs, and document_mode chooses the mode of the tab it opens whether or not a workspace is already running.", Vec::from([
+    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors. Opens the file if the workspace does not have it yet, starting a server when none runs, and document_mode chooses the mode of the tab it opens whether or not a workspace is already running.", Vec::from([
         // B238: this description is the whole point of the fix. The mode used
         // to be a property of the SERVER, so the honest schema had to say it
         // "shapes only a newly started server" — and since B225 made every
@@ -391,11 +385,10 @@ fn tool_definitions() -> Vec<Value> {
                     "bytes_base64",
                     string("Base64 bytes to insert, alternative to text."),
                 ),
-                ("expected_revision", revision_guard()),
             ]));
             p
         },
-        mutating_required(),
+        vec![],
     ));
     tools.push((
         "replace",
@@ -461,11 +454,10 @@ fn tool_definitions() -> Vec<Value> {
                     "symbol",
                     string("A name CodeGraph's index (.codegraph/codegraph.db) has for this file, resolved to that symbol's own defining line extent — the caller says what to edit, not where it starts and ends. Refused as symbol_unavailable with no index, symbol_not_found with no matching node, or symbol_ambiguous if more than one node in this file shares the name."),
                 ),
-                ("expected_revision", revision_guard()),
             ]));
             p
         },
-        mutating_required(),
+        vec![],
     ));
     for verb in ["move", "copy"] {
         tools.push((
@@ -529,11 +521,10 @@ fn tool_definitions() -> Vec<Value> {
                         "dest_line",
                         int("Destination line (1-based, text tabs only): insert immediately before this line. One past the last line appends at end of file."),
                     ),
-                    ("expected_revision", revision_guard()),
                 ]));
                 p
             },
-            mutating_required(),
+            vec![],
         ));
     }
     tools.push(("large_edit", "Stream an acknowledged job-owned rewrite of a large file and atomically replace it.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
@@ -544,49 +535,32 @@ fn tool_definitions() -> Vec<Value> {
         ("delete_len", int("Byte length replaced.")),
         ("text", string("Replacement text.")),
         ("bytes_base64", string("Replacement bytes, alternative to text.")),
-        ("expected_revision", revision_guard()),
-    ])); p }, mutating_required()));
-    tools.push(("begin_transaction", "Begin an explicit undo transaction; subsequent ordinary edits are grouped until end_transaction.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
+    ])); p }, vec![]));
+    tools.push(("begin_transaction", "Begin an explicit undo transaction; subsequent ordinary edits are grouped until end_transaction.", Vec::new(), vec![]));
     tools.push((
         "end_transaction",
         "Close the explicit undo transaction and commit its grouped undo step.",
-        {
-            let mut p: ToolProperties = Vec::new();
-            p.extend(Vec::from([("expected_revision", revision_guard())]));
-            p
-        },
-        mutating_required(),
+        Vec::new(),
+        vec![],
     ));
-    tools.push(("restore", "Turn off lossless NFC presentation; refuses with not_normalized when the tab never normalized, and refuses when edits made restoration lossy.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
+    tools.push(("restore", "Turn off lossless NFC presentation; refuses with not_normalized when the tab never normalized, and refuses when edits made restoration lossy.", Vec::new(), vec![]));
     tools.push((
         "undo",
         "Undo one server history transaction; the server returns the new revision.",
-        {
-            let mut p: ToolProperties = Vec::new();
-            p.extend(Vec::from([("expected_revision", revision_guard())]));
-            p
-        },
-        mutating_required(),
+        Vec::new(),
+        vec![],
     ));
     tools.push((
         "redo",
         "Redo one server history transaction; the server returns the new revision.",
-        {
-            let mut p: ToolProperties = Vec::new();
-            p.extend(Vec::from([("expected_revision", revision_guard())]));
-            p
-        },
-        mutating_required(),
+        Vec::new(),
+        vec![],
     ));
     tools.push((
         "save",
         "Atomically save the current working view after external-change resolution.",
-        {
-            let mut p: ToolProperties = Vec::new();
-            p.extend(Vec::from([("expected_revision", revision_guard())]));
-            p
-        },
-        mutating_required(),
+        Vec::new(),
+        vec![],
     ));
     tools.push(("save_as", "Atomically create a new target file without changing the active tab; existing targets are refused.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("target_path", string("New file to create; must not already exist."))])); p }, vec![]));
     tools.push((
@@ -815,14 +789,9 @@ fn tool_definitions() -> Vec<Value> {
                 });
                 properties.insert((*key).to_string(), value);
             }
-            // The revision guard rides the envelope, not the payload, so it is
-            // the one described key with no row in the table.
-            if let Some(value) = described.get("expected_revision") {
-                properties.insert("expected_revision".into(), value.clone());
-            }
             for key in described.keys() {
                 assert!(
-                    *key == "expected_revision" || accepted.contains(key),
+                    accepted.contains(key),
                     "{name} advertises {key}, which {method} does not read - the server would refuse it as an unknown argument"
                 );
             }
@@ -1075,7 +1044,7 @@ mod tests {
         assert_eq!(content[1]["text"], "the notice");
     }
 
-    use super::{handle, mutating_required, parse_revision_argument, ADAPTER_ARGUMENTS};
+    use super::{handle, parse_revision_argument, ADAPTER_ARGUMENTS};
     use serde_json::{json, Value};
 
     fn tools() -> Vec<Value> {
@@ -1173,30 +1142,53 @@ mod tests {
         }
     }
 
-    /// The mutating tools' revision guard is the one adapter-consumed
-    /// argument that is deliberately not on every tool, so it is pinned
-    /// where it does belong rather than left to the sweep above.
+    /// ai-text-editor-automatic-revision-guard: the client auto-fills the
+    /// revision for every revision-guarded request that did not already
+    /// carry one, so expected_revision is not offered as a property at all
+    /// on any tool any more -- not merely absent from `required`. Checked
+    /// against the exact nine guarded verbs plus begin_transaction/
+    /// end_transaction, replacing the old test's `found >= 7` bound (which
+    /// is how a two-verb undercount went unnoticed for as long as it did).
     #[test]
-    fn the_revision_guard_is_declared_wherever_it_is_required() {
-        let guard = mutating_required();
-        assert_eq!(guard, vec!["expected_revision"]);
+    fn expected_revision_is_no_longer_part_of_the_mutating_schema() {
+        const FORMERLY_GUARDED_TOOLS: &[&str] = &[
+            "insert",
+            "replace",
+            "move",
+            "copy",
+            "large_edit",
+            "restore",
+            "undo",
+            "redo",
+            "save",
+            "begin_transaction",
+            "end_transaction",
+        ];
         let mut found = 0;
         for tool in tools() {
+            let name = tool.get("name").and_then(Value::as_str).unwrap_or("?");
+            if FORMERLY_GUARDED_TOOLS.contains(&name) {
+                found += 1;
+            }
+            assert!(
+                !properties(&tool).contains_key("expected_revision"),
+                "{name} still advertises expected_revision"
+            );
             let required = tool
                 .pointer("/inputSchema/required")
                 .and_then(Value::as_array)
                 .cloned()
                 .unwrap_or_default();
-            if required.iter().any(|key| key == "expected_revision") {
-                let name = tool.get("name").and_then(Value::as_str).unwrap_or("?");
-                assert!(
-                    properties(&tool).contains_key("expected_revision"),
-                    "{name} requires the revision guard and does not declare it"
-                );
-                found += 1;
-            }
+            assert!(
+                !required.iter().any(|key| key == "expected_revision"),
+                "{name} still requires expected_revision"
+            );
         }
-        assert!(found >= 7, "expected the mutating tools, found {found}");
+        assert_eq!(
+            found,
+            FORMERLY_GUARDED_TOOLS.len(),
+            "expected exactly the nine guarded verbs plus begin_transaction/end_transaction"
+        );
     }
 
     /// search accepts `query` OR `query_base64` -- the server itself refuses

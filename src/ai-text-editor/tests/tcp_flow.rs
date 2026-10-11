@@ -442,3 +442,118 @@ fn an_explicit_endpoint_with_no_file_ignores_a_different_servers_cached_session(
         "server B answered for its own file, not server A's: {payload_b}"
     );
 }
+
+// ---- ai-text-editor-automatic-revision-guard (W11) -------------------------
+//
+// The initiative owner's explicit subagent concern: a genuinely separate
+// process identity -- its own session directory, its own in-process
+// Resolved, sharing no in-process state or cache file with another
+// connection -- addresses an already-open tab purely by tab_id and still
+// gets the correct revision auto-filled, because the fetch reads the
+// server's own live state fresh on every call rather than any per-identity
+// cache.
+
+#[test]
+fn a_separate_identity_with_its_own_empty_session_dir_auto_fills_the_revision_by_tab_id() {
+    let mut harness = TcpHarness::new("subagent");
+    let file = harness.path("shared.txt");
+    std::fs::write(&file, "alpha\nbeta\n").unwrap();
+    let auth = harness.auth_file("auth", "subagent-secret");
+    let endpoint = harness.start_tcp_server(&file, &auth);
+
+    // Connection A: the "parent" -- the harness's own identity and session
+    // directory, opening the tab and giving it one real edit so there is
+    // genuine history (its own explicit revision, decoupled from the
+    // mechanism under test).
+    let session_a = harness.path("session-a.json");
+    let opened = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "subagent-secret",
+        "--save-session-token",
+        session_a.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]);
+    assert!(opened.status.success(), "{}", stderr_text(&opened));
+    let payload = first_payload(&opened);
+    let tab_id = payload["tab_id"].as_str().expect("tab_id").to_owned();
+    let revision = payload["revision"].as_u64().expect("revision").to_string();
+
+    let edited_by_a = harness.client(&[
+        "replace",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "subagent-secret",
+        "--session-token",
+        session_a.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "5",
+        "-t",
+        "ALPHA",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        edited_by_a.status.success(),
+        "{}",
+        stderr_text(&edited_by_a)
+    );
+
+    // Connection B: a SEPARATE process identity, with its own fresh, empty
+    // session directory -- never written to by A, and proven empty before
+    // use so a reviewer can see the scenario below is not accidentally
+    // satisfied by shared state. It addresses the tab purely by --tab-id
+    // (no --endpoint, no --session-token, no --save-session-token of A's),
+    // with NO explicit revision, and must still succeed.
+    let session_dir_b = harness.path("session-dir-b");
+    std::fs::create_dir_all(&session_dir_b).unwrap();
+    assert_eq!(
+        std::fs::read_dir(&session_dir_b).unwrap().count(),
+        0,
+        "connection B's session dir must start out empty -- proof it holds nothing of A's"
+    );
+    let mut command_b = Command::new(env!("CARGO_BIN_EXE_ai-text-editor"));
+    command_b
+        .env("HOME", &harness.scratch)
+        .env("XDG_RUNTIME_DIR", harness.scratch.join("runtime"))
+        .env("TSCH_AI_EDITOR_METADATA_DIR", harness.scratch.join("meta"))
+        .env("TSCH_AI_EDITOR_SESSION_DIR", &session_dir_b)
+        .env("TSCH_AI_EDITOR_AGENT", "tcp-test-subagent-B")
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("CODEX_SESSION_ID")
+        .env_remove("OPENCODE_PID")
+        .args([
+            "replace",
+            "--tab-id",
+            &tab_id,
+            "--range-start-line",
+            "2",
+            "--range-end-line",
+            "2",
+            "-t",
+            "BETA\n",
+            "-p",
+            "structured",
+        ]);
+    let replaced_by_b = command_b.output().expect("client binary must run");
+    assert!(
+        replaced_by_b.status.success(),
+        "connection B -- a separate identity with its own empty session dir \
+         -- must auto-fill the current revision by tab_id alone and succeed: {}",
+        stderr_text(&replaced_by_b)
+    );
+    // B's session dir was proven EMPTY, above, before this call ran -- the
+    // auto-fill could not have read any cache of A's or any prior cache of
+    // its own. What the call itself then does with its own session dir
+    // afterward (e.g. persisting its own fresh focus/cache entry) is
+    // ordinary post-success bookkeeping, not evidence either way about
+    // where the revision it used came from.
+}

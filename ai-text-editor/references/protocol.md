@@ -65,10 +65,11 @@ Naming a `file` on a request means "act on that file's tab", and opening it is
 part of that. Every method does it, not only `open`: a client that discovers no
 tab for the named file opens one and starts a server if none is running, then
 serves the request. The single exception is the revision-guarded methods
-(`insert`, `replace`, `large_edit`, `restore`, `undo`, `redo`, `save`) on a file
-that has no tab at all — the revision they carry cannot have come from a tab
-that never existed, so applying the edit against a guessable revision 0 is
-refused by name. When a tab did exist and its server has since died, they do
+(`insert`, `replace`, `move`, `copy`, `large_edit`, `restore`, `undo`, `redo`,
+`save`) on a file that has no tab at all — the revision they carry cannot have
+come from a tab that never existed, so applying the edit against a guessable
+revision 0 is refused by name. When a tab did exist and its server has since
+died, they do
 start a replacement: the journal replays and the server's own `stale_revision`
 check decides, by number, whether the revision they hold still means anything.
 

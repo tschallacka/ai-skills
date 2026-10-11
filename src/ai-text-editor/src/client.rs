@@ -713,7 +713,24 @@ where
         } else {
             resolved
         };
-    let frames = request_send(&resolved, &build(&resolved))?;
+    // Automatic revision guard: a caller of a revision-guarded verb that did
+    // not supply one gets the tab's current revision fetched fresh, right
+    // here, for this one call. No cache, nothing stored or reused across
+    // calls -- the one-round-trip fetch-then-send gap this leaves is an
+    // accepted, minimal tradeoff (ai-text-editor-automatic-revision-guard
+    // plan, AR-05), not a defect to patch with a retry. A caller-supplied
+    // revision (explicit, including an explicitly stale one) is always sent
+    // unchanged; the server's own enforcement is completely untouched.
+    let send_envelope = |resolved: &Resolved| {
+        let mut envelope = build(resolved);
+        if crate::is_revision_guarded(&request.method) && envelope.revision.is_none() {
+            if let Some(current) = fetch_current_revision(resolved) {
+                envelope.revision = Some(current);
+            }
+        }
+        envelope
+    };
+    let frames = request_send(&resolved, &send_envelope(&resolved))?;
     // B179's stale-token variant: a server RESTARTED on the same socket path
     // is live (so resolve did not error and the no-autostart policy is
     // untouched), but the cached tab-scoped token belongs to the dead
@@ -744,7 +761,7 @@ where
         })
     {
         if let Some(refreshed) = refresh_token(request, &resolved) {
-            if let Ok(retried) = request_send(&resolved, &build(&refreshed)) {
+            if let Ok(retried) = request_send(&resolved, &send_envelope(&refreshed)) {
                 return Ok((retried, refreshed));
             }
         }
@@ -790,6 +807,38 @@ fn request_send(
 ) -> Result<Vec<serde_json::Value>, String> {
     request(&resolved.endpoint, envelope)
         .map_err(|error| format!("{error} (endpoint {})", resolved.endpoint.display()))
+}
+
+/// The first frame carrying a `payload.revision`, as a `u64` -- `None` if no
+/// frame has one, or it is not an integer. Split out from
+/// `fetch_current_revision` so it is directly unit-testable against a
+/// hand-built frame with no transport involved (W17/AR-02).
+fn parse_revision_from_frames(frames: &[serde_json::Value]) -> Option<u64> {
+    frames.iter().find_map(|frame| {
+        frame
+            .pointer("/payload/revision")
+            .and_then(serde_json::Value::as_u64)
+    })
+}
+
+/// One-shot, uncached probe for the tab's current revision: sends a
+/// `history` request (not itself revision-guarded) over the already-resolved
+/// connection and reads the revision back out of the response. Never panics
+/// and never propagates an error -- any failure (no server, a malformed
+/// response, anything else) becomes `None`, and the caller proceeds exactly
+/// as it would without this feature.
+fn fetch_current_revision(resolved: &Resolved) -> Option<u64> {
+    let envelope = Envelope {
+        version: crate::PROTOCOL_VERSION,
+        request_id: "auto-revision-fetch".into(),
+        method: "history".into(),
+        revision: None,
+        auth_token: resolved.auth_token.clone(),
+        session_token: resolved.session_token.clone(),
+        payload: serde_json::json!({}),
+    };
+    let frames = request_send(resolved, &envelope).ok()?;
+    parse_revision_from_frames(&frames)
 }
 
 fn resolved_default(request: &ResolveRequest) -> Resolved {
@@ -846,4 +895,56 @@ pub fn cold_discovery_frames(method: &str) -> Vec<serde_json::Value> {
         serde_json::json!({"type": "data", "version": 1, "request_id": "cold-default", "payload": payload}),
         serde_json::json!({"type": "complete", "version": 1, "request_id": "cold-default", "sequence": 1, "result_generation": "client_default"}),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AR-01: a transport failure during the auto-fill probe must degrade to
+    /// today's behavior (no auto-filled revision) rather than panic or
+    /// propagate an error. Binds an ephemeral TCP port and drops the listener
+    /// immediately, so the address is real but guaranteed to refuse the
+    /// connection `fetch_current_revision` attempts.
+    #[test]
+    fn fetch_current_revision_returns_none_when_nothing_is_listening() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let address = listener.local_addr().expect("local addr").to_string();
+        drop(listener);
+        let resolved = Resolved {
+            endpoint: Endpoint::Tcp(address),
+            auth_token: None,
+            session_token: None,
+            cache_path: None,
+        };
+        assert_eq!(fetch_current_revision(&resolved), None);
+    }
+
+    /// AR-02: a frame with no `payload.revision` (an error-shaped response,
+    /// or any other frame missing the key) must parse to `None` rather than
+    /// panic -- exercised directly, independent of any transport.
+    #[test]
+    fn parse_revision_from_frames_returns_none_without_a_revision_field() {
+        let frames = vec![serde_json::json!({
+            "type": "error",
+            "version": 1,
+            "request_id": "x",
+            "code": "revision_required",
+            "message": "missing revision",
+        })];
+        assert_eq!(parse_revision_from_frames(&frames), None);
+    }
+
+    /// A frame that DOES carry `payload.revision` is the positive case the
+    /// two failure-path tests above need a contrast against.
+    #[test]
+    fn parse_revision_from_frames_finds_the_revision_when_present() {
+        let frames = vec![serde_json::json!({
+            "type": "data",
+            "version": 1,
+            "request_id": "x",
+            "payload": {"revision": 7},
+        })];
+        assert_eq!(parse_revision_from_frames(&frames), Some(7));
+    }
 }

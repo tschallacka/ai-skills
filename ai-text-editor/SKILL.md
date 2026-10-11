@@ -54,11 +54,12 @@ shared location every skill's compiled binaries live in:
 launches `ai-text-editor-mcp` itself from the same shared location, and
 every verb above is a typed tool call instead of a command line.
 
-The exception is the seven verbs that carry a revision guard — `insert`,
-`replace`, `large_edit`, `restore`, `undo`, `redo`, `save`. On a file with no
-tab they are refused, because the revision they carry cannot have come from a
-tab that never existed. `open` (or any read) first, then edit with the revision
-it reports.
+The exception is the nine verbs that carry a revision guard — `insert`,
+`replace`, `move`, `copy`, `large_edit`, `restore`, `undo`, `redo`, `save`. On a
+file with no tab they are refused, because the revision they carry cannot have
+come from a tab that never existed — the client fills it in automatically
+once a tab exists, but it cannot invent one for a tab that never has. `open`
+(or any read) first.
 
 Opening a path that does not exist yet is how you create a file: the tab
 starts empty and the file appears on disk only when the first `save`
@@ -163,21 +164,28 @@ is enabled for the project. Both are refused by name rather than guessed when
 absent or ambiguous (`range_start_match_ambiguous`, `symbol_ambiguous`, …) —
 never silently the first occurrence or the first matching node.
 
-**Guard by revision otherwise; add `--expected-text` only when the span's
-endpoints did not come from a read (or a search) at that revision.** A
-revision proves the document has not moved since the coordinates were read —
-for a span read and edited in the same breath, that is the whole property
-that matters, and `--expected-text` re-sending the span's own content is
-duplicated generation that costs *output* tokens for no added safety. Reach
-for `--expected-text` when a coordinate is not fresh from a read or a live
-`match_id`: a line number carried across your own earlier edits, or an offset
-you computed rather than copied. There the guard earns its cost, because it
-catches what revision cannot — the document is unchanged but the text at this
-*span* is not what you think, the way a prior edit that shifted a length
-leaves a later `delete_len` wrong even though the revision it was read at is
-still current. When you do need it, a fresh `read` (or `search`) is still the
-cheaper way to get it right: reading spends input tokens, `--expected-text`
-spends output ones, and input is the far cheaper half. Every applied edit
+**The revision guard is automatic; add `--expected-text` only when the span's
+endpoints did not come from a read (or a search) at the tab's current
+revision.** The client sources the revision for you now, so there is nothing
+to choose here on the ordinary path: an MCP tool call has no
+`expected_revision` property to set at all, and the CLI's
+`-r`/`--expected-revision` is an optional, advanced override for a caller with
+its own reason to pin a specific revision explicitly (a stale explicit value
+is still refused exactly as before). When you do pass it explicitly, the
+choice below still applies to that path — a revision proves the document has
+not moved since the coordinates were read, which for a span read and edited in
+the same breath is the whole property that matters, and `--expected-text`
+re-sending the span's own content is duplicated generation that costs *output*
+tokens for no added safety. Reach for `--expected-text` when a coordinate is
+not fresh from a read or a live `match_id`: a line number carried across your
+own earlier edits, or an offset you computed rather than copied. There the
+guard earns its cost, because it catches what revision cannot — the document
+is unchanged but the text at this *span* is not what you think, the way a
+prior edit that shifted a length leaves a later `delete_len` wrong even though
+the revision it was read at is still current. When you do need it, a fresh
+`read` (or `search`) is still the cheaper way to get it right: reading spends
+input tokens, `--expected-text` spends output ones, and input is the far
+cheaper half. Every applied edit
 reports the `offset`, `delete_len` and `deleted` bytes it resolved, so
 verifying an edit against the response never needs a read-back either way.
 On a tab opened with NFC normalization, byte offsets address the ORIGINAL
@@ -354,10 +362,12 @@ default gives you.
 4. Decide whether external bytes need a `.back` copy and whether a closing tab's
    journal is preserved or explicitly cleaned. Backup failure blocks the action.
 5. Every mutating request (`insert`, `replace`, `move`, `copy`, `large_edit`,
-   `restore`, `undo`, `redo`, and `save`) must include the revision most
-   recently returned by `open`, `history`, or a completed mutation. Missing
-   revisions are refused;
-   stale revisions are never merged implicitly.
+   `restore`, `undo`, `redo`, and `save`) carries a revision, but the client
+   supplies it automatically on both surfaces — an MCP tool call has no
+   `expected_revision` argument to set at all. A CLI caller may still pass
+   `-r`/`--expected-revision` explicitly for an advanced or scripted reason
+   to pin a specific revision; a stale explicit value is refused exactly as
+   before, and stale revisions are never merged implicitly.
 6. A request that names a file is only served by the tab holding that file;
    a request routed to a different tab is refused with `file_mismatch` and
    the fix is to `open` the named file first. Prefer `--tab-id` once you hold

@@ -5277,3 +5277,411 @@ fn copy_addresses_its_source_by_symbol_name() {
         "fn bar() {\n    other();\n}\nfn foo() {\n    body();\n}\n\nfn bar() {\n    other();\n}\n"
     );
 }
+
+// ---- ai-text-editor-automatic-revision-guard (W08-W10, W18) ---------------
+//
+// The client (not the caller) now sources the revision for a guarded verb
+// that did not supply one, fetched fresh immediately before each such
+// request. These tests prove: every guarded verb still succeeds with no
+// -r/--expected-revision anywhere on the command line (W08 the three
+// "simple" verbs, W09 the six "structural" ones); an EXPLICITLY supplied
+// stale revision is still refused exactly as before, proving the server's
+// own enforcement is untouched (W10); and the auto-filled revision survives
+// the existing session_unauthorized refresh-and-retry path (W18).
+
+#[test]
+fn insert_replace_and_save_succeed_with_no_explicit_revision_anywhere() {
+    let harness = Harness::new("autofill-simple");
+    let file = harness.write("autofill.txt", "one\ntwo\n");
+    harness.open(&file);
+
+    let inserted = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "zero\n",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        inserted.status.success(),
+        "insert with no -r must succeed via client auto-fill: {}",
+        stderr_text(&inserted)
+    );
+
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "ONE\n",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        replaced.status.success(),
+        "replace with no -r must succeed via client auto-fill: {}",
+        stderr_text(&replaced)
+    );
+
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(
+        saved.status.success(),
+        "save with no -r must succeed via client auto-fill: {}",
+        stderr_text(&saved)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "zero\nONE\ntwo\n",
+        "every edit above must actually have applied"
+    );
+}
+
+#[test]
+fn move_copy_undo_and_redo_succeed_with_no_explicit_revision() {
+    let harness = Harness::new("autofill-structural");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    harness.open(&file);
+
+    // move: no -r.
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "3",
+        "--range-end-line",
+        "3",
+        "--dest-line",
+        "1",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        moved.status.success(),
+        "move with no -r must succeed via client auto-fill: {}",
+        stderr_text(&moved)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap_or_default(),
+        "alpha\nbeta\ngamma\n",
+        "move alone does not touch disk until save"
+    );
+
+    // copy: no -r.
+    let copied = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "4",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        copied.status.success(),
+        "copy with no -r must succeed via client auto-fill: {}",
+        stderr_text(&copied)
+    );
+
+    // undo: no -r.
+    let undone = harness.client(&["undo", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(
+        undone.status.success(),
+        "undo with no -r must succeed via client auto-fill: {}",
+        stderr_text(&undone)
+    );
+
+    // redo: no -r.
+    let redone = harness.client(&["redo", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(
+        redone.status.success(),
+        "redo with no -r must succeed via client auto-fill: {}",
+        stderr_text(&redone)
+    );
+
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "gamma\nalpha\nbeta\ngamma\n",
+        "the move (alpha..gamma -> gamma,alpha,beta) and the copy \
+         (undone then redone, duplicating the now-first \"gamma\" line \
+         at the end) applied together"
+    );
+}
+
+#[test]
+fn restore_succeeds_with_no_explicit_revision() {
+    // normalize_nfc is a server-startup-wide setting (state_guard.normalize_nfc
+    // in ai-text-editor-server.rs), applied to every tab THAT server opens --
+    // not a per-open-request flag like document_mode. So this needs its own
+    // fresh workspace whose FIRST open carries --normalize-nfc, rather than
+    // reusing a harness/server that already started without it.
+    let harness = Harness::new("autofill-restore");
+    let file = harness.write("normalized.txt", "hello\n");
+    let opened = harness.client(&[
+        "open",
+        "-f",
+        file.to_str().unwrap(),
+        "--normalize-nfc",
+        "-p",
+        "structured",
+    ]);
+    assert!(opened.status.success(), "{}", stderr_text(&opened));
+
+    // Plain ASCII normalizes trivially, so restore_original succeeds with
+    // nothing lossy to refuse -- and no -r anywhere on this call.
+    let restored = harness.client(&["restore", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(
+        restored.status.success(),
+        "restore with no -r must succeed via client auto-fill: {}",
+        refusal_text(&restored)
+    );
+}
+
+#[test]
+fn large_edit_with_no_explicit_revision_succeeds_via_client_auto_fill() {
+    let harness = Harness::new("autofill-large-edit");
+    let file = harness.write("large.txt", "alpha\nbeta\ngamma\n");
+
+    // large_edit only reaches a bounded large-file tab; force this small
+    // file to count as one by starting the server directly with a
+    // near-zero --large-threshold-bytes, since the per-file autostart the
+    // other tests in this file use has no flag to lower the threshold.
+    let mut server_command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor-server"));
+    server_command
+        .env("HOME", &harness.scratch)
+        .env("XDG_RUNTIME_DIR", harness.scratch.join("runtime"))
+        .env("TSCH_AI_EDITOR_METADATA_DIR", harness.scratch.join("meta"))
+        .env(
+            "TSCH_AI_EDITOR_SESSION_DIR",
+            harness.scratch.join("sessions"),
+        )
+        .env("TSCH_AI_EDITOR_AGENT", &harness.agent)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("CODEX_SESSION_ID")
+        .env_remove("OPENCODE_PID")
+        .arg("start")
+        .arg("--file")
+        .arg(&file)
+        .arg("--large-threshold-bytes")
+        .arg("1")
+        .stdout(std::process::Stdio::piped());
+    let mut server = server_command.spawn().expect("server binary must start");
+    let stdout = server.stdout.take().expect("piped stdout");
+    let endpoint = std::io::BufRead::lines(std::io::BufReader::new(stdout))
+        .map_while(Result::ok)
+        .find_map(|line| {
+            serde_json::from_str::<Value>(&line)
+                .ok()
+                .and_then(|value| value.get("endpoint")?.as_str().map(str::to_owned))
+        })
+        .expect("the server announces its endpoint on stdout");
+    assert!(endpoint.starts_with("unix:"), "endpoint: {endpoint}");
+
+    let session = harness.path("large-edit-session.json");
+    let opened = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint,
+        "--save-session-token",
+        session.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]);
+    assert!(opened.status.success(), "{}", stderr_text(&opened));
+    assert_eq!(
+        first_payload(&opened)["large_file"],
+        json!(true),
+        "the lowered threshold must make this tab a large-file tab"
+    );
+
+    let started = harness.client(&[
+        "job-start",
+        "--endpoint",
+        &endpoint,
+        "--session-token",
+        session.to_str().unwrap(),
+        "--owner",
+        "w09-large-edit",
+    ]);
+    assert!(started.status.success(), "{}", stderr_text(&started));
+    let job = &first_payload(&started)["job"];
+    let job_id = job["id"].to_string();
+    let resume_token = job["resume_token"].as_str().unwrap().to_owned();
+
+    // No -r/--expected-revision anywhere on this large-edit call.
+    let edited = harness.client(&[
+        "large-edit",
+        "--endpoint",
+        &endpoint,
+        "--session-token",
+        session.to_str().unwrap(),
+        "-j",
+        &job_id,
+        "--resume-token",
+        &resume_token,
+        "--acknowledge-large-edit",
+        "-o",
+        "0",
+        "-d",
+        "5",
+        "-t",
+        "ALPHA",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        edited.status.success(),
+        "large-edit with no -r must succeed via client auto-fill: {}",
+        stderr_text(&edited)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "ALPHA\nbeta\ngamma\n",
+        "large_edit rewrites the file directly, not just the in-memory buffer"
+    );
+
+    let _ = server.kill();
+    let _ = server.wait();
+}
+
+#[test]
+fn an_explicitly_supplied_stale_revision_is_still_refused() {
+    // The server's own enforcement must be completely untouched: an
+    // EXPLICIT, stale -r is refused exactly as before this initiative,
+    // regardless of the client's new ability to auto-fill an OMITTED one.
+    let harness = Harness::new("explicit-stale-regression");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let stale_revision = revision_of(&opened).to_string();
+
+    // Advance the real revision with an auto-filled (omitted) edit, so the
+    // captured revision above is now genuinely stale.
+    let advanced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "ALPHA\n",
+        "-p",
+        "structured",
+    ]);
+    assert!(advanced.status.success(), "{}", stderr_text(&advanced));
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "ALPHA\nbeta\n");
+
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "BETA\n",
+        "-r",
+        &stale_revision,
+        "-p",
+        "text",
+    ]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(
+        refused.stdout.is_empty(),
+        "a refused edit must not print a payload"
+    );
+    let error = stderr_text(&refused);
+    assert!(
+        error.contains("stale_revision"),
+        "an explicitly stale revision must still be refused: {error}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "ALPHA\nbeta\n",
+        "the refused explicit-revision call must not have touched the file"
+    );
+}
+
+#[test]
+fn an_auto_filled_revision_survives_the_session_unauthorized_retry() {
+    // AR-04: execute()'s existing session_unauthorized refresh-and-retry
+    // path must carry the retry through send_envelope too, not the bare
+    // build closure -- otherwise the retry's envelope reverts to
+    // revision: None and the retry itself fails with revision_required.
+    let harness = Harness::new("autofill-retry-survives");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    harness.open(&file);
+
+    // Corrupt the cached session token on disk so the NEXT call's first
+    // attempt is refused session_unauthorized, forcing execute() onto its
+    // refresh-and-retry path.
+    let session_dir = harness.scratch.join("sessions");
+    let mut corrupted_any = false;
+    for entry in std::fs::read_dir(&session_dir)
+        .expect("session dir must exist after the open above")
+        .flatten()
+    {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path).expect("read session file");
+        let Ok(mut value) = serde_json::from_str::<Value>(&content) else {
+            continue;
+        };
+        if value.get("session_token").is_none() {
+            continue;
+        }
+        value["session_token"] = json!("corrupted-not-a-real-token");
+        std::fs::write(&path, serde_json::to_string(&value).unwrap()).expect("rewrite session");
+        corrupted_any = true;
+    }
+    assert!(
+        corrupted_any,
+        "expected to find and corrupt at least one cached session file under {}",
+        session_dir.display()
+    );
+
+    // No -r here either: the retry must still auto-fill it.
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "ALPHA\n",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        replaced.status.success(),
+        "a guarded call with no -r must survive the session_unauthorized retry \
+         with the revision still auto-filled, not reverted to None: {}",
+        stderr_text(&replaced)
+    );
+
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "ALPHA\nbeta\n");
+}

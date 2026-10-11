@@ -802,6 +802,30 @@ reconfirmed (`required: ["expected_revision"]`, description says
 `spike/optional-revision` only (`991ef66d`), still unpushed, still not on
 `master`.
 
+## Real implementation (schema property removed, not just optional): same `bash-7-challenge` rate as the corrected spike (2026-10-11)
+
+**Shipped-quality, not a spike -- the full planning-skill track's output, uncommitted on `master`.** The two spikes above tested "`expected_revision` optional, with or without a matching description string." The real implementation goes one step further than either: `ai-text-editor-mcp`'s MCP schema drops `expected_revision` from `properties` entirely on every affected tool (not merely from `required`), so a caller cannot pass it through the normal MCP tool-calling surface even if it tried -- confirmed by a direct `tools/list` probe (`replace`'s schema: no `expected_revision` key, `required: []`) before this run. The client (`ai-text-editor`/`ai-text-editor-mcp`, through the shared `client::execute()` seam) now fetches the tab's current revision itself, just-in-time, immediately before composing any guarded request that has none -- no cache, no identity-keyed state, nothing the caller has to track. The server's own enforcement (`is_revision_guarded`, `RevisionGuard::check`) is untouched.
+
+Same mechanism, same `run-case.sh` path, `levers=none`: `bash-7-challenge` x5 (`results/20261011T101240Z-automatic-revision-guard-verify/bash-7-challenge-rep{1..5}`), plus `bash-2-terse` x2 and `bash-4-directive` x2 as regression sanity checks (both held 2/2 in the corrected-spike pass).
+
+| variant | this run | original (mandatory revision) | confounded spike | corrected spike |
+|---|---|---|---|---|
+| bash-7-challenge | **3/5** | 2/5 | 0/4 | 3/5 |
+| bash-2-terse | 1/2 | -- (5/5 @ n=5 in the 30-rep trial) | -- | 2/2 |
+| bash-4-directive | 1/2 | -- (5/5 @ n=5 in the 30-rep trial) | -- | 2/2 |
+
+**`bash-7-challenge` did not move past the corrected spike's 3/5 at this n.** The structurally stronger fix -- the property is genuinely gone, not just described as optional -- did not raise the rate further. The two declines (`rep1`, `rep4`) are both the familiar skim-to-`Edit` reflex, not a deliberated rejection: `rep4` never called `ToolSearch` at all (straight `Bash`/`Edit`/`Write`, matching the 30-rep trial's "reflexive first move" finding); `rep1` *did* call `ToolSearch` and load the real (now-propertyless) schemas, then went straight to `Edit` with an empty thinking block and no stated reason -- unlike the ORIGINAL `bash-7-challenge-rep1` from the first 30-rep trial, which explicitly reasoned "a full rewrite with Write is simpler than about ten revision-guarded replaces." That specific argument is no longer even available to cite, since there is nothing revision-shaped left in the schema to point at -- consistent with this fix closing off one stated rationale for declining without touching the underlying skim reflex that drives most declines regardless of wording.
+
+**The property genuinely never leaked through, on every adopting call, with no exceptions** -- checked directly against the raw transcripts (not inferred from the score): every `mcp__ai-text-editor__{open,replace,save,insert,search,read}` call across all five adopting reps (`bash-7-challenge-rep2/3/5`, `bash-2-terse-rep1`, `bash-4-directive-rep2`) was grepped for `expected_revision` in its `tool_use` input, and it appears zero times, across 13 `replace` calls, 3 `insert` calls, 7 `save` calls, and more. This is the one real upgrade over the corrected spike's finding: there, "most adopting calls omitted the argument" was a model choice (it could have supplied one; most didn't); here it is a structural guarantee -- there is no argument slot to fill, so "always omitted" is not a rate to report at all, just a fact about the schema.
+
+**Nothing broke.** `score.json`'s `all_three_edits_correct`, `tax_rate_external_edit_preserved`, `external_reformat_preserved`, and `tests_pass` were all `true` across every one of the 9 reps, adopted or not -- matching the spikes' own clean safety record.
+
+**`bash-2-terse`/`bash-4-directive` at 1/2 each is a drop from the corrected spike's 2/2**, but at `n=2` per variant that is one rep's difference, well within noise against the 30-rep trial's own 5/5 ceiling for both wordings -- not treated here as a regression signal, just reported honestly rather than rounded up. Both declines were pure skim-to-`Edit` with no `ToolSearch` call at all, the same failure mode seen everywhere else in this file, not anything specific to the real implementation's schema change.
+
+Implementation: the uncommitted working-tree changes to `src/ai-text-editor/src/client.rs`, `src/ai-text-editor-mcp/src/lib.rs`, `src/ai-text-editor/src/bin/ai-text-editor.rs`, and the three reader-facing docs, built via the approved plan `.plans/ai-text-editor-automatic-revision-guard/` (3 goals, 18 work units, 4 adversarial review cycles). Raw results under `results/20261011T101240Z-automatic-revision-guard-verify/` (gitignored, not committed). Binaries confirmed to match the working tree (`cargo build --release -p ai-text-editor -p ai-text-editor-mcp` reported already up to date) before this run.
+
+**Open after this:** `bash-7-challenge`'s 3/5-vs-3/5 result at `n=5`-vs-`n=5`/`n=4` across three different implementations (mandatory, corrected-optional, property-removed) is still too thin to say the structural fix made no difference at all -- it could easily be the same underlying rate with sampling noise on both sides. The more informative next step is probably not more `bash-7-challenge` reps but checking whether the property's removal changes anything measurable in the *adopting* reps' own behavior beyond "never supplies it" (already confirmed) -- e.g. fewer stale-revision retries, less back-and-forth on `replace` -- since the adoption-rate bit alone may simply be insensitive to this particular lever at the sample sizes this benchmark can afford.
+
 ## Open follow-ups
 
 - **Done (2026-10-10), and it worked:** naming `ToolSearch` explicitly in
