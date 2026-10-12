@@ -242,6 +242,52 @@ impl Drop for Harness {
     }
 }
 
+/// B4: nothing used to start tailpipe-server-rs automatically, and
+/// `Harness::start()` above always pre-starts one by hand -- which is
+/// exactly why this gap went uncaught by this crate's own test suite.
+/// This spawns only the adapter, against an endpoint nothing has ever
+/// bound, and proves `list_streams` autostarts a server on its own rather
+/// than failing with a bare connection error.
+#[test]
+fn the_adapter_autostarts_tailpipe_server_rs_with_no_manual_start() {
+    ensure_built(&sibling_bin_dir(), "tailpipe-server-rs");
+    let dir = scratch();
+    let endpoint = dir.join("tailpipe.sock");
+    assert!(!endpoint.exists(), "nothing should be listening yet");
+
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_tailpipe-mcp"))
+        .env("TAILPIPE_ENDPOINT", &endpoint)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start tailpipe-mcp");
+    let mut stdin = adapter.stdin.take().unwrap();
+    let stdout = adapter.stdout.take().unwrap();
+    let (sender, lines) = channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = sender.send(line);
+        }
+    });
+
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_streams","arguments":{}}})
+    )
+    .unwrap();
+    let line = lines
+        .recv_timeout(Duration::from_secs(10))
+        .expect("adapter never answered list_streams against a cold endpoint");
+    let response: Value = serde_json::from_str(&line).unwrap();
+    let result = Harness::tool_result(&response);
+    assert_eq!(result["streams"], json!([]), "{response}");
+
+    let _ = adapter.kill();
+    let _ = adapter.wait();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn all_five_tools_round_trip_through_the_adapter() {
     let mut harness = Harness::start();
@@ -301,5 +347,51 @@ fn all_five_tools_round_trip_through_the_adapter() {
     assert_eq!(
         wait_result["line"],
         json!({"id": 2, "text": "pushed while waiting"})
+    );
+}
+
+/// B3: the schema used to advertise from/to/since/timeout_seconds as
+/// `"type": "string"`, and a client that honors the advertised schema (as
+/// Claude Code does) sends exactly that -- a JSON string, not a number.
+/// `all_five_tools_round_trip_through_the_adapter` above never caught this
+/// because it crafts its own JSON by hand with real numbers; this sends the
+/// numeric arguments as strings instead, the shape a schema-honoring caller
+/// actually produces.
+#[test]
+fn reads_and_waits_numeric_arguments_also_work_as_the_schema_honoring_strings_claude_code_sends() {
+    let mut harness = Harness::start();
+    harness.ingest("s", "hello world");
+
+    let read_response = harness.call("read", json!({"stream": "s", "from": "1", "to": "1"}));
+    let read_result = Harness::tool_result(&read_response);
+    assert_eq!(
+        read_result["lines"],
+        json!([{"id": 1, "text": "hello world"}]),
+        "{read_response}"
+    );
+
+    let id = harness.next_id;
+    harness.next_id += 1;
+    let wait_message = json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"wait","arguments":{"stream":"s","since":"1","timeout_seconds":"10"}}});
+    writeln!(harness.stdin, "{wait_message}").unwrap();
+
+    std::thread::sleep(Duration::from_millis(200));
+    harness.ingest("s", "pushed while waiting");
+
+    let wait_response = loop {
+        let line = harness
+            .lines
+            .recv_timeout(Duration::from_secs(5))
+            .expect("adapter never answered wait");
+        let response: Value = serde_json::from_str(&line).unwrap();
+        if response["id"] == json!(id) {
+            break response;
+        }
+    };
+    let wait_result = Harness::tool_result(&wait_response);
+    assert_eq!(
+        wait_result["line"],
+        json!({"id": 2, "text": "pushed while waiting"}),
+        "{wait_response}"
     );
 }

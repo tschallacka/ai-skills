@@ -191,8 +191,21 @@ fn string_arg(arguments: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// B3: the schema used to declare every argument -- including this one's --
+/// as `"type": "string"` unconditionally, so a caller honoring that schema
+/// (Claude Code among them) sent a JSON string for from/to/since/
+/// timeout_seconds, which `Value::as_u64` never matches even when the
+/// string holds a parseable integer. Accepting a numeric string here too,
+/// on top of fixing the schema's own types below, means a client that still
+/// sends a string (an older schema snapshot, a stricter MCP client that
+/// prefers over-wide inputs) keeps working rather than failing again the
+/// same way.
 fn u64_arg(arguments: &Value, key: &str) -> Option<u64> {
-    arguments.get(key).and_then(Value::as_u64)
+    match arguments.get(key) {
+        Some(Value::Number(number)) => number.as_u64(),
+        Some(Value::String(text)) => text.parse().ok(),
+        _ => None,
+    }
 }
 
 fn call_tool(id: Value, params: Value) -> Value {
@@ -257,10 +270,30 @@ fn call_tool(id: Value, params: Value) -> Value {
     }
 }
 
+/// B3: the JSON schema type for an argument, not just its name and doc --
+/// the earlier shape stamped every argument "string" regardless, so a
+/// numeric one (from/to/since/timeout_seconds) advertised a type its own
+/// handler could never satisfy from a schema-honoring caller.
+#[derive(Clone, Copy)]
+enum ArgType {
+    String,
+    Integer,
+}
+
+impl ArgType {
+    fn as_json_type(self) -> &'static str {
+        match self {
+            ArgType::String => "string",
+            ArgType::Integer => "integer",
+        }
+    }
+}
+
+type Arg = (&'static str, &'static str, ArgType);
 type ToolDef = (
     &'static str,
     &'static str,
-    &'static [(&'static str, &'static str)],
+    &'static [Arg],
     &'static [&'static str],
 );
 
@@ -271,9 +304,9 @@ fn tool_definitions() -> Vec<Value> {
             "read",
             "Read a named stream's lines in an inclusive id range.",
             &[
-                ("stream", "the stream name"),
-                ("from", "the first id, inclusive"),
-                ("to", "the last id, inclusive"),
+                ("stream", "the stream name", ArgType::String),
+                ("from", "the first id, inclusive", ArgType::Integer),
+                ("to", "the last id, inclusive", ArgType::Integer),
             ],
             &["stream", "from", "to"],
         ),
@@ -281,9 +314,9 @@ fn tool_definitions() -> Vec<Value> {
             "search",
             "Run an exact-text or regex search against a named stream's retained lines.",
             &[
-                ("stream", "the stream name"),
-                ("mode", "exact or regex"),
-                ("query", "the text or pattern to search for"),
+                ("stream", "the stream name", ArgType::String),
+                ("mode", "exact or regex", ArgType::String),
+                ("query", "the text or pattern to search for", ArgType::String),
             ],
             &["stream", "mode", "query"],
         ),
@@ -291,26 +324,30 @@ fn tool_definitions() -> Vec<Value> {
             "wait",
             "Block (bounded by timeout_seconds) until stream has a line past since, then return it.",
             &[
-                ("stream", "the stream name"),
-                ("since", "the cursor id to wait past (default 0)"),
-                ("timeout_seconds", "how long to wait before giving up (default 30)"),
+                ("stream", "the stream name", ArgType::String),
+                ("since", "the cursor id to wait past (default 0)", ArgType::Integer),
+                (
+                    "timeout_seconds",
+                    "how long to wait before giving up (default 30)",
+                    ArgType::Integer,
+                ),
             ],
             &["stream"],
         ),
         (
             "save",
             "Trigger a gzip snapshot of a named stream without evicting it.",
-            &[("stream", "the stream name")],
+            &[("stream", "the stream name", ArgType::String)],
             &["stream"],
         ),
     ];
     defs.iter()
         .map(|(name, description, arguments, required)| {
             let mut properties = Map::new();
-            for (key, doc) in arguments.iter() {
+            for (key, doc, arg_type) in arguments.iter() {
                 properties.insert(
                     (*key).to_string(),
-                    json!({"type": "string", "description": doc}),
+                    json!({"type": arg_type.as_json_type(), "description": doc}),
                 );
             }
             json!({
@@ -406,5 +443,44 @@ mod tests {
             names,
             vec!["list_streams", "read", "search", "wait", "save"]
         );
+    }
+
+    /// B3: read and wait's numeric arguments must advertise a type their
+    /// own handler can actually be sent -- a schema-honoring caller sends
+    /// what the schema says, and "string" here meant from/to/since/
+    /// timeout_seconds could never parse via `Value::as_u64`.
+    #[test]
+    fn reads_and_waits_numeric_arguments_are_typed_integer_not_string() {
+        let response = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}));
+        let tools = response["result"]["tools"].as_array().unwrap();
+        let schema_type = |tool: &str, arg: &str| {
+            tools
+                .iter()
+                .find(|t| t["name"] == tool)
+                .and_then(|t| t["inputSchema"]["properties"][arg]["type"].as_str())
+                .map(str::to_string)
+        };
+        assert_eq!(schema_type("read", "from"), Some("integer".into()));
+        assert_eq!(schema_type("read", "to"), Some("integer".into()));
+        assert_eq!(schema_type("read", "stream"), Some("string".into()));
+        assert_eq!(schema_type("wait", "since"), Some("integer".into()));
+        assert_eq!(
+            schema_type("wait", "timeout_seconds"),
+            Some("integer".into())
+        );
+        assert_eq!(schema_type("search", "mode"), Some("string".into()));
+        assert_eq!(schema_type("search", "query"), Some("string".into()));
+    }
+
+    #[test]
+    fn u64_arg_accepts_a_real_number_and_a_numeric_string_alike() {
+        assert_eq!(u64_arg(&json!({"from": 3}), "from"), Some(3));
+        assert_eq!(u64_arg(&json!({"from": "3"}), "from"), Some(3));
+    }
+
+    #[test]
+    fn u64_arg_refuses_a_non_numeric_string_and_a_missing_key() {
+        assert_eq!(u64_arg(&json!({"from": "not a number"}), "from"), None);
+        assert_eq!(u64_arg(&json!({}), "from"), None);
     }
 }
