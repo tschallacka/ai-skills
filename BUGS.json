@@ -1,6 +1,6 @@
 {
   "skill": "bug-report",
-  "skill_version": "2.0.0-alpha.8",
+  "skill_version": "2.0.0-alpha.9",
   "comment": "Defects found in this repository's own skills and installer.",
   "bugs": [
     {
@@ -45,72 +45,6 @@
       "notes": null,
       "created_at": "2026-10-08T20:03:51Z",
       "updated_at": "2026-10-08T20:03:51Z"
-    },
-    {
-      "id": "B3",
-      "title": "tailpipe-mcp's read/wait args are schema-typed string but handler parses only JSON numbers",
-      "status": "fixed",
-      "severity": "major",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "Call the tailpipe MCP read tool with {stream, from, to} exactly as its own advertised schema types them (strings) -- e.g. a harness like Claude Code that honors inputSchema and sends from/to/since/timeout_seconds as JSON strings. Or call tools/list and inspect read/wait's inputSchema directly.",
-      "observed": "read refuses every call with 'read needs from' (and 'read needs to') because from/to never parse; wait silently ignores a supplied since and timeout_seconds, always behaving as since=0/timeout_seconds=30. Confirmed at the source: tool_definitions() in src/tailpipe-mcp/src/lib.rs (~line 313) stamps every argument's schema type as \"string\" unconditionally, including from/to/since/timeout_seconds, while call_tool's u64_arg() reads them via Value::as_u64(), which returns None for a JSON string even when its content is a parseable integer. list_streams and search work because none of their arguments are numeric.",
-      "expected": "read and wait accept the numeric arguments a client sends honoring the tool's own advertised schema. Fix by either (a) declaring from/to/since/timeout_seconds as schema type \"integer\" and keeping u64_arg as-is, or (b) keeping them \"string\" in the schema and making u64_arg also accept a numeric string (parse::<u64>() on a string value) -- whichever direction is chosen, schema and handler must agree.",
-      "mechanism": "tool_definitions()'s per-argument schema builder (src/tailpipe-mcp/src/lib.rs ~line 310-314) applies one shared json!({\"type\": \"string\", ...}) template to every argument regardless of the tool, so a numeric argument's schema was never distinguished from a textual one; call_tool's u64_arg() helper (~line 194) was written assuming numeric JSON input and never reconciled against that generic schema.",
-      "surfaces": [
-        "tailpipe-mcp",
-        "read",
-        "wait"
-      ],
-      "fix": "src/tailpipe-mcp/src/lib.rs: tool_definitions() now carries a per-argument ArgType (String|Integer) instead of stamping every argument \"type\": \"string\" unconditionally -- read's from/to and wait's since/timeout_seconds are now schema-typed integer. u64_arg() also made lenient (accepts a JSON number or a numeric JSON string) so a client still on an older cached schema keeps working too.",
-      "verification": "New tests: reads_and_waits_numeric_arguments_are_typed_integer_not_string and u64_arg_accepts_a_real_number_and_a_numeric_string_alike/u64_arg_refuses_a_non_numeric_string_and_a_missing_key (unit, src/tailpipe-mcp/src/lib.rs); reads_and_waits_numeric_arguments_also_work_as_the_schema_honoring_strings_claude_code_sends (integration, src/tailpipe-mcp/tests/mcp_flow.rs) -- confirmed failing before the fix (adapter error) and passing after. Full tailpipe-mcp/tailpipe-client-rs/tailpipe-server-rs suites green, fmt/clippy clean, full ./run-tests.sh (263/263) green.",
-      "found_by": "a Claude Code session exercising the newly-installed tailpipe skill end-to-end: confirmed read/wait fail via the MCP tool but succeed when the same requests are sent to the adapter directly over stdio with real JSON numbers",
-      "notes": "list_streams and search are unaffected (no numeric arguments). save takes only 'stream', also unaffected.",
-      "created_at": "2026-10-12T13:10:32Z",
-      "updated_at": "2026-10-12T13:51:30Z"
-    },
-    {
-      "id": "B5",
-      "title": "ai-text-editor opening a file replayed 16 stale journal edits into the buffer, leaving the tab dirty/diverged on open",
-      "status": "fixed",
-      "severity": "major",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "Reported secondhand, not yet reproduced in this repo: in another session's own project (unrelated to ai-skills), opening a file (OutfitHelper.php) in ai-text-editor during unspecified merge-related work replayed 16 old journal records into the buffer on open. Closing and reopening the tab replayed the same 16 edits again rather than reconciling against the current disk content.",
-      "observed": "The tab came up dirty (unsaved edits present), disk_diverged true, and the buffer's content did not match the file on disk -- consistent with journal.rs's Journal::replay() re-applying every record it holds unconditionally rather than against a confirmed starting state. The reporting agent worked around it by using plain Edit instead of ai-text-editor, and explicitly did not clear/discard the journal, so the stale records (and whatever server-side tab/session state produced this) should still be inspectable.",
-      "expected": "Opening a file should replay only edits that genuinely belong to the current document state, and reopening an already-reconciled tab should not re-apply the same records a second time. Needs: (1) reproduction against a real file+journal in this repo (the reporting session's own file/journal are not available here), (2) reading journal.rs's replay() together with whatever open()/tab-bootstrap code decides how much journal history to apply and when a journal is considered stale vs. current, to find where the staleness/replay-idempotency check is missing.",
-      "mechanism": "Not yet root-caused -- flagged as needing investigation, not fixed. journal.rs's own replay() (src/ai-text-editor/src/journal.rs) unconditionally replays every record currently in the journal file; whatever decides when a tab's journal should instead be rotated/cleared/treated as already-applied is elsewhere (open/tab-bootstrap, not inspected yet).",
-      "surfaces": [
-        "ai-text-editor"
-      ],
-      "fix": "src/ai-text-editor/src/bin/ai-text-editor-server.rs (both tab-construction sites): saved_digest, used by tab_dirty(), was stamped from the pre-replay disk read at open time -- effectively 'saved means matches whatever disk holds right now'. Moved it to after the journal replay loop, computed from journal_base (the bytes as of the journal's last save record, or the first edit's own before-state with no save yet -- the same fallback the existing external-change check already uses), so a tab whose only journal history is edit-then-save now correctly reports dirty: false on reopen even when disk has moved on since (a merge, an external tool), while a tab with real edits after its last save still reports dirty: true.",
-      "verification": "Reproduced and fixed from a user-supplied exact repro (create/open/replace-line/save/close-preserve/external-rewrite/reopen), not secondhand. New test a_saved_edit_replays_clean_even_when_disk_has_since_moved_on (src/ai-text-editor/tests/cli_flow.rs) fails before the fix with the EXACT reported shape (dirty:true, disk_diverged:false, external_change_pending:true, journal_replay.edits:1) and passes after; also asserts stability across a second close/reopen. Confirmed save()'s own independent disk check (separate from the dirty flag) already prevented the 'quietly overwrite' data-loss scenario the report worried about -- this fix corrects the misleading status, not a silent-overwrite risk. Full ai-text-editor/ai-text-editor-mcp suites green (116 tests), fmt/clippy clean, full ./run-tests.sh (263/263) green.",
-      "found_by": "a Claude Code session using ai-text-editor for real editing work in its own unrelated project, reported secondhand",
-      "notes": "Not locally reproduced yet -- filed from a relayed report so it is not lost, per the bug-report skill's own convention for an unverified report. Reproduction needs a tab whose journal already holds edits from a prior session, then opened again while the file has also changed on disk.",
-      "created_at": "2026-10-12T13:11:31Z",
-      "updated_at": "2026-10-12T13:51:30Z"
-    },
-    {
-      "id": "B4",
-      "title": "tailpipe has no autostart: an agent must manually launch tailpipe-server-rs before any MCP tool or CLI reader works",
-      "status": "fixed",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": "B3",
-      "reproduce": "With no tailpipe-server-rs running, call any tailpipe MCP tool (e.g. list_streams) or tailpipe-client-rs subcommand against the default endpoint.",
-      "observed": "The MCP adapter's call fails with a plain connection error (observed as 'No such file' against the socket path) and nothing starts a server to recover. Confirmed at the source: tailpipe_mcp::request()/connect_and_request() (src/tailpipe-mcp/src/lib.rs, src/tailpipe-client-rs/src/client.rs) only connects -- the sole Command::new(...).spawn() of tailpipe-server-rs anywhere in the production client/adapter code is inside #[cfg(test)] helpers, never on a live request path. tailpipe-mcp also exposes no start_server tool (unlike chat-mcp's own start_server, which is one of chat's listed tools).",
-      "expected": "A caller should not need to know tailpipe-server-rs exists or launch it by hand, mirroring ai-text-editor's own autostart-on-first-use (every verb starts a server if none is running) or, failing that, an explicit start_server tool the same shape as chat-mcp's. Either approach needs a decision on where discovery/autostart should live (the shared client crate so both the MCP adapter and the CLI benefit, vs. MCP-only) before implementing.",
-      "mechanism": "No autostart path exists in tailpipe_client_rs::client::connect_and_request or tailpipe_mcp::request(); design gap, not a regression.",
-      "surfaces": [
-        "tailpipe-mcp",
-        "tailpipe-client-rs"
-      ],
-      "fix": "src/tailpipe-client-rs/src/client.rs: connect_and_request and tail now go through a shared connect_autostarting() -- on NotFound/ConnectionRefused it autostarts tailpipe-server-rs at the resolved endpoint (sibling-to-current-exe binary resolution, StaleLock-coordinated against a racing caller, bounded poll for the socket to come up), mirroring ai-text-editor's own autostart-on-first-use. Added stale-lock as a dependency. tailpipe/SKILL.md documents the new behavior.",
-      "verification": "New tests: a_cold_endpoint_autostarts_tailpipe_server_rs_with_no_manual_start (src/tailpipe-client-rs/tests/cli_flow.rs, real subprocess, no pre-started server) and the_adapter_autostarts_tailpipe_server_rs_with_no_manual_start (src/tailpipe-mcp/tests/mcp_flow.rs, same, through the real MCP adapter) -- both confirmed failing before the fix (No such file or directory) and passing after. Full tailpipe-* suites green, fmt/clippy clean, full ./run-tests.sh (263/263) green.",
-      "found_by": "the same session that found B3, during first-time setup of the newly-installed tailpipe skill",
-      "notes": "Worked around by starting the server by hand on the endpoint the MCP adapter resolves to (resolve_endpoint() in src/tailpipe-mcp/src/lib.rs: $TAILPIPE_ENDPOINT, else $TAILPIPE_HOME, else $XDG_CONFIG_HOME/tsch-ai-skills/tailpipe/tailpipe.sock). Correction: B4 is NOT a sub-issue of B3 -- they are two independent defects found in the same session (a type mismatch vs. a missing autostart path). The --parent B3 set at filing time was a mistake; treat B4 as standalone.",
-      "created_at": "2026-10-12T13:10:47Z",
-      "updated_at": "2026-10-12T13:51:30Z"
     }
   ]
 }
