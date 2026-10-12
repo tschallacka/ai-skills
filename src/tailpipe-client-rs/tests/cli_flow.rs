@@ -194,6 +194,50 @@ fn run_client(args: &[&str], stdin_text: Option<&str>) -> String {
     String::from_utf8_lossy(&output.stdout).to_string()
 }
 
+/// B4: nothing used to start tailpipe-server-rs automatically -- every other
+/// verb in this skill family either autostarts (ai-text-editor) or offers an
+/// explicit start_server tool (chat). This proves the fix through the real
+/// compiled binaries, with no `Server::start()` call at all: the endpoint
+/// names a fresh directory nothing has ever bound, so every one of these
+/// calls must autostart on its own.
+#[test]
+fn a_cold_endpoint_autostarts_tailpipe_server_rs_with_no_manual_start() {
+    ensure_built(&sibling_bin_dir(), "tailpipe-server-rs");
+    let dir = short_temp_dir().join(format!(
+        "tailpipe-autostart-{}-{}",
+        std::process::id(),
+        unique()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let endpoint = dir.join("tailpipe.sock");
+    let endpoint_str = endpoint.to_str().unwrap();
+    assert!(!endpoint.exists(), "nothing should be listening yet");
+
+    run_client(
+        &["ingest", "--endpoint", endpoint_str, "--stream", "s"],
+        Some("alpha\n"),
+    );
+    let list_out = run_client(&["list", "--endpoint", endpoint_str], None);
+    assert!(list_out.lines().any(|line| line == "s"), "{list_out}");
+    let read_out = run_client(
+        &[
+            "read",
+            "--endpoint",
+            endpoint_str,
+            "--stream",
+            "s",
+            "--from",
+            "1",
+            "--to",
+            "1",
+        ],
+        None,
+    );
+    assert_eq!(read_out.lines().collect::<Vec<_>>(), vec!["1\talpha"]);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn ingest_list_read_and_save_round_trip() {
     let server = Server::start();

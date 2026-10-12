@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 tailpipe-server-rs = { path = "../tailpipe-server-rs" }
+stale-lock = { path = "../stale-lock" }
 serde_json.workspace = true
 
 [dev-dependencies]

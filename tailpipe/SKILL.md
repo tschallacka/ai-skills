@@ -27,6 +27,13 @@ transport uses) and serves every connection on its own thread. A stream is
 created on its first ingested line and lives in memory until it is
 explicitly saved or evicted.
 
+Starting it by hand is never required: every reader and MCP call autostarts
+one at the endpoint it resolves to if nothing answers there yet (a missing
+socket, or a stale one left by a server that already exited), mirroring
+ai-text-editor's own autostart-on-first-use. Two callers racing to notice
+the same missing server coordinate through a lock file next to the
+endpoint, so only one of them actually spawns it.
+
 **Idle eviction.** A stream with no read or write for `--idle-timeout-ms`
 (default 900000, 15 minutes) is snapshotted -- gzip-compressed, one line per
 line, to `--snapshot-dir/<stream>-<unix-timestamp>.gz` -- and removed from

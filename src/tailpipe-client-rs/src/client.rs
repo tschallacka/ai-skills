@@ -6,14 +6,127 @@
 //! connect_and_request's shape).
 
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use tailpipe_server_rs::protocol::{Request, Response};
 use tailpipe_server_rs::transport::Stream;
+
+/// B4: neither "the socket file was never created" nor "it exists but its
+/// server already exited" is an error a caller should have to recover from
+/// by hand — every other verb in this skill family (ai-text-editor's own
+/// client, chat's `start_server` tool) autostarts or offers one. Unix
+/// domain sockets report the first as NotFound and the second (a stale path
+/// left behind by a server that exited without unlinking it) as
+/// ConnectionRefused; either is "nobody is listening here", not a real
+/// failure, so both retry through `autostart` once rather than surfacing a
+/// bare connect error.
+fn is_connection_missing(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+    )
+}
+
+/// Mirrors ai-text-editor's own `server_binary_path`: a shared install puts
+/// every binary a skill ships in one directory, so the running process's own
+/// siblings are the first place to look, falling back to a bare name PATH
+/// can still resolve.
+fn server_binary_path() -> PathBuf {
+    let name = if cfg!(windows) {
+        "tailpipe-server-rs.exe"
+    } else {
+        "tailpipe-server-rs"
+    };
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// Start `tailpipe-server-rs` at `endpoint` if nothing answers there yet,
+/// and return once it does (or the attempt fails). A `StaleLock` next to the
+/// endpoint coordinates two callers racing to notice the same missing
+/// server -- the loser re-checks connectivity rather than spawning a second
+/// instance to fight the first over the same socket path.
+fn autostart(endpoint: &Path) -> std::io::Result<()> {
+    if let Some(parent) = endpoint.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let lock_path = endpoint.with_extension("start.lock");
+    let _lock =
+        stale_lock::StaleLock::acquire(&lock_path, Duration::from_secs(20)).map_err(|error| {
+            std::io::Error::other(format!("cannot coordinate server start: {error}"))
+        })?;
+    if Stream::connect(endpoint).is_ok() {
+        return Ok(()); // another caller already won this race
+    }
+    let binary = server_binary_path();
+    let snapshot_dir = endpoint
+        .parent()
+        .map(|dir| dir.join("snapshots"))
+        .unwrap_or_else(|| std::env::temp_dir().join("tailpipe-snapshots"));
+    let log_path = endpoint.with_extension(format!("start-{}.log", std::process::id()));
+    let log = std::fs::File::create(&log_path)?;
+    let log_capture = log.try_clone()?;
+    let mut child = std::process::Command::new(&binary)
+        .arg(endpoint)
+        .arg("--snapshot-dir")
+        .arg(&snapshot_dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::from(log_capture))
+        .spawn()
+        .map_err(|error| {
+            let _ = std::fs::remove_file(&log_path);
+            std::io::Error::other(format!(
+                "cannot autostart {}: {error}; start it yourself with `tailpipe-server-rs {}`",
+                binary.display(),
+                endpoint.display()
+            ))
+        })?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if Stream::connect(endpoint).is_ok() {
+            let _ = std::fs::remove_file(&log_path);
+            return Ok(());
+        }
+        if child.try_wait().is_ok_and(|status| status.is_some()) {
+            break; // no point waiting out the deadline on an exited spawn
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let reason = std::fs::read_to_string(&log_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&log_path);
+    let reason = reason.trim();
+    Err(std::io::Error::other(if reason.is_empty() {
+        format!(
+            "tailpipe-server-rs for {} did not announce in time",
+            endpoint.display()
+        )
+    } else {
+        format!(
+            "tailpipe-server-rs for {} failed to start: {reason}",
+            endpoint.display()
+        )
+    }))
+}
+
+fn connect_autostarting(endpoint: &Path) -> std::io::Result<Stream> {
+    match Stream::connect(endpoint) {
+        Ok(stream) => Ok(stream),
+        Err(error) if is_connection_missing(&error) => {
+            autostart(endpoint)?;
+            Stream::connect(endpoint)
+        }
+        Err(error) => Err(error),
+    }
+}
 
 /// Opens a fresh connection, sends `request`, and reads back exactly one
 /// Response line. Used for every verb except Tail.
 pub fn connect_and_request(endpoint: &Path, request: &Request) -> std::io::Result<Response> {
-    let mut stream = Stream::connect(endpoint)?;
+    let mut stream = connect_autostarting(endpoint)?;
     writeln!(stream, "{}", serde_json::to_string(request).unwrap())?;
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
@@ -33,7 +146,7 @@ pub fn tail(
     since: u64,
     mut on_line: impl FnMut(Response),
 ) -> std::io::Result<()> {
-    let mut stream = Stream::connect(endpoint)?;
+    let mut stream = connect_autostarting(endpoint)?;
     writeln!(
         stream,
         "{}",
