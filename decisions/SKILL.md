@@ -25,7 +25,7 @@ exist yet, write it yourself first, as the skeleton below with an empty
 ```json
 {
   "skill": "decisions",
-  "skill_version": "2.0.0-alpha.8",
+  "skill_version": "2.0.0-alpha.9",
   "comment": "Non-blocking questions raised during work.",
   "questions": [
     {

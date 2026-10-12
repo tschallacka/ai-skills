@@ -28,7 +28,7 @@ command).
 ```json
 {
   "skill": "bug-report",
-  "skill_version": "2.0.0-alpha.8",
+  "skill_version": "2.0.0-alpha.9",
   "comment": "Defects found in <subject>, with reproduction and verification.",
   "bugs": [
     {
