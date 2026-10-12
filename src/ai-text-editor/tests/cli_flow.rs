@@ -1985,6 +1985,100 @@ fn a_replayed_tab_arms_the_external_change_guard() {
     );
 }
 
+/// A saved edit is already-saved: reopening a tab whose only journal history
+/// is `edit` then `save` must replay cleanly against that save point, not
+/// come up `dirty: true` just because disk has since moved on (a merge, an
+/// external tool, anything outside the editor). `saved_digest` used to be
+/// stamped from the pre-replay disk read, so it held the EXTERNAL change's
+/// bytes rather than the journal's own last save point, and every such
+/// reopen reported a real edit as still-unsaved even though the save
+/// response already said `dirty: false` before close. Reported against
+/// ZPlusOutfits/Helper/OutfitHelper.php: 16 pre-merge edits replayed as
+/// dirty on an open right after `git merge`.
+#[test]
+fn a_saved_edit_replays_clean_even_when_disk_has_since_moved_on() {
+    let harness = Harness::new("savedreplay");
+    let file = harness.write("doc.txt", "line one\nline two\nline three\n");
+    let opened = harness.open(&file);
+    assert_eq!(revision_of(&opened), 0);
+    let edited = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "line TWO edited in editor\n",
+        "-p",
+        "structured",
+    ]);
+    assert!(edited.status.success(), "{}", refusal_text(&edited));
+    assert_eq!(revision_of(&edited), 1);
+    assert_eq!(first_payload(&edited)["dirty"], json!(true));
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(first_payload(&saved)["dirty"], json!(false));
+    let closed = harness.client(&[
+        "close",
+        "-f",
+        file.to_str().unwrap(),
+        "--journal-action",
+        "preserve",
+    ]);
+    assert!(closed.status.success(), "{}", refusal_text(&closed));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    // Mirrors the real report: a new file written elsewhere and moved into
+    // place, the way `git merge`/`git checkout` replace a file, rather than
+    // an in-place write.
+    let outside = file.with_extension("outside");
+    std::fs::write(
+        &outside,
+        "line one\nline TWO edited in editor\nline three\nline four added outside the editor\n",
+    )
+    .unwrap();
+    std::fs::rename(&outside, &file).unwrap();
+    let reopened = harness.open(&file);
+    let payload = first_payload(&reopened);
+    assert!(
+        payload["journal_replay"]["edits"].is_number(),
+        "expected a replayed tab: {payload}"
+    );
+    assert_eq!(
+        payload["dirty"],
+        json!(false),
+        "the only journaled edit was already saved before close: {payload}"
+    );
+    assert_eq!(
+        payload["external_change_pending"],
+        json!(true),
+        "disk genuinely moved past the tab's last save: {payload}"
+    );
+    // Closing with `preserve` and reopening again must be stable, not
+    // re-trigger the same false `dirty: true` on every subsequent open.
+    harness
+        .client(&[
+            "close",
+            "-f",
+            file.to_str().unwrap(),
+            "--journal-action",
+            "preserve",
+        ])
+        .status
+        .success()
+        .then_some(())
+        .expect("close");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let reopened_again = harness.open(&file);
+    assert_eq!(
+        first_payload(&reopened_again)["dirty"],
+        json!(false),
+        "{}",
+        first_payload(&reopened_again)
+    );
+}
+
 #[test]
 fn reload_catches_up_with_a_second_external_write_and_says_so() {
     // B398: resolve(reload) applied the `pending_external` snapshot taken

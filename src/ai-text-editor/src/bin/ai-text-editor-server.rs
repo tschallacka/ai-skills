@@ -186,7 +186,6 @@ fn main() {
     let metadata = Metadata::open(&path)
         .unwrap_or_else(|error| die(&format!("cannot open tab metadata: {error}")));
     let disk_digest = disk_state(&path, large_file.as_ref(), document.bytes());
-    let saved_digest = digest(document.bytes());
     let journal_root = std::env::var_os("TSCH_AI_EDITOR_METADATA_DIR")
         .map(PathBuf::from)
         .or_else(|| {
@@ -283,6 +282,18 @@ fn main() {
         document = after_document.clone();
         history.record(&before_document, &after_document);
     }
+    // "Saved" means "matches the journal's own last save point", not
+    // "matches whatever is on disk right now" -- the latter is what
+    // disk_diverged/external_change_pending already answer (B204, below).
+    // Computing this from the pre-replay disk read made every reopen of a
+    // tab with a replayed-but-already-saved journal report dirty: true,
+    // because disk had moved on (someone else's edit, a merge, ...) since
+    // that save. journal_base is the bytes as of the last "save" record
+    // (or, with no save yet, the first edit's own "before" -- the same
+    // fallback the external-change check below already uses), so an
+    // already-saved tab now reports dirty: false even when disk has since
+    // diverged, while a tab with real edits after its last save still does.
+    let saved_digest = digest(journal_base.as_deref().unwrap_or(&disk_at_entry));
     let rebuilt_index = if let Some(file) = &large_file {
         file.index_prefix(DEFAULT_GRANULARITY, DEFAULT_GRANULARITY)
             .unwrap_or_else(|_| LineIndex::build(document.bytes(), DEFAULT_GRANULARITY))
@@ -689,7 +700,6 @@ fn open_additional_tab(
     let metadata =
         Metadata::open(&path).map_err(|error| format!("cannot open tab metadata: {error}"))?;
     let disk_digest = disk_state(&path, large_file.as_ref(), document.bytes());
-    let saved_digest = digest(document.bytes());
     let journal_root = session::metadata_root();
     fs::create_dir_all(&journal_root)
         .map_err(|error| format!("cannot create journal directory: {error}"))?;
@@ -776,6 +786,18 @@ fn open_additional_tab(
         document = after_document.clone();
         history.record(&before_document, &after_document);
     }
+    // "Saved" means "matches the journal's own last save point", not
+    // "matches whatever is on disk right now" -- the latter is what
+    // disk_diverged/external_change_pending already answer (B204, below).
+    // Computing this from the pre-replay disk read made every reopen of a
+    // tab with a replayed-but-already-saved journal report dirty: true,
+    // because disk had moved on (someone else's edit, a merge, ...) since
+    // that save. journal_base is the bytes as of the last "save" record
+    // (or, with no save yet, the first edit's own "before" -- the same
+    // fallback the external-change check below already uses), so an
+    // already-saved tab now reports dirty: false even when disk has since
+    // diverged, while a tab with real edits after its last save still does.
+    let saved_digest = digest(journal_base.as_deref().unwrap_or(&disk_at_entry));
     let rebuilt_index = if let Some(file) = &large_file {
         file.index_prefix(DEFAULT_GRANULARITY, DEFAULT_GRANULARITY)
             .unwrap_or_else(|_| LineIndex::build(document.bytes(), DEFAULT_GRANULARITY))
