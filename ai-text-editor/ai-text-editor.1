@@ -124,8 +124,8 @@ the source span is refused as \fBmove_destination_inside_source\fR.
 .PP
 \fBbulk-edit --edits-json JSON\fR (or \fB--edits-file PATH\fR, either supplies
 the \fBedits\fR array) applies several \fBreplace\fR/\fBinsert\fR/\fBsave\fR
-items \(em each its own \fB{op, file|tab_id, ...the usual addressing/content
-keys, session_token}\fR \(em in one call, across multiple tabs, best-effort
+items \(em each its own {op, file|tab_id, ...the usual addressing/content
+keys, session_token} \(em in one call, across multiple tabs, best-effort
 per item: a failing item is reported in its own result entry and never
 blocks a sibling that passes its own checks. Edits landing on the same tab
 within one call group into a single undo step for that tab, the same
