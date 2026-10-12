@@ -376,6 +376,98 @@ destination the moved bytes actually landed at, after any shift) — enough to
 verify what happened without having sent or received the content, the same
 contract `replace`'s own resolved-span answer already gives.
 
+### bulk_edit
+
+`bulk_edit` applies several `replace`/`insert`/`save` items in one request,
+each addressing its own tab — across multiple files, not just multiple spans
+in one — instead of one round trip per edit. The payload is `{"edits": [...]}`,
+a non-empty array; each item is `{"op": "replace"|"insert"|"save", "file":
+<path>|"tab_id": <id>, ...the item's own addressing/content keys, "session_token":
+<token> (optional)}`. `file` autostarts/opens the tab the same way a bare
+`file` does on any other verb; `tab_id` matches the same prefix a standalone
+request's `tab_id` does. Exactly one of `file`/`tab_id` is required; naming
+both is accepted only when they agree on the same tab — a genuine
+disagreement is `file_mismatch`, the same refusal a standalone request
+naming an inconsistent `file` gets from the tab its `session_token` already
+routed to.
+
+Items are processed strictly in array order, each resolved against its own
+tab's **live** state at that moment — so a later item staled by an earlier
+item in the same batch (e.g. a `replace` whose `expected_text` no longer
+matches because an earlier item in this same batch already changed that
+span) fails with the ordinary single-edit error that scenario already has
+(`expected_text_mismatch`, `match_id_stale`, and so on), not a new code.
+There is no per-item revision: each item applies against its tab's current
+revision automatically, the same automatic-revision-guard behavior every
+other mutating verb has; `revision_required`/`stale_revision` are not
+reachable through `bulk_edit`.
+
+**Authorization, per item, in this fixed order** — identical in substance to
+what `handle()` enforces for a standalone request against the one tab it was
+already routed to:
+
+1. `auth_token` — the connection's own (the TCP challenge secret, or the
+   Unix socket envelope's own field), checked against the resolved tab's
+   `auth_token`. This is one value for the whole outer request, not
+   per-item: a mismatch refuses every item in the batch uniformly.
+2. `session_token` — the item's own, checked against the resolved tab's.
+   Exempt when the item addresses its tab by `tab_id` (mirrors a standalone
+   request's own `addressed_by_handle` exemption), and exempt for a
+   `file`-addressed item whose tab this very `bulk_edit` call itself just
+   created — decided once, the first time that path is touched in this
+   batch, and reused for every later item naming the same path, never
+   re-checked against live state (a later item would otherwise see the
+   earlier item's own open and wrongly read the path as pre-existing). A
+   client need not track these manually: it fills a `file`-addressed item's
+   `session_token` from its own per-(identity, file) cache the same way
+   every other verb's session token is filled transparently.
+3. the per-item key door — the SAME per-verb accepted-key table (name, then
+   value) a standalone request's `unknown_argument`/`argument_out_of_range`
+   door reads, keyed by that item's own `op`. `op`, `file`, `tab_id`, and
+   `session_token` are the item's own addressing/auth keys, not part of any
+   verb's payload.
+4. `external_change` — refused when the tab's file changed on disk and the
+   change has not been resolved, for every item (including `save`, which
+   also has its own independent digest-based check — this pre-check gives
+   `save` items the same early, uniform refusal shape `replace`/`insert`
+   items get).
+5. `large_file_edit_requires_acknowledgement` — refused when the resolved
+   tab is a large-file tab, for every item including `save`: `save` has no
+   large-file awareness of its own, and applying it against a large tab's
+   bounded placeholder buffer would silently overwrite the real file with
+   an empty one.
+
+Each item's own result entry is `{"index", "applied": true|false, ...}` —
+on success, the same fields a standalone call to that `op` would answer with
+(`revision`, `offset`/`delete_len`/`bytes_written`/`deleted` for
+`replace`/`insert`; `saved`/`dirty`/`revision`/`bytes` for `save`), plus the
+resolved tab's own canonical `file` and `tab_id` (never the raw string the
+item supplied); on failure, `{"error": <code>, "message": <text>}`, the same
+code and message a standalone call hitting that exact problem would report.
+The response also carries `applied_count`/`failed_count` over the whole
+batch. Edits that land on the same tab within one `bulk_edit` call group
+into a single undo step for that tab — the same guarantee
+`begin_transaction`/`end_transaction` give across separate requests, which
+still exist unchanged for a caller that wants to interleave other reads
+between edits; `bulk_edit` is for the common case of many edits with no
+interleaving.
+
+`move`, `copy`, and `large_edit` batching are not supported: an item naming
+one of those ops is refused `bulk_edit_op_invalid`, without affecting
+sibling items. This is a documented limitation, not an oversight — each
+has its own atomicity/streaming shape (`move`/`copy`'s own one-splice
+guarantee, `large_edit`'s own job lifecycle) that a best-effort batch
+surface would have to reconcile with, and neither pulls its own weight
+against the token-cost problem `bulk_edit` exists to close, since `replace`/
+`insert`/`save` are what a multi-edit session spends its round trips on.
+
+A cold `bulk_edit` call — an identity's first-ever call under this protocol,
+with no prior `open` to discover a server by — autostarts or discovers a
+server from its first edit item's own `file`, the same as any other verb
+given a bare `file` for the first time; a warm identity (one with an
+already-live focused tab) reuses that live workspace instead, even when the
+batch's own targets are files it has never touched.
+
 `search` takes `preview_lines` (an integer, `0` — the default — meaning
 unshrunk): when a match's `contents`/`contents_base64` spans more than
 `preview_lines * 2` lines, the response replaces it with `contents_preview`

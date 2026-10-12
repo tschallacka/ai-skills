@@ -557,3 +557,108 @@ fn a_separate_identity_with_its_own_empty_session_dir_auto_fills_the_revision_by
     // ordinary post-success bookkeeping, not evidence either way about
     // where the revision it used came from.
 }
+
+/// W03/W16: before W16, `serve_tcp`'s `bulk_edit` arm never injected the
+/// connection's verified secret into the envelope it built, so every batch
+/// item's auth_token check (W01) saw the hardcoded `None` the spike gave it
+/// and failed closed regardless of whether the connection's own challenge
+/// secret was right. Case A proves the fix: a legitimate caller can now
+/// actually use `bulk_edit` over TCP at all, the secret threading all the
+/// way from the connection's challenge into each item's own check.
+///
+/// AR-05's own finding (confirmed again while writing this test) rules out
+/// a true "Case B" here: this protocol has one `auth_token` secret per
+/// SERVER instance, shared by every tab it opens, and TCP never lets that
+/// secret cross the wire in a request -- it is bound to the connection by
+/// the HMAC challenge instead. A connection that completes the challenge
+/// with the WRONG secret is refused before `bulk_edit` is ever parsed (the
+/// same connection-level refusal `a_wrong_token_on_the_port_is_refused_by_
+/// name_not_silently` already covers for every other verb); one that
+/// completes it with the RIGHT secret has that same secret injected into
+/// every item, which then always matches `tab.auth_token` -- there is no
+/// value a connection can authenticate with that disagrees with the one
+/// secret this server has. A per-item auth_token MISMATCH is only
+/// reachable on the one transport where the field is client-controlled
+/// end to end: the Unix socket, covered by
+/// `bulk_edit_refuses_every_item_when_the_envelopes_auth_token_is_wrong` in
+/// `cli_flow.rs` (W17).
+#[test]
+fn bulk_edit_over_tcp_refuses_an_item_without_the_connections_auth_token() {
+    let mut harness = TcpHarness::new("bulk-edit-auth");
+    let a = harness.path("a.txt");
+    std::fs::write(&a, "a one\na two\n").unwrap();
+    let b = harness.path("b.txt");
+    std::fs::write(&b, "b one\nb two\n").unwrap();
+    let auth = harness.auth_file("auth", "port-bulk-secret");
+    let endpoint = harness.start_tcp_server(&a, &auth);
+
+    let opened_a = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "port-bulk-secret",
+        "-f",
+        a.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]);
+    assert!(opened_a.status.success(), "{}", stderr_text(&opened_a));
+    let opened_b = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "port-bulk-secret",
+        "-f",
+        b.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]);
+    assert!(opened_b.status.success(), "{}", stderr_text(&opened_b));
+
+    // Case A: the right secret, threaded through the connection's own
+    // challenge, must reach every item's check and let a legitimate batch
+    // apply -- the regression W16 fixes.
+    let edits = serde_json::json!([
+        {"op": "replace", "file": a.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "A ONE\n"},
+        {"op": "replace", "file": b.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "B ONE\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&[
+        "bulk-edit",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "port-bulk-secret",
+        "--edits-json",
+        &edits,
+        "-p",
+        "structured",
+    ]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let payload = first_payload(&batch);
+    assert_eq!(payload["applied_count"], Value::from(2), "{payload:?}");
+    assert_eq!(payload["failed_count"], Value::from(0), "{payload:?}");
+
+    // The connection-level refusal every other verb already gets for a
+    // wrong challenge secret: `bulk_edit` must fail the same way, not
+    // silently.
+    let wrong = harness.client(&[
+        "bulk-edit",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "wrong-secret",
+        "--edits-json",
+        &edits,
+        "-p",
+        "text",
+    ]);
+    assert!(!wrong.status.success());
+    assert!(
+        stderr_text(&wrong).contains("authentication_failed"),
+        "the refusal must be named on stderr: {}",
+        stderr_text(&wrong)
+    );
+}

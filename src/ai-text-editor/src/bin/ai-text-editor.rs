@@ -47,6 +47,9 @@ fn main() {
         "job-cancel" => "job_cancel",
         "job-transfer" => "job_transfer",
         "job-release" => "job_release",
+        // A batch of replace/insert/save ops, each addressing its own file
+        // or tab_id, in one request.
+        "bulk-edit" => "bulk_edit",
         other => {
             eprintln!("ai-text-editor: unknown command {other}");
             std::process::exit(64);
@@ -59,7 +62,7 @@ fn main() {
         option(&args, &["--session", "-s"]).or_else(|| option(&args, &["--agent", "-A"]));
     let tab_id = option(&args, &["--tab-id", "-T"]);
     let tab_path = option(&args, &["--tab-path"]);
-    let resolve_request = ResolveRequest {
+    let mut resolve_request = ResolveRequest {
         file: file.clone(),
         tab_id: tab_id.clone(),
         tab_path: tab_path.clone(),
@@ -269,6 +272,67 @@ fn main() {
                 .unwrap_or_else(|error| die(&format!("invalid --result-json: {error}"))),
         );
     }
+    // bulk-edit's one real argument -- a JSON array of {op, file|tab_id,
+    // ...the same addressing/content keys replace/insert/save already
+    // take}, given inline or from a file.
+    if let Some(value) = option(&args, &["--edits-json"]) {
+        payload.insert(
+            "edits".into(),
+            serde_json::from_str(&value)
+                .unwrap_or_else(|error| die(&format!("invalid --edits-json: {error}"))),
+        );
+    }
+    if let Some(path) = option(&args, &["--edits-file"]) {
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| die(&format!("cannot read --edits-file {path}: {error}")));
+        payload.insert(
+            "edits".into(),
+            serde_json::from_str(&text).unwrap_or_else(|error| {
+                die(&format!("invalid JSON in --edits-file {path}: {error}"))
+            }),
+        );
+    }
+    // W23/AR-23/AR-27/AR-32/AR-37: a cold `bulk-edit` call (no prior open
+    // under this identity) has no `--file`/`--tab-id`/`--tab-path`/
+    // `--endpoint` for `resolve_request` to autostart or discover a server
+    // from -- those are plain per-single-verb flags, and bulk-edit's own
+    // targets live inside `--edits-json`/`--edits-file`, parsed above.
+    // Checked only when every one of those is absent (a caller naming any
+    // of them means what it always means and is left alone); the identity's
+    // own live focus wins when it has one (the warm, unchanged case), and
+    // only a genuinely cold identity falls back to the first edits item's
+    // own `file`. `focus_is_live` checks liveness, not just the cache
+    // file's existence (AR-32) -- a stale on-disk record naming a dead
+    // server must fall to the same autostart path a brand-new identity
+    // takes, not be mistaken for a live workspace.
+    if method == "bulk_edit"
+        && resolve_request.file.is_none()
+        && resolve_request.tab_id.is_none()
+        && resolve_request.tab_path.is_none()
+        && resolve_request.explicit_endpoint.is_none()
+    {
+        let identity = client::identity(
+            resolve_request.explicit_identity.as_deref(),
+            &resolve_request.agent_env_var,
+        );
+        let warm = match identity.as_deref() {
+            Some(identity) => {
+                client::focus_is_live(identity).unwrap_or_else(|error| die_runtime(&error))
+            }
+            None => false,
+        };
+        if !warm {
+            if let Some(first_file) = payload
+                .get("edits")
+                .and_then(Value::as_array)
+                .and_then(|edits| edits.first())
+                .and_then(|item| item.get("file"))
+                .and_then(Value::as_str)
+            {
+                resolve_request.file = Some(PathBuf::from(first_file));
+            }
+        }
+    }
     if flag(&args, &["--detached"]) {
         payload.insert("detached".into(), Value::Bool(true));
     }
@@ -310,7 +374,7 @@ fn main() {
     let failed = frames
         .iter()
         .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"));
-    let save_path = saved_token_path.or(resolved.cache_path);
+    let save_path = saved_token_path.or_else(|| resolved.cache_path.clone());
     let returned_session_token = frames
         .iter()
         .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
@@ -337,6 +401,12 @@ fn main() {
             &resolved.endpoint,
             auth_token.as_deref().or(resolved.auth_token.as_deref()),
             persisted_session_token,
+        );
+        client::persist_bulk_edit_item_caches(
+            &resolve_request,
+            &resolved,
+            auth_token.as_deref().or(resolved.auth_token.as_deref()),
+            &frames,
         );
     }
     // A refused operation must look refused in every presentation. Before
@@ -517,4 +587,5 @@ fn help() {
     println!("Close: close first prompts with journal_close_decision_required; repeat with --journal-action preserve|clean. clean deletes the tab journal and metadata database.");
     println!("Sessions/auth: -e/--endpoint ENDPOINT, --session-token PATH, -s/--session ID, -A/--agent ID, or environment agent identity (TSCH_AI_EDITOR_AGENT, or a coding harness's own CLAUDE_CODE_SESSION_ID/CODEX_SESSION_ID/OPENCODE_PID); explicit --endpoint wins, stale saved sessions are errors. --save-session-token PATH overrides automatic session storage. TCP clients use --auth-token TOKEN (or a token saved in the session file); servers accept --auth-token TOKEN or owner-only --auth-token-file PATH. Jobs use -j/--job-id N, --owner NAME, --resume-token TOKEN, --detached, --progress-json JSON, --result-json JSON.");
     println!("The server alone owns document state, history, indexes, journals, and SQLite metadata. Large files provide bounded read/index views; acknowledged large-edit jobs stream accepted rewrites and retain file-backed undo snapshots.");
+    println!("bulk-edit --edits-json JSON (or --edits-file PATH, either supplies the edits array) applies several replace/insert/save ops in one request -- each its own {{op, file|tab_id, ...the usual addressing/content keys, session_token}} -- across multiple tabs, best-effort per item (one failing item does not block the rest). Edits landing on the same tab group into one undo step for that tab, the same guarantee begin-transaction/end-transaction give across separate requests -- both still exist: begin-transaction/end-transaction for a caller that wants to interleave other reads between edits, bulk-edit for the common case of many edits with no interleaving. Each item is authorized exactly as a standalone call would be: the connection's auth_token, and a per-item session_token required only for a file-addressed item whose tab predates this same call and that this identity has no cached token for (tab_id addressing is always exempt; the client fills a known file's token automatically). move/copy/large-edit batching is not supported; an item naming one of those ops is refused bulk_edit_op_invalid without affecting its siblings.");
 }

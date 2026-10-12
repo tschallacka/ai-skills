@@ -536,6 +536,35 @@ fn tool_definitions() -> Vec<Value> {
         ("text", string("Replacement text.")),
         ("bytes_base64", string("Replacement bytes, alternative to text.")),
     ])); p }, vec![]));
+    // A batch of replace/insert/save ops, each addressing its own
+    // file or tab_id, applied in one call instead of one round trip per
+    // edit. Best-effort per item -- a failing item is reported and the rest
+    // still apply -- and edits that succeed within the same tab in one
+    // batch group into one undo step for that tab, the way
+    // begin_transaction/end_transaction already do across separate
+    // requests (both still exist: begin_transaction/end_transaction for a
+    // caller that wants to interleave other reads between edits, bulk_edit
+    // for the common case of many edits with no interleaving). No per-item
+    // revision: each item is applied against its tab's live revision, the
+    // same automatic-revision-guard behavior every other mutating tool now
+    // has. move/copy/large_edit batching is not supported.
+    tools.push((
+        "bulk_edit",
+        "Apply several replace/insert/save ops -- each its own {op, file|tab_id, ...the usual addressing/content keys} -- in one call. Best-effort per item: a failing item is reported in its own result entry and does not block the rest. Edits that land on the same tab within this one call group into one undo step for that tab. move/copy/large_edit batching is not supported.",
+        {
+            let mut p: ToolProperties = Vec::new();
+            p.extend(Vec::from([(
+                "edits",
+                json!({
+                    "description": "Array of edit items, applied in order. Each item: {op: \"replace\"|\"insert\"|\"save\", file: <path> (opens the tab automatically if not already open) or tab_id: <id> (exactly one of the two), plus the same addressing/content keys a standalone replace/insert call takes -- offset, delete_len, cursor_id, range_start_line/range_end_line, range_start_byte/range_end_byte, expected_text/expected_bytes_base64, match_id, range_start_match/range_end_before_match/range_match_regex, symbol, text/bytes_base64 (a save item takes only its target, no other keys). session_token: optional per item, required when the item addresses a tab this identity did not just create in this same call and has no cached token for -- a caller that already opened the file through this same identity never needs to supply it. No per-item revision -- each item is applied against its tab's current revision automatically.",
+                    "type": "array",
+                    "items": {"type": "object"},
+                }),
+            )]));
+            p
+        },
+        vec!["edits"],
+    ));
     tools.push(("begin_transaction", "Begin an explicit undo transaction; subsequent ordinary edits are grouped until end_transaction.", Vec::new(), vec![]));
     tools.push((
         "end_transaction",
@@ -839,7 +868,7 @@ fn call_tool(id: Value, params: Value) -> Value {
         .get("file")
         .and_then(Value::as_str)
         .map(PathBuf::from);
-    let resolve_request = ResolveRequest {
+    let mut resolve_request = ResolveRequest {
         file: file.clone(),
         // Read, and left in the payload: the server routes on both.
         tab_id: payload
@@ -884,6 +913,43 @@ fn call_tool(id: Value, params: Value) -> Value {
             .unwrap_or(false),
         force_refresh: false,
     };
+    // W24/AR-23/AR-28/AR-32/AR-37: the MCP mirror of the CLI's W23 fix.
+    // `bulk_edit`'s own targets live inside `payload["edits"]`, which none
+    // of `file`/`tab_id`/`tab_path`/`endpoint` above ever see -- checked
+    // only when every one of those is absent (a caller naming any of them
+    // means what it always means). `focus_is_live` checks liveness, not
+    // just whether the cache file exists (AR-32): a stale on-disk record
+    // naming a dead server must fall to the same autostart/discovery path
+    // a brand-new identity takes, not be mistaken for a live workspace.
+    if method == "bulk_edit"
+        && resolve_request.file.is_none()
+        && resolve_request.tab_id.is_none()
+        && resolve_request.tab_path.is_none()
+        && resolve_request.explicit_endpoint.is_none()
+    {
+        let identity = client::identity(
+            resolve_request.explicit_identity.as_deref(),
+            &resolve_request.agent_env_var,
+        );
+        let warm = match identity.as_deref() {
+            Some(identity) => match client::focus_is_live(identity) {
+                Ok(warm) => warm,
+                Err(error) => return tool_error(id, &error),
+            },
+            None => false,
+        };
+        if !warm {
+            if let Some(first_file) = payload
+                .get("edits")
+                .and_then(Value::as_array)
+                .and_then(|edits| edits.first())
+                .and_then(|item| item.get("file"))
+                .and_then(Value::as_str)
+            {
+                resolve_request.file = Some(PathBuf::from(first_file));
+            }
+        }
+    }
     let auth_token = payload
         .get("auth_token")
         .and_then(|value| value.as_str().map(str::to_owned));
@@ -968,6 +1034,12 @@ fn call_tool(id: Value, params: Value) -> Value {
             &resolved.endpoint,
             auth_token.as_deref().or(resolved.auth_token.as_deref()),
             returned_session_token.or(resolved.session_token.as_deref()),
+        );
+        client::persist_bulk_edit_item_caches(
+            &resolve_request,
+            &resolved,
+            auth_token.as_deref().or(resolved.auth_token.as_deref()),
+            &frames,
         );
     }
     // A refusal must look refused on the MCP wire too: the CLI exits

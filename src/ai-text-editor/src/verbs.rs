@@ -85,6 +85,10 @@ pub const METHODS: &[&str] = &[
     "job_cancel",
     "job_transfer",
     "job_release",
+    // Intercepted before `handle()`'s own dispatch (it may touch several
+    // tabs in one call), so it is not one of the methods `handle` itself
+    // matches, unlike every other entry in this list.
+    "bulk_edit",
 ];
 
 /// The payload keys `method` consumes, beyond [`UNIVERSAL_KEYS`] — the set the
@@ -199,6 +203,12 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
         "job_progress" => &["job_id", "resume_token", "progress"],
         "job_complete" => &["job_id", "resume_token", "result"],
         "job_transfer" => &["job_id", "resume_token", "owner"],
+        // The real structure lives inside this one nested key (an array of
+        // per-item {op, file|tab_id, ...addressing/content keys}), not as
+        // flat top-level keys this door can check individually -- each
+        // item's own keys are validated separately, inside
+        // `handle_bulk_edit`'s own per-item loop.
+        "bulk_edit" => &["edits"],
         _ => return None,
     };
     Some(keys)

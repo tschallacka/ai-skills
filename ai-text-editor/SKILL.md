@@ -347,6 +347,22 @@ default gives you.
     `begin-transaction`/`end-transaction` (undo-grouping only) is not the
     same guarantee. A destination strictly inside the source span is
     refused as `move_destination_inside_source`.
+18. `bulk-edit` applies several `replace`/`insert`/`save` items -- each its
+    own `{op, file|tab_id, ...the usual addressing/content keys}` -- in one
+    call, across multiple tabs, best-effort per item: a failing item is
+    reported in its own result entry and never blocks a sibling that
+    passes its own checks. Edits landing on the same tab within one call
+    group into a single undo step for that tab, the same guarantee
+    `begin-transaction`/`end-transaction` give across separate requests --
+    both still exist: `begin-transaction`/`end-transaction` for a caller
+    that wants to interleave other reads between edits, `bulk-edit` for the
+    common case of many edits with no interleaving. Each item is
+    authorized exactly as a standalone call would be: the connection's
+    `auth_token`, and a per-item `session_token` mirroring every other
+    verb's tab-scoped token -- required only for a `file`-addressed item
+    whose tab predates this same call and that this identity's own client
+    has no cached token for (`tab_id` addressing is always exempt). `move`/
+    `copy`/`large_edit` batching is not supported.
 
 ## Agent responsibilities
 

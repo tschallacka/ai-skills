@@ -956,6 +956,12 @@ fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerSt
     let writer = reader.get_mut();
     let default_tab = default_tab(&state);
     let (value, selected_tab) = match validate_ndjson(&line).and_then(validate_request) {
+        // bulk_edit may touch several tabs in one call, so it is
+        // dispatched directly against `state` rather than through the
+        // single-tab select_tab()+handle() pairing every other verb uses.
+        Ok(envelope) if envelope.method == "bulk_edit" => {
+            (handle_bulk_edit(envelope, &state), default_tab.clone())
+        }
         Ok(envelope) => match select_tab(&envelope, &state) {
             Ok(selected) => (handle(envelope, &selected), selected),
             Err(message) => {
@@ -1060,6 +1066,18 @@ fn serve_tcp(
     }
     let default_tab = default_tab(&state);
     let (value, selected_tab) = match validate_ndjson(&line).and_then(validate_request) {
+        // See the matching branch in serve() -- bulk_edit may touch several
+        // tabs in one call, so it bypasses select_tab()+handle().
+        Ok(mut envelope) if envelope.method == "bulk_edit" && envelope.request_id == request_id => {
+            // W16: mirror the sibling arm below exactly -- authentication is
+            // bound to this connection and request id, so the secret never
+            // has to cross the TCP wire in the request itself. Without this,
+            // every item's synthetic envelope inherited the hardcoded `None`
+            // the spike gave it and every auth_token check in
+            // handle_bulk_edit failed closed over TCP.
+            envelope.auth_token = Some(String::from_utf8_lossy(secret).into_owned());
+            (handle_bulk_edit(envelope, &state), default_tab.clone())
+        }
         Ok(mut envelope) if envelope.request_id == request_id => {
             // Authentication is bound to this connection and request id. Do
             // not require the secret to cross the TCP wire in the request.
@@ -1475,6 +1493,86 @@ fn select_tab_refusal(message: String) -> (&'static str, String) {
     (code, body)
 }
 
+/// Get the tab already open for `path`, or open and register a new one —
+/// the body of `select_tab`'s own `"open"` handling, factored out so the
+/// spike `bulk_edit` verb can open a batch item's file the same way without
+/// going through a whole `open` envelope. `requested_mode` is the explicit
+/// `document_mode` an `open` call may carry; a batch item never supplies one
+/// and passes `None`, matching how any other non-`open` verb that happens to
+/// autostart a tab behaves today.
+fn open_or_get_tab(
+    state: &Arc<Mutex<ServerState>>,
+    path: &Path,
+    requested_mode: Option<DocumentMode>,
+) -> Result<Arc<Mutex<Tab>>, String> {
+    let state_guard = state.lock().unwrap();
+    let key = tab_key(path);
+    if let Some(tab) = state_guard.tabs.get(&key) {
+        // Reopening an existing tab in a different mode is not a mode
+        // change: the buffer, the index, the journal and every coordinate
+        // already committed to one interpretation of the bytes. Refused by
+        // name rather than answered with a mode the caller did not ask for,
+        // which is the shape of the bug this fixes.
+        if let Some(wanted) = requested_mode {
+            let held = tab.lock().ok().map(|tab| tab.document.mode);
+            if held.is_some_and(|held| held != wanted) {
+                return Err(format!(
+                    "document_mode_conflict: {} is already open as {:?} and a tab's mode is fixed for its lifetime; `close` it and open it again to read it as {:?}",
+                    path.display(),
+                    held.unwrap_or(DocumentMode::TextUtf8),
+                    wanted
+                ));
+            }
+        }
+        return Ok(tab.clone());
+    }
+    let mode = requested_mode.unwrap_or(state_guard.mode);
+    let normalize_nfc = state_guard.normalize_nfc;
+    let auth_token = state_guard.auth_token.clone();
+    let generation = state_guard.server_generation.clone();
+    let threshold = state_guard.large_threshold_bytes;
+    let endpoint = state_guard.endpoint.clone();
+    drop(state_guard);
+    let tab = open_additional_tab(
+        path.to_path_buf(),
+        mode,
+        normalize_nfc,
+        auth_token.clone(),
+        generation.clone(),
+        threshold,
+    )?;
+    if let Some(endpoint) = endpoint {
+        let mut tab_guard = tab;
+        let session_token = tab_guard.session_token.clone();
+        register_session(
+            &endpoint,
+            &generation,
+            &session_token,
+            auth_token.as_deref(),
+        );
+        tab_guard.short_id = session::short_id_for(&tab_guard.tab_uuid)
+            .unwrap_or_else(|| tab_guard.tab_uuid.clone());
+        let tab = Arc::new(Mutex::new(tab_guard));
+        let key = tab_key(path);
+        let mut state_guard = state.lock().unwrap();
+        if let Some(existing) = state_guard.tabs.get(&key) {
+            return Ok(existing.clone());
+        }
+        let result = tab.clone();
+        state_guard.tabs.insert(key, tab);
+        return Ok(result);
+    }
+    let key = tab_key(path);
+    let tab = Arc::new(Mutex::new(tab));
+    let mut state_guard = state.lock().unwrap();
+    if let Some(existing) = state_guard.tabs.get(&key) {
+        return Ok(existing.clone());
+    }
+    let result = tab.clone();
+    state_guard.tabs.insert(key, tab);
+    Ok(result)
+}
+
 fn select_tab(
     envelope: &ai_text_editor::protocol::Envelope,
     state: &Arc<Mutex<ServerState>>,
@@ -1630,72 +1728,8 @@ fn select_tab(
                         .map_err(|error| format!("document_mode_invalid: {error}"))?,
                 ),
             };
-            let key = tab_key(path);
-            if let Some(tab) = state_guard.tabs.get(&key) {
-                // Reopening an existing tab in a different mode is not a mode
-                // change: the buffer, the index, the journal and every
-                // coordinate already committed to one interpretation of the
-                // bytes. Refused by name rather than answered with a mode the
-                // caller did not ask for, which is the shape of the bug this
-                // fixes.
-                if let Some(wanted) = requested_mode {
-                    let held = tab.lock().ok().map(|tab| tab.document.mode);
-                    if held.is_some_and(|held| held != wanted) {
-                        return Err(format!(
-                            "document_mode_conflict: {} is already open as {:?} and a tab's mode is fixed for its lifetime; `close` it and open it again to read it as {:?}",
-                            path.display(),
-                            held.unwrap_or(DocumentMode::TextUtf8),
-                            wanted
-                        ));
-                    }
-                }
-                return Ok(tab.clone());
-            }
-            let mode = requested_mode.unwrap_or(state_guard.mode);
-            let normalize_nfc = state_guard.normalize_nfc;
-            let auth_token = state_guard.auth_token.clone();
-            let generation = state_guard.server_generation.clone();
-            let threshold = state_guard.large_threshold_bytes;
-            let endpoint = state_guard.endpoint.clone();
             drop(state_guard);
-            let tab = open_additional_tab(
-                path.clone(),
-                mode,
-                normalize_nfc,
-                auth_token.clone(),
-                generation.clone(),
-                threshold,
-            )?;
-            if let Some(endpoint) = endpoint {
-                let mut tab_guard = tab;
-                let session_token = tab_guard.session_token.clone();
-                register_session(
-                    &endpoint,
-                    &generation,
-                    &session_token,
-                    auth_token.as_deref(),
-                );
-                tab_guard.short_id = session::short_id_for(&tab_guard.tab_uuid)
-                    .unwrap_or_else(|| tab_guard.tab_uuid.clone());
-                let tab = Arc::new(Mutex::new(tab_guard));
-                let key = tab_key(path);
-                let mut state_guard = state.lock().unwrap();
-                if let Some(existing) = state_guard.tabs.get(&key) {
-                    return Ok(existing.clone());
-                }
-                let result = tab.clone();
-                state_guard.tabs.insert(key, tab);
-                return Ok(result);
-            }
-            let key = tab_key(path);
-            let tab = Arc::new(Mutex::new(tab));
-            let mut state_guard = state.lock().unwrap();
-            if let Some(existing) = state_guard.tabs.get(&key) {
-                return Ok(existing.clone());
-            }
-            let result = tab.clone();
-            state_guard.tabs.insert(key, tab);
-            return Ok(result);
+            return open_or_get_tab(state, path, requested_mode);
         }
     }
     let default = state_guard.tabs[&state_guard.default_key].clone();
@@ -2214,164 +2248,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                 frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, tab.document.bytes()), "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "mode": tab.document.mode})))
             }
         },
-        "replace" | "insert" => {
-            // B226/T114: a match_id, an anchor pair, a symbol, a line range,
-            // or a pair of search-hit byte bounds all resolve to the same
-            // (offset, delete_len), so everything below — the journal
-            // record, cursor adjustment, the undo entry — is untouched by
-            // which addressing named the span.
-            let span = match resolve_span(&envelope, &tab) {
-                Ok(span) => span,
-                Err((code, message)) => {
-                    frames.push(error(&envelope.request_id, code, message));
-                    return frames;
-                }
-            };
-            let offset = span
-                .map(|(offset, _)| offset)
-                .unwrap_or_else(|| resolve_point(&envelope, &tab));
-            // B230: the content guard. `expected_text` says which bytes the
-            // caller believes are at `offset`; when it is the only thing
-            // naming a length, it IS the length, so the arithmetic that got
-            // this wrong is not performed at all.
-            let expected = match expected_span_bytes(&envelope) {
-                Ok(expected) => expected,
-                Err((code, message)) => {
-                    frames.push(error(&envelope.request_id, code, message));
-                    return frames;
-                }
-            };
-            let named_delete_len = envelope.payload.get("delete_len").and_then(Value::as_u64);
-            let delete_len = match (span, &expected) {
-                (Some((_, length)), _) => length,
-                (None, Some(expected)) => match named_delete_len {
-                    None => expected.len(),
-                    Some(named) if named as usize == expected.len() => named as usize,
-                    Some(named) => {
-                        frames.push(error_details(
-                            &envelope.request_id,
-                            "expected_text_length_mismatch",
-                            format!(
-                                "delete_len {named} disagrees with the {} bytes of expected_text; name one, or make them agree",
-                                expected.len()
-                            ),
-                            json!({"delete_len": named, "expected_text_bytes": expected.len()}),
-                        ));
-                        return frames;
-                    }
-                },
-                (None, None) if envelope.method == "insert" => 0,
-                (None, None) => named_delete_len.unwrap_or(0) as usize,
-            };
-            if let Some(expected) = &expected {
-                let bytes = tab.document.bytes();
-                let end = offset.saturating_add(delete_len);
-                let actual: &[u8] = bytes.get(offset..end).unwrap_or_default();
-                if actual != expected.as_slice() {
-                    // This is the corruption itself, refused. Two `replace`
-                    // calls at one offset with a delete_len correct for the
-                    // ORIGINAL token, while the buffer already held a longer
-                    // one, deleted 35 of 36 bytes and left the orphan digit:
-                    // `=== 01`, valid PHP, wrong logic, reported as a success
-                    // with a fresh revision. The revision guard could not
-                    // catch it and never could — it proves the document has
-                    // not moved since the caller read it, and this caller held
-                    // a perfectly current revision. What was missing was any
-                    // relation between delete_len and the bytes at the offset.
-                    frames.push(error_details(
-                        &envelope.request_id,
-                        "expected_text_mismatch",
-                        format!(
-                            "the bytes at offset {offset} are not what expected_text names, so the edit was not applied; read the range and retry against what is actually there (a previous edit of your own may have changed its length)"
-                        ),
-                        json!({
-                            "offset": offset,
-                            "delete_len": delete_len,
-                            "expected": byte_preview(expected),
-                            "actual": byte_preview(actual),
-                            "actual_bytes_available": bytes.len().saturating_sub(offset),
-                        }),
-                    ));
-                    return frames;
-                }
-            }
-            let replacement = if let Some(encoded) = envelope.payload.get("bytes_base64").and_then(Value::as_str) {
-                match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded) { Ok(bytes) => bytes, Err(error_value) => { frames.push(error(&envelope.request_id, "invalid_base64", error_value.to_string())); return frames; } }
-            } else { envelope.payload.get("text").and_then(Value::as_str).unwrap_or("").as_bytes().to_vec() };
-            // B212: an edit with nothing to insert and nothing to delete is
-            // not an edit; it must not spend a revision the guard machinery
-            // will later refuse to explain.
-            if replacement.is_empty() && delete_len == 0 {
-                frames.push(error(&envelope.request_id, "empty_edit", "insert/replace with empty text and a zero delete would change nothing; pass text or bytes_base64 to insert, or a non-zero delete_len to delete"));
-                return frames;
-            }
-            let before = tab.document.clone();
-            let mut after = before.clone();
-            match after.apply_bytes(offset, delete_len, &replacement) {
-                Ok(()) => {
-                    let revision = tab.revision.saturating_add(1);
-                    let record = json!({"offset": offset, "delete_len": delete_len, "bytes": replacement.len(), "revision": revision, "before": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, before.bytes()), "after": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, after.bytes())});
-                    match journal_append_result(&mut tab, "edit", record) {
-                        Ok(()) => {
-                            adjust_cursors(
-                                &before,
-                                &after,
-                                &mut tab.cursors,
-                                offset,
-                                delete_len,
-                                replacement.len(),
-                            );
-                            tab.document = after.clone();
-                            if tab.transaction_before.is_none() {
-                                tab.history.record(&before, &after);
-                            }
-                            tab.revision = revision;
-                            tab.results.clear();
-                            tab.index = LineIndex::build(tab.document.bytes(), tab.index.granularity);
-                            tab.index_complete = true;
-                            persist_index(&mut tab);
-                            let _ = tab.metadata.record(&tab.path, tab.document.mode, tab.revision, tab.document.bytes().len());
-                            // A delete spanning a line end joins two lines;
-                            // nothing in the coordinates says so otherwise.
-                            let spans_lines =
-                                before.bytes()[offset..offset + delete_len].contains(&b'\n');
-                            // B226: echo the span that was actually changed.
-                            // The verify-read after every edit existed because
-                            // the caller could not tell what its arithmetic
-                            // had addressed; with the resolved offset and
-                            // length in the answer, it can.
-                            let mut payload = json!({"revision": tab.revision, "cursors": tab.cursors, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "offset": offset, "delete_len": delete_len, "bytes_written": replacement.len()});
-                            // B230's second half: the bytes that actually
-                            // went. The corruption this closes was reported
-                            // as a plain success and only a later read caught
-                            // it; a caller that can see what it deleted can
-                            // see the orphan digit it left behind.
-                            if delete_len > 0 {
-                                payload["deleted"] =
-                                    byte_preview(&before.bytes()[offset..offset + delete_len]);
-                            }
-                            if spans_lines {
-                                payload["spans_lines"] = json!(true);
-                            }
-                            frames.push(response(&envelope.request_id, payload));
-                        }
-                        Err(error_value) => frames.push(error(&envelope.request_id, "journal_write_failed", error_value.to_string())),
-                    }
-                }
-                Err(error_value) => {
-                    let message = if tab.document.normalize_nfc
-                        && tab.document.mode == DocumentMode::TextUtf8
-                    {
-                        format!(
-                            "{error_value}; on a normalized tab, byte offsets address the ORIGINAL bytes, not the normalized view a read shows - offset {offset} is inside a multi-byte sequence of the original"
-                        )
-                    } else {
-                        error_value.to_string()
-                    };
-                    frames.push(error(&envelope.request_id, "edit_refused", message));
-                }
-            }
-        }
+        "replace" | "insert" => apply_edit_verb(&envelope, &mut tab, &mut frames),
         // T113: relocate/duplicate a span server-side with no content in the
         // request or response — the server already holds the bytes. Large-tab
         // and revision-guard refusal both come from the generic
@@ -2655,6 +2532,385 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
     frames
 }
 
+/// A batch of `replace`/`insert`/`save` ops, each addressing its own file
+/// or tab_id, applied in one request/response instead of one round trip
+/// per edit. Intercepted at the `serve`/`serve_tcp` level, before
+/// `select_tab` + `handle`, because it is the one verb that may touch
+/// several DIFFERENT tabs in a single call rather than the one tab a
+/// request is normally routed to -- so its own per-item loop re-implements,
+/// for each item, every check `handle()` already runs for the one tab a
+/// standalone request is routed to: `auth_token`, `session_token` (with its
+/// own `tab_id`/fresh-`file` exemptions -- see the per-item loop below and
+/// §10.1 of the plan that hardened this), the per-verb key door (name, then
+/// value), `external_change`, and `large_file_edit_requires_acknowledgement`.
+///
+/// Semantics:
+/// - Best-effort, per-edit: a failing item is reported and processing
+///   continues: this is NOT all-or-nothing like a single replace/insert.
+/// - Edits are applied strictly in array order, each resolved against its
+///   tab's CURRENT state at that point in the sequence (the same
+///   `apply_edit_verb`/`save` path a standalone request already uses) -- so
+///   an item whose addressing has gone stale because an EARLIER item in the
+///   same batch already changed that tab's buffer fails with the same
+///   existing error code a second separate request would have gotten (e.g.
+///   `match_id_stale`), rather than needing new coordinate-shift
+///   bookkeeping.
+/// - Edits that succeed within the same tab in this one batch call group
+///   into ONE undo step for that tab -- the same guarantee
+///   `begin_transaction`/`end_transaction` already gives across N separate
+///   requests, but in one round trip. A transaction a caller already had
+///   open on a touched tab before this batch arrived is left alone (this
+///   batch only closes a transaction IT opened).
+/// - No per-item `expected_revision`: consistent with the shipped
+///   automatic-revision-guard design, each item is applied against its tab's
+///   live revision with no caller-tracked bookkeeping.
+/// - `move`/`copy`/`large_edit` batching is not supported, refused by name
+///   as `bulk_edit_op_invalid` without affecting sibling items.
+fn handle_bulk_edit(
+    envelope: ai_text_editor::protocol::Envelope,
+    state: &Arc<Mutex<ServerState>>,
+) -> Vec<Value> {
+    if let Some(key) = envelope.payload.as_object().and_then(|map| {
+        map.keys()
+            .find(|key| !ai_text_editor::verbs::reads_payload_key("bulk_edit", key))
+    }) {
+        let accepted = ai_text_editor::verbs::payload_keys("bulk_edit").unwrap_or_default();
+        return vec![error_details(
+            &envelope.request_id,
+            "unknown_argument",
+            format!("bulk_edit does not read `{key}`"),
+            json!({"method": "bulk_edit", "accepted": accepted}),
+        )];
+    }
+    let edits = match envelope.payload.get("edits").and_then(Value::as_array) {
+        Some(edits) if !edits.is_empty() => edits.clone(),
+        Some(_) => {
+            return vec![error(
+                &envelope.request_id,
+                "bulk_edit_empty",
+                "edits must be a non-empty array",
+            )]
+        }
+        None => {
+            return vec![error(
+                &envelope.request_id,
+                "bulk_edit_required",
+                "bulk_edit requires an edits array",
+            )]
+        }
+    };
+    let mut results = Vec::with_capacity(edits.len());
+    let mut applied_count: u64 = 0;
+    let mut failed_count: u64 = 0;
+    // Which tabs this batch itself opened a transaction on, so finalization
+    // below closes only those -- never a transaction the caller already had
+    // open on a tab before this batch touched it.
+    let mut touched: std::collections::HashMap<String, (Arc<Mutex<Tab>>, bool)> =
+        std::collections::HashMap::new();
+    // AR-06/W01: whether a file-addressed path's tab existed before this
+    // batch call began, decided once at that path's first touch and reused
+    // for every later item addressing the same path -- never re-checked
+    // against live state, which would otherwise see a sibling item's own
+    // open and wrongly treat the path as pre-existing.
+    let mut file_freshness: std::collections::HashMap<String, bool> =
+        std::collections::HashMap::new();
+    for (index, item) in edits.iter().enumerate() {
+        let op = item.get("op").and_then(Value::as_str).unwrap_or("");
+        if op != "replace" && op != "insert" && op != "save" {
+            results.push(json!({"index": index, "applied": false, "error": "bulk_edit_op_invalid", "message": format!("edits[{index}].op must be \"replace\", \"insert\", or \"save\" (move/copy/large_edit batching is not supported), got {:?}", item.get("op"))}));
+            failed_count += 1;
+            continue;
+        }
+        let (target, session_exempt) = match resolve_tab_for_item(item, state, &mut file_freshness)
+        {
+            Ok(resolved) => resolved,
+            Err(message) => {
+                let (code, message) = select_tab_refusal(message);
+                results.push(
+                    json!({"index": index, "applied": false, "error": code, "message": message}),
+                );
+                failed_count += 1;
+                continue;
+            }
+        };
+        // AR-10/W18: a batch item naming BOTH tab_id and file must agree on
+        // which tab they name -- the same check `select_tab` runs for a
+        // standalone request, via the same `ensure_tab_file`.
+        if item.get("tab_id").is_some() {
+            if let Some(requested) = requested_file_in(item) {
+                if let Err(message) = ensure_tab_file(&target, Some(&requested), op) {
+                    let (code, message) = select_tab_refusal(message);
+                    results.push(json!({"index": index, "applied": false, "error": code, "message": message}));
+                    failed_count += 1;
+                    continue;
+                }
+            }
+        }
+        // W01/W16: per-item auth_token parity with handle() -- the outer
+        // envelope's real auth_token (never the hardcoded `None` the spike
+        // synthesized), checked against the resolved tab's own.
+        {
+            let guard = target.lock().unwrap();
+            if let Some(expected) = &guard.auth_token {
+                if envelope.auth_token.as_deref() != Some(expected.as_str()) {
+                    results.push(json!({"index": index, "applied": false, "error": "authentication_failed", "message": "auth_token is required or invalid"}));
+                    failed_count += 1;
+                    continue;
+                }
+            }
+        }
+        // W01/W21: per-item session_token parity with handle(), exempt
+        // exactly when `session_exempt` says so (tab_id addressing, or a
+        // file path this same batch call just opened).
+        if !session_exempt {
+            let guard = target.lock().unwrap();
+            let supplied = item.get("session_token").and_then(Value::as_str);
+            if supplied != Some(guard.session_token.as_str()) {
+                results.push(json!({"index": index, "applied": false, "error": "session_unauthorized", "message": "a valid server-issued session_token is required for this tab operation; if the server restarted, `open` the file again for a current one (the journal replays)"}));
+                failed_count += 1;
+                continue;
+            }
+        }
+        // W04: the per-item key door -- name, then value -- using the SAME
+        // per-verb tables handle()'s own door reads, keyed by this item's
+        // own op. `op`/`file`/`tab_id`/`session_token` are the batch item's
+        // own addressing/auth keys, not part of any verb's payload.
+        let item_keys: Vec<&String> = item
+            .as_object()
+            .map(|map| {
+                map.keys()
+                    .filter(|key| {
+                        !matches!(key.as_str(), "op" | "file" | "tab_id" | "session_token")
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(key) = item_keys
+            .iter()
+            .find(|key| !ai_text_editor::verbs::reads_payload_key(op, key))
+        {
+            let accepted = ai_text_editor::verbs::payload_keys(op).unwrap_or_default();
+            results.push(json!({"index": index, "applied": false, "error": "unknown_argument", "message": format!("the request carries {key}, which {op} does not read"), "offending_key": key, "accepted_keys": accepted}));
+            failed_count += 1;
+            continue;
+        }
+        if let Some((key, value)) = item_keys.iter().find_map(|key| {
+            let value = item.get(key.as_str())?;
+            (ai_text_editor::verbs::is_count_key(key) && value.as_u64().is_none())
+                .then(|| (key.as_str(), value.clone()))
+        }) {
+            results.push(json!({"index": index, "applied": false, "error": "argument_out_of_range", "message": format!("{key} must be a non-negative whole number, not {value}"), "offending_key": key, "offending_value": value}));
+            failed_count += 1;
+            continue;
+        }
+        // AR-39/AR-41/W01: external_change and large_file_edit_requires_
+        // acknowledgement, the two checks handle() runs for every mutating
+        // verb before dispatch and that apply_edit_verb/save have no
+        // independent copy of for the batch surface (save() does have its
+        // own digest-based external_change check, but gets this same
+        // pre-check too for parity with replace/insert; large_file_edit_
+        // requires_acknowledgement has no check of its own in save() at
+        // all, and a large tab's save would otherwise silently overwrite
+        // the real file with an empty placeholder buffer).
+        {
+            let mut guard = target.lock().unwrap();
+            observe_external(&mut guard);
+            if let Some(bytes) = &guard.pending_external {
+                let byte_count = bytes.len();
+                results.push(json!({"index": index, "applied": false, "error": "external_change", "message": "the file changed outside this editor tab; mutating commands are blocked until you resolve the external change (reads still return the editor's buffer)", "bytes": byte_count, "choices": ["backup", "reload", "merge", "keep", "force_save"], "force_save_requires": "acknowledge_force_save=true"}));
+                failed_count += 1;
+                continue;
+            }
+            if guard.large_file.is_some() {
+                results.push(json!({"index": index, "applied": false, "error": "large_file_edit_requires_acknowledgement", "message": "large tabs provide bounded access; editing requires an explicit long-operation acknowledgement"}));
+                failed_count += 1;
+                continue;
+            }
+        }
+        let key = {
+            let guard = target.lock().unwrap();
+            full_tab_id(&guard).to_owned()
+        };
+        touched.entry(key).or_insert_with(|| {
+            let opened_here = {
+                let mut guard = target.lock().unwrap();
+                if guard.transaction_before.is_none() {
+                    guard.transaction_before = Some(guard.document.clone());
+                    true
+                } else {
+                    false
+                }
+            };
+            (target.clone(), opened_here)
+        });
+        let synthetic = ai_text_editor::protocol::Envelope {
+            version: envelope.version,
+            request_id: format!("{}#{index}", envelope.request_id),
+            method: op.to_string(),
+            revision: None,
+            auth_token: None,
+            session_token: None,
+            payload: item.clone(),
+        };
+        let mut item_frames = Vec::new();
+        {
+            let mut guard = target.lock().unwrap();
+            if op == "save" {
+                save(&synthetic, &mut guard, &mut item_frames);
+            } else {
+                apply_edit_verb(&synthetic, &mut guard, &mut item_frames);
+            }
+        }
+        match item_frames.into_iter().next() {
+            Some(frame) if frame.get("type").and_then(Value::as_str) == Some("data") => {
+                let mut entry = frame.get("payload").cloned().unwrap_or(json!({}));
+                if let Some(object) = entry.as_object_mut() {
+                    object.insert("index".into(), json!(index));
+                    object.insert("applied".into(), json!(true));
+                    // W02: echo the resolved tab's own canonical path and
+                    // short tab_id -- never the raw string the item
+                    // supplied, which may be a relative/unresolved spelling
+                    // of the same file or (addressed by tab_id) no file at
+                    // all.
+                    let guard = target.lock().unwrap();
+                    object.insert("file".into(), json!(guard.path));
+                    object.insert("tab_id".into(), json!(tab_id(&guard)));
+                    // Session-cache gap fix: every other verb's successful
+                    // response carries its tab's session_token, which the
+                    // client persists under (identity, file) for later
+                    // standalone calls to find the same tab -- bulk_edit's
+                    // own OUTER response never named a single file for that
+                    // machinery to key on, so no per-item cache entry was
+                    // ever written, and a later standalone verb addressing
+                    // one of these files once this identity has 2+ tabs hit
+                    // session_ambiguous and autostarted a DUPLICATE server
+                    // for it. Only an applied item echoes it, mirroring the
+                    // same rule a standalone call's own refusal already
+                    // follows: a refused item's resolved tab is not one this
+                    // identity is authorized against, so its token must
+                    // never be cached as if it were.
+                    object.insert("session_token".into(), json!(guard.session_token));
+                }
+                results.push(entry);
+                applied_count += 1;
+            }
+            Some(frame) => {
+                let code = frame
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("edit_refused")
+                    .to_string();
+                let message = frame
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                results.push(
+                    json!({"index": index, "applied": false, "error": code, "message": message}),
+                );
+                failed_count += 1;
+            }
+            None => {
+                results.push(json!({"index": index, "applied": false, "error": "bulk_edit_no_result", "message": "the edit produced no frame"}));
+                failed_count += 1;
+            }
+        }
+    }
+    for (tab, opened_here) in touched.values() {
+        if !opened_here {
+            continue;
+        }
+        let mut guard = tab.lock().unwrap();
+        if let Some(before) = guard.transaction_before.take() {
+            if before.bytes() != guard.document.bytes() {
+                let after = guard.document.clone();
+                guard.history.record(&before, &after);
+                let revision = guard.revision;
+                journal_append(&mut guard, "transaction_end", json!({"revision": revision}));
+            }
+        }
+    }
+    vec![response(
+        &envelope.request_id,
+        json!({"results": results, "applied_count": applied_count, "failed_count": failed_count}),
+    )]
+}
+
+/// One batch item's target tab: `tab_id` (matched the same prefix-matching
+/// way `select_tab` already matches one) or `file` (opened automatically if
+/// not already open, the same autostart convention every other verb already
+/// gives a bare `file`). Exactly one of the two, like every other verb's own
+/// addressing.
+///
+/// The returned `bool` is W01's per-item session_token exemption: `true`
+/// when this item's addressing needs no session_token at all (tab_id,
+/// mirroring handle()'s own `addressed_by_handle`) or when `file` named a
+/// path this same batch call just opened (AR-06) -- `false` when the
+/// resolved tab predates this call and the caller must supply the
+/// session_token it was issued.
+fn resolve_tab_for_item(
+    item: &Value,
+    state: &Arc<Mutex<ServerState>>,
+    file_freshness: &mut std::collections::HashMap<String, bool>,
+) -> Result<(Arc<Mutex<Tab>>, bool), String> {
+    if let Some(wanted) = item.get("tab_id").and_then(Value::as_str) {
+        if wanted.is_empty() {
+            return Err("tab_unknown: tab_id must not be empty".into());
+        }
+        let state_guard = state.lock().unwrap();
+        let matched: Vec<Arc<Mutex<Tab>>> = state_guard
+            .tabs
+            .values()
+            .filter(|tab| {
+                tab.lock()
+                    .ok()
+                    .is_some_and(|tab| full_tab_id(&tab).starts_with(wanted))
+            })
+            .cloned()
+            .collect();
+        let owner = matched
+            .iter()
+            .find(|tab| tab.lock().is_ok_and(|tab| tab.short_id == wanted))
+            .cloned();
+        return match owner.or_else(|| (matched.len() == 1).then(|| matched[0].clone())) {
+            Some(tab) => Ok((tab, true)),
+            None if matched.is_empty() => {
+                Err(format!("tab_unknown: no tab on this server has tab_id {wanted}"))
+            }
+            None => Err(format!(
+                "tab_ambiguous: {wanted} names {} open tabs on this server; address one by a longer tab_id",
+                matched.len()
+            )),
+        };
+    }
+    if let Some(path) = item.get("file").and_then(Value::as_str) {
+        let path = ai_text_editor::transport::canonical_or_near(std::path::Path::new(path))
+            .unwrap_or_else(|_| PathBuf::from(path));
+        let key = tab_key(&path);
+        let existed_before = if let Some(existed) = file_freshness.get(&key) {
+            *existed
+        } else {
+            let existed_before = state.lock().unwrap().tabs.contains_key(&key);
+            file_freshness.insert(key, existed_before);
+            existed_before
+        };
+        let tab = open_or_get_tab(state, &path, None)?;
+        return Ok((tab, !existed_before));
+    }
+    Err("bulk_edit_target_required: each edit needs file or tab_id".into())
+}
+
+/// The `file` key of one `bulk_edit` batch item, canonicalized the same way
+/// [`requested_file`] canonicalizes a standalone envelope's `file` -- used
+/// only to check a tab_id-addressed item's `file` key against the tab
+/// `tab_id` actually resolved (AR-10's `file_mismatch` regression).
+fn requested_file_in(item: &Value) -> Option<PathBuf> {
+    item.get("file").and_then(Value::as_str).map(|path| {
+        ai_text_editor::transport::canonical_or_near(std::path::Path::new(path))
+            .unwrap_or_else(|_| PathBuf::from(path))
+    })
+}
+
 fn restore_document(
     envelope: &ai_text_editor::protocol::Envelope,
     tab: &mut Tab,
@@ -2703,6 +2959,202 @@ fn restore_document(
         &envelope.request_id,
         json!({"restored": true, "normalize_nfc": false, "revision": revision}),
     ));
+}
+
+/// The body of a single `replace`/`insert` request, applied against an
+/// already-locked tab. Factored out of the `handle()` dispatch so the spike
+/// `bulk_edit` verb (which locks a *different* tab per item, picked from
+/// `ServerState` rather than the one tab `handle()` was already given) can
+/// apply each item through the exact same span-resolution/content-guard/
+/// journal/undo path a standalone `replace`/`insert` request uses, instead of
+/// duplicating it.
+fn apply_edit_verb(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &mut Tab,
+    frames: &mut Vec<Value>,
+) {
+    // B226/T114: a match_id, an anchor pair, a symbol, a line range, or a
+    // pair of search-hit byte bounds all resolve to the same (offset,
+    // delete_len), so everything below — the journal record, cursor
+    // adjustment, the undo entry — is untouched by which addressing named
+    // the span.
+    let span = match resolve_span(envelope, tab) {
+        Ok(span) => span,
+        Err((code, message)) => {
+            frames.push(error(&envelope.request_id, code, message));
+            return;
+        }
+    };
+    let offset = span
+        .map(|(offset, _)| offset)
+        .unwrap_or_else(|| resolve_point(envelope, tab));
+    // B230: the content guard. `expected_text` says which bytes the caller
+    // believes are at `offset`; when it is the only thing naming a length,
+    // it IS the length, so the arithmetic that got this wrong is not
+    // performed at all.
+    let expected = match expected_span_bytes(envelope) {
+        Ok(expected) => expected,
+        Err((code, message)) => {
+            frames.push(error(&envelope.request_id, code, message));
+            return;
+        }
+    };
+    let named_delete_len = envelope.payload.get("delete_len").and_then(Value::as_u64);
+    let delete_len = match (span, &expected) {
+        (Some((_, length)), _) => length,
+        (None, Some(expected)) => match named_delete_len {
+            None => expected.len(),
+            Some(named) if named as usize == expected.len() => named as usize,
+            Some(named) => {
+                frames.push(error_details(
+                    &envelope.request_id,
+                    "expected_text_length_mismatch",
+                    format!(
+                        "delete_len {named} disagrees with the {} bytes of expected_text; name one, or make them agree",
+                        expected.len()
+                    ),
+                    json!({"delete_len": named, "expected_text_bytes": expected.len()}),
+                ));
+                return;
+            }
+        },
+        (None, None) if envelope.method == "insert" => 0,
+        (None, None) => named_delete_len.unwrap_or(0) as usize,
+    };
+    if let Some(expected) = &expected {
+        let bytes = tab.document.bytes();
+        let end = offset.saturating_add(delete_len);
+        let actual: &[u8] = bytes.get(offset..end).unwrap_or_default();
+        if actual != expected.as_slice() {
+            // This is the corruption itself, refused. Two `replace` calls at
+            // one offset with a delete_len correct for the ORIGINAL token,
+            // while the buffer already held a longer one, deleted 35 of 36
+            // bytes and left the orphan digit: `=== 01`, valid PHP, wrong
+            // logic, reported as a success with a fresh revision. The
+            // revision guard could not catch it and never could — it proves
+            // the document has not moved since the caller read it, and this
+            // caller held a perfectly current revision. What was missing was
+            // any relation between delete_len and the bytes at the offset.
+            frames.push(error_details(
+                &envelope.request_id,
+                "expected_text_mismatch",
+                format!(
+                    "the bytes at offset {offset} are not what expected_text names, so the edit was not applied; read the range and retry against what is actually there (a previous edit of your own may have changed its length)"
+                ),
+                json!({
+                    "offset": offset,
+                    "delete_len": delete_len,
+                    "expected": byte_preview(expected),
+                    "actual": byte_preview(actual),
+                    "actual_bytes_available": bytes.len().saturating_sub(offset),
+                }),
+            ));
+            return;
+        }
+    }
+    let replacement =
+        if let Some(encoded) = envelope.payload.get("bytes_base64").and_then(Value::as_str) {
+            match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded) {
+                Ok(bytes) => bytes,
+                Err(error_value) => {
+                    frames.push(error(
+                        &envelope.request_id,
+                        "invalid_base64",
+                        error_value.to_string(),
+                    ));
+                    return;
+                }
+            }
+        } else {
+            envelope
+                .payload
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .as_bytes()
+                .to_vec()
+        };
+    // B212: an edit with nothing to insert and nothing to delete is not an
+    // edit; it must not spend a revision the guard machinery will later
+    // refuse to explain.
+    if replacement.is_empty() && delete_len == 0 {
+        frames.push(error(&envelope.request_id, "empty_edit", "insert/replace with empty text and a zero delete would change nothing; pass text or bytes_base64 to insert, or a non-zero delete_len to delete"));
+        return;
+    }
+    let before = tab.document.clone();
+    let mut after = before.clone();
+    match after.apply_bytes(offset, delete_len, &replacement) {
+        Ok(()) => {
+            let revision = tab.revision.saturating_add(1);
+            let record = json!({"offset": offset, "delete_len": delete_len, "bytes": replacement.len(), "revision": revision, "before": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, before.bytes()), "after": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, after.bytes())});
+            match journal_append_result(tab, "edit", record) {
+                Ok(()) => {
+                    adjust_cursors(
+                        &before,
+                        &after,
+                        &mut tab.cursors,
+                        offset,
+                        delete_len,
+                        replacement.len(),
+                    );
+                    tab.document = after.clone();
+                    if tab.transaction_before.is_none() {
+                        tab.history.record(&before, &after);
+                    }
+                    tab.revision = revision;
+                    tab.results.clear();
+                    tab.index = LineIndex::build(tab.document.bytes(), tab.index.granularity);
+                    tab.index_complete = true;
+                    persist_index(tab);
+                    let _ = tab.metadata.record(
+                        &tab.path,
+                        tab.document.mode,
+                        tab.revision,
+                        tab.document.bytes().len(),
+                    );
+                    // A delete spanning a line end joins two lines; nothing
+                    // in the coordinates says so otherwise.
+                    let spans_lines = before.bytes()[offset..offset + delete_len].contains(&b'\n');
+                    // B226: echo the span that was actually changed. The
+                    // verify-read after every edit existed because the
+                    // caller could not tell what its arithmetic had
+                    // addressed; with the resolved offset and length in the
+                    // answer, it can.
+                    let mut payload = json!({"revision": tab.revision, "cursors": tab.cursors, "dirty": tab_dirty(tab), "disk_diverged": tab_disk_diverged(tab), "offset": offset, "delete_len": delete_len, "bytes_written": replacement.len()});
+                    // B230's second half: the bytes that actually went. The
+                    // corruption this closes was reported as a plain success
+                    // and only a later read caught it; a caller that can see
+                    // what it deleted can see the orphan digit it left
+                    // behind.
+                    if delete_len > 0 {
+                        payload["deleted"] =
+                            byte_preview(&before.bytes()[offset..offset + delete_len]);
+                    }
+                    if spans_lines {
+                        payload["spans_lines"] = json!(true);
+                    }
+                    frames.push(response(&envelope.request_id, payload));
+                }
+                Err(error_value) => frames.push(error(
+                    &envelope.request_id,
+                    "journal_write_failed",
+                    error_value.to_string(),
+                )),
+            }
+        }
+        Err(error_value) => {
+            let message = if tab.document.normalize_nfc
+                && tab.document.mode == DocumentMode::TextUtf8
+            {
+                format!(
+                    "{error_value}; on a normalized tab, byte offsets address the ORIGINAL bytes, not the normalized view a read shows - offset {offset} is inside a multi-byte sequence of the original"
+                )
+            } else {
+                error_value.to_string()
+            };
+            frames.push(error(&envelope.request_id, "edit_refused", message));
+        }
+    }
 }
 
 fn observe_external(tab: &mut Tab) {

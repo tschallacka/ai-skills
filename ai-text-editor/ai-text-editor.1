@@ -122,6 +122,26 @@ internally, which is why \fBbegin-transaction\fR/\fBend-transaction\fR
 (undo-grouping only) is not the same guarantee. A destination strictly inside
 the source span is refused as \fBmove_destination_inside_source\fR.
 .PP
+\fBbulk-edit --edits-json JSON\fR (or \fB--edits-file PATH\fR, either supplies
+the \fBedits\fR array) applies several \fBreplace\fR/\fBinsert\fR/\fBsave\fR
+items \(em each its own \fB{op, file|tab_id, ...the usual addressing/content
+keys, session_token}\fR \(em in one call, across multiple tabs, best-effort
+per item: a failing item is reported in its own result entry and never
+blocks a sibling that passes its own checks. Edits landing on the same tab
+within one call group into a single undo step for that tab, the same
+guarantee \fBbegin-transaction\fR/\fBend-transaction\fR give across separate
+requests \(em both still exist: \fBbegin-transaction\fR/\fBend-transaction\fR
+for a caller that wants to interleave other reads between edits,
+\fBbulk-edit\fR for the common case of many edits with no interleaving.
+Each item is authorized exactly as a standalone call would be \(em the
+connection's \fBauth_token\fR, and a per-item \fBsession_token\fR required
+only for a \fBfile\fR-addressed item whose tab predates this same call and
+that this identity has no cached token for (\fBtab_id\fR addressing is
+always exempt; the client fills a known file's token automatically, the
+same as every other command). \fBmove\fR, \fBcopy\fR, and \fBlarge-edit\fR
+batching are not supported; an item naming one of those ops is refused
+\fBbulk_edit_op_invalid\fR without affecting its siblings.
+.PP
 For TCP startup use exactly one of \fB--auth-token TOKEN\fR or an owner-only
 \fB--auth-token-file PATH\fR. Clients pass \fB--auth-token TOKEN\fR or reuse a
 saved session token.

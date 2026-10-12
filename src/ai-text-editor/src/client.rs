@@ -163,6 +163,26 @@ pub fn focus_path(identity: &str) -> PathBuf {
     cache_path(identity, None)
 }
 
+/// W26/AR-32/AR-37: whether `identity` already has a live focused tab --
+/// the liveness half of a cold-start check. `resolve` itself never trusts a
+/// cached focus without probing `Endpoint::is_live()` first (B179); a
+/// cold-start check that only asked "does the cache file exist" would treat
+/// a stale on-disk record naming a dead server as warm and skip the
+/// autostart it actually needs. `Ok(false)` covers both "no cache file at
+/// all" and "a cache file naming a dead endpoint" -- both read as
+/// cold-start. `Err` surfaces a genuinely unreadable cache file rather than
+/// silently folding corruption into "cold-start" (the same shape `resolve`'s
+/// own cache-read error already uses).
+pub fn focus_is_live(identity: &str) -> Result<bool, String> {
+    let path = focus_path(identity);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let session = read_session(&path)
+        .map_err(|error| format!("cannot read session token {}: {error}", path.display()))?;
+    Ok(session.endpoint.is_live())
+}
+
 pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
     let identity = identity(request.explicit_identity.as_deref(), &request.agent_env_var);
     let cache_path = request.session_token_path.clone().or_else(|| {
@@ -410,6 +430,64 @@ pub fn persist_cache(
             .map_err(|error| format!("cannot save session token: {error}"))?;
     }
     Ok(())
+}
+
+/// `persist_cache`'s own per-(identity, file) cache, extended to `bulk_edit`:
+/// every other verb's successful response carries the ONE tab's own
+/// session_token, which the caller persists via `resolved.cache_path`
+/// (`cache_path(identity, request.file)`) so a later standalone call for
+/// that same file reconnects straight to it. `bulk_edit`'s own
+/// `ResolveRequest.file` is always `None` -- its real targets live inside
+/// `edits`, invisible to that generic machinery -- so without this, no
+/// (identity, file) entry is EVER written for the individual files a batch
+/// touches. A later standalone verb addressing one of those files by name,
+/// once this identity has 2+ registered tabs, hits `session::resolve`'s own
+/// `session_ambiguous` refusal and falls through to autostarting a
+/// SEPARATE, duplicate server for that file -- a real resource/routing
+/// hazard, not just cosmetic.
+///
+/// Reads the per-item `file`/`session_token` the server now echoes in
+/// `bulk_edit`'s own response (`handle_bulk_edit`'s success branch). Only an
+/// APPLIED item persists a cache entry, mirroring `persist_cache`'s own
+/// existing caller's rule for a standalone call: a refused item's resolved
+/// tab is not one this identity is authorized against, so its token must
+/// never be cached as if it were.
+pub fn persist_bulk_edit_item_caches(
+    request: &ResolveRequest,
+    resolved: &Resolved,
+    auth_token: Option<&str>,
+    frames: &[serde_json::Value],
+) {
+    if request.method != "bulk_edit" {
+        return;
+    }
+    let Some(identity) = identity(request.explicit_identity.as_deref(), &request.agent_env_var)
+    else {
+        return;
+    };
+    let Some(results) = frames.iter().find_map(|frame| {
+        frame
+            .pointer("/payload/results")
+            .and_then(serde_json::Value::as_array)
+    }) else {
+        return;
+    };
+    for entry in results {
+        if entry.get("applied").and_then(serde_json::Value::as_bool) != Some(true) {
+            continue;
+        }
+        let Some(file) = entry.get("file").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(token) = entry
+            .get("session_token")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let path = cache_path(&identity, Some(Path::new(file)));
+        let _ = persist_cache(Some(&path), &resolved.endpoint, auth_token, Some(token));
+    }
 }
 
 /// Remember the tab this call was served by as this identity's focused tab
@@ -728,6 +806,9 @@ where
                 envelope.revision = Some(current);
             }
         }
+        if request.method == "bulk_edit" {
+            autofill_bulk_edit_session_tokens(request, resolved, &mut envelope);
+        }
         envelope
     };
     let frames = request_send(&resolved, &send_envelope(&resolved))?;
@@ -767,6 +848,85 @@ where
         }
     }
     Ok((frames, resolved))
+}
+
+/// W21/AR-11/AR-23: every other verb's session_token is resolved
+/// transparently by `resolve`/`cache_path` for `(identity, file)` and
+/// attached to the outer envelope automatically -- `bulk_edit`'s per-item
+/// `session_token` field (the server-side check W01 adds) has no client-side
+/// counterpart, so an item addressing an already-open tab by `file` (the
+/// exact shape the pre-existing spike tests and the validated benchmark both
+/// use) would be refused with nothing the caller could have supplied. This
+/// fills what the client already fills for every other verb, per item: a
+/// `file`-addressed item carrying no explicit `session_token` gets this
+/// identity's own cached token for that file attached before the request is
+/// sent. An item naming `tab_id` needs no fill (W01's own exemption).
+///
+/// Deliberately not cold-start discovery itself: populating
+/// `ResolveRequest.file` in the first place (so a genuinely cold call can
+/// autostart or discover a server at all) is Goal 05's job in the CLI/MCP
+/// entry points that build `ResolveRequest` before `execute` is ever
+/// called. What this function adds on top is specific to the ONE file that
+/// drove that discovery: `request.file` (Goal 05's own cold-start target,
+/// when set). That file structurally cannot have a per-(identity, file)
+/// cache entry yet -- discovery fell back to it precisely because none
+/// existed -- but `execute`'s own pre-existing `refresh_token` step
+/// (unconditional for every verb but `open`) already fetched ITS current
+/// session_token into `resolved` before this closure ever ran, the exact
+/// mechanism that lets a cold `replace -f new.txt` work as any identity's
+/// first-ever call with no tracked token. Reusing it here, for the one
+/// item whose `file` matches `request.file`, closes the gap a cold
+/// `bulk_edit` would otherwise hit: the item that bootstrapped the
+/// connection is not in ANY cache yet, and the server-side freshness
+/// exemption (AR-06) does not cover it either, because an autostarted
+/// server's own startup already opened that exact file as its default
+/// tab before this request's own per-item loop ever ran -- predating the
+/// batch from the per-item loop's point of view, even though it is this
+/// identity's genuine first touch from the caller's.
+fn autofill_bulk_edit_session_tokens(
+    request: &ResolveRequest,
+    resolved: &Resolved,
+    envelope: &mut Envelope,
+) {
+    let identity = identity(request.explicit_identity.as_deref(), &request.agent_env_var);
+    let Some(edits) = envelope
+        .payload
+        .get_mut("edits")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for item in edits.iter_mut() {
+        let Some(object) = item.as_object_mut() else {
+            continue;
+        };
+        if object.contains_key("tab_id") || object.contains_key("session_token") {
+            continue;
+        }
+        let Some(file) = object
+            .get("file")
+            .and_then(serde_json::Value::as_str)
+            .map(PathBuf::from)
+        else {
+            continue;
+        };
+        if let Some(identity) = identity.as_deref() {
+            if let Ok(session) = read_session(&cache_path(identity, Some(&file))) {
+                if let Some(token) = session.session_token {
+                    object.insert("session_token".into(), serde_json::Value::String(token));
+                    continue;
+                }
+            }
+        }
+        if request.file.as_deref() == Some(file.as_path()) {
+            if let Some(token) = &resolved.session_token {
+                object.insert(
+                    "session_token".into(),
+                    serde_json::Value::String(token.clone()),
+                );
+            }
+        }
+    }
 }
 
 /// Re-open the file against the already-live endpoint to recover a current
