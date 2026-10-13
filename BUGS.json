@@ -45,6 +45,27 @@
       "notes": null,
       "created_at": "2026-10-08T20:03:51Z",
       "updated_at": "2026-10-08T20:03:51Z"
+    },
+    {
+      "id": "B3",
+      "title": "ai-text-editor (MCP install): idle/last-tab-closed server exit frees its socket before retiring its registry rows, so a replacement generation's reachable endpoint can still answer for a dead generation's stale tab ids",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Not independently reproduced live; mechanism confirmed by reading src/ai-text-editor/src/bin/ai-text-editor-server.rs (spawn_idle_watchdog ~L538-575, and the last-tab-closed exit ~L1282-1297) and src/ai-text-editor/src/session.rs (resolve_tab_at ~L288-340). Both server exit paths, in order: (1) remove the per-file socket and discovery files, (2) call session::retire_generation, (3) std::process::exit. endpoint_for_file/socket_for_file derive the same file's socket path deterministically (a hash of the canonical path), so a replacement server autostarted for the same file can bind that freed path in the window between step 1 and step 2. resolve_tab's only liveness check on a candidate SessionRecord is endpoint_is_reachable (is anything listening), never a check that the live process is the SAME server_generation that registered the record -- so a not-yet-retired record for the dying generation's tab still resolves as valid, pointing the caller at a live but unrelated new generation.",
+      "observed": "Field report (MCP install, no CLI, identity from the harness session id, no explicit --agent/--session/--endpoint on any call): across one long background Claude Code session editing 4 files, tab ids drifted per file (e.g. one file: d -> bd -> 9; another: c -> 1 -> bf). Two distinct refusal shapes were seen: (1) the client-side tab_unknown: no session record has tab_id d, consistent with ordinary idle-timeout recycling and already phrased helpfully; (2) a different, server-side no tab on this server has tab_id c, seen per-item inside a bulk_edit while a sibling item in the SAME call addressing tab_id: bd applied fine -- i.e. one live server answered for bd but not for c. No data loss (journals replayed, every save landed, re-addressing by file always worked); cost was refused calls, including one whole 4-item bulk_edit refused on tab_unknown, and match_ids going stale along with their tab, forcing edits to be redone via text anchors.",
+      "expected": "Within one agent identity, a tab id either keeps resolving for the life of the tab, or its failure is consistently as informative as the existing tab_unknown text already is (it names the likely cause -- the tab may belong to a server that has since exited -- and the fix -- open the file again for a current id, the journal replays). The server-side no tab on this server refusal currently carries none of that context.",
+      "mechanism": "Exit-path cleanup order (free the socket, THEN retire the registry generation) leaves a window where a replacement server for the same file can occupy the freed, deterministic socket path while the dying generation's own SessionRecord rows are still live in the registry, passing the reachability-only liveness check.",
+      "surfaces": [
+        "ai-text-editor"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "relayed field report (MCP install), mechanism independently verified by source reading this session",
+      "notes": "Companion TODO: idle watchdog consulting 'claude agents --json' (interactive+background, documented/scriptable) to skip self-termination while the owning chat session is still listed would shrink how often idle-timeout is what triggers this race, but does not close the window itself -- the exit-path ordering is the actual defect.",
+      "created_at": "2026-10-13T14:39:35Z",
+      "updated_at": "2026-10-13T14:39:35Z"
     }
   ]
 }

@@ -2,5 +2,21 @@
   "skill": "todo",
   "skill_version": "2.0.0-alpha.9",
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
-  "tasks": []
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "ai-text-editor-server: idle watchdog should consult 'claude agents --json' before self-terminating",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "The idle watchdog (spawn_idle_watchdog, src/ai-text-editor/src/bin/ai-text-editor-server.rs) self-terminates purely on elapsed wall-clock inactivity (default 600s) plus in-flight/detached-job checks -- it has no signal for whether the owning chat session is still open. A session that is simply busy elsewhere (not touching this file) for 10+ minutes loses its editor server and gets a new tab generation on the next reconnect, which is the precondition for B3's stale-registry-row race (shrinks how often it's hit, does not close the window itself -- that's B3's own exit-path-ordering defect). Fix (MCP installs only; no equivalent for CLI-only installs, which have no long-lived owning process to check): 'claude agents --json' is a documented, scriptable command (--help: 'Print active sessions (interactive and background) as a JSON array and exit (for scripting; does not require a TTY)') that returns each live session's sessionId and pid. The server already knows its own agent_id (the same value, via agent_session_key::resolve_session_key) from registration. The watchdog should shell out to 'claude agents --json' on each poll and skip the idle-exit if its own agent_id is still present as a sessionId in the result, regardless of elapsed idle time.",
+      "blocked_on": null,
+      "refs": [
+        "B3"
+      ],
+      "note": "Raised in the same session that filed B3; 'claude agents --json' confirmed live on this machine (claude 2.x) to list both interactive and background sessions with sessionId+pid before this was filed.",
+      "created_at": "2026-10-13T14:39:44Z",
+      "updated_at": "2026-10-13T14:39:44Z"
+    }
+  ]
 }
