@@ -49,7 +49,7 @@
     {
       "id": "B3",
       "title": "ai-text-editor (MCP install): idle/last-tab-closed server exit frees its socket before retiring its registry rows, so a replacement generation's reachable endpoint can still answer for a dead generation's stale tab ids",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -60,12 +60,12 @@
       "surfaces": [
         "ai-text-editor"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Reordered both server exit paths (idle timeout, last tab closed) in src/ai-text-editor/src/bin/ai-text-editor-server.rs to retire_generation before removing the socket/discovery files (shared via a new retire_and_cleanup helper), closing the window where a replacement server for the same file could bind the freed path while the dying generation's own registry rows were still live. Also brought the two server-side 'no tab on this server' refusals in line with the client-side tab_unknown wording.",
+      "verification": "cargo test -p ai-text-editor --release: 128 tests green, including the existing B189 regression test (a_stopped_server_leaves_no_session_registry_records_behind) and killed_server_is_replaced_by_the_next_open_and_the_journal_replays, both unaffected by the reorder. cargo fmt/clippy clean. Full ./pre-push-check.sh (including cargo test for the dependent ai-text-editor-mcp crate) passed. Commit 094f51e8 on master. The exit-path ordering itself is not independently race-tested (the window is sub-millisecond and not reliably observable from outside the process); correctness rests on the reorder plus the unaffected existing test suite, not a new regression test for the race itself.",
       "found_by": "relayed field report (MCP install), mechanism independently verified by source reading this session",
-      "notes": "Companion TODO: idle watchdog consulting 'claude agents --json' (interactive+background, documented/scriptable) to skip self-termination while the owning chat session is still listed would shrink how often idle-timeout is what triggers this race, but does not close the window itself -- the exit-path ordering is the actual defect.",
+      "notes": "Companion TODO: idle watchdog consulting 'claude agents --json' (interactive+background, documented/scriptable) to skip self-termination while the owning chat session is still listed would shrink how often idle-timeout is what triggers this race, but does not close the window itself -- the exit-path ordering is the actual defect. Companion TODO T1 implemented in the same commit: idle watchdog consults 'claude agents --json' before honoring the idle timeout.",
       "created_at": "2026-10-13T14:39:35Z",
-      "updated_at": "2026-10-13T14:39:35Z"
+      "updated_at": "2026-10-13T14:51:07Z"
     }
   ]
 }

@@ -6,7 +6,7 @@
     {
       "id": "T1",
       "title": "ai-text-editor-server: idle watchdog should consult 'claude agents --json' before self-terminating",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "The idle watchdog (spawn_idle_watchdog, src/ai-text-editor/src/bin/ai-text-editor-server.rs) self-terminates purely on elapsed wall-clock inactivity (default 600s) plus in-flight/detached-job checks -- it has no signal for whether the owning chat session is still open. A session that is simply busy elsewhere (not touching this file) for 10+ minutes loses its editor server and gets a new tab generation on the next reconnect, which is the precondition for B3's stale-registry-row race (shrinks how often it's hit, does not close the window itself -- that's B3's own exit-path-ordering defect). Fix (MCP installs only; no equivalent for CLI-only installs, which have no long-lived owning process to check): 'claude agents --json' is a documented, scriptable command (--help: 'Print active sessions (interactive and background) as a JSON array and exit (for scripting; does not require a TTY)') that returns each live session's sessionId and pid. The server already knows its own agent_id (the same value, via agent_session_key::resolve_session_key) from registration. The watchdog should shell out to 'claude agents --json' on each poll and skip the idle-exit if its own agent_id is still present as a sessionId in the result, regardless of elapsed idle time.",
@@ -14,9 +14,9 @@
       "refs": [
         "B3"
       ],
-      "note": "Raised in the same session that filed B3; 'claude agents --json' confirmed live on this machine (claude 2.x) to list both interactive and background sessions with sessionId+pid before this was filed.",
+      "note": "Implemented in the same commit as B3 (094f51e8): the idle watchdog now computes current_agent_id() and, right before honoring the idle timeout, shells out to 'claude agents --json' (owning_session_is_alive); if the agent_id is still listed, the watchdog continues instead of exiting. Pure matching logic (agent_is_listed) unit-tested directly (6 cases: listed, unlisted, empty list, malformed JSON, object-instead-of-array, entry missing sessionId). The subprocess-calling half is not unit-tested (no fake 'claude' binary substituted); behavior when 'claude' is missing or errors is to fall back to the existing timeout unchanged, by design.",
       "created_at": "2026-10-13T14:39:44Z",
-      "updated_at": "2026-10-13T14:39:44Z"
+      "updated_at": "2026-10-13T14:51:14Z"
     }
   ]
 }
