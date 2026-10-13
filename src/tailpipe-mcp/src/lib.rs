@@ -12,6 +12,21 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tailpipe_server_rs::protocol::{Request, Response, SearchMode};
 
+/// The MCP server-level pitch, shown to the client once at `initialize` --
+/// the same mechanism chat-mcp and decisions-mcp already carry as their own
+/// `INSTRUCTIONS` consts. Unlike those two, tailpipe-mcp shipped with none at
+/// all (not a deliberate omission the way ai-text-editor-mcp's own
+/// env-var-gated default is; just never added).
+const INSTRUCTIONS: &str = "A less/tail for agents: pipe a running command's stdout into a named \
+stream and read/search/tail it back by id, from anywhere, without having been the process that \
+started it. Piping in (tailpipe-client-rs ingest --stream NAME) is shell-only -- there is no tool \
+for that half -- but every read is a typed call here: list_streams names what is active, read takes \
+an inclusive id range, search runs exact or regex, wait blocks (bounded by timeout_seconds) until a \
+line past since arrives, and save snapshots a stream to gzip without evicting it. A stream lives \
+only in server memory and is evicted -- snapshotted first, nothing lost -- after 15 minutes with no \
+read or write. Not for durable, cross-session message history (use the chat skill) or for editing a \
+file in place (use ai-text-editor).";
+
 /// `$TAILPIPE_ENDPOINT` if set, else the same `$TAILPIPE_HOME`-rooted
 /// default path convention tailpipe-server-rs's own --snapshot-dir default
 /// uses, with `tailpipe.sock` as the endpoint file name.
@@ -176,7 +191,8 @@ pub fn handle(message: Value) -> Value {
         "initialize" => json!({"jsonrpc":"2.0","id":id,"result":{
             "protocolVersion":"2025-06-18",
             "capabilities":{"tools":{}},
-            "serverInfo":{"name":"tailpipe","version":"0.1.0"}}}),
+            "serverInfo":{"name":"tailpipe","version":"0.1.0"},
+            "instructions": INSTRUCTIONS}}),
         "notifications/initialized" => Value::Null,
         "tools/list" => json!({"jsonrpc":"2.0","id":id,"result":{"tools": tool_definitions()}}),
         "tools/call" => call_tool(id, message.get("params").cloned().unwrap_or_default()),
@@ -368,6 +384,17 @@ fn tool_definitions() -> Vec<Value> {
 mod tests {
     use super::*;
     use tailpipe_server_rs::protocol::Line;
+
+    #[test]
+    fn initialize_reports_a_non_empty_instructions_pitch() {
+        let response = handle(json!({"jsonrpc":"2.0","id":1,"method":"initialize"}));
+        assert_eq!(response["result"]["serverInfo"]["name"], "tailpipe");
+        let instructions = response["result"]["instructions"]
+            .as_str()
+            .expect("instructions must be a string");
+        assert!(!instructions.is_empty());
+        assert!(instructions.contains("tailpipe-client-rs ingest"));
+    }
 
     #[test]
     fn list_streams_result_shapes_a_stub_response() {
