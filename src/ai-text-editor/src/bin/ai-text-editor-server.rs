@@ -568,11 +568,39 @@ fn spawn_idle_watchdog(state: Arc<Mutex<ServerState>>, idle_timeout: Duration) {
         if any_job_active {
             continue;
         }
-        let _ = fs::remove_file(endpoint_for_file(&discovery_path));
-        let _ = fs::remove_file(socket_for_file(&discovery_path));
-        let _ = session::retire_generation(&generation);
+        // T1: a session that is simply busy elsewhere for longer than
+        // idle_timeout should not lose its editor out from under it. This is
+        // an ADDITIONAL reason to stay up, checked only once every other
+        // idle condition already held -- not a replacement for the timeout,
+        // which still governs an agent_id-less server or a non-Claude-Code
+        // harness exactly as before.
+        if let Some(agent_id) = current_agent_id() {
+            if owning_session_is_alive(&agent_id) {
+                continue;
+            }
+        }
+        retire_and_cleanup(&discovery_path, &generation);
         std::process::exit(0);
     });
+}
+
+/// Same ladder the client's `session_identity` resolves with (no explicit
+/// flag on this side — the server has no argv concept of "--agent", only
+/// its own environment), so a client that supplies no explicit id still
+/// finds the tab its own harness registered. Shared by `register_session`
+/// (what gets written to the registry) and the idle watchdog's own T1
+/// liveness check (which chat session this generation belongs to).
+fn current_agent_id() -> Option<String> {
+    let (key, source) = agent_session_key::resolve_session_key(
+        None,
+        "TSCH_AI_EDITOR_AGENT",
+        &|name| std::env::var(name).ok(),
+        None,
+    );
+    match source {
+        agent_session_key::KeySource::Shared => None,
+        _ => Some(key),
+    }
 }
 
 fn register_session(
@@ -581,30 +609,68 @@ fn register_session(
     session_token: &str,
     auth_token: Option<&str>,
 ) {
-    // Same ladder the client's `session_identity` resolves with (no
-    // explicit flag on this side — the server has no argv concept of
-    // "--agent", only its own environment), so a client that supplies no
-    // explicit id still finds the tab its own harness registered.
-    let (key, source) = agent_session_key::resolve_session_key(
-        None,
-        "TSCH_AI_EDITOR_AGENT",
-        &|name| std::env::var(name).ok(),
-        None,
-    );
-    let agent_id = match source {
-        agent_session_key::KeySource::Shared => None,
-        _ => Some(key),
-    };
     let record = session::new_record(
         &endpoint.display(),
         server_generation,
         session_token,
         auth_token,
-        agent_id,
+        current_agent_id(),
     );
     if let Err(error) = session::register(&record) {
         eprintln!("ai-text-editor-server: cannot register session: {error}");
     }
+}
+
+/// B3: shuts a server generation down in the one order that is safe. A
+/// later server for the same file binds the same socket and discovery
+/// paths deterministically (`endpoint_for_file`/`socket_for_file` hash the
+/// canonical file path) -- so retiring the registry generation BEFORE
+/// freeing those paths means a replacement can never bind a path this
+/// generation's own (still-live) registry rows still point at. Reversing
+/// this order leaves a window where a replacement server occupies the
+/// freed path while a resolver can still match the dying generation's own
+/// rows, which pass their reachability-only liveness check (something
+/// really is listening there -- it just is not this generation) and hand a
+/// caller a tab id that the live server has never heard of.
+fn retire_and_cleanup(discovery_path: &Path, generation: &str) {
+    let _ = session::retire_generation(generation);
+    let _ = fs::remove_file(endpoint_for_file(discovery_path));
+    let _ = fs::remove_file(socket_for_file(discovery_path));
+}
+
+/// T1: whether `agent_id` is still listed as a live session by `claude
+/// agents --json` (documented, scriptable: "Print active sessions
+/// (interactive and background) as a JSON array and exit"). Any failure --
+/// `claude` not on PATH, a non-Claude-Code harness, malformed output -- is
+/// treated as "cannot confirm liveness", never as a reason to delay
+/// shutdown: this is an ADDITIONAL reason to stay up, not a replacement for
+/// the idle timeout.
+fn owning_session_is_alive(agent_id: &str) -> bool {
+    let Ok(output) = std::process::Command::new("claude")
+        .args(["agents", "--json"])
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    agent_is_listed(&output.stdout, agent_id)
+}
+
+/// The pure half of `owning_session_is_alive`: does `claude agents --json`'s
+/// own output list `agent_id` as a `sessionId`. Split out so the matching
+/// logic is testable against literal JSON without a real `claude` binary.
+fn agent_is_listed(json: &[u8], agent_id: &str) -> bool {
+    let Ok(value) = serde_json::from_slice::<Value>(json) else {
+        return false;
+    };
+    let Some(sessions) = value.as_array() else {
+        return false;
+    };
+    sessions
+        .iter()
+        .any(|session| session.get("sessionId").and_then(Value::as_str) == Some(agent_id))
 }
 
 /// T118: reads back the short id `register_session` (just called) actually
@@ -1290,9 +1356,7 @@ fn write_frames<S: std::io::Write>(
         if state_guard.tabs.is_empty() {
             let discovery_path = state_guard.discovery_path.clone();
             let generation = state_guard.server_generation.clone();
-            let _ = fs::remove_file(endpoint_for_file(&discovery_path));
-            let _ = fs::remove_file(socket_for_file(&discovery_path));
-            let _ = session::retire_generation(&generation);
+            retire_and_cleanup(&discovery_path, &generation);
             std::process::exit(0);
         }
         if state_guard.default_key == key {
@@ -1647,7 +1711,7 @@ fn select_tab(
             }
             None if matched.is_empty() => {
                 return Err(format!(
-                    "tab_unknown: no tab on this server has tab_id {wanted}; {}",
+                    "tab_unknown: no tab on this server has tab_id {wanted}; the id may belong to a server that has since exited -- `open` the file again for a current id (the journal replays); {}",
                     candidate_advice(&state_guard)
                 ))
             }
@@ -2896,9 +2960,9 @@ fn resolve_tab_for_item(
             .cloned();
         return match owner.or_else(|| (matched.len() == 1).then(|| matched[0].clone())) {
             Some(tab) => Ok((tab, true)),
-            None if matched.is_empty() => {
-                Err(format!("tab_unknown: no tab on this server has tab_id {wanted}"))
-            }
+            None if matched.is_empty() => Err(format!(
+                "tab_unknown: no tab on this server has tab_id {wanted}; the id may belong to a server that has since exited -- `open` the file again for a current id (the journal replays)"
+            )),
             None => Err(format!(
                 "tab_ambiguous: {wanted} names {} open tabs on this server; address one by a longer tab_id",
                 matched.len()
@@ -6377,4 +6441,42 @@ fn pid_is_alive(pid: u32) -> bool {
     // touching the process; EPERM means it exists and is not ours to kill.
     let result = unsafe { libc::kill(pid as libc::c_int, 0) };
     result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(test)]
+mod watchdog_tests {
+    use super::agent_is_listed;
+
+    #[test]
+    fn a_listed_session_id_is_recognized() {
+        let json = br#"[{"pid":123,"sessionId":"abc-123","status":"busy"}]"#;
+        assert!(agent_is_listed(json, "abc-123"));
+    }
+
+    #[test]
+    fn an_unlisted_session_id_is_not_recognized() {
+        let json = br#"[{"pid":123,"sessionId":"abc-123","status":"busy"}]"#;
+        assert!(!agent_is_listed(json, "someone-else"));
+    }
+
+    #[test]
+    fn an_empty_session_list_is_not_recognized() {
+        assert!(!agent_is_listed(b"[]", "abc-123"));
+    }
+
+    #[test]
+    fn malformed_json_is_not_recognized() {
+        assert!(!agent_is_listed(b"not json", "abc-123"));
+    }
+
+    #[test]
+    fn a_json_object_instead_of_an_array_is_not_recognized() {
+        assert!(!agent_is_listed(br#"{"sessionId":"abc-123"}"#, "abc-123"));
+    }
+
+    #[test]
+    fn a_session_entry_with_no_session_id_field_is_skipped_not_fatal() {
+        let json = br#"[{"pid":1},{"pid":2,"sessionId":"abc-123"}]"#;
+        assert!(agent_is_listed(json, "abc-123"));
+    }
 }
