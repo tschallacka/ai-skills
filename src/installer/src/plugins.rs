@@ -4,8 +4,8 @@
 //! than being selectable on their own. None is in the shipped skill list:
 //! tui-hint-plugin rides with interactive-shell, editor-gate-plugin with
 //! ai-text-editor, agent-identity-plugin with
-//! chat/ai-text-editor/interactive-shell, and chat-interrupt-plugin with
-//! chat.
+//! chat/ai-text-editor/interactive-shell, chat-interrupt-plugin with
+//! chat, and tailpipe-gate-plugin with tailpipe.
 //!
 //! Claude Code reads a plugin directory per root, so it is copied there
 //! verbatim; opencode declares plugins globally in its own config's
@@ -66,6 +66,14 @@ const DECISION_REMINDER_PLUGIN_FILES: &[&str] = &[
     "hooks/session-start.sh",
 ];
 const DECISION_REMINDER_PLUGIN_EXECUTABLES: &[&str] = &["hooks/lib.sh", "hooks/session-start.sh"];
+
+const TAILPIPE_GATE_PLUGIN_FILES: &[&str] = &[
+    ".claude-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/lib.sh",
+    "hooks/pre-tool-use-bash.sh",
+];
+const TAILPIPE_GATE_PLUGIN_EXECUTABLES: &[&str] = &["hooks/lib.sh", "hooks/pre-tool-use-bash.sh"];
 
 /// Copies `files` (relative to `source_root/plugin_name`) into
 /// `target_root/plugin_name`, then makes `executables` (a subset of `files`)
@@ -294,6 +302,20 @@ pub fn install_decision_reminder_plugin_claude(
     )
 }
 
+/// Rides with `tailpipe`, Claude Code only (`PreToolUse` is a Claude Code
+/// hook): a soft, non-blocking reminder on a Bash call that follows or
+/// backgrounds-and-redirects a running command's output, that tailpipe
+/// keeps it queryable and pollable instead.
+pub fn install_tailpipe_gate_plugin(source_root: &Path, target_root: &Path) -> io::Result<PathBuf> {
+    copy_plugin_files(
+        source_root,
+        "tailpipe-gate-plugin",
+        TAILPIPE_GATE_PLUGIN_FILES,
+        TAILPIPE_GATE_PLUGIN_EXECUTABLES,
+        target_root,
+    )
+}
+
 pub enum OpencodePluginOutcome {
     /// This run's checkout does not ship the opencode variant of the plugin.
     NotShipped,
@@ -484,6 +506,37 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             for hook in ["hooks/editor-token", "hooks/pre-tool-use-read.sh"] {
+                let mode = fs::metadata(destination.join(hook))
+                    .unwrap()
+                    .permissions()
+                    .mode();
+                assert_eq!(mode & 0o111, 0o111, "{hook}");
+            }
+        }
+    }
+
+    #[test]
+    fn tailpipe_gate_plugin_copies_its_own_file_set_and_marks_hooks_executable() {
+        let source_root = tempfile::tempdir().unwrap();
+        let dir = source_root.path().join("tailpipe-gate-plugin");
+        write(&dir.join(".claude-plugin/plugin.json"), "{}");
+        write(&dir.join("hooks/hooks.json"), "{}");
+        write(&dir.join("hooks/lib.sh"), "#!/bin/sh\n");
+        write(&dir.join("hooks/pre-tool-use-bash.sh"), "#!/bin/sh\n");
+        write(&dir.join("README.md"), "not shipped");
+        let target_root = tempfile::tempdir().unwrap();
+
+        let destination =
+            install_tailpipe_gate_plugin(source_root.path(), target_root.path()).unwrap();
+
+        assert!(destination.join(".claude-plugin/plugin.json").is_file());
+        assert!(destination.join("hooks/pre-tool-use-bash.sh").is_file());
+        assert!(!destination.join("README.md").exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for hook in ["hooks/lib.sh", "hooks/pre-tool-use-bash.sh"] {
                 let mode = fs::metadata(destination.join(hook))
                     .unwrap()
                     .permissions()

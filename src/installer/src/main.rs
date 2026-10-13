@@ -85,6 +85,9 @@ Usage:
   installer install-decision-reminder-plugin --source DIR --target DIR
                      install the vendor-shipped plugin that rides with
                      decisions (Claude Code only)
+  installer install-tailpipe-gate-plugin --source DIR --target DIR
+                     install the vendor-shipped plugin that rides with
+                     tailpipe (Claude Code only)
   installer install-profiles --agent claude|opencode|codex --source DIR --target DIR
                      (re)install every shipped agent profile (.agents/profiles/),
                      translated into that agent's own custom-subagent format
@@ -150,6 +153,7 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         Some("install-decision-reminder-plugin") => {
             run_install_decision_reminder_plugin(&argv[1..])
         }
+        Some("install-tailpipe-gate-plugin") => run_install_tailpipe_gate_plugin(&argv[1..]),
         Some("install-profiles") => run_install_profiles(&argv[1..]),
         Some("set-claude-env") => run_set_claude_env(&argv[1..]),
         Some("print-skill-files") => run_print_skill_files(&argv[1..]),
@@ -1129,6 +1133,9 @@ fn run_remaining_post_install_steps(
     if skills.iter().any(|s| s == "decisions") {
         run_decision_reminder_plugin_post_install(known_roots, source, sink);
     }
+    if skills.iter().any(|s| s == "tailpipe") {
+        run_tailpipe_gate_plugin_post_install(known_roots, source, sink);
+    }
     run_profiles_post_install(known_roots, source, home, sink);
     run_mods_post_install(known_roots, source, sink);
 }
@@ -1353,6 +1360,36 @@ fn run_decision_reminder_plugin_post_install(
                 destination.display()
             )),
             Err(e) => sink.log(&format!("decision-reminder-plugin: {e}")),
+        }
+    }
+}
+
+/// A companion plugin for `tailpipe`, Claude Code only (`PreToolUse` is a
+/// Claude Code hook): a soft, non-blocking reminder on a Bash call that
+/// follows or backgrounds-and-redirects a running command's output, that
+/// tailpipe keeps it queryable and pollable instead.
+fn run_tailpipe_gate_plugin_post_install(
+    roots: &[(&Path, &str)],
+    source: &Path,
+    sink: &mut dyn ui::progress::Sink,
+) {
+    let claude_roots: Vec<&Path> = roots
+        .iter()
+        .filter(|(_, k)| *k == "claude")
+        .map(|(p, _)| *p)
+        .collect();
+    if claude_roots.is_empty() {
+        return;
+    }
+    sink.log("");
+    sink.log("== tailpipe tool steering (PreToolUse hook) ==");
+    for target in &claude_roots {
+        match plugins::install_tailpipe_gate_plugin(source, target) {
+            Ok(destination) => sink.log(&format!(
+                "Installed: {} (soft reminder that tailpipe keeps a followed/backgrounded command's output queryable)",
+                destination.display()
+            )),
+            Err(e) => sink.log(&format!("tailpipe-gate-plugin: {e}")),
         }
     }
 }
@@ -2768,6 +2805,20 @@ fn run_install_decision_reminder_plugin(argv: &[String]) -> Result<ExitCode, Str
         .map_err(|e| e.to_string())?;
     println!(
         "Installed: {} (reminds you of open questions at session start)",
+        destination.display()
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_install_tailpipe_gate_plugin(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_plugin_args("install-tailpipe-gate-plugin", argv)?;
+    let target = args
+        .target
+        .ok_or("install-tailpipe-gate-plugin: --target is required")?;
+    let destination =
+        plugins::install_tailpipe_gate_plugin(&args.source, &target).map_err(|e| e.to_string())?;
+    println!(
+        "Installed: {} (soft reminder that tailpipe keeps a followed/backgrounded command's output queryable)",
         destination.display()
     );
     Ok(ExitCode::SUCCESS)

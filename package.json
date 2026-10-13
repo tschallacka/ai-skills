@@ -56,6 +56,7 @@
     "www",
     "ci-failures",
     "tailpipe",
+    "tailpipe-gate-plugin",
     ".agents",
     "README.md",
     "LICENSE",
@@ -82,6 +83,7 @@
     "!chat-interrupt-plugin/tests/**",
     "!decision-reminder-plugin/tests/**",
     "!editor-gate-plugin/tests/**",
+    "!tailpipe-gate-plugin/tests/**",
     "!tui-hint-plugin/tests/**"
   ],
   "engines": {

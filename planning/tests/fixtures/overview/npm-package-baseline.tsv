@@ -214,7 +214,7 @@ package/mods/tui-hint-board/.claude-plugin/plugin.json	436
 package/mods/tui-hint-board/hooks/hooks.json	36
 package/mods/tui-hint-board/hooks/register.tsx	15890
 package/mods/tui-hint-board/types/index.d.ts	213
-package/package.json	2773
+package/package.json	2839
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
 package/planning/PACKAGE-MANIFEST.tsv	17811
 package/planning/REVIEWER.md	26888
@@ -326,6 +326,11 @@ package/rjq/SKILL.md	2537
 package/rjq/binaries.tsv	758
 package/rjq/docs/README.md	859
 package/rjq/requires.tsv	360
+package/tailpipe-gate-plugin/.claude-plugin/plugin.json	380
+package/tailpipe-gate-plugin/README.md	1683
+package/tailpipe-gate-plugin/hooks/hooks.json	219
+package/tailpipe-gate-plugin/hooks/lib.sh	3623
+package/tailpipe-gate-plugin/hooks/pre-tool-use-bash.sh	1697
 package/tailpipe/SKILL.md	6369
 package/tailpipe/integration.tsv	2030
 package/text-etiquette/SKILL.md	3897

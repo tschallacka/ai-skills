@@ -1,0 +1,6 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "tailpipe-gate",
+  "version": "0.1.0",
+  "description": "A soft reminder on Bash calls that follow a running command's output (tail -f) or background it behind a redirect, that tailpipe keeps every line queryable by id and pollable without blocking, where a pager or a plain redirect loses both."
+}
