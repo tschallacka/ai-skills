@@ -1925,6 +1925,26 @@ fn wait_for_death(pid: u32, seconds: u64) -> bool {
     !process_alive(pid)
 }
 
+/// T1: a stand-in `claude` executable, placed first on PATH for a test's
+/// autostarted server, so `owning_session_is_alive`'s `claude agents --json`
+/// call finds this instead of (or absence of) a real `claude` binary.
+/// Always answers the same canned body regardless of its own arguments --
+/// these tests exercise the watchdog's own wiring and json-matching, not
+/// argument plumbing, which `agent_is_listed`'s unit tests already cover.
+#[cfg(unix)]
+fn write_fake_claude_agents(dir: &std::path::Path, json_body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let script = dir.join("claude");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\ncat <<'EOF'\n{json_body}\nEOF\n"),
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+}
+
 #[test]
 fn a_replayed_tab_arms_the_external_change_guard() {
     // B204: the journal buffer was stale against a disk that moved while
@@ -2605,6 +2625,83 @@ fn a_detached_job_pins_the_watchdog_until_its_owner_releases_it() {
     assert!(
         wait_for_death(pid, 30),
         "the server kept living after its last detached job was released"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn t1_the_idle_watchdog_stays_up_while_claude_agents_lists_the_owning_session() {
+    let harness = Harness::new("watchdogalive");
+    let file = harness.write("doc.txt", "a\n");
+    let fake_bin = harness.path("fakebin");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    write_fake_claude_agents(
+        &fake_bin,
+        &format!(
+            r#"[{{"pid":1,"sessionId":"{}","status":"busy"}}]"#,
+            harness.agent
+        ),
+    );
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let opened = harness.client_env(
+        &[
+            "open",
+            "-f",
+            file.to_str().unwrap(),
+            "--idle-timeout-seconds",
+            "2",
+            "--verbosity",
+            "3",
+        ],
+        &[("PATH", path.as_str())],
+    );
+    assert!(opened.status.success(), "{}", refusal_text(&opened));
+    let pid = server_pid(&opened);
+    std::thread::sleep(std::time::Duration::from_secs(6));
+    assert!(
+        process_alive(pid),
+        "the watchdog must not idle-exit while `claude agents --json` still lists this identity"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn t1_the_idle_watchdog_still_exits_when_claude_agents_does_not_list_the_session() {
+    let harness = Harness::new("watchdogdead");
+    let file = harness.write("doc.txt", "a\n");
+    let fake_bin = harness.path("fakebin");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    // Lists a real array, just never this identity -- the "checked and ruled
+    // out" case, distinct from "claude is not on PATH at all" (also covered
+    // by every OTHER idle-timeout test in this file, which set no PATH
+    // override at all).
+    write_fake_claude_agents(&fake_bin, "[]");
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let opened = harness.client_env(
+        &[
+            "open",
+            "-f",
+            file.to_str().unwrap(),
+            "--idle-timeout-seconds",
+            "2",
+            "--verbosity",
+            "3",
+        ],
+        &[("PATH", path.as_str())],
+    );
+    assert!(opened.status.success(), "{}", refusal_text(&opened));
+    let pid = server_pid(&opened);
+    assert!(
+        wait_for_death(pid, 15),
+        "an empty `claude agents --json` listing must not block the idle timeout"
     );
 }
 
