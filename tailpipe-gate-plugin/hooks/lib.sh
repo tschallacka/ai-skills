@@ -51,10 +51,20 @@ tailpipe_gate_reminder() { # <env_var_name> <default_text>
 #      terminated on a space/`=`/end/pipe/`;`/`&` rather than a `\b` word
 #      boundary, which a flag immediately followed by a digit (`-f2`) or
 #      glued to its argument would not cross.
-#   2. A backgrounded command (trailing `&`) that also redirects or pipes
-#      its own output (`>`, `>>`, `2>&1`, or `|`) -- "start something
-#      long-running and plan to come back to its log", the shape tailpipe's
-#      ingest/read/search/wait directly replace.
+#   2. A backgrounded command (a standalone `&` job-control separator --
+#      never `&&`, never the `&` inside a `2>&1`/`>&2`-style redirect, and
+#      not required to be the command's last token: `cmd &`, `(cmd &)`,
+#      `{ cmd & }`, and `cmd & echo $!` -- capturing the backgrounded job's
+#      own pid right after starting it -- all count) that also redirects or
+#      pipes its own output somewhere in the line (`>`, `>>`, `2>&1`, or
+#      `|`) -- "start something long-running and plan to come back to its
+#      log", the shape tailpipe's ingest/read/search/wait directly replace.
+#      Not scoped to the specific backgrounded segment -- a redirect
+#      anywhere on the line is enough once a standalone `&` is present
+#      anywhere else on it. A false positive here is a missed-opportunity
+#      reminder, not a wrong action, since this hook only ever adds
+#      non-blocking context; that is the tradeoff for not hand-parsing
+#      shell structure in a regex.
 #
 # Deliberately narrower than "any pipe into less/head": that would fire on
 # everyday, already-finished-by-the-time-you-read-it commands (`ls | less`)
@@ -67,7 +77,7 @@ tailpipe_gate_matches() { # <command line>
     printf '%s' "$command" \
         | grep -Eic '(^|[|;&(]|[[:space:]])tail([[:space:]][^|;&]*)?[[:space:]](-[a-z]*f|--follow)([[:space:]]|=|$|[|;&])' >/dev/null \
         && return 0
-    if printf '%s' "$command" | grep -Ec '&[[:space:]]*$' >/dev/null; then
+    if printf '%s' "$command" | grep -Ec '[^&>]&([^&]|$)' >/dev/null; then
         printf '%s' "$command" | grep -Ec '(>>?|2>&1|\|)' >/dev/null && return 0
     fi
     return 1

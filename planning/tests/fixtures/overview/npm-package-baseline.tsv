@@ -329,8 +329,8 @@ package/rjq/requires.tsv	360
 package/tailpipe-gate-plugin/.claude-plugin/plugin.json	380
 package/tailpipe-gate-plugin/README.md	1683
 package/tailpipe-gate-plugin/hooks/hooks.json	219
-package/tailpipe-gate-plugin/hooks/lib.sh	3623
-package/tailpipe-gate-plugin/hooks/pre-tool-use-bash.sh	1697
+package/tailpipe-gate-plugin/hooks/lib.sh	4337
+package/tailpipe-gate-plugin/hooks/pre-tool-use-bash.sh	1608
 package/tailpipe/SKILL.md	6369
 package/tailpipe/integration.tsv	2030
 package/text-etiquette/SKILL.md	3897

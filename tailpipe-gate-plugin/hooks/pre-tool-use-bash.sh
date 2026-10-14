@@ -26,7 +26,7 @@ if ! tailpipe_gate_matches "$command_line"; then
     exit 0
 fi
 
-reminder="$(tailpipe_gate_reminder TAILPIPE_GATE_TEXT "This looks like output you'll want to come back to. Piping it to a file or a pager loses the ability to search it later and gives no way to check progress without re-reading from the start. tailpipe keeps every line under a queryable stream instead: pipe into it alongside (or instead of) your redirect -- <command> | tailpipe-client-rs ingest --stream NAME -- then poll it with mcp__tailpipe__wait/read/search (no MCP registered here? tailpipe-client-rs tail/read/search) without blocking on the command and without losing anything it already printed. Not required here; just worth knowing.")"
+reminder="$(tailpipe_gate_reminder TAILPIPE_GATE_TEXT "Redo this through tailpipe instead of a plain redirect or pager: piping it to a file loses the ability to search it later, and gives no way to check progress without re-reading from the start. Pipe into tailpipe alongside (or instead of) your redirect -- <command> | tailpipe-client-rs ingest --stream NAME -- then poll it with mcp__tailpipe__wait/read/search (no MCP registered here? tailpipe-client-rs tail/read/search), without blocking on the command and without losing anything it already printed.")"
 if [ -z "$reminder" ]; then
     printf '{}'
     exit 0

@@ -37,6 +37,18 @@ t_assert_eq 'a backgrounded command with no redirect at all does not match' \
     "$(matches 'sleep 300 &')" 'no'
 t_assert_eq 'a redirect with no backgrounding does not match (it already blocks and finishes)' \
     "$(matches 'long_build.sh > build.log 2>&1')" 'no'
+t_assert_eq 'a parenthesized backgrounded subshell redirecting output matches' \
+    "$(matches '(nohup long_build.sh > build.log 2>&1 &)')" 'yes'
+t_assert_eq 'a braced backgrounded group redirecting output matches' \
+    "$(matches '{ nohup long_build.sh > build.log 2>&1 & }')" 'yes'
+t_assert_eq 'a background & followed by a same-line pid capture still matches' \
+    "$(matches 'long_build.sh > build.log 2>&1 & echo \$!')" 'yes'
+t_assert_eq 'a parenthesized background with a same-line pid capture still matches' \
+    "$(matches '(long_build.sh > build.log 2>&1 & echo \$! > job.pid); cat job.pid')" 'yes'
+t_assert_eq 'a bare 2>&1 redirect with no standalone & does not match' \
+    "$(matches 'cmd 2>&1')" 'no'
+t_assert_eq 'a logical && does not get mistaken for backgrounding' \
+    "$(matches 'cmd1 > out.log && cmd2')" 'no'
 
 # B319-equivalent: tailpipe_gate_rjq_bin resolves the installer's own shared
 # copy first, never the user's global PATH.
