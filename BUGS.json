@@ -6,7 +6,7 @@
     {
       "id": "B1",
       "title": "chat-interrupt-plugin has no file-list function in build-release.sh, so every release tarball omits it entirely",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -17,17 +17,17 @@
       "surfaces": [
         "installer/build-release.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Already fixed in commit 4fa0f6eb (\"tailpipe: add agent-facing log pipe (server, reader, mcp consumer, board mod)\"), whose own commit message says so directly: installer/build-release.sh gained chat_interrupt_plugin_files() (listing .claude-plugin/plugin.json, hooks/hooks.json, hooks/lib.sh, hooks/pre-tool-use.sh) and a call to it from collect(). This closure only updates the register, which was never updated when the code fix landed.\n",
+      "verification": "Verified in the current master working tree: installer/build-release.sh defines chat_interrupt_plugin_files() (line 266) printing the four files, and collect() calls it (line 312). `installer/build-release.sh --list | grep chat-interrupt-plugin` (the entry's own reproduce command) lists all four files. git log -S confirms the function was introduced in 4fa0f6eb and has not been removed since. This closure updates only the register entry, which was left open after the code fix shipped.\n",
       "found_by": "claude-sonnet-5-5, alpha.6 release prep -- discovered auditing test-rjq-active-references.sh's npm-package-baseline failure, which led to a wider packaging-manifest check",
       "notes": "Second, smaller instance of the same gap found in the same pass: editor-gate-plugin/hooks/pre-tool-use-read.sh is similarly missing from editor_gate_plugin_files() AND from src/installer/src/plugins.rs's EDITOR_GATE_PLUGIN_FILES constant (filed separately). A dedicated general-purpose sub-agent is auditing the rest of the repo for the same class of gap; its findings, if any, should be filed as follow-ups rather than folded into this entry.",
       "created_at": "2026-10-08T20:03:42Z",
-      "updated_at": "2026-10-08T20:03:42Z"
+      "updated_at": "2026-10-14T14:56:25Z"
     },
     {
       "id": "B2",
       "title": "editor-gate-plugin's Read-matcher hook (pre-tool-use-read.sh) has never been installed by any install path",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": "B1",
@@ -39,12 +39,12 @@
         "installer/build-release.sh",
         "src/installer/src/plugins.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Already fixed in commit 4fa0f6eb, same commit as B1 (its message names both). installer/build-release.sh's editor_gate_plugin_files() now lists hooks/pre-tool-use-read.sh alongside its siblings, and src/installer/src/plugins.rs's EDITOR_GATE_PLUGIN_FILES and EDITOR_GATE_PLUGIN_EXECUTABLES constants both include it too. This closure only updates the register, which was never updated when the code fix landed.\n",
+      "verification": "Verified in the current master working tree: `installer/build-release.sh --list | grep \"editor-gate-plugin.*read\"` prints editor-gate-plugin/hooks/pre-tool-use-read.sh, and src/installer/src/plugins.rs lines 29-44 (EDITOR_GATE_PLUGIN_FILES, EDITOR_GATE_PLUGIN_EXECUTABLES) both carry \"hooks/pre-tool-use-read.sh\". git log -S confirms both were added in 4fa0f6eb and have not been removed since. This closure updates only the register entry, which was left open after the code fix shipped.\n",
       "found_by": "claude-sonnet-5-5, alpha.6 release prep -- found auditing B1 (chat-interrupt-plugin's own missing tarball entry)",
       "notes": null,
       "created_at": "2026-10-08T20:03:51Z",
-      "updated_at": "2026-10-08T20:03:51Z"
+      "updated_at": "2026-10-14T14:56:25Z"
     },
     {
       "id": "B3",
@@ -66,6 +66,28 @@
       "notes": "Companion TODO: idle watchdog consulting 'claude agents --json' (interactive+background, documented/scriptable) to skip self-termination while the owning chat session is still listed would shrink how often idle-timeout is what triggers this race, but does not close the window itself -- the exit-path ordering is the actual defect. Companion TODO T1 implemented in the same commit: idle watchdog consults 'claude agents --json' before honoring the idle timeout.",
       "created_at": "2026-10-13T14:39:35Z",
       "updated_at": "2026-10-13T14:51:07Z"
+    },
+    {
+      "id": "B4",
+      "title": "installer install-skill crashes with ETXTBSY instead of installing when a skill's shared binary is already running (e.g. decisions-mcp)",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Start a live decisions-mcp (or any shared-bin skill's MCP adapter) from ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/decisions-mcp, then run: target/release/installer install-skill decisions --target <fresh-dir> --approval yes --source $(pwd). Also hit by tests/test-register-schemas.sh and npm's own prepack lifecycle script (package.json's prepack chain), which both call install-skill for todo/bug-report/decisions.\n",
+      "observed": "install-skill writes the skill's SKILL.md and nothing else, then exits with 'installer: Text file busy (os error 26)' and a nonzero status. Root cause: src/installer/src/cli_mode.rs's install_skill_cli, in its shared-binary branch, called fs::copy(&source_file, shared_dir.join(filename)) directly -- an O_TRUNC open of the destination path -- rather than going through install.rs's own copy_file_atomic (sibling temp file + rename). The interactive install path (install::install_skill) already used copy_file_atomic for shared binaries; only this separate CLI-mode path (planning's self-update tooling, and the one tests/test-register-schemas.sh and npm's prepack script both call) had the direct fs::copy. Opening a currently-running binary's own file for write fails ETXTBSY on Linux the moment the kernel has it mapped executable, so any shared-bin skill whose own MCP adapter (or CLI) happens to be running on the machine at install time crashes this path instead of installing. Downstream effect also confirmed live: with test-register-schemas.sh failing this way, 'npm pack' aborts in its prepack hook, which pre-release-check.sh's gate_release_artifacts then mischaracterizes as a generic 'npm package differs from its baseline' failure (same gate, unrelated real cause) -- a second, misleading symptom of the same root bug.\n",
+      "expected": "install-skill updates a shared binary the same safe way install::install_skill already does: write a sibling temp file, then rename over the old name, which succeeds regardless of whether the old file is currently mapped executable by another process, and skip the copy entirely when the bytes are already identical.\n",
+      "mechanism": "fs::copy's destination open is O_WRONLY|O_TRUNC|O_CREAT, which the kernel refuses (ETXTBSY) against a file currently open for execute-mapping. rename() only requires write access to the containing directory entry, not the target inode, and a process with the old inode already mapped keeps it valid (just unlinked) after the rename -- the same reasoning install.rs's own module doc comment already states for why it copies this way everywhere else.\n",
+      "surfaces": [
+        "src/installer/src/cli_mode.rs",
+        "src/installer/src/install.rs"
+      ],
+      "fix": "src/installer/src/install.rs: made copy_file_atomic and files_equal pub(crate) (previously private to that module). src/installer/src/cli_mode.rs: install_skill_cli's shared-binary branch now skips the copy when the destination already matches (files_equal) and otherwise calls install::copy_file_atomic instead of fs::copy, mirroring install::install_skill's own shared-binary handling exactly.\n",
+      "verification": "Reproduced live first: with the real, long-running decisions-mcp process from another concurrent Claude Code session holding ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/decisions-mcp open, install-skill decisions failed with the ETXTBSY error above; after the fix, the identical command succeeded (Installed: ...) while that process stayed alive and untouched (confirmed via ps across the fix). New regression test cli_mode::tests::install_skill_cli_overwrites_a_changed_shared_binary_even_when_it_cannot_be_opened_for_write (chmod 0444 on the destination -- a portable stand-in for 'cannot be opened for write in place' that does not require spawning a real child binary) passes only with the fix. cargo test --release -p installer: 500 passed, 0 failed (was 499 before this change). cargo fmt --check and cargo clippy --release -p installer -- -D warnings both clean. tests/test-register-schemas.sh and planning/tests/test-npm-package.sh (run directly, and via npm pack's own prepack hook) both now PASS against the live environment that was previously crashing them; the npm-package-baseline diff that surfaced once this was fixed is unrelated pre-existing uncommitted work (editor-gate-plugin's own hooks/pre-tool-use-{read,edit-write}.sh, left intentionally uncommitted) and not a regression.\n",
+      "found_by": "claude-sonnet-5-5, discovered running pre-release-check.sh to verify B1/B2s closure",
+      "notes": null,
+      "created_at": "2026-10-14T14:55:54Z",
+      "updated_at": "2026-10-14T14:55:54Z"
     }
   ]
 }
