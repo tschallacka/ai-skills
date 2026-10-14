@@ -20,6 +20,7 @@ mod install;
 mod integration;
 mod manifest;
 mod mcp;
+mod path_env;
 mod permissions;
 mod plan_migration;
 mod plugins;
@@ -1136,6 +1137,7 @@ fn run_remaining_post_install_steps(
     if skills.iter().any(|s| s == "tailpipe") {
         run_tailpipe_gate_plugin_post_install(known_roots, source, sink);
     }
+    run_shared_bin_path_post_install(home, confirms, sink);
     run_profiles_post_install(known_roots, source, home, sink);
     run_mods_post_install(known_roots, source, sink);
 }
@@ -1391,6 +1393,51 @@ fn run_tailpipe_gate_plugin_post_install(
             )),
             Err(e) => sink.log(&format!("tailpipe-gate-plugin: {e}")),
         }
+    }
+}
+
+/// Not gated to any one skill: every skill that ships a compiled binary
+/// (T72's shared bin) benefits from it being a bare command rather than a
+/// path an agent has to look up first. Asked rather than done silently,
+/// since it edits the user's own shell startup files -- see `path_env`'s
+/// own module doc for what it writes and why the edit goes at the TOP of
+/// each file rather than the more common append-at-the-end.
+fn run_shared_bin_path_post_install(
+    home: &Path,
+    confirms: &mut Confirms,
+    sink: &mut dyn ui::progress::Sink,
+) {
+    let bin = shared_bin::shared_bin_dir(home);
+    let bin_str = bin.to_string_lossy();
+    if !ask_with_context(
+        sink,
+        confirms,
+        &format!("Put {bin_str} at the front of PATH in your shell startup files?"),
+        "Every skill's compiled binaries (rjq, tailpipe-client-rs, ...) live in this one shared \
+         directory, which nothing puts on PATH by itself -- today that means invoking one by \
+         name from an ordinary terminal needs its full path spelled out. Saying yes writes one \
+         small env file there and sources it from the top of every shell startup file this \
+         installer knows about (zsh's .zshenv; bash's .bashrc, .profile, and .bash_profile if \
+         you already have one) -- at the TOP, specifically, so anything your own dotfile does \
+         further down (your own PATH changes, oh-my-zsh, direnv, ...) still wins, the same as \
+         it would if this directory were never added at all. Each edited file is backed up \
+         beside itself unless git already tracks it. A new terminal is needed to pick this up.",
+    ) {
+        return;
+    }
+    sink.log("");
+    sink.log("== shared bin on PATH ==");
+    match path_env::ensure_shared_bin_on_path(home) {
+        Ok(path_env::PathEnvOutcome::AlreadyConfigured) => {
+            sink.log("  Already configured.");
+        }
+        Ok(path_env::PathEnvOutcome::Configured { touched }) => {
+            for path in touched {
+                sink.log(&format!("  Updated: {}", path.display()));
+            }
+            sink.log("  Open a new terminal (or re-source your shell) for this to take effect.");
+        }
+        Err(e) => sink.log(&format!("  shared bin PATH setup: {e}")),
     }
 }
 
