@@ -383,19 +383,53 @@ pub(crate) fn files_equal(a: &Path, b: &Path) -> io::Result<bool> {
 // currently be running (e.g. decisions-mcp) must never be opened for write
 // directly -- fs::copy's O_TRUNC open on the destination fails ETXTBSY the
 // moment the kernel has it mapped executable. Writing to a sibling temp file
-// first and renaming over the old name sidesteps that entirely: rename()
-// only needs a write-lock on the directory entry, and the still-running
-// process keeps its already-open inode regardless. Every caller that can
-// touch a shared binary must go through this, not fs::copy.
+// first and renaming over the old name sidesteps that entirely on Linux and
+// macOS: rename() only needs a write-lock on the directory entry, and the
+// still-running process keeps its already-open inode regardless. Every
+// caller that can touch a shared binary must go through this, not fs::copy.
+// Same copy-then-rename trick, and the same Windows fallback below, as
+// setup-dev-env/src/stage.rs's write_then_rename/replace_running_binary --
+// that crate rebuilds its own running binary, this one can overwrite any
+// skill's shared binary while that skill's own long-lived adapter process
+// has it open; both land on the identical platform-level problem.
 pub(crate) fn copy_file_atomic(source: &Path, dest: &Path) -> io::Result<()> {
     let temp = sibling_temp_path(dest);
     fs::copy(source, &temp)?;
-    fs::rename(&temp, dest)
+    match fs::rename(&temp, dest) {
+        Ok(()) => Ok(()),
+        Err(error) => replace_running_binary(&temp, dest, error),
+    }
 }
 
 fn sibling_temp_path(dest: &Path) -> PathBuf {
     let file_name = dest.file_name().unwrap_or_default().to_string_lossy();
     dest.with_file_name(format!(".{file_name}.installer-tmp.{}", std::process::id()))
+}
+
+/// Windows refuses to replace an executable while a process is running from
+/// it -- the plain `rename(&temp, dest)` above fails there, unlike Linux/
+/// macOS, when `dest` is a currently-running shared binary. It does allow
+/// such a file to be RENAMED, so the running image is moved aside and the
+/// new file takes its name; the old one is removed on a later run, when
+/// nothing holds it. Anywhere else (Linux/macOS, or a Windows error unrelated
+/// to the running file) the original error stands.
+fn replace_running_binary(temp: &Path, dest: &Path, error: io::Error) -> io::Result<()> {
+    if !cfg!(windows) || !dest.is_file() {
+        let _ = fs::remove_file(temp);
+        return Err(error);
+    }
+    let name = dest.file_name().unwrap_or_default().to_string_lossy();
+    let aside = dest.with_file_name(format!(".{name}.installer-old-{}", std::process::id()));
+    let moved = fs::rename(dest, &aside).and_then(|()| fs::rename(temp, dest));
+    if moved.is_ok() {
+        let _ = fs::remove_file(&aside);
+        return Ok(());
+    }
+    let _ = fs::remove_file(temp);
+    if !dest.is_file() && aside.is_file() {
+        let _ = fs::rename(&aside, dest);
+    }
+    moved
 }
 
 #[cfg(unix)]
