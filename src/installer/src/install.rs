@@ -375,11 +375,19 @@ fn should_ship(path: &Path) -> bool {
     !(header.contains("# MODE: DEV") || header.contains("<!-- MODE: DEV -->"))
 }
 
-fn files_equal(a: &Path, b: &Path) -> io::Result<bool> {
+pub(crate) fn files_equal(a: &Path, b: &Path) -> io::Result<bool> {
     Ok(fs::read(a)? == fs::read(b)?)
 }
 
-fn copy_file_atomic(source: &Path, dest: &Path) -> io::Result<()> {
+// B4: a shared binary this process or a sibling agent's own MCP adapter may
+// currently be running (e.g. decisions-mcp) must never be opened for write
+// directly -- fs::copy's O_TRUNC open on the destination fails ETXTBSY the
+// moment the kernel has it mapped executable. Writing to a sibling temp file
+// first and renaming over the old name sidesteps that entirely: rename()
+// only needs a write-lock on the directory entry, and the still-running
+// process keeps its already-open inode regardless. Every caller that can
+// touch a shared binary must go through this, not fs::copy.
+pub(crate) fn copy_file_atomic(source: &Path, dest: &Path) -> io::Result<()> {
     let temp = sibling_temp_path(dest);
     fs::copy(source, &temp)?;
     fs::rename(&temp, dest)
