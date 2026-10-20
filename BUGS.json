@@ -92,7 +92,7 @@
     {
       "id": "B5",
       "title": "tailpipe-mcp's resolve_endpoint() has no SUN_LEN fallback, unlike every sibling skill's own socket-path resolution",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -103,17 +103,17 @@
       "surfaces": [
         "src/tailpipe-mcp/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "src/tailpipe-mcp/src/lib.rs: resolve_endpoint() now computes the preferred $TAILPIPE_HOME-rooted path as before, then checks it against a conservative SUN_PATH_SAFE_LIMIT (90 bytes) and falls back to a short, deterministic path under /tmp (tagged by an FNV-1a hash of the preferred path, the same tagging scheme chat-client-rs's own short-path fallback already uses) when it would not fit. The pure decision lives in resolve_endpoint_from(home), which resolve_endpoint() calls after resolving TAILPIPE_HOME/XDG_CONFIG_HOME/HOME from the environment. No change was needed anywhere else: tailpipe-client-rs's connect_and_request autostarts tailpipe-server-rs by spawning it with this exact resolved endpoint as its positional argument (src/tailpipe-client-rs/src/client.rs's autostart()), so the server always binds the same safe path the client resolved -- the fix at this one call site covers the whole bind+connect flow. Confirmed via grep that neither tailpipe-server-rs nor tailpipe-client-rs's own CLI computes any default endpoint path of its own (both always require an explicit path from the caller), so B5's \"if any exists there too\" caveat resolves to no further surfaces.",
+      "verification": "cargo test --release -p tailpipe-mcp (nix develop shell): 4 new unit tests pass -- a short home keeps the preferred path, the exact 126-byte fixture home from the field report falls back to a path under /tmp that itself fits, two distinct long homes resolve to two distinct fallback endpoints, and the same long home resolves identically every time. All 15 existing lib unit tests, all 3 existing mcp_flow integration tests (including the_adapter_autostarts_tailpipe_server_rs_with_no_manual_start, which exercises the real connect-then-autostart path end to end), and 0 doc-tests still pass. cargo fmt -p tailpipe-mcp --check and cargo clippy --release -p tailpipe-mcp -- -D warnings both clean.",
       "found_by": "claude-sonnet-5-5, skill-adoption benchmark full pass (2026-10-19)",
       "notes": "Not benchmark-specific: any real HOME/XDG_CONFIG_HOME at or past roughly 80 bytes trips this, since the fixed suffix (.config/tsch-ai-skills/tailpipe/tailpipe.sock) alone is 41 bytes. Filed from a live reproduction in the skill-adoption benchmark's disposable-HOME harness, not a hypothetical.",
       "created_at": "2026-10-20T06:13:20Z",
-      "updated_at": "2026-10-20T06:13:20Z"
+      "updated_at": "2026-10-20T06:22:08Z"
     },
     {
       "id": "B6",
       "title": "skill-adoption benchmark: adoption_signals regexes and a scenario verify step are too literal, scoring genuine adoption/correctness as false across several scenarios",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -128,12 +128,12 @@
         "benchmark/skill-adoption/scenarios/S10-question-etiquette/scenario.sh",
         "benchmark/skill-adoption/make-experimenter-brief.py"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Four changes:\n\n1. benchmark/skill-adoption/scenarios/S05-bug-report/scenario.json: adoption_signals.skill pattern widened from \\bbugs\\s+add\\b to \\bbugs\\S?\\s+add\\b -- tolerates one character (a quote) between \"bugs\" and the following whitespace, so a quoted variable invocation like \"$bugs\" add now matches, while bugs.json and a false subword like mybugsadd still don't.\n\n2. benchmark/skill-adoption/scenarios/S14-project-specifics/scenario.json: adoption_signals.behavioral pattern narrowed from (?i)NODE_OPTIONS to (?i)NODE_OPTIONS\\s*= -- requires the assignment form, not a bare mention of the variable name, so reading it off the planted fixture note no longer counts as evidence of actually setting it.\n\n3. benchmark/skill-adoption/scenarios/S10-question-etiquette/scenario.sh: both verify-step regexes (questions, sub_items) now tolerate leading/trailing markdown emphasis markers (*, _) around the Q-label and sub-item label, so \"**Q1.**\" and \"**a.**\" count the same as their unbolded form. Confirmed live: the pre-fix regex matched 0 questions and 0 sub_items against a bolded fixture that has 1 question and 2 sub_items; the fixed regex matches 1 and 2 respectively, identical to the unbolded control fixture.\n\n4. benchmark/skill-adoption/make-experimenter-brief.py's Step 5.4 (score adoption) gained explicit, generically-applicable guidance rather than scenario-specific patches for the two remaining cases no regex alone can fix: (a) a literal pattern match that only appears inside content the subject merely read (a skill's own docs, a planted fixture note) rather than something it produced or ran does not count, and the experimenter must say why in partial_or_misuse rather than trust the regex; (b) mode-aware transport scoring is now explicit -- reaching the right skill through the wrong transport (CLI under mode=mcp, or vice versa) is scored adopted=false with the actual transport named, consistently rather than per-lane judgment calls. Verified the template still renders with no stray/unsubstituted braces (py_compile clean, and a live render of S16's brief shows the new paragraph filled in with mode substituted correctly).\n\nNot changed: S16-planning's own adoption_signals patterns were already appropriately specific (matched on real plan-file names, not generic skill vocabulary); its false-positive was a one-off read-vs-produced confusion, covered by the new Step 5.4 guidance (item 4 above) rather than a scenario.json change. The S11/S04 decisions mode=mcp-vs-CLI transport question is likewise covered by the new Step 5.4 mode-aware-transport guidance rather than a scenario-specific change, since the same confusion could recur in any mcp-mode scenario.",
+      "verification": "python3 -c \"import json; json.load(...)\" confirms S05 and S14 scenario.json still parse. bash -n and shellcheck -s bash (via nix develop) both clean on S10's scenario.sh. Live-ran S10's fixed verify step against two hand-built transcripts (identical content, one plain, one with **bold** around every Q/sub-item label): both now report questions=1 sub_items=2 escape_seen=True identically, where the pre-fix regexes matched 0 and 0 on the bolded one (confirmed by running both old and new patterns side by side against the same fixture). py_compile on make-experimenter-brief.py is clean, and a live brief render (S16, claude, n/a) shows the new Step 5.4 paragraphs rendered with {mode} substituted and no stray template braces.",
       "found_by": "claude-sonnet-5-5, skill-adoption benchmark full pass (2026-10-19), flagged independently by 3 of 5 lane experimenter subagents",
       "notes": "Distinct from the S01 scorer bugs this same pass already fixed (dead PASS-grep, missing test fixture, doubled path) -- those were scenario.sh verify-script bugs; this entry's primary subject is the adoption_signals regex layer, with S10's verify-script bug noted alongside it as the same root cause (literal matching against reasonable subject phrasing) in a different artifact.",
       "created_at": "2026-10-20T06:14:18Z",
-      "updated_at": "2026-10-20T06:14:18Z"
+      "updated_at": "2026-10-20T06:26:01Z"
     }
   ]
 }
