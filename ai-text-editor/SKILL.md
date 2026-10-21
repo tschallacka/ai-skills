@@ -384,11 +384,16 @@ default gives you.
    `-r`/`--expected-revision` explicitly for an advanced or scripted reason
    to pin a specific revision; a stale explicit value is refused exactly as
    before, and stale revisions are never merged implicitly.
-6. A request that names a file is only served by the tab holding that file;
-   a request routed to a different tab is refused with `file_mismatch` and
-   the fix is to `open` the named file first. Prefer `--tab-id` once you hold
-   one: it addresses the tab directly and cannot be mismatched. Read the
-   `tab_id` in every answer rather than assuming which tab served it. Mutating `--offset`/`--delete-len`
+6. A request that names a file is only served by the tab holding that file.
+   If the named file has no tab anywhere on the server yet, it is opened
+   automatically and the request is served by that new tab — the same thing
+   a standalone `open` would do. Only a genuine dispute — the named file
+   already has its own tab elsewhere, but routing (an explicit `tab_id`/
+   `tab_path`, or the session token) landed on a different one — is refused,
+   with `file_mismatch`; the fix is to address the named file's own tab
+   directly. Prefer `--tab-id` once you hold one: it addresses the tab
+   directly and cannot be mismatched. Read the `tab_id` in every answer
+   rather than assuming which tab served it. Mutating `--offset`/`--delete-len`
    address bytes, not columns, and a delete that crosses a line end is
    reported as `spans_lines`.
 7. Keep snapshots/commits in the surrounding workflow when useful; the editor

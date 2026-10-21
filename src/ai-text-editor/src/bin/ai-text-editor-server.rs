@@ -951,6 +951,21 @@ fn open_additional_tab(
 /// One spelling of the mode names, for the startup argument and for the
 /// per-tab `document_mode` an `open` carries (B238). Two copies of this match
 /// is how the two would come to accept different sets.
+/// A line-range read's `text` is one concatenated blob; verifying "lines
+/// 161-173" against it meant counting newlines by hand, the same arithmetic
+/// mistake the protocol already warns against for byte offsets -- an
+/// off-by-one here silently swallowed a brace a `replace` then deleted along
+/// with everything else. `lines` numbers the SAME bytes `text` already
+/// carries (never a second source of truth), one entry per line starting at
+/// `start_line`, so a caller addressing "line 173" reads it off the
+/// response instead of recomputing it.
+fn numbered_lines(text: &str, start_line: u64) -> Vec<Value> {
+    text.split_inclusive('\n')
+        .enumerate()
+        .map(|(index, line)| json!({"line": start_line + index as u64, "text": line}))
+        .collect()
+}
+
 fn parse_document_mode(value: &str) -> Result<DocumentMode, String> {
     match value {
         "text_utf8" => Ok(DocumentMode::TextUtf8),
@@ -1415,6 +1430,15 @@ fn requested_file(envelope: &ai_text_editor::protocol::Envelope) -> Option<PathB
 /// `-f OTHERFILE` replace silently mutate the session's *previous* tab:
 /// the edit returned a real new revision, the next read (routed elsewhere)
 /// never showed it, and the named file never changed on disk.
+///
+/// Refuses a request that names a file some OTHER tab already holds while
+/// routed (by an explicit `tab_id`/`tab_path`, a session token, or the
+/// default-tab fallback) to this one. Every call site only reaches this with
+/// `requested` naming a file that genuinely has a tab elsewhere: `select_tab`
+/// and `bulk_edit` both check that first (`should_autoopen_requested_file`/the
+/// registry lookup they already hold) and open the file instead of calling
+/// this when it does not -- there is nothing to dispute with a file that was
+/// never opened at all.
 fn ensure_tab_file(
     tab: &Arc<Mutex<Tab>>,
     requested: Option<&PathBuf>,
@@ -1659,12 +1683,40 @@ fn open_or_get_tab(
     Ok(result)
 }
 
+/// Whether this request names a file no tab on this server holds at all --
+/// in which case the tab `select_tab` would otherwise route to has nothing
+/// to be IN DISPUTE about, so the right move is to open the named file
+/// rather than refuse the routed tab as a mismatch. A field report
+/// (bug-report register, "intuitive edit tool misinterpretations") found
+/// that refusal read as a dispute between two real tabs even when the true
+/// state was "this file was never opened" -- opening it is what every caller
+/// did next anyway (B219/B225's client-side recovery already did exactly
+/// this for non-revision-guarded verbs); this makes the server do it
+/// directly, for every verb, instead of only explaining the gap more clearly.
+fn should_autoopen_requested_file(
+    requested: Option<&PathBuf>,
+    method: &str,
+    requested_exists_elsewhere: bool,
+) -> bool {
+    requested.is_some()
+        && !requested_exists_elsewhere
+        && !matches!(method, "capabilities" | "resources")
+}
+
 fn select_tab(
     envelope: &ai_text_editor::protocol::Envelope,
     state: &Arc<Mutex<ServerState>>,
 ) -> Result<Arc<Mutex<Tab>>, String> {
     let state_guard = state.lock().unwrap();
     let requested = requested_file(envelope);
+    // Whether SOME tab on this server already holds the requested file --
+    // computed once, since every `ensure_tab_file` call below shares the
+    // same registry snapshot. `ensure_tab_file` uses this to tell a genuine
+    // tab dispute (the file has its own tab; the wrong one was addressed)
+    // from the case where the named file has never been opened here at all.
+    let requested_exists_elsewhere = requested
+        .as_ref()
+        .is_some_and(|path| state_guard.tabs.contains_key(&tab_key(path)));
     // T96: a tab id is addressing on its own, for every verb. It is checked
     // before the session token because it is the more specific of the two: a
     // caller that names a tab means that tab, whatever token its cache
@@ -1706,6 +1758,12 @@ fn select_tab(
         let resolved = owner.or_else(|| (matched.len() == 1).then(|| matched[0].clone()));
         match resolved {
             Some(tab) => {
+                // An explicit tab_id was named, so a disagreement with the
+                // requested `file` is always the genuine-dispute case --
+                // never the "nobody has opened this file" case
+                // `should_autoopen_requested_file` exists for -- matching
+                // `handle_bulk_edit`'s identical reasoning for an explicit
+                // tab_id there.
                 ensure_tab_file(&tab, requested.as_ref(), &envelope.method)?;
                 return Ok(tab);
             }
@@ -1750,6 +1808,9 @@ fn select_tab(
         match matched.len() {
             1 => {
                 let tab = matched.into_iter().next().unwrap();
+                // An explicit tab_path was named, so a disagreement with the
+                // requested `file` is always the genuine-dispute case --
+                // same reasoning as the tab_id branch above.
                 ensure_tab_file(&tab, requested.as_ref(), &envelope.method)?;
                 return Ok(tab);
             }
@@ -1776,20 +1837,34 @@ fn select_tab(
         }
     }
     if let Some(token) = envelope.session_token.as_deref() {
-        for tab in state_guard.tabs.values() {
-            if tab
-                .lock()
-                .ok()
-                .is_some_and(|tab| tab.session_token == token)
-            {
-                ensure_tab_file(tab, requested.as_ref(), &envelope.method)?;
-                return Ok(tab.clone());
+        let found = state_guard
+            .tabs
+            .values()
+            .find(|tab| {
+                tab.lock()
+                    .ok()
+                    .is_some_and(|tab| tab.session_token == token)
+            })
+            .cloned();
+        return match found {
+            Some(tab) => {
+                if should_autoopen_requested_file(
+                    requested.as_ref(),
+                    &envelope.method,
+                    requested_exists_elsewhere,
+                ) {
+                    let path = requested.clone().expect("checked by should_autoopen_requested_file");
+                    drop(state_guard);
+                    return open_or_get_tab(state, &path, None);
+                }
+                ensure_tab_file(&tab, requested.as_ref(), &envelope.method)?;
+                Ok(tab)
             }
-        }
-        return Err(
-            "session_unauthorized: the supplied session_token does not belong to a tab on this server"
-                .into(),
-        );
+            None => Err(
+                "session_unauthorized: the supplied session_token does not belong to a tab on this server"
+                    .into(),
+            ),
+        };
     }
     if envelope.method == "open" {
         if let Some(path) = requested.as_ref() {
@@ -1819,6 +1894,17 @@ fn select_tab(
         }
     }
     let default = state_guard.tabs[&state_guard.default_key].clone();
+    if should_autoopen_requested_file(
+        requested.as_ref(),
+        &envelope.method,
+        requested_exists_elsewhere,
+    ) {
+        let path = requested
+            .clone()
+            .expect("checked by should_autoopen_requested_file");
+        drop(state_guard);
+        return open_or_get_tab(state, &path, None);
+    }
     ensure_tab_file(&default, requested.as_ref(), &envelope.method)?;
     Ok(default)
 }
@@ -2190,7 +2276,10 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                     }
                     let block = tab.index.block_for_line(start_line as usize).clone();
                     match file.read_lines_from(start_line, (end_line - start_line + 1) as usize, block.byte_offset as u64, block.line) {
-                        Ok(lines) => frames.push(response(&envelope.request_id, json!({"text": lines.text, "start_line": lines.start_line, "end_line": lines.end_line, "eof": lines.eof, "revision": tab.revision, "large_file": true}))),
+                        Ok(lines) => {
+                            let numbered = numbered_lines(&lines.text, lines.start_line);
+                            frames.push(response(&envelope.request_id, json!({"text": lines.text, "lines": numbered, "start_line": lines.start_line, "end_line": lines.end_line, "eof": lines.eof, "revision": tab.revision, "large_file": true})));
+                        }
                         Err(error_value) => frames.push(error(&envelope.request_id, "large_read_failed", error_value.to_string())),
                     }
                     return frames;
@@ -2242,7 +2331,10 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                         block.byte_offset as u64,
                         block.line,
                     ) {
-                        Ok(lines) => frames.push(response(&envelope.request_id, json!({"text": lines.text, "start_line": lines.start_line, "end_line": lines.end_line, "eof": lines.eof, "revision": tab.revision, "large_file": true}))),
+                        Ok(lines) => {
+                            let numbered = numbered_lines(&lines.text, lines.start_line);
+                            frames.push(response(&envelope.request_id, json!({"text": lines.text, "lines": numbered, "start_line": lines.start_line, "end_line": lines.end_line, "eof": lines.eof, "revision": tab.revision, "large_file": true})));
+                        }
                         Err(error_value) => frames.push(error(&envelope.request_id, "large_read_failed", error_value.to_string())),
                     }
                     return frames;
@@ -2276,7 +2368,8 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             let start = (start_line as usize).min(lines.len() + 1);
                             let end = (end_line as usize).min(lines.len());
                             let selected = if start <= end { lines[start - 1..end].concat() } else { String::new() };
-                            frames.push(response(&envelope.request_id, json!({"text": selected, "revision": tab.revision, "start_line": start, "end_line": end, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "complete": start == 1 && end == lines.len()})));
+                            let numbered = numbered_lines(&selected, start as u64);
+                            frames.push(response(&envelope.request_id, json!({"text": selected, "lines": numbered, "revision": tab.revision, "start_line": start, "end_line": end, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "complete": start == 1 && end == lines.len()})));
                         } else if byte_range.is_some() {
                             frames.push(error(&envelope.request_id, "read_range_unsupported", "a text tab reads a byte window with offset/length, snapped to char boundaries; range_start_byte/range_end_byte address raw and hex tabs"));
                         } else if before.is_some() || after.is_some() {
@@ -2724,6 +2817,11 @@ fn handle_bulk_edit(
         // standalone request, via the same `ensure_tab_file`.
         if item.get("tab_id").is_some() {
             if let Some(requested) = requested_file_in(item) {
+                // An explicit tab_id was named, so a disagreement with this
+                // item's own `file` is always the genuine-dispute case (the
+                // caller named a real, specific tab) -- never the "nobody has
+                // opened this file" case `ensure_tab_file`'s other branch
+                // exists for.
                 if let Err(message) = ensure_tab_file(&target, Some(&requested), op) {
                     let (code, message) = select_tab_refusal(message);
                     results.push(json!({"index": index, "applied": false, "error": code, "message": message}));
@@ -3188,7 +3286,31 @@ fn apply_edit_verb(
                         tab.history.record(&before, &after);
                     }
                     tab.revision = revision;
-                    tab.results.clear();
+                    // A deleted-or-shifted search result set used to be
+                    // cleared wholesale on every edit, so replacing ONE of
+                    // several identical search hits staled every sibling hit
+                    // too -- a match_id addresses `<result_id>#<index>`, a
+                    // fresh search was the only way to reach the next one,
+                    // and a 10-hit search pushed callers toward a
+                    // hand-counted block replace instead (the risky path
+                    // `numbered_lines` above exists to make safer). A span
+                    // entirely before or after this edit did not move except
+                    // by the edit's own size change, so it is re-addressed
+                    // rather than discarded; `resolve_match_id`'s own content
+                    // check still has the last word if the shift is wrong.
+                    let deleted_newlines = before.bytes()[offset..offset + delete_len]
+                        .iter()
+                        .filter(|&&byte| byte == b'\n')
+                        .count() as i64;
+                    let inserted_newlines =
+                        replacement.iter().filter(|&&byte| byte == b'\n').count() as i64;
+                    shift_or_invalidate_results(
+                        &mut tab.results,
+                        offset,
+                        delete_len,
+                        replacement.len(),
+                        inserted_newlines - deleted_newlines,
+                    );
                     tab.index = LineIndex::build(tab.document.bytes(), tab.index.granularity);
                     tab.index_complete = true;
                     persist_index(tab);
@@ -3213,8 +3335,21 @@ fn apply_edit_verb(
                     // what it deleted can see the orphan digit it left
                     // behind.
                     if delete_len > 0 {
-                        payload["deleted"] =
-                            byte_preview(&before.bytes()[offset..offset + delete_len]);
+                        let deleted_bytes = &before.bytes()[offset..offset + delete_len];
+                        payload["deleted"] = byte_preview(deleted_bytes);
+                        // A verbosity-0 caller never sees `deleted` at all,
+                        // and even a caller reading it at the default level
+                        // still has to notice a brace in there -- this is an
+                        // active check, not a passive echo, so it fires at
+                        // every level a "note" is itself shown at (B226's
+                        // `deleted` field being dropped at verbosity 0 is
+                        // working as specified; this check does not depend
+                        // on it). Two edits in one real session deleted a
+                        // lone, unbalanced closing brace this way and broke
+                        // the file past the dev server's own parse step.
+                        if let Some(note) = bracket_balance_note(deleted_bytes, &replacement) {
+                            payload["note"] = json!(note);
+                        }
                     }
                     if spans_lines {
                         payload["spans_lines"] = json!(true);
@@ -3239,6 +3374,122 @@ fn apply_edit_verb(
                 error_value.to_string()
             };
             frames.push(error(&envelope.request_id, "edit_refused", message));
+        }
+    }
+}
+
+/// Net open-minus-close count for `{}`, `()` and `[]` across `bytes`, as
+/// three signed totals in that order. A self-contained balanced span (a
+/// whole function body, a whole block) nets to `(0, 0, 0)`; a span that
+/// clips at a boundary -- stops just short of, or just past, a brace whose
+/// partner lies outside the span -- does not.
+fn bracket_net(bytes: &[u8]) -> (i64, i64, i64) {
+    let mut net = (0i64, 0i64, 0i64);
+    for byte in bytes {
+        match byte {
+            b'{' => net.0 += 1,
+            b'}' => net.0 -= 1,
+            b'(' => net.1 += 1,
+            b')' => net.1 -= 1,
+            b'[' => net.2 += 1,
+            b']' => net.2 -= 1,
+            _ => {}
+        }
+    }
+    net
+}
+
+/// An advisory note when a replace's deleted span and its replacement text
+/// do not carry the same brace/paren/bracket balance -- the two incidents
+/// this exists for both replaced a hand-counted line range whose deletion
+/// quietly included a trailing `}` the replacement text never accounted
+/// for, and the dev server's parse error was the first anything said so.
+/// This is a hint, not a refusal: a legitimate edit (replacing a whole
+/// function body with a differently-shaped one) can trip it too, so it
+/// names what differed and lets the caller judge rather than blocking the
+/// edit outright.
+fn bracket_balance_note(deleted: &[u8], inserted: &[u8]) -> Option<String> {
+    let (deleted_braces, deleted_parens, deleted_brackets) = bracket_net(deleted);
+    let (inserted_braces, inserted_parens, inserted_brackets) = bracket_net(inserted);
+    let mut mismatches = Vec::new();
+    if deleted_braces != inserted_braces {
+        mismatches.push(format!(
+            "{{}} net {deleted_braces} deleted vs {inserted_braces} inserted"
+        ));
+    }
+    if deleted_parens != inserted_parens {
+        mismatches.push(format!(
+            "() net {deleted_parens} deleted vs {inserted_parens} inserted"
+        ));
+    }
+    if deleted_brackets != inserted_brackets {
+        mismatches.push(format!(
+            "[] net {deleted_brackets} deleted vs {inserted_brackets} inserted"
+        ));
+    }
+    if mismatches.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "the deleted span and the replacement text have different bracket balances ({}); if this was meant to be a like-for-like edit, read the surrounding lines before trusting this result",
+        mismatches.join(", ")
+    ))
+}
+
+/// After a successful `replace`/`insert`, re-addresses every stored search
+/// result instead of discarding the whole set (see the call site's own
+/// comment for why a blanket clear cost a caller a fresh search per
+/// remaining hit). A `match_id` is `<result_id>#<index>`, so an entry can
+/// never be removed from its `Vec` without shifting every later index out
+/// from under its own already-issued id -- an overlapping entry is instead
+/// marked unresolvable by setting `byte_start` past `byte_end`, the exact
+/// shape `resolve_match_id`'s own `start > end` check already reports as
+/// `match_id_stale`, so no new error path is needed on the read side.
+fn shift_or_invalidate_results(
+    results: &mut std::collections::HashMap<String, Vec<Value>>,
+    offset: usize,
+    delete_len: usize,
+    inserted_len: usize,
+    newline_delta: i64,
+) {
+    let edit_end = offset.saturating_add(delete_len);
+    let byte_delta = inserted_len as i64 - delete_len as i64;
+    for entries in results.values_mut() {
+        for entry in entries.iter_mut() {
+            let Some(object) = entry.as_object_mut() else {
+                continue;
+            };
+            let (Some(start), Some(end)) = (
+                object.get("byte_start").and_then(Value::as_u64),
+                object.get("byte_end").and_then(Value::as_u64),
+            ) else {
+                // No span to re-address at all (e.g. a path_wildcard hit) --
+                // nothing here depends on buffer offsets.
+                continue;
+            };
+            let (start, end) = (start as usize, end as usize);
+            if end <= offset {
+                // Entirely before the edit: unaffected.
+                continue;
+            }
+            if start >= edit_end {
+                // Entirely after the edit: shifted by exactly the edit's own
+                // size change. `resolve_match_id`'s content check against the
+                // live buffer still has the last word if this is wrong.
+                let new_start = (start as i64 + byte_delta) as u64;
+                let new_end = (end as i64 + byte_delta) as u64;
+                object.insert("byte_start".into(), json!(new_start));
+                object.insert("byte_end".into(), json!(new_end));
+                if let Some(line) = object.get("line").and_then(Value::as_u64) {
+                    let new_line = (line as i64 + newline_delta).max(1) as u64;
+                    object.insert("line".into(), json!(new_line));
+                }
+                continue;
+            }
+            // Overlaps the edited span: there is no sensible re-addressing,
+            // so mark it unresolvable rather than guess.
+            object.insert("byte_start".into(), json!(u64::MAX));
+            object.insert("byte_end".into(), json!(0u64));
         }
     }
 }
@@ -3790,10 +4041,17 @@ fn resolve_anchor_span(
             ));
         }
     }
-    let (Some(start_pattern), Some(end_pattern)) = (start_pattern, end_pattern) else {
+    // `range_end_before_match` names where the span stops; omitting it means
+    // "to the end of the file" rather than requiring a sentinel pattern that
+    // is only there to never match. `range_start_match` has no such
+    // shorthand -- an edit with no start at all is `resolve_span`'s "no span
+    // requested here" case (`Ok(None)` at the top of this function), so a
+    // start-less anchor span would be ambiguous between that and "from the
+    // top of the file", and is refused instead of guessed.
+    let Some(start_pattern) = start_pattern else {
         return Err((
             "edit_range_incomplete",
-            "an anchor span needs both range_start_match and range_end_before_match".into(),
+            "an anchor span needs range_start_match; range_end_before_match may be omitted to mean \"to the end of the file\"".into(),
         ));
     };
     if tab.document.mode != DocumentMode::TextUtf8 {
@@ -3834,24 +4092,29 @@ fn resolve_anchor_span(
                 ))
             }
         };
-    let end = match find_anchor_matches("range_end_before_match", end_pattern, regex, text)?
-        .as_slice()
-    {
-        [one] => *one,
-        [] => {
-            return Err((
-                "range_end_before_match_not_found",
-                format!("no match for range_end_before_match {end_pattern:?}"),
-            ))
-        }
-        many => {
-            return Err((
-                "range_end_before_match_ambiguous",
-                format!(
-                    "{} matches for range_end_before_match {end_pattern:?}; name a more specific anchor",
-                    many.len()
-                ),
-            ))
+    let end = match end_pattern {
+        None => text.len(),
+        Some(end_pattern) => {
+            match find_anchor_matches("range_end_before_match", end_pattern, regex, text)?
+                .as_slice()
+            {
+                [one] => *one,
+                [] => {
+                    return Err((
+                        "range_end_before_match_not_found",
+                        format!("no match for range_end_before_match {end_pattern:?}"),
+                    ))
+                }
+                many => {
+                    return Err((
+                        "range_end_before_match_ambiguous",
+                        format!(
+                            "{} matches for range_end_before_match {end_pattern:?}; name a more specific anchor",
+                            many.len()
+                        ),
+                    ))
+                }
+            }
         }
     };
     if end < start {
@@ -4123,16 +4386,28 @@ fn page(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &m
         .unwrap_or(4) as usize;
     let historical_requested =
         envelope.payload.get("historical").and_then(Value::as_bool) == Some(true);
+    // A pager_key's own leading component is the revision the search ran
+    // against (search_result_id). `tab.results` keeps a stale key's entries
+    // alive and re-addressed after an edit -- for resolve_match_id's
+    // benefit, so a follow-up edit can still resolve a prior hit without a
+    // fresh search -- but that same liveness must not let a plain `page`
+    // hand back a shifted view as if nothing had changed: default serving
+    // stays gated on the key's own revision still matching the tab's
+    // current one, the same staleness contract the metadata-backed path
+    // below already enforces via its own `revision=?` bind.
+    let key_revision = key.split(':').next().and_then(|s| s.parse::<u64>().ok());
     let mut source_revision = tab.revision;
     let mut historical = false;
-    let page = if let Some(results) = tab.results.get(key) {
-        Some((
-            results.len(),
-            results
-                .get(offset..offset.saturating_add(limit).min(results.len()))
-                .unwrap_or(&[])
-                .to_vec(),
-        ))
+    let page = if key_revision == Some(tab.revision) {
+        tab.results.get(key).map(|results| {
+            (
+                results.len(),
+                results
+                    .get(offset..offset.saturating_add(limit).min(results.len()))
+                    .unwrap_or(&[])
+                    .to_vec(),
+            )
+        })
     } else if let Ok(Some(page)) = tab
         .metadata
         .load_result_page(key, tab.revision, offset, limit)

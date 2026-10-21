@@ -449,41 +449,24 @@ fn external_change_blocks_writes_loudly_without_blinding_reads() {
     );
 }
 
+/// bug-report register, "intuitive edit tool misinterpretations": a request
+/// naming a file with no tab anywhere on this server used to be refused as
+/// `file_mismatch`, worded as a dispute with whatever tab the session token
+/// or default fallback would otherwise have routed to -- confusing when the
+/// true state is simpler, there is no dispute, the file was just never
+/// opened. There is nothing to refuse in that case: the server now opens it
+/// instead, exactly as a standalone `open` would, and routes the request to
+/// the tab it just created.
 #[test]
-fn a_request_naming_another_file_cannot_edit_the_routed_tab() {
-    let harness = Harness::new("mismatch");
+fn a_request_naming_a_never_opened_file_opens_it_instead_of_refusing() {
+    let harness = Harness::new("autoopen");
     let first = harness.write("first.txt", "one\n");
     let second = harness.write("second.txt", "two\n");
-    harness.open(&first);
+    let first_id = tab_id_of(&harness.open(&first));
     // No tab exists for `second` under this identity; the registry's newest
-    // tab belongs to `first` and answered earlier calls, so its token would
-    // route here. It must be refused, not applied to the wrong buffer.
-    let refused = harness.client(&[
-        "replace",
-        "-f",
-        second.to_str().unwrap(),
-        "-o",
-        "0",
-        "-d",
-        "3",
-        "-t",
-        "X",
-        "-r",
-        "1",
-        "-p",
-        "text",
-    ]);
-    assert!(!refused.status.success());
-    let error = stderr_text(&refused);
-    assert!(
-        error.contains("file_mismatch") || error.contains("no server discovered"),
-        "refusal must name the mismatch or point at open: {error}"
-    );
-    assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
-    assert_eq!(std::fs::read_to_string(&second).unwrap(), "two\n");
-    // Opening the named file routes correctly and the same edit then lands.
-    let opened = harness.open(&second);
-    let revision = revision_of(&opened).to_string();
+    // tab belongs to `first` and answered earlier calls, so its session
+    // token would otherwise route here. `second` has never been opened, so
+    // this must open it rather than apply the edit to the wrong buffer.
     let applied = harness.client(&[
         "replace",
         "-f",
@@ -495,13 +478,94 @@ fn a_request_naming_another_file_cannot_edit_the_routed_tab() {
         "-t",
         "X",
         "-r",
-        &revision,
+        "0",
         "-p",
         "structured",
     ]);
     assert!(applied.status.success(), "{}", stderr_text(&applied));
+    let payload = first_payload(&applied);
+    assert_ne!(
+        payload["tab_id"], first_id,
+        "the edit must land in second.txt's own, newly opened tab, not first.txt's: {payload:?}"
+    );
+    assert_eq!(payload["dirty"], json!(true));
+    // Journaled, not yet saved.
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "two\n");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
     harness.client(&["save", "-f", second.to_str().unwrap(), "-r", "1"]);
     assert_eq!(std::fs::read_to_string(&second).unwrap(), "X\n");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
+}
+
+/// The other half of the same fix: when the named file DOES already have its
+/// own tab, routing to a different, explicitly addressed tab is a genuine
+/// dispute, not a never-opened file -- and must still be refused rather than
+/// silently reopening or editing the wrong buffer.
+#[test]
+fn a_request_naming_a_file_open_elsewhere_still_refuses_the_mismatched_tab() {
+    let harness = Harness::new("mismatch-dispute");
+    let first = harness.write("first.txt", "one\n");
+    let second = harness.write("second.txt", "two\n");
+    let first_id = tab_id_of(&harness.open(&first));
+    harness.open(&second);
+    let refused = harness.client(&[
+        "replace",
+        "--tab-id",
+        &first_id,
+        "-f",
+        second.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "3",
+        "-t",
+        "X",
+        "-r",
+        "0",
+        "-p",
+        "text",
+    ]);
+    assert!(!refused.status.success());
+    let error = stderr_text(&refused);
+    assert!(error.contains("file_mismatch"), "stderr named: {error}");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "two\n");
+}
+
+/// An explicit tab_id makes any `file` disagreement a genuine dispute, even
+/// when the named file has never been opened anywhere on this server -- the
+/// never-opened-file relaxation `should_autoopen_requested_file` exists for
+/// is for callers that named no tab at all, not for one that named this
+/// exact tab and a different file. Matches `handle_bulk_edit`'s identical
+/// treatment of an explicit tab_id.
+#[test]
+fn an_explicit_tab_id_with_a_never_opened_file_still_refuses_rather_than_autoopening() {
+    let harness = Harness::new("tab-id-never-opened");
+    let first = harness.write("first.txt", "one\n");
+    let typo = harness.write("typo.txt", "two\n");
+    let first_id = tab_id_of(&harness.open(&first));
+    let refused = harness.client(&[
+        "replace",
+        "--tab-id",
+        &first_id,
+        "-f",
+        typo.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "0",
+        "-t",
+        "X",
+        "-r",
+        "0",
+        "-p",
+        "text",
+    ]);
+    assert!(!refused.status.success());
+    let error = stderr_text(&refused);
+    assert!(error.contains("file_mismatch"), "stderr named: {error}");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
+    assert_eq!(std::fs::read_to_string(&typo).unwrap(), "two\n");
 }
 
 #[test]
@@ -640,6 +704,18 @@ fn bounded_text_reads_honour_their_line_range_and_refuse_the_impossible() {
     assert_eq!(payload["start_line"], json!(2));
     assert_eq!(payload["end_line"], json!(4));
     assert_eq!(payload["complete"], json!(false));
+    // bug-report register, "intuitive edit tool misinterpretations": a line
+    // range read back as one concatenated blob forced hand-counted newlines
+    // to address a later replace, and an off-by-one there silently deleted
+    // the wrong line. `lines` numbers the same bytes `text` already carries.
+    assert_eq!(
+        payload["lines"],
+        json!([
+            {"line": 2, "text": "two\n"},
+            {"line": 3, "text": "three\n"},
+            {"line": 4, "text": "four\n"},
+        ])
+    );
     // A range without its end is refused, never silently widened to the
     // whole document.
     let read = harness.client(&["read", "-f", path, "--range-start-line", "2"]);
@@ -1219,6 +1295,70 @@ fn expected_text_refuses_the_double_replace_that_corrupted_a_file() {
 }
 
 #[test]
+fn a_replace_that_unbalances_braces_carries_an_advisory_note() {
+    // bug-report register, "intuitive edit tool misinterpretations": a
+    // hand-counted line range swallowed a function's closing brace along with
+    // the line meant to be replaced, and nothing in the response said so
+    // until the file failed to parse. `note` is advisory, not a refusal --
+    // the edit still applies -- but it names what differed so a caller can
+    // catch the mistake before relying on the result.
+    let harness = Harness::new("bracketbalance");
+    let file = harness.write("wrap.js", "function wrap() {\n    doThing();\n}\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "3",
+        "-t",
+        "    doOtherThing();\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", refusal_text(&replaced));
+    let payload = first_payload(&replaced);
+    let note = payload["note"]
+        .as_str()
+        .unwrap_or_else(|| panic!("expected a bracket-balance note: {payload}"));
+    assert!(
+        note.contains("{}"),
+        "note should name the brace mismatch: {note}"
+    );
+
+    // A like-for-like edit whose deleted span and replacement are both
+    // internally balanced carries no note at all.
+    let revision = payload["revision"].as_u64().unwrap();
+    let balanced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "    doOtherThing();\n",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(balanced.status.success(), "{}", refusal_text(&balanced));
+    let balanced_payload = first_payload(&balanced);
+    assert!(
+        balanced_payload.get("note").is_none(),
+        "a balanced like-for-like edit should carry no bracket-balance note: {balanced_payload}"
+    );
+}
+
+#[test]
 fn a_replace_takes_a_pair_of_search_hit_bounds() {
     // The other half of B226: a span across two hits is the two numbers a
     // search already reports (B214 gave text hits absolute byte_start and
@@ -1337,10 +1477,16 @@ fn a_replace_addresses_a_match_id_from_a_prior_search() {
 
 #[test]
 fn a_match_id_is_refused_once_the_edit_it_addresses_has_moved() {
-    // Every successful edit clears tab.results (the same line emit_results
-    // populated it from), so a match_id from before an unrelated edit names a
-    // result set that no longer exists — refused, not silently misapplied to
-    // whatever now sits at that offset.
+    // A match_id's span is re-addressed, not blanket-discarded, across an
+    // edit that does not touch it: an edit entirely before or after a stored
+    // match shifts that match's byte_start/byte_end by the edit's own size
+    // change (shift_or_invalidate_results), so a sibling hit from the same
+    // search survives an edit to an unrelated one instead of forcing a fresh
+    // search for every remaining hit (bug-report register, "intuitive edit
+    // tool misinterpretations" -- a 10-hit search pushed an agent toward a
+    // risky hand-counted block replace once the first hit's edit staled
+    // every other one). An edit that OVERLAPS a stored match's span is a
+    // different case and still refuses it as `match_id_stale`.
     let harness = Harness::new("matchidstale");
     let file = harness.write("doc.txt", "alpha BEGIN middle END omega\n");
     let opened = harness.open(&file);
@@ -1362,7 +1508,7 @@ fn a_match_id_is_refused_once_the_edit_it_addresses_has_moved() {
         .unwrap()
         .to_string();
 
-    // An unrelated edit elsewhere in the file still clears every result set.
+    // An edit entirely before "middle" shifts it rather than discarding it.
     let unrelated = harness.client(&[
         "insert",
         "-f",
@@ -1379,7 +1525,7 @@ fn a_match_id_is_refused_once_the_edit_it_addresses_has_moved() {
     assert!(unrelated.status.success(), "{}", refusal_text(&unrelated));
     let revision = first_payload(&unrelated)["revision"].as_u64().unwrap();
 
-    let stale = harness.client(&[
+    let survived = harness.client(&[
         "replace",
         "-f",
         file.to_str().unwrap(),
@@ -1393,8 +1539,76 @@ fn a_match_id_is_refused_once_the_edit_it_addresses_has_moved() {
         "structured",
     ]);
     assert!(
+        survived.status.success(),
+        "a match_id whose span never overlapped the intervening edit must still resolve: {}",
+        refusal_text(&survived)
+    );
+    let revision = first_payload(&survived)["revision"].as_u64().unwrap();
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "Xalpha BEGIN CENTER END omega\n",
+        "the shifted span, not whatever now sits at the original offset, must have been replaced"
+    );
+
+    // A fresh match whose span an edit genuinely OVERLAPS is still refused.
+    let found_center = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "CENTER",
+        "-p",
+        "structured",
+    ]);
+    let center_match_id = first_payload(&found_center)["matches"][0]["match_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let center_start = first_payload(&found_center)["matches"][0]["byte_start"]
+        .as_u64()
+        .unwrap();
+
+    let overlapping = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-byte",
+        &(center_start + 2).to_string(),
+        "--range-end-byte",
+        &(center_start + 6).to_string(),
+        "-t",
+        "YY",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        overlapping.status.success(),
+        "{}",
+        refusal_text(&overlapping)
+    );
+    let revision = first_payload(&overlapping)["revision"].as_u64().unwrap();
+
+    let stale = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--match-id",
+        &center_match_id,
+        "-t",
+        "CENTER",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(
         !stale.status.success(),
-        "a match_id past its search must be refused, not silently applied"
+        "a match_id whose span an intervening edit overlapped must be refused, not silently applied"
     );
     assert!(
         refusal_text(&stale).contains("match_id_stale"),
@@ -3843,6 +4057,90 @@ fn a_search_naming_a_page_argument_is_refused_and_points_at_page() {
     assert_eq!(first_payload(&paged)["pager_key"], json!(pager_key));
 }
 
+/// `shift_or_invalidate_results` keeps a search hit's entry alive and
+/// re-addressed across an edit that does not touch it, so `resolve_match_id`
+/// can still resolve it for a follow-up edit with no fresh search -- but
+/// `page` must not let that same liveness serve the shifted view as if
+/// nothing had changed: a plain `page` after any edit still refuses by
+/// default, exactly as it did before an edit was possible to survive at all,
+/// and only the explicit `--historical` escape retrieves it (marked
+/// `stale: true`).
+#[test]
+fn a_plain_page_after_an_edit_still_refuses_only_historical_retrieves_it() {
+    let harness = Harness::new("pagestale");
+    let file = harness.write("pagestale.txt", "alpha\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "alpha",
+        "-p",
+        "structured",
+    ]);
+    let pager_key = first_payload(&found)["pager_key"]
+        .as_str()
+        .expect("a pager key")
+        .to_string();
+
+    // An edit entirely before the match: shifted, not discarded, by
+    // shift_or_invalidate_results -- but still a real edit since the search.
+    let inserted = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "Z",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(inserted.status.success(), "{}", stderr_text(&inserted));
+
+    let plain = harness.client(&[
+        "page",
+        "-f",
+        file.to_str().unwrap(),
+        "--pager-key",
+        &pager_key,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        !plain.status.success(),
+        "a post-edit page must still refuse by default: {}",
+        String::from_utf8_lossy(&plain.stdout)
+    );
+    let refusal = stdout_json(&plain)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("stale_result"));
+
+    let escaped = harness.client(&[
+        "page",
+        "-f",
+        file.to_str().unwrap(),
+        "--pager-key",
+        &pager_key,
+        "--historical",
+        "-p",
+        "structured",
+    ]);
+    assert!(escaped.status.success(), "{}", stderr_text(&escaped));
+    let payload = first_payload(&escaped);
+    assert_eq!(payload["stale"], json!(true));
+    assert_eq!(payload["matches"][0]["contents"], json!("alpha"));
+}
+
 /// B252: `index` refuses `action`, which no verb reads at all.
 ///
 /// A different kind from B250 and B251: those keys belong to a sibling verb and
@@ -5112,18 +5410,24 @@ fn range_match_regex_reads_anchors_as_rust_regexes() {
 }
 
 #[test]
-fn an_incomplete_anchor_pair_is_refused_naming_what_is_missing() {
-    let harness = Harness::new("anchor-incomplete");
+fn a_start_anchor_with_no_end_anchor_runs_to_the_end_of_the_file() {
+    // Previously refused as `edit_range_incomplete` -- a caller wanting "from
+    // this anchor to the end of the file" had to name a `range_end_before_match`
+    // pattern that could never match, purely as a sentinel, and got
+    // `range_end_before_match_not_found` for the attempt (bug-report
+    // register, "intuitive edit tool misinterpretations"). Omitting
+    // `range_end_before_match` now means exactly that span.
+    let harness = Harness::new("anchor-to-eof");
     let file = harness.write("doc.txt", "alpha beta gamma\n");
     let opened = harness.open(&file);
     let revision = revision_of(&opened).to_string();
 
-    let only_start = harness.client(&[
+    let to_eof = harness.client(&[
         "replace",
         "-f",
         file.to_str().unwrap(),
         "--range-start-match",
-        "alpha",
+        "beta",
         "-t",
         "X",
         "-r",
@@ -5131,8 +5435,41 @@ fn an_incomplete_anchor_pair_is_refused_naming_what_is_missing() {
         "-p",
         "structured",
     ]);
-    assert!(!only_start.status.success());
-    assert!(refusal_text(&only_start).contains("edit_range_incomplete"));
+    assert!(to_eof.status.success(), "{}", refusal_text(&to_eof));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha X",
+        "everything from the start anchor onward, including the trailing newline, must be gone"
+    );
+}
+
+#[test]
+fn an_end_anchor_with_no_start_anchor_is_still_refused_naming_what_is_missing() {
+    // Unlike the end anchor, the start anchor has no "to the beginning of the
+    // file" shorthand -- an end-only anchor would be ambiguous with
+    // `resolve_span`'s own "no anchor span requested here" case, so it stays
+    // a named refusal rather than a guess.
+    let harness = Harness::new("anchor-no-start");
+    let file = harness.write("doc.txt", "alpha beta gamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let only_end = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-end-before-match",
+        "gamma",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!only_end.status.success());
+    assert!(refusal_text(&only_end).contains("edit_range_incomplete"));
 }
 
 #[test]
