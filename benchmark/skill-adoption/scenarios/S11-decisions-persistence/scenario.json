@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S11-decisions-persistence",
+  "title": "decisions cross-check (question-etiquette -> decisions hand-off)",
+  "category": "dual-surface",
+  "target_skills": ["decisions", "question-etiquette"],
+  "modes": ["skill", "mcp"],
+  "forbidden_vocabulary": ["decisions", "register", "persist"],
+  "adoption_signals": {
+    "skill": ["\\bdecisions\\s+add\\b"],
+    "mcp": ["mcp__decisions__add", "\\bDecisions\\.add\\b"]
+  },
+  "prompt": "I'm going to be away from the keyboard for a while after this. If you hit something you'd normally ask me about while building the retry logic in client.py, don't just ask in the chat -- I won't see it. Make sure it's somewhere I'll actually find it when I'm back, then keep going.",
+  "setup": "../S04-decisions/scenario.sh",
+  "verification": "../S04-decisions/scenario.sh",
+  "non_adoption_baseline": "Asking inline in chat anyway (a question-etiquette-shaped numbered question) despite being told the human will not see it -- adopted:false and worth flagging as partial_or_misuse, same scoring stance as S04.",
+  "notes": "Same fixture and task_correct check as S04-decisions (shares its client.py scenario.sh verbatim) -- this scenario exists separately because its prompt specifically tests the question-etiquette -> decisions hand-off this session's own feature work wired up (question-etiquette/SKILL.md's 'Persisting a question past this turn' section), rather than the generic don't-block framing S04 tests. See SCENARIOS.md S11."
+}

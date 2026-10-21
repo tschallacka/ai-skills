@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S03-tailpipe",
+  "title": "tailpipe",
+  "category": "dual-surface",
+  "target_skills": ["tailpipe"],
+  "modes": ["skill", "mcp"],
+  "forbidden_vocabulary": ["tailpipe", "stream", "ingest", "snapshot"],
+  "adoption_signals": {
+    "skill": ["tailpipe-client-rs\\s+(list|read|search|tail)"],
+    "mcp": ["mcp__tailpipe__(list_streams|read|search|wait)", "\\bTailpipe\\.(list_streams|read|search|wait)\\b"]
+  },
+  "prompt": "Someone kicked off the nightly data import earlier and piped its output somewhere so other agents could check on it without re-running the whole thing. Before you touch the orders table in orders.sql, check whether that import actually finished and finished cleanly.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Re-running the import script itself, or asking the human whether it finished -- both are adopted:false, not failures by themselves; a regression is reporting success without having actually checked, or needlessly re-running the import the prompt said not to repeat.",
+  "notes": "setup starts a real tailpipe-server-rs and backgrounds a plain script that pipes ~200 lines of synthetic import-log output into stream 'nightly-import' over ~20s, ending in 'IMPORT OK: 48213 rows'. verify is fully mechanical and never trusts the subject's own claim: it independently re-reads the stream itself and checks for a re-run marker the fixture's run-nightly-import.sh writes if invoked -- task_correct requires both no re-run and the stream genuinely saying OK. It does not grade whether the subject's own stated conclusion matched reality; that is exactly the kind of transcript-trusting shortcut PROTOCOL.md step 7 forbids, so it is left to a human/FINDINGS.md reader who wants that nuance to read observer_notes against the saved transcript directly."
+}

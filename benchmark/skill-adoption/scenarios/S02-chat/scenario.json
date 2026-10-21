@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S02-chat",
+  "title": "chat",
+  "category": "dual-surface",
+  "target_skills": ["chat"],
+  "modes": ["skill", "mcp"],
+  "forbidden_vocabulary": ["chat", "channel", "nick", "join", "mcp", "tail", "irc", "#proj"],
+  "adoption_signals": {
+    "skill": ["chat-client-rs\\s+(join|send|read|tail|who)"],
+    "mcp": ["mcp__chat__(join|read|wait|send|who)", "\\bChat\\.(join|read|wait|send|who)\\b"]
+  },
+  "prompt": "I'm handing you part 1 of a two-part data migration (migrate_users.py in this repo). A colleague is doing part 2, the schema change, in their own session right now. Don't finish writing part 1's final commit until you've actually confirmed from them that the schema change landed -- I don't want you guessing at the new shape. Go ahead and start on part 1 in the meantime.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "The agent stalls and asks the human to relay word of completion, or proceeds and guesses the schema anyway despite the explicit instruction not to -- the latter is a regression, the former is a legitimate non-adoption outcome.",
+  "notes": "setup starts a real chat-server-rs in the workspace's $CHAT_HOME and backgrounds a plain (non-LLM) bot process using chat-client-rs that joins #proj as teammate-bot, waits 45s, then sends the schema-landed message naming the subject's own nick -- which the orchestrator must pass to setup via $SUBJECT_NICK (resolved from the scenario's run_id if the subject's real nick is not known in advance; a wildcard @mention or an any-channel-member broadcast is an acceptable fallback if per-nick targeting proves awkward in practice). verify checks (a) migrate_users.py's final content matches schema v3, (b) its mtime is after the bot message's own log timestamp."
+}

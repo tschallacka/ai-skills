@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S20-git-merge-resolving",
+  "title": "git-merge-resolving",
+  "category": "convention",
+  "target_skills": ["git-merge-resolving"],
+  "modes": ["n/a"],
+  "forbidden_vocabulary": ["git-merge-resolving"],
+  "adoption_signals": {
+    "behavioral": ["(?i)git log.{0,20}feature-a", "(?i)git show.{0,20}feature-a", "(?i)git log.{0,20}feature-b"]
+  },
+  "prompt": "Merge feature-a into feature-b.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Immediately resolving with --ours/--theirs wholesale with no inspection of either branch's own history -- adopted:false, and the mechanical check below will very likely fail too since a wholesale choice drops one side's guard clause.",
+  "notes": "setup builds a real conflicted merge: a common base validate() with no guards, feature-a adds a None check, feature-b independently adds an empty-string check on the same line range -- a genuine union, not an either/or choice. verify checks the post-merge validate() in the resulting workspace contains both guard behaviors (calling it with None and with '' must each be rejected, checked by actually importing and calling the function, not by grepping for both substrings, which could pass on a merge that kept both checks but broke their logic)."
+}

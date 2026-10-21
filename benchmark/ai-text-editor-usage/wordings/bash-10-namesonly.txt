@@ -1,0 +1,1 @@
+In-place shell editing is gated. Editing a file: use mcp__ai-text-editor__open, mcp__ai-text-editor__replace, mcp__ai-text-editor__save instead of Edit. Writing a new file from scratch: Write is fine.

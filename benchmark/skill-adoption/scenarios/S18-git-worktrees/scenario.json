@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S18-git-worktrees",
+  "title": "git-worktrees",
+  "category": "convention",
+  "target_skills": ["git-worktrees"],
+  "modes": ["n/a"],
+  "forbidden_vocabulary": ["worktree"],
+  "adoption_signals": {
+    "behavioral": ["git worktree add"]
+  },
+  "prompt": "I want to try two different approaches to refactoring normalize() in transform.py at the same time, on this repo, without one messing up the other while I compare them.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Branch-switching in place in the single checkout -- which makes both approaches inspectable at once impossible without discarding one, which is exactly what this scenario checks for.",
+  "notes": "setup is a small real git repo with transform.py on main. verify checks `git worktree list` (or, as a fallback the subject might have used instead, two separate plain clones) shows at least two separate working directories, each with transform.py present and each on a different branch/approach from the original -- i.e. both approaches are simultaneously inspectable, which branch-switching in one checkout cannot satisfy by construction."
+}

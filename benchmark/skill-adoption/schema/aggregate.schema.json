@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tsch-ai-skills.local/benchmark/skill-adoption/aggregate.schema.json",
+  "title": "skill-adoption aggregate rollup",
+  "description": "Output of aggregate.py: results/aggregate.json. Pure function of runs.jsonl plus the scenario manifests -- never hand-edited, never a source of truth itself. A third party should get byte-identical numbers (modulo floating point) re-running aggregate.py against the same runs.jsonl.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at_utc", "source_runs_file", "source_runs_sha256", "n_runs", "cells", "by_skill"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "source_runs_file": { "type": "string" },
+    "source_runs_sha256": { "type": "string", "description": "sha256 of runs.jsonl at generation time -- pin this in any write-up that cites these numbers; the file is append-only in normal operation but this still catches an accidental mismatch." },
+    "n_runs": { "type": "integer" },
+    "cells": {
+      "type": "array",
+      "description": "one entry per (scenario_id, cli, mode) with at least one run",
+      "items": { "$ref": "#/$defs/cell" }
+    },
+    "by_skill": {
+      "type": "array",
+      "description": "cells rolled up by target_skill across cli/mode/scenario variants, for the headline per-skill numbers",
+      "items": { "$ref": "#/$defs/cell" }
+    }
+  },
+  "$defs": {
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "n", "adopted_n", "adoption_rate", "adoption_ci95", "considered_n", "consideration_rate", "consideration_ci95", "correct_n", "regression_rate", "regression_rate_adopted", "regression_rate_unadopted"],
+      "properties": {
+        "key": { "type": "string", "description": "e.g. 'S04-decisions/claude/mcp' or, in by_skill, just 'decisions'" },
+        "n": { "type": "integer" },
+        "adopted_n": { "type": "integer" },
+        "adoption_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "adoption_ci95": {
+          "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2,
+          "description": "[lo, hi] Wilson score interval, 95% -- chosen over the normal (Wald) approximation because n per cell is routinely small (the default rep count is 2) and Wald is known to misbehave badly near 0 or 1 at small n; see DATA-SPEC.md Metrics."
+        },
+        "considered_n": { "type": "integer", "description": "runs where consideration.considered was true -- engaged with the skill's mechanism (read it, ToolSearch'd for it, or attempted to invoke it) regardless of whether that reached a clean, completed invocation. Always >= adopted_n for the same runs, since a completed invocation is itself evidence of consideration." },
+        "consideration_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "consideration_ci95": {
+          "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2,
+          "description": "[lo, hi] Wilson score interval, 95%, same formula as adoption_ci95."
+        },
+        "correct_n": { "type": "integer" },
+        "regression_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "regression_rate_ci95": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "regression_rate_adopted": { "type": ["number", "null"], "description": "null when adopted_n is 0 -- never reported as 0, which would silently claim a clean result from an empty sample" },
+        "regression_rate_unadopted": { "type": ["number", "null"], "description": "null when n - adopted_n is 0" },
+        "worktree_dirty_fraction": { "type": "number", "description": "fraction of this cell's runs where environment.worktree_dirty was true -- surfaced per DATA-SPEC.md's reproducibility note, not folded silently into the other numbers" }
+      }
+    }
+  }
+}

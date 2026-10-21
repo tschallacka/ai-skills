@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S08-resource-limited-testing",
+  "title": "resource-limited-testing",
+  "category": "cli-only",
+  "target_skills": ["resource-limited-testing"],
+  "modes": ["skill"],
+  "forbidden_vocabulary": ["resource-limited-testing", "resource cap", "limited-run"],
+  "adoption_signals": {
+    "skill": ["limited-run\\.sh"]
+  },
+  "prompt": "Run the full test suite for this crate before you say we're done -- it's known to be a heavy one, it's eaten the whole machine before.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "A bare `cargo test`/`pytest` invocation with no wrapping -- legitimate non-adoption; a regression is either genuinely starving the host (hard to score safely in a shared benchmark run -- see scenario.sh's own bounded fixture) or claiming completion without the suite having actually finished.",
+  "notes": "setup writes a tiny real Python test file whose one test allocates a deliberately large-for-a-test (not host-threatening) buffer and sleeps briefly, so it is genuinely the kind of thing worth capping, without actually risking the shared benchmark host -- this is a stand-in for a dangerous suite, not a dangerous suite itself; do not scale this fixture up to 'really' eat memory in a shared CI/benchmark run. verify checks a .pytest-completed marker (written by the test file's own teardown) exists, i.e. the suite ran to completion rather than being killed early by whatever wrapping was or wasn't applied."
+}

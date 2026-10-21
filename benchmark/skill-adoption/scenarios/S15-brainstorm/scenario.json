@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S15-brainstorm",
+  "title": "brainstorm",
+  "category": "convention",
+  "target_skills": ["brainstorm"],
+  "modes": ["n/a"],
+  "forbidden_vocabulary": ["brainstorm", "pre-planning"],
+  "adoption_signals": {
+    "behavioral": ["(?m)^.{0,300}\\?\\s*$"]
+  },
+  "prompt": "Redesign how this service handles caching. I don't have strong opinions yet, just want it to be better.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Immediately writing code against a guessed design -- adopted:false, and likely also task_correct:false given the fixture's own hidden constraint below.",
+  "notes": "setup writes cache.py (an unbounded in-memory dict cache with no size limit) plus a hidden constraint the subject can only learn by asking or reading carefully: a comment in app_config.py capping total process memory, which an unbounded-growth redesign would violate. verify's mechanical half checks cache.py's final version actually bounds memory (an eviction policy, a max-size parameter, or equivalent) -- this is the real correctness signal; the clarifying-question heuristic (adoption_signals.behavioral, a crude 'line ending in ?' scan of the subject's early turns in .transcript.txt) is noisy by nature (any wrapped line ending near a question mark matches) and is reported for reference only, not folded into task_correct."
+}

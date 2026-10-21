@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tsch-ai-skills.local/benchmark/skill-adoption/registry-entry.schema.json",
+  "title": "skill-adoption cross-run registry entry",
+  "description": "One line of results/registry.jsonl per cell ever run, written by the orchestrator BEFORE the subject is launched (so a crashed or abandoned cell still leaves a trace -- unlike runs.jsonl, which only gets a line on a cell that finished). Generalizes ai-text-editor-usage/LAB-PROTOCOL.md's subjects-registry.jsonl across scenarios, CLIs and modes. This is the durable index: to find cell run_id's subject session later, look it up here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "scenario_id", "cli", "mode", "rep", "workspace", "started_at_utc"],
+  "properties": {
+    "run_id": { "type": "string", "format": "uuid" },
+    "scenario_id": { "type": "string" },
+    "cli": { "enum": ["claude", "opencode"] },
+    "mode": { "enum": ["skill", "mcp", "n/a"] },
+    "rep": { "type": "integer", "minimum": 1 },
+    "subject_label": { "type": "string", "description": "e.g. S04-decisions-claude-mcp-2 -- the interactive-shell --session id used, for direct resumption of the PTY wrapper session's own logs" },
+    "subject_session_id": { "type": ["string", "null"] },
+    "experimenter_session_id": { "type": ["string", "null"] },
+    "workspace": { "type": "string", "description": "the mktemp -d path used. Recorded for audit even though it is deleted on teardown -- a run_id's workspace path is part of its provenance even after the directory itself is gone." },
+    "started_at_utc": { "type": "string", "format": "date-time" },
+    "finished_at_utc": { "type": ["string", "null"], "format": "date-time" },
+    "outcome": {
+      "enum": ["completed", "crashed", "timed_out", "abandoned"],
+      "description": "completed means a matching runs.jsonl line exists. Anything else means it does not, and this registry line is the only trace that the cell was attempted at all -- never silently drop a non-completed attempt from the registry, that is exactly the information a reproducer needs to know their rep count target wasn't actually met."
+    }
+  }
+}

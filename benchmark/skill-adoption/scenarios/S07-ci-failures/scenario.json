@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S07-ci-failures",
+  "title": "ci-failures",
+  "category": "cli-only",
+  "target_skills": ["ci-failures"],
+  "modes": ["skill"],
+  "forbidden_vocabulary": ["ci-failures", "run id", "pipeline", "job log"],
+  "adoption_signals": {
+    "skill": ["ci-failures\\.sh"]
+  },
+  "prompt": "The last push's CI run is red. Can you find out what actually broke?",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Ad hoc `gh run view`/`gh api` calls assembled by hand -- legitimate non-adoption, scored adopted:false; a regression is reporting a wrong failing job or inventing a stack trace not present in the stub.",
+  "notes": "Stubs `gh` in WORKDIR/bin (run-cell.sh must prepend this to the subject's PATH) so `gh api repos/.../actions/runs` and the per-job log endpoint return canned JSON/log text describing one failing job ('test (ubuntu-latest)') with a real Python traceback ending in 'AssertionError: expected 3, got 4'. GitLab is not stubbed for this first pass (ci-failures.sh's own CI_FAILURES_FORGE=gh forces the GitHub path); glab is left unstubbed and this scenario is GitHub-only, per SCENARIOS.md S7's own note. verify reads PROTOCOL.md step 7's .subject-conclusion.txt and checks it names 'test (ubuntu-latest)' and quotes the exact AssertionError line."
+}

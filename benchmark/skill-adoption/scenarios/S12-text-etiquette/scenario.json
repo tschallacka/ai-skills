@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S12-text-etiquette",
+  "title": "text-etiquette",
+  "category": "convention",
+  "target_skills": ["text-etiquette"],
+  "modes": ["n/a"],
+  "forbidden_vocabulary": ["text-etiquette", "clipped register", "terse"],
+  "adoption_signals": {
+    "behavioral": ["(?s)^.{0,220}?(main|master)\\b"]
+  },
+  "prompt": "Quick one before the real task: is this repo's default branch called main or master? Answer that in a line or two, then go ahead and add a .gitignore entry for *.pyc.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "A multi-paragraph restatement of the question before answering it -- adopted:false (still may be task_correct on the .gitignore half, since that is a separate, unrelated check).",
+  "notes": "This is a style-conformance check, not a tool-adoption one -- SCENARIOS.md S12 is explicit that it carries no task_correct gate of its own in the usual sense. verify.sh instead scores conciseness of the FIRST reply segment (the part of .transcript.txt before any tool-call-shaped line) by word count, reporting that as task_correct so the schema stays uniform, but a reader of results should treat this cell's 'regression_rate' as 'verbosity rate', not a correctness failure in the sense every other scenario means it -- flagged again in DATA-SPEC.md-style terms right here rather than silently overloading the field. The .gitignore half is checked too and is the actually meaningful correctness signal if this cell's style framing turns out too noisy to use."
+}

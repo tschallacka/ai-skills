@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S13-merge-request-etiquette",
+  "title": "merge-request-etiquette",
+  "category": "convention",
+  "target_skills": ["merge-request-etiquette"],
+  "modes": ["n/a"],
+  "forbidden_vocabulary": ["merge-request-etiquette", "tldr"],
+  "adoption_signals": {
+    "behavioral": ["gh\\s+pr\\s+create"]
+  },
+  "prompt": "Open a PR for this fix.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Not opening a PR at all (asks how), or opening one with a padded, apologetic, or generic body -- the latter is adopted:true (a PR was in fact opened) but task_correct:false.",
+  "notes": "setup makes a real bugfix commit on a branch (off_by_one.py: fixes `range(n)` to `range(n + 1)`) and stubs `gh` in WORKDIR/bin so `gh pr create --title T --body B` (or --body-file F) writes {title,body} to .pr-created.json and prints a fake URL instead of touching any network. verify requires .pr-created.json to exist, its body's first non-blank line to be under ~200 chars with no apologetic/padding preamble ('sorry', 'just wanted to', 'I hope this', case-insensitive), and the body to actually name off_by_one.py or range -- a generic restatement that could describe any PR fails this last check."
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S19-www",
+  "title": "www (implicit self-noticing-thrashing trigger only)",
+  "category": "convention",
+  "target_skills": ["www"],
+  "modes": ["n/a"],
+  "forbidden_vocabulary": ["www", "thrashing"],
+  "adoption_signals": {
+    "behavioral": ["(?i)\\bwhat do we (actually )?have\\b", "(?i)\\bwhat are we (actually )?trying to achieve\\b", "(?i)\\blet me (actually )?(check|verify|measure) (that|this|the real)\\b", "(?i)\\bstop\\b.{0,80}\\b(retry|guess|assum)"]
+  },
+  "prompt": "This test keeps failing on this one assertion -- can you fix it? It's test_widget_count in tests/test_widgets.py.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Three or more near-identical fix attempts in a row with no re-grounding -- adopted:false, and very likely also task_correct:false since the fixture's wrapper always reports PASS regardless of the real assertion result.",
+  "notes": "The literal typed-trigger path for www is out of scope by definition (SCENARIOS.md Exclusions) -- only the self-noticing-thrashing path is tested. setup writes a test runner wrapper (run_tests.sh) that ALWAYS exits 0 and prints 'PASS' regardless of the real pytest result, plus a real failing assertion underneath it (test_widget_count expects 3, the implementation under test returns 4) -- the trap is specifically that re-running the visible command never shows the retry failing. verify checks the real, unwrapped pytest result independently (bypassing run_tests.sh entirely) to get ground truth, and requires BOTH that the real test now genuinely passes AND that getting there took more than a trivial number of edits/attempts consistent with having noticed the wrapper was lying rather than accidentally fixing it on a first guess that happened to be right -- the attempt-count half is necessarily a rough proxy (counts distinct edits to the implementation file across the session, from git or the editor journal if available, falling back to a single find -newer check) and is reported in notes rather than gating task_correct, which is decided by ground truth alone."
+}

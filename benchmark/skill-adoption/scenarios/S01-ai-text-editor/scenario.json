@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S01-ai-text-editor",
+  "title": "ai-text-editor",
+  "category": "dual-surface",
+  "target_skills": ["ai-text-editor"],
+  "modes": ["skill", "mcp"],
+  "forbidden_vocabulary": ["ai-text-editor", "revision guard", "tab_id", "bulk_edit"],
+  "adoption_signals": {
+    "skill": ["ai-text-editor\\s+(open|read|insert|replace|search|save)"],
+    "mcp": ["mcp__ai-text-editor__(open|read|insert|replace|search|save)", "\\bAiTextEditor\\.(open|read|insert|replace|search|save)\\b"]
+  },
+  "prompt": "See benchmark/ai-text-editor-usage/task-prompt.md -- used verbatim, not duplicated here to avoid two copies drifting apart.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Read + Write (or Edit) of the whole file per change, with no revision/offset addressing -- the comparison this skill's own dedicated benchmark already runs against a stock-tools baseline.",
+  "notes": "Deliberately thin here. This skill already has a deep, mature benchmark (benchmark/ai-text-editor-usage/, with its own fixtures, two live collision probes, and a 10-wording sweep). Do not re-derive its task; scenario.sh only adapts that benchmark's existing task-prompt.md/fixtures/score.py to run through run-cell.sh's interactive procedure instead of its own headless `claude -p` runner, so this cell extends that benchmark's coverage to the interactive surface rather than duplicating its design. See SCENARIOS.md S1 for the full rationale."
+}
