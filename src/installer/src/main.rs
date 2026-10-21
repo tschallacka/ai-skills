@@ -58,13 +58,19 @@ Usage:
                      garbage-collects its shared binary and any co-installed
                      plugin only when no other still-installed skill (on any
                      root this installer can discover under $HOME) needs
-                     them; deregisters its MCP entry. Does not touch
-                     permission grants written into settings.json.
-  installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR | --project-specifics DIR)
+                     them; deregisters its MCP entry; reverses that skill's
+                     own per-skill permission grant if it wrote one
+                     (interactive-shell's Bash-execute allow, or a
+                     dual-surface skill's mcp__<skill>__* wildcard). Run-wide
+                     grants (worktrees/planning/project-specifics) are
+                     untouched.
+  installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR | --project-specifics DIR | --mcp-tool SKILL)
                      grant that agent read/write on the planning skill's own
-                     scripts/plan-root/tmp directory, on a worktree root, or
-                     on the shared project-specifics note directory
-  installer revoke-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR | --project-specifics DIR)
+                     scripts/plan-root/tmp directory, on a worktree root, on
+                     the shared project-specifics note directory, or (claude
+                     only) blanket-approve every tool call an mcp-mode
+                     skill's server exposes
+  installer revoke-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR | --project-specifics DIR | --mcp-tool SKILL)
                      the exact inverse of grant-permissions
   installer mcp-register --agent NAME --name NAME --path PATH
                      register PATH as an mcp-mode stdio server named NAME
@@ -1121,6 +1127,7 @@ fn run_remaining_post_install_steps(
         run_project_specifics_post_install(known_roots, home, confirms, sink);
     }
     run_mcp_registration_step(roots, source, skills, sink);
+    run_mcp_tool_permission_step(known_roots, source, skills, home, confirms, sink);
     if skills.iter().any(|s| s == "interactive-shell") {
         run_interactive_shell_post_install(known_roots, source, home, confirms, sink);
     }
@@ -1526,6 +1533,94 @@ fn run_worktrees_permission_step(
                 Err(e) => sink.log(&format!("codex: {e}")),
             },
             _ => {}
+        }
+    }
+}
+
+/// Pre-approves MCP tool calls for every dual-surface skill just installed
+/// in `mcp` mode, so a session using one of them is not stopped at a
+/// per-call approval prompt for a server this very install just registered
+/// -- the Claude Code counterpart to `run_mcp_registration_step` making the
+/// server reachable at all. Claude Code only: `permissions.allow` is the
+/// only place this installer writes a tool-call grant, and neither
+/// opencode's `permission` object nor codex's path-only `writable_roots`
+/// has a verified equivalent to write instead of guessing one.
+///
+/// Framed to the user as a materially bigger trust grant than the
+/// path-scoped Read/Edit/Bash entries worktrees/planning/project-specifics
+/// write above: an MCP server is not confined to one directory (see e.g.
+/// ai-text-editor/SKILL.md's own "treat the endpoint token as full
+/// file-access authority, keep TCP on loopback" warning), so
+/// `mcp__<skill>__*` approves every tool that server exposes now or adds
+/// later, not one directory's worth of access. This is exactly the shape
+/// Claude Code itself writes when a user answers "don't ask again" to one
+/// of that server's own prompts in a live session -- this step only offers
+/// to make that same choice once, at install time, instead of per-prompt.
+fn run_mcp_tool_permission_step(
+    known_roots: &[(&Path, &str)],
+    source: &Path,
+    skills: &[String],
+    home: &Path,
+    confirms: &mut Confirms,
+    sink: &mut dyn ui::progress::Sink,
+) {
+    if !known_roots.iter().any(|(_, kind)| *kind == "claude") {
+        return;
+    }
+    let mcp_skills: Vec<&String> = skills
+        .iter()
+        .filter(|skill| {
+            known_roots.iter().any(|(target, kind)| {
+                *kind == "claude"
+                    && integration::installed_mode(source, skill, &target.join(skill.as_str()))
+                        .as_deref()
+                        == Some("mcp")
+            })
+        })
+        .collect();
+    if mcp_skills.is_empty() {
+        return;
+    }
+
+    sink.log("");
+    sink.log("== MCP tool permissions ==");
+    let skill_list = mcp_skills
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !ask_with_context(
+        sink,
+        confirms,
+        &format!(
+            "Pre-approve every Claude Code tool call for {skill_list}, so using {} needs no \
+             per-call confirmation? (Each edited config is backed up beside itself, unless git \
+             already tracks it)",
+            if mcp_skills.len() == 1 { "it" } else { "them" }
+        ),
+        "Installed in mcp mode, each of these runs as an MCP server whose tools Claude Code \
+         gates behind a yes/no prompt the first time each is called in a session -- the same \
+         prompt a 'don't ask again' choice would otherwise answer live. Unlike the path-scoped \
+         grants above, an MCP server here is not confined to one directory: approving it \
+         approves every tool it exposes now or adds later, for whatever that server's own \
+         authority covers (ai-text-editor, for one, can open any path its own OS user can \
+         reach -- see its SKILL.md). Saying yes writes one wildcard allow rule per skill \
+         listed above; declining leaves every call prompting as it does today.",
+    ) {
+        return;
+    }
+    for skill in &mcp_skills {
+        match permissions::claude_mcp_tool_permissions(skill, home) {
+            Ok(outcome) => {
+                for line in permission_outcome_lines(
+                    "claude-code",
+                    &format!("mcp__{skill}__* already present"),
+                    outcome,
+                ) {
+                    sink.log(&line);
+                }
+            }
+            Err(e) => sink.log(&format!("claude-code: {e}")),
         }
     }
 }
@@ -2070,8 +2165,10 @@ fn parse_uninstall_args(argv: &[String]) -> Result<UninstallArgs, String> {
 
 /// T142 (first pass): removes a skill's own installed directory, garbage-
 /// collects its shared binary and any co-installed vendor plugin only when
-/// nothing else still installed needs them, and deregisters its MCP entry.
-/// Does NOT yet cover permission-grant reversal, the opencode tui-hint
+/// nothing else still installed needs them, deregisters its MCP entry, and
+/// reverses the skill's own per-skill permission grant if it has one (see
+/// `uninstall::revoke_skill_permissions`). Does NOT yet cover run-wide grant
+/// reversal (worktrees/planning/project-specifics), the opencode tui-hint
 /// variant, or a TUI action.
 fn run_uninstall(argv: &[String]) -> Result<ExitCode, String> {
     let args = parse_uninstall_args(argv)?;
@@ -2158,6 +2255,9 @@ enum GrantTarget {
     ProjectSpecifics {
         root: String,
     },
+    McpTool {
+        skill: String,
+    },
 }
 
 struct GrantArgs {
@@ -2173,6 +2273,7 @@ fn parse_grant_args(argv: &[String]) -> Result<GrantArgs, String> {
     let mut worktrees: Option<String> = None;
     let mut bins: Option<String> = None;
     let mut project_specifics: Option<String> = None;
+    let mut mcp_tool: Option<String> = None;
 
     let mut i = 0;
     while i < argv.len() {
@@ -2192,22 +2293,26 @@ fn parse_grant_args(argv: &[String]) -> Result<GrantArgs, String> {
             "--worktrees" => worktrees = Some(value!()),
             "--bins" => bins = Some(value!()),
             "--project-specifics" => project_specifics = Some(value!()),
+            "--mcp-tool" => mcp_tool = Some(value!()),
             other => return Err(format!("grant-permissions: unknown option: {other}")),
         }
         i += 1;
     }
     let agent = agent.ok_or("grant-permissions: --agent is required")?;
-    let target = match (scripts, plans, tmp, worktrees, bins, project_specifics) {
-        (Some(scripts), Some(plans), Some(tmp), None, None, None) => GrantTarget::Planning {
+    let target = match (scripts, plans, tmp, worktrees, bins, project_specifics, mcp_tool) {
+        (Some(scripts), Some(plans), Some(tmp), None, None, None, None) => GrantTarget::Planning {
             scripts,
             plans,
             tmp,
         },
-        (None, None, None, Some(worktrees), None, None) => GrantTarget::Worktrees { worktrees },
-        (None, None, None, None, Some(bins), None) => GrantTarget::Bins { bins },
-        (None, None, None, None, None, Some(root)) => GrantTarget::ProjectSpecifics { root },
+        (None, None, None, Some(worktrees), None, None, None) => {
+            GrantTarget::Worktrees { worktrees }
+        }
+        (None, None, None, None, Some(bins), None, None) => GrantTarget::Bins { bins },
+        (None, None, None, None, None, Some(root), None) => GrantTarget::ProjectSpecifics { root },
+        (None, None, None, None, None, None, Some(skill)) => GrantTarget::McpTool { skill },
         _ => return Err(
-            "grant-permissions: pass exactly one of --scripts/--plans/--tmp together, --worktrees, --bins, or --project-specifics"
+            "grant-permissions: pass exactly one of --scripts/--plans/--tmp together, --worktrees, --bins, --project-specifics, or --mcp-tool"
                 .to_string(),
         ),
     };
@@ -2406,6 +2511,22 @@ fn run_revoke_permissions(argv: &[String]) -> Result<ExitCode, String> {
                 "revoke-permissions: --bins is only auto-editable for --agent claude".to_string(),
             )
         }
+        ("claude", GrantTarget::McpTool { skill }) => {
+            let outcome = permissions::claude_mcp_tool_permissions_remove(skill, &home)
+                .map_err(|e| e.to_string())?;
+            match outcome {
+                permissions::PermissionRemovalOutcome::Removed(entries) => {
+                    print_removed("claude-code", &entries)
+                }
+                _ => println!("claude-code: nothing to remove"),
+            }
+        }
+        (_, GrantTarget::McpTool { .. }) => {
+            return Err(
+                "revoke-permissions: --mcp-tool is only auto-editable for --agent claude"
+                    .to_string(),
+            )
+        }
         (
             "opencode",
             GrantTarget::Planning {
@@ -2502,6 +2623,21 @@ fn run_grant_permissions(argv: &[String]) -> Result<ExitCode, String> {
                 "interactive-shell grant already in place",
                 outcome,
             );
+        }
+        ("claude", GrantTarget::McpTool { skill }) => {
+            let outcome = permissions::claude_mcp_tool_permissions(skill, &home)
+                .map_err(|e| e.to_string())?;
+            print_permission_outcome(
+                "claude-code",
+                &format!("mcp__{skill}__* already present"),
+                outcome,
+            );
+        }
+        (_, GrantTarget::McpTool { .. }) => {
+            return Err(
+                "grant-permissions: --mcp-tool is only auto-editable for --agent claude"
+                    .to_string(),
+            )
         }
         (_, GrantTarget::Bins { .. }) => {
             return Err(
@@ -3370,6 +3506,74 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_mcp_tool_permission_step_grants_only_the_mcp_mode_skill_when_confirmed() {
+        let source = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let skill_root = home.path().join(".claude/skills");
+        std::fs::create_dir_all(skill_root.join("chat")).unwrap();
+        std::fs::create_dir_all(skill_root.join("planning")).unwrap();
+        std::fs::write(
+            integration::mode_marker_path(&skill_root.join("chat")),
+            "mcp",
+        )
+        .unwrap();
+        settings_test_file(home.path(), "{}");
+
+        let roots = [(skill_root.as_path(), "claude")];
+        let skills = vec!["chat".to_string(), "planning".to_string()];
+        let mut confirms = Confirms::new(true);
+
+        run_mcp_tool_permission_step(
+            &roots,
+            source.path(),
+            &skills,
+            home.path(),
+            &mut confirms,
+            &mut ui::progress::PlainSink,
+        );
+
+        let cfg = home.path().join(".claude/settings.json");
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        let allow = doc["permissions"]["allow"].as_array().unwrap();
+        assert!(allow.iter().any(|v| v == "mcp__chat__*"));
+        assert!(!allow.iter().any(|v| v == "mcp__planning__*"));
+    }
+
+    #[test]
+    fn run_mcp_tool_permission_step_is_a_no_op_with_no_mcp_mode_skill() {
+        let source = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let skill_root = home.path().join(".claude/skills");
+        std::fs::create_dir_all(skill_root.join("planning")).unwrap();
+        settings_test_file(home.path(), "{}");
+
+        let roots = [(skill_root.as_path(), "claude")];
+        let skills = vec!["planning".to_string()];
+        // Would panic on an unanswered prompt with no bridge and no stdin to
+        // read from in a test process; reaching the end with `yes: false`
+        // confirms the step returned before ever asking.
+        let mut confirms = Confirms::new(false);
+
+        run_mcp_tool_permission_step(
+            &roots,
+            source.path(),
+            &skills,
+            home.path(),
+            &mut confirms,
+            &mut ui::progress::PlainSink,
+        );
+    }
+
+    fn settings_test_file(home: &Path, content: &str) -> PathBuf {
+        let dir = home.join(".claude");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, content).unwrap();
+        path
+    }
 
     /// B(planning-tmp-dir-not-created): codex's own sandbox refuses to run
     /// any command at all when a declared writable root does not already
