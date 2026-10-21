@@ -6,7 +6,8 @@
 //! round trip the CLI makes, just without a process per call.
 
 use decisions::{
-    add, answer, implement, list, migrate, stub, Filter, NewQuestion, Priority, Status,
+    add, answer, answer_with_text, implement, list, migrate, remove_options, reorder_options,
+    set_option, stub, Filter, NewQuestion, Priority, Status,
 };
 use serde_json::{json, Value};
 
@@ -14,11 +15,15 @@ const INSTRUCTIONS: &str = "The question register (DECISIONS.json): non-blocking
 raised mid-work, with lettered options, a priority, and the branch they came from as context. A \
 question's lifecycle is open -> decided -> implemented. Use list_open/list_decided/list_implemented/ \
 list_closed/list_urgent to glean questions; add to raise one and keep working with a stubbed \
-assumption recorded via stub; answer records the user's pick (moves it to decided); once a decided \
-pick has actually been carried out in the code, call implement to record that and move it to \
-implemented -- a decided question is outstanding work for the agent, not just the user's to answer. \
-This never replaces a harness's own blocking question or confirmation mechanism -- it is for the one \
-that does not have to be answered right now.";
+assumption recorded via stub; answer records the user's pick (moves it to decided) -- pass letter \
+for one of the question's own options, or text for the user's own words when none of them fit; once \
+a decided pick has actually been carried out in the code, call implement to record that and move it \
+to implemented -- a decided question is outstanding work for the agent, not just the user's to \
+answer. option_set/option_remove/option_reorder edit what a question offers before anyone has \
+picked from it (only while it is still open): option_set adds a new letter or relabels an existing \
+one, option_remove takes any number of letters at once atomically, option_reorder takes the full \
+list of current letters in the wanted order. This never replaces a harness's own blocking question \
+or confirmation mechanism -- it is for the one that does not have to be answered right now.";
 
 pub fn handle(message: Value) -> Value {
     let id = message.get("id").cloned().unwrap_or(Value::Null);
@@ -57,10 +62,14 @@ fn tool_definitions() -> Vec<Value> {
             },
             "required":["title","options"]
         }}),
-        json!({"name":"answer","description":"Record the user's pick for a question: sets it to decided.","inputSchema":{
+        json!({"name":"answer","description":"Record the user's pick for a question: sets it to decided. Give letter for one of the question's own options, or text for the user's own words when none of them fit -- exactly one of the two.","inputSchema":{
             "type":"object",
-            "properties":{"id":{"type":"string"},"letter":{"type":"string","description":"One of the question's own option letters."}},
-            "required":["id","letter"]
+            "properties":{
+                "id":{"type":"string"},
+                "letter":{"type":"string","description":"One of the question's own option letters."},
+                "text":{"type":"string","description":"The user's own words, when the pick is not one of the offered letters."}
+            },
+            "required":["id"]
         }}),
         json!({"name":"stub","description":"Record what was assumed or stubbed on an open question, without changing its status.","inputSchema":{
             "type":"object",
@@ -71,6 +80,21 @@ fn tool_definitions() -> Vec<Value> {
             "type":"object",
             "properties":{"id":{"type":"string"},"note":{"type":"string","description":"What was implemented, for the record. Optional."}},
             "required":["id"]
+        }}),
+        json!({"name":"option_set","description":"Add a new lettered option, or relabel an existing one if the letter is already offered. Refused once the question is no longer open.","inputSchema":{
+            "type":"object",
+            "properties":{"id":{"type":"string"},"letter":{"type":"string"},"label":{"type":"string"}},
+            "required":["id","letter","label"]
+        }}),
+        json!({"name":"option_remove","description":"Remove one or more of a question's options at once, atomically: every named letter must exist and at least one option must remain, or nothing changes. Refused once the question is no longer open.","inputSchema":{
+            "type":"object",
+            "properties":{"id":{"type":"string"},"letters":{"type":"array","items":{"type":"string"},"description":"The option letters to remove."}},
+            "required":["id","letters"]
+        }}),
+        json!({"name":"option_reorder","description":"Resort a question's options into exactly the given letter order -- a permutation of its current letters, never a way to add, drop, or rename one. Refused once the question is no longer open.","inputSchema":{
+            "type":"object",
+            "properties":{"id":{"type":"string"},"order":{"type":"array","items":{"type":"string"},"description":"Every current option letter, in the wanted order."}},
+            "required":["id","order"]
         }}),
     ]
 }
@@ -157,6 +181,9 @@ const TOOL_NAMES: &[&str] = &[
     "answer",
     "stub",
     "implement",
+    "option_set",
+    "option_remove",
+    "option_reorder",
 ];
 
 fn call_tool(id: Value, params: Value) -> Value {
@@ -204,9 +231,12 @@ fn call_tool(id: Value, params: Value) -> Value {
             },
         )),
         "add" => add_tool(register, &arguments),
-        "answer" => mutate_tool(register, &arguments, "id", "letter", answer),
+        "answer" => answer_tool(register, &arguments),
         "stub" => mutate_tool(register, &arguments, "id", "assumption", stub),
         "implement" => implement_tool(register, &arguments),
+        "option_set" => option_set_tool(register, &arguments),
+        "option_remove" => option_remove_tool(register, &arguments),
+        "option_reorder" => option_reorder_tool(register, &arguments),
         _ => unreachable!("checked against TOOL_NAMES above"),
     };
 
@@ -251,6 +281,80 @@ fn add_tool(mut register: decisions::Register, arguments: &Value) -> Result<Valu
     )?;
     save_register(&register)?;
     Ok(tool_result(id))
+}
+
+/// `letter` and `text` are mutually exclusive: a lettered pick goes through
+/// `answer` (validated against the question's own options), the user's own
+/// words go through `answer_with_text` (nothing to validate against).
+fn answer_tool(mut register: decisions::Register, arguments: &Value) -> Result<Value, String> {
+    let question_id = string_argument(arguments, "id").ok_or("id is required")?;
+    let letter = string_argument(arguments, "letter");
+    let text = string_argument(arguments, "text");
+    match (letter, text) {
+        (Some(_), Some(_)) => Err("give letter or text, not both".to_string()),
+        (None, None) => Err("either letter or text is required".to_string()),
+        (Some(letter), None) => {
+            answer(&mut register, &question_id, &letter)?;
+            save_register(&register)?;
+            Ok(tool_result(question_id))
+        }
+        (None, Some(text)) => {
+            answer_with_text(&mut register, &question_id, &text)?;
+            save_register(&register)?;
+            Ok(tool_result(question_id))
+        }
+    }
+}
+
+fn option_set_tool(mut register: decisions::Register, arguments: &Value) -> Result<Value, String> {
+    let question_id = string_argument(arguments, "id").ok_or("id is required")?;
+    let letter = string_argument(arguments, "letter").ok_or("letter is required")?;
+    let label = string_argument(arguments, "label").ok_or("label is required")?;
+    set_option(&mut register, &question_id, &letter, &label)?;
+    save_register(&register)?;
+    Ok(tool_result(question_id))
+}
+
+fn option_remove_tool(
+    mut register: decisions::Register,
+    arguments: &Value,
+) -> Result<Value, String> {
+    let question_id = string_argument(arguments, "id").ok_or("id is required")?;
+    let letters: Vec<String> = arguments
+        .get("letters")
+        .and_then(Value::as_array)
+        .ok_or("letters is required")?
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .ok_or("letters must all be strings")
+        })
+        .collect::<Result<_, _>>()?;
+    remove_options(&mut register, &question_id, &letters)?;
+    save_register(&register)?;
+    Ok(tool_result(question_id))
+}
+
+fn option_reorder_tool(
+    mut register: decisions::Register,
+    arguments: &Value,
+) -> Result<Value, String> {
+    let question_id = string_argument(arguments, "id").ok_or("id is required")?;
+    let order: Vec<String> = arguments
+        .get("order")
+        .and_then(Value::as_array)
+        .ok_or("order is required")?
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .ok_or("order must all be strings")
+        })
+        .collect::<Result<_, _>>()?;
+    reorder_options(&mut register, &question_id, &order)?;
+    save_register(&register)?;
+    Ok(tool_result(question_id))
 }
 
 fn mutate_tool(
@@ -330,6 +434,9 @@ mod tests {
             "answer",
             "stub",
             "implement",
+            "option_set",
+            "option_remove",
+            "option_reorder",
         ] {
             assert!(names.contains(&expected), "missing {expected}: {names:?}");
         }
@@ -441,5 +548,133 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("bogus"));
+    }
+
+    #[test]
+    fn answer_with_text_decides_on_the_users_own_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = scratch_register(dir.path());
+
+        let add_response = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"add","arguments":{"title":"Pick one","options":[{"letter":"a","label":"Yes"}],"priority":"normal"}}}));
+        let id = add_response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let decided = handle(json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
+            "params":{"name":"answer","arguments":{"id": id, "text": "Neither, do something else"}}}));
+        assert!(decided.get("error").is_none(), "{decided}");
+
+        let decided_list = handle(
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_decided","arguments":{}}}),
+        );
+        assert!(decided_list["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Neither, do something else"));
+    }
+
+    #[test]
+    fn answer_with_both_letter_and_text_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = scratch_register(dir.path());
+
+        let add_response = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"add","arguments":{"title":"Pick one","options":[{"letter":"a","label":"Yes"}],"priority":"normal"}}}));
+        let id = add_response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let response = handle(json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
+            "params":{"name":"answer","arguments":{"id": id, "letter": "a", "text": "no"}}}));
+        assert!(response.get("error").is_some(), "{response}");
+    }
+
+    #[test]
+    fn option_set_adds_and_relabels_then_option_remove_and_reorder_apply() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = scratch_register(dir.path());
+
+        let add_response = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"add","arguments":{"title":"Pick one","options":[{"letter":"a","label":"Yes"},{"letter":"b","label":"No"}],"priority":"normal"}}}));
+        let id = add_response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let set = handle(json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
+            "params":{"name":"option_set","arguments":{"id": id, "letter": "c", "label": "Maybe"}}}));
+        assert!(set.get("error").is_none(), "{set}");
+
+        let reordered = handle(json!({"jsonrpc":"2.0","id":3,"method":"tools/call",
+            "params":{"name":"option_reorder","arguments":{"id": id, "order": ["c", "a", "b"]}}}));
+        assert!(reordered.get("error").is_none(), "{reordered}");
+
+        let removed = handle(json!({"jsonrpc":"2.0","id":4,"method":"tools/call",
+            "params":{"name":"option_remove","arguments":{"id": id, "letters": ["b"]}}}));
+        assert!(removed.get("error").is_none(), "{removed}");
+
+        let open = handle(
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_open","arguments":{}}}),
+        );
+        let text = open["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Maybe"));
+        assert!(!text.contains("\"letter\":\"b\""));
+    }
+
+    #[test]
+    fn option_remove_with_a_non_string_letter_is_refused_not_coerced_to_blank() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = scratch_register(dir.path());
+
+        let add_response = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"add","arguments":{"title":"Pick one","options":[{"letter":"a","label":"Yes"}],"priority":"normal"}}}));
+        let id = add_response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let removed = handle(json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
+            "params":{"name":"option_remove","arguments":{"id": id, "letters": [1]}}}));
+        assert!(removed.get("error").is_some(), "{removed}");
+    }
+
+    #[test]
+    fn option_reorder_with_a_non_string_entry_is_refused_not_coerced_to_blank() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = scratch_register(dir.path());
+
+        let add_response = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"add","arguments":{"title":"Pick one","options":[{"letter":"a","label":"Yes"}],"priority":"normal"}}}));
+        let id = add_response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let reordered = handle(json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
+            "params":{"name":"option_reorder","arguments":{"id": id, "order": [1]}}}));
+        assert!(reordered.get("error").is_some(), "{reordered}");
+    }
+
+    #[test]
+    fn option_set_is_refused_once_the_question_is_decided() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = scratch_register(dir.path());
+
+        let add_response = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"add","arguments":{"title":"Pick one","options":[{"letter":"a","label":"Yes"}],"priority":"normal"}}}));
+        let id = add_response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        handle(json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
+            "params":{"name":"answer","arguments":{"id": id, "letter": "a"}}}));
+
+        let response = handle(json!({"jsonrpc":"2.0","id":3,"method":"tools/call",
+            "params":{"name":"option_set","arguments":{"id": id, "letter": "b", "label": "No"}}}));
+        assert!(response.get("error").is_some(), "{response}");
     }
 }

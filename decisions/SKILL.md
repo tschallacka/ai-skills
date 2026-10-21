@@ -56,10 +56,15 @@ decisions add --title T --option a:LABEL --option b:LABEL [--option c:LABEL ...]
 decisions list [--status open|decided|implemented|closed|dropped|obsolete]
                [--priority urgent|high|normal|low|someday] [--branch B] [--file PATH]
 decisions answer <ID> <LETTER> [--file PATH]
+decisions answer <ID> --text <TEXT> [--file PATH]   (the human's own words,
+              not one of the offered letters)
 decisions stub <ID> <ASSUMPTION> [--file PATH]
 decisions implement <ID> [NOTE] [--file PATH]
 decisions apply <ID> <RESOLUTION> [--file PATH]
 decisions close <ID> <RESOLUTION> [--file PATH]   (an alias for apply)
+decisions option-set <ID> <LETTER> <LABEL> [--file PATH]
+decisions option-remove <ID> <LETTER> [<LETTER> ...] [--file PATH]
+decisions option-reorder <ID> <LETTER,LETTER,...> [--file PATH]
 ```
 
 Any command takes `--file PATH`, which wins over everything else. Failing
@@ -84,6 +89,23 @@ reason: it does not vanish just because someone answered it. `close`/`apply`
 can withdraw a question from any status, with or without ever implementing
 it.
 
+Not every answer fits one of the offered letters -- `answer --text` records
+the human's own words as the pick instead, moving the question to decided
+the same way a lettered answer does. This is the register-side counterpart
+of `question-etiquette`'s own "something else -- tell me" escape option: a
+closed set of letters with no way out is a leading question, and this is
+how the escape is actually resolved rather than just offered.
+
+`option-set`, `option-remove`, and `option-reorder` edit what a question
+offers, but only while it is still open -- editing the options after someone
+has already picked from them would leave that pick pointing at a choice
+that may no longer say what it said when it was picked. `option-set` adds a
+new letter or relabels an existing one, `option-remove` takes any number of
+letters at once atomically (refusing to leave a question with no options at
+all), and `option-reorder` takes a comma-separated list that must name
+exactly the question's current letters -- a resort, not a way to also add,
+drop, or rename one.
+
 ## Install mode
 
 Which tools you have depends on the install mode (`integration.tsv`), same
@@ -106,13 +128,20 @@ mode-offering skill in this repo uses).
 
 - **The MCP adapter** (`decisions-mcp`, stdio only, no daemon, no port):
   exposes `list_open`, `list_decided`, `list_implemented`, `list_closed`,
-  `list_urgent`, `answer`, `add`, `stub`, and `implement` as typed tool
-  calls, for an agent that wants to glean or act on questions without
-  shelling out.
+  `list_urgent`, `answer` (`letter` or `text`), `add`, `stub`, `implement`,
+  `option_set`, `option_remove`, and `option_reorder` as typed tool calls,
+  for an agent that wants to glean or act on questions without shelling
+  out. Registered under the server name `decisions`, so its tools surface
+  as `mcp__decisions__<name>`.
 - **The `decision-board` mod**: shows open and decided questions in a pane
   (toggle to "Implemented" to see what is already done), and lets a person
-  press a button to choose an answer option directly, instead of running
-  `decisions answer` by hand.
+  either press a button to choose an answer option directly, or type a
+  free-text answer in their own words when none of the options fit --
+  both instead of running `decisions answer` by hand. Raising a question
+  through `decisions-mcp`'s own `add` tool opens this pane automatically,
+  so a non-blocking question still reaches the person right away instead
+  of waiting for them to notice it in `decisions list` or run
+  `/decision-board` themselves.
 - **The `decision-reminder-plugin`**: at session start, reads the register
   and reminds the agent of open and urgent questions to answer, and
   separately names every decided question still awaiting implementation --

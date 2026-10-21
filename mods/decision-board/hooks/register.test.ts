@@ -1,7 +1,19 @@
 import { expect, test } from 'claude-code/testing'
 import { __test } from './register'
 
-const { decisionsBin, resolveDecisionsFile, loadQuestions } = __test
+const { decisionsBin, resolveDecisionsFile, loadQuestions, answerTextArgs } = __test
+
+test('answerTextArgs builds answer --text with the file flag last', async () => {
+  expect(answerTextArgs('/bin/decisions', 'Q3', 'Neither, do this instead', '/proj/DECISIONS.json')).toEqual([
+    '/bin/decisions',
+    'answer',
+    'Q3',
+    '--text',
+    'Neither, do this instead',
+    '--file',
+    '/proj/DECISIONS.json',
+  ])
+})
 
 test('decisionsBin resolves under XDG_CONFIG_HOME, falling back to HOME/.config', async () => {
   expect(decisionsBin('', '/xdg')).toBe('/xdg/tsch-ai-skills/bin/decisions')
