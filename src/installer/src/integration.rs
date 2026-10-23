@@ -101,16 +101,32 @@ pub fn installed_mode(_source_root: &Path, _skill: &str, destination: &Path) -> 
 /// `binary_mode` does not recognise as belonging to `skill` is simply
 /// skipped, so scanning it is still correct, just not skill-scoped the way
 /// the old per-skill directory was for free.
+///
+/// `integration.tsv` can declare more than one `mcp`-mode binary for a
+/// skill now (`chat` has both `chat-mcp`, the adapter, and
+/// `chat-spool-watch`, a helper merely gated to mcp-mode installs) -- this
+/// must not fall back to "whichever one `fs::read_dir` happens to return
+/// first", since that order is filesystem-dependent and not stable across
+/// runs or hosts. The adapter is always named `<skill>-mcp` (every
+/// dual-surface skill's own `integration.tsv`/docs already say so), so that
+/// is the one filename this looks for among the `mcp`-mode candidates,
+/// rather than accepting any of them.
 pub fn mcp_adapter_path(source_root: &Path, skill: &str, home: &Path) -> Option<PathBuf> {
     let bin_dir = crate::shared_bin::shared_bin_dir(home);
     let files = fs::read_dir(&bin_dir).ok()?;
+    let adapter_name = format!("{skill}-mcp");
     for file in files.filter_map(|e| e.ok()) {
         let path = file.path();
         if !path.is_file() {
             continue;
         }
         let filename = file.file_name();
-        if binary_mode(source_root, skill, &filename.to_string_lossy()).as_deref() == Some("mcp") {
+        let filename = filename.to_string_lossy();
+        let bare = filename.strip_suffix(".exe").unwrap_or(&filename);
+        if bare != adapter_name {
+            continue;
+        }
+        if binary_mode(source_root, skill, &filename).as_deref() == Some("mcp") {
             return Some(path);
         }
     }
@@ -312,6 +328,31 @@ mod tests {
         fs::create_dir_all(&bin).unwrap();
         fs::write(bin.join("ai-text-editor"), "").unwrap();
         assert!(mcp_adapter_path(dir.path(), "ai-text-editor", home.path()).is_none());
+    }
+
+    // A real regression: `chat/integration.tsv` declares two `mcp`-mode
+    // binaries (`chat-mcp`, the adapter, and `chat-spool-watch`, a helper
+    // merely gated to mcp-mode installs). Picking "whichever one
+    // `fs::read_dir` returns first" let a real install register
+    // `chat-spool-watch` -- which never answers the MCP handshake -- as the
+    // chat MCP server command. `chat-spool-watch` is written to disk first
+    // here on purpose, so a regression back to first-match-wins would pick
+    // it and fail this test rather than passing by directory-order luck.
+    #[test]
+    fn mcp_adapter_path_picks_the_named_adapter_over_another_mcp_mode_binary() {
+        const CHAT_SAMPLE: &str = "mode\tbinary\twhy\n\
+            skill\tchat-client-rs\tShort-lived client\n\
+            mcp\tchat-mcp\tMCP bridge\n\
+            mcp\tchat-spool-watch\tWatcher gated to mcp-mode installs\n";
+        let dir = tempfile::tempdir().unwrap();
+        write_integration(dir.path(), "chat", CHAT_SAMPLE);
+        let home = tempfile::tempdir().unwrap();
+        let bin = crate::shared_bin::shared_bin_dir(home.path());
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("chat-spool-watch"), "").unwrap();
+        fs::write(bin.join("chat-mcp"), "").unwrap();
+        let found = mcp_adapter_path(dir.path(), "chat", home.path()).unwrap();
+        assert_eq!(found, bin.join("chat-mcp"));
     }
 
     #[test]
