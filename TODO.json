@@ -4,6 +4,23 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
+      "id": "T2",
+      "title": "benchmark/skill-adoption prepare-cell.sh silently ships a skill dir with no binary unless staged by hand",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "prepare-cell.sh's disposable install only works if <skill>/bin/<triple>/<binary> is already staged for every dual-surface skill (ai-text-editor, chat, decisions, tailpipe) before the installer copies it -- setup-dev-env.sh only stages interactive-shell's own bin/<triple>/, not these. Two independent live-experiment agents (running real cells against S01-ai-text-editor and S04-decisions) each had to manually mirror installer/build-release.sh's own copy convention by hand before a cell would actually have a working binary, with no warning from prepare-cell.sh when the staging step was missing. Confirms PROTOCOL.md's own open caveat that the installer invocation is unverified end-to-end against a disposable HOME.",
+      "blocked_on": null,
+      "refs": [
+        "benchmark/skill-adoption/prepare-cell.sh",
+        "benchmark/skill-adoption/PROTOCOL.md",
+        "installer/build-release.sh"
+      ],
+      "note": null,
+      "created_at": "2026-10-23T15:16:04Z",
+      "updated_at": "2026-10-23T15:16:04Z"
+    },
+    {
       "id": "T1",
       "title": "ai-text-editor-server: idle watchdog should consult 'claude agents --json' before self-terminating",
       "status": "done",
