@@ -47,6 +47,28 @@
       "updated_at": "2026-10-14T14:56:25Z"
     },
     {
+      "id": "B8",
+      "title": "installer could register chat-spool-watch as the chat MCP server instead of chat-mcp",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Install the chat skill in mcp mode so both chat-mcp (the adapter) and chat-spool-watch (an mcp-mode-only helper, added for the interrupt feature) land in the shared bin dir; run the installer's MCP registration step for claude/codex/opencode.",
+      "observed": "mcp_adapter_path (src/installer/src/integration.rs) took the first bin/ file fs::read_dir happened to return among those chat/integration.tsv tags mode=mcp. With two such binaries now declared for chat, read_dir's filesystem-dependent order could register chat-spool-watch as the chat MCP server command. chat-spool-watch never answers the MCP handshake, so every session using that registration timed out after 30s waiting to connect.",
+      "expected": "The installer always registers the real adapter binary (chat-mcp) as the MCP server command, regardless of how many other binaries a skill's integration.tsv also gates to mcp-mode-only installs.",
+      "mechanism": "mcp_adapter_path scanned for ANY bin/ file tagged mode=mcp in integration.tsv and returned the first fs::read_dir hit. This was safe while every skill had exactly one mcp-mode binary; chat/integration.tsv has declared two since the chat-interrupt feature added chat-spool-watch (correctly gated to mcp-mode-only installs, but not the adapter to register), making the pick nondeterministic.",
+      "surfaces": [
+        "installer",
+        "chat"
+      ],
+      "fix": "mcp_adapter_path now matches the specific filename <skill>-mcp (the convention every dual-surface skill's adapter already follows) among the mode=mcp candidates, instead of accepting the first match (src/installer/src/integration.rs, commit 6ae2d690 on master).",
+      "verification": "New test mcp_adapter_path_picks_the_named_adapter_over_another_mcp_mode_binary: with both chat-spool-watch and chat-mcp written to the shared bin dir (chat-spool-watch written first, so a regression to first-match-wins would fail it rather than passing by directory-order luck), mcp_adapter_path returns chat-mcp. Full installer suite (508 tests), cargo fmt and clippy clean; pre-push-check PASS.",
+      "found_by": "Tschallacka (relayed from another local Claude Code session that diagnosed the live misregistration by hand)",
+      "notes": null,
+      "created_at": "2026-10-23T14:46:58Z",
+      "updated_at": "2026-10-23T14:46:58Z"
+    },
+    {
       "id": "B3",
       "title": "ai-text-editor (MCP install): idle/last-tab-closed server exit frees its socket before retiring its registry rows, so a replacement generation's reachable endpoint can still answer for a dead generation's stale tab ids",
       "status": "fixed",
