@@ -74,6 +74,8 @@ mod tests {
         assert_eq!(resolved, home.join("tailpipe.sock"));
     }
 
+    // Windows has no socket path limit, so `fits` is always true there.
+    #[cfg(unix)]
     #[test]
     fn a_long_home_falls_back_to_a_short_tagged_tmp_path() {
         // The exact path this bug was filed from: a disposable per-cell HOME
