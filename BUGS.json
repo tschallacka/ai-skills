@@ -177,6 +177,28 @@
       "notes": null,
       "created_at": "2026-10-20T09:33:17Z",
       "updated_at": "2026-10-20T09:33:21Z"
+    },
+    {
+      "id": "B9",
+      "title": "ai-text-editor: after a failed replace, a tab opened at verbosity 0 reads as having no tab",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Through the MCP adapter, under one session identity: open a second file at default verbosity, open the target file with verbosity 0, call replace with a range_start_match that matches nothing, then call save naming the target by file.",
+      "observed": "replace is refused correctly with range_start_match_not_found, then save is refused with \"save carries a revision guard and <file> has no tab in this workspace\", telling the caller to open a file it just opened. Reopening returns the same tab id, so the tab was not destroyed.",
+      "expected": "A refused replace changes nothing, so the following save finds the tab and succeeds, as it does in every variant below.",
+      "mechanism": "Not established. The message is the guarded-verb arm of resolve in src/ai-text-editor/src/client.rs (around line 392), reached when discovery returns Err, so the refusal is client-side routing rather than tab state. A verbosity 0 open response carries no session_token, which is the likely link, but why a failed replace differs from a successful one was not traced.",
+      "surfaces": [
+        "ai-text-editor",
+        "ai-text-editor-mcp"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "",
+      "notes": "Measured 2026-11-05 on the installed MCP binary and on a build of origin/master plus the strict-gate branch, each with fresh session ids. Fails: 1 and 3 extra tabs with verbosity 0 on all calls; open at verbosity 0 then failed replace and save at default. Passes: no extra tab at verbosity 0; open at default verbosity then failed replace; open at verbosity 0 then save directly; open at verbosity 0 then successful replace and save. The CLI with a fresh single-tab session also passes. Batching calls is not a factor. No data is at risk: the file is untouched and reopening recovers. Separately, once and not isolated: open with acknowledge_create_parents at verbosity 0 did not create the missing directory, and save failed with save_failed; the same call at default verbosity had created it earlier.",
+      "created_at": "2026-11-05T12:39:14Z",
+      "updated_at": "2026-11-05T12:39:14Z"
     }
   ]
 }
