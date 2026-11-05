@@ -163,6 +163,26 @@ pub fn focus_path(identity: &str) -> PathBuf {
     cache_path(identity, None)
 }
 
+/// W26/AR-32/AR-37: whether `identity` already has a live focused tab --
+/// the liveness half of a cold-start check. `resolve` itself never trusts a
+/// cached focus without probing `Endpoint::is_live()` first (B179); a
+/// cold-start check that only asked "does the cache file exist" would treat
+/// a stale on-disk record naming a dead server as warm and skip the
+/// autostart it actually needs. `Ok(false)` covers both "no cache file at
+/// all" and "a cache file naming a dead endpoint" -- both read as
+/// cold-start. `Err` surfaces a genuinely unreadable cache file rather than
+/// silently folding corruption into "cold-start" (the same shape `resolve`'s
+/// own cache-read error already uses).
+pub fn focus_is_live(identity: &str) -> Result<bool, String> {
+    let path = focus_path(identity);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let session = read_session(&path)
+        .map_err(|error| format!("cannot read session token {}: {error}", path.display()))?;
+    Ok(session.endpoint.is_live())
+}
+
 pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
     let identity = identity(request.explicit_identity.as_deref(), &request.agent_env_var);
     let cache_path = request.session_token_path.clone().or_else(|| {
@@ -410,6 +430,64 @@ pub fn persist_cache(
             .map_err(|error| format!("cannot save session token: {error}"))?;
     }
     Ok(())
+}
+
+/// `persist_cache`'s own per-(identity, file) cache, extended to `bulk_edit`:
+/// every other verb's successful response carries the ONE tab's own
+/// session_token, which the caller persists via `resolved.cache_path`
+/// (`cache_path(identity, request.file)`) so a later standalone call for
+/// that same file reconnects straight to it. `bulk_edit`'s own
+/// `ResolveRequest.file` is always `None` -- its real targets live inside
+/// `edits`, invisible to that generic machinery -- so without this, no
+/// (identity, file) entry is EVER written for the individual files a batch
+/// touches. A later standalone verb addressing one of those files by name,
+/// once this identity has 2+ registered tabs, hits `session::resolve`'s own
+/// `session_ambiguous` refusal and falls through to autostarting a
+/// SEPARATE, duplicate server for that file -- a real resource/routing
+/// hazard, not just cosmetic.
+///
+/// Reads the per-item `file`/`session_token` the server now echoes in
+/// `bulk_edit`'s own response (`handle_bulk_edit`'s success branch). Only an
+/// APPLIED item persists a cache entry, mirroring `persist_cache`'s own
+/// existing caller's rule for a standalone call: a refused item's resolved
+/// tab is not one this identity is authorized against, so its token must
+/// never be cached as if it were.
+pub fn persist_bulk_edit_item_caches(
+    request: &ResolveRequest,
+    resolved: &Resolved,
+    auth_token: Option<&str>,
+    frames: &[serde_json::Value],
+) {
+    if request.method != "bulk_edit" {
+        return;
+    }
+    let Some(identity) = identity(request.explicit_identity.as_deref(), &request.agent_env_var)
+    else {
+        return;
+    };
+    let Some(results) = frames.iter().find_map(|frame| {
+        frame
+            .pointer("/payload/results")
+            .and_then(serde_json::Value::as_array)
+    }) else {
+        return;
+    };
+    for entry in results {
+        if entry.get("applied").and_then(serde_json::Value::as_bool) != Some(true) {
+            continue;
+        }
+        let Some(file) = entry.get("file").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(token) = entry
+            .get("session_token")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let path = cache_path(&identity, Some(Path::new(file)));
+        let _ = persist_cache(Some(&path), &resolved.endpoint, auth_token, Some(token));
+    }
 }
 
 /// Remember the tab this call was served by as this identity's focused tab
@@ -713,7 +791,27 @@ where
         } else {
             resolved
         };
-    let frames = request_send(&resolved, &build(&resolved))?;
+    // Automatic revision guard: a caller of a revision-guarded verb that did
+    // not supply one gets the tab's current revision fetched fresh, right
+    // here, for this one call. No cache, nothing stored or reused across
+    // calls -- the one-round-trip fetch-then-send gap this leaves is an
+    // accepted, minimal tradeoff (ai-text-editor-automatic-revision-guard
+    // plan, AR-05), not a defect to patch with a retry. A caller-supplied
+    // revision (explicit, including an explicitly stale one) is always sent
+    // unchanged; the server's own enforcement is completely untouched.
+    let send_envelope = |resolved: &Resolved| {
+        let mut envelope = build(resolved);
+        if crate::is_revision_guarded(&request.method) && envelope.revision.is_none() {
+            if let Some(current) = fetch_current_revision(resolved) {
+                envelope.revision = Some(current);
+            }
+        }
+        if request.method == "bulk_edit" {
+            autofill_bulk_edit_session_tokens(request, resolved, &mut envelope);
+        }
+        envelope
+    };
+    let frames = request_send(&resolved, &send_envelope(&resolved))?;
     // B179's stale-token variant: a server RESTARTED on the same socket path
     // is live (so resolve did not error and the no-autostart policy is
     // untouched), but the cached tab-scoped token belongs to the dead
@@ -744,12 +842,91 @@ where
         })
     {
         if let Some(refreshed) = refresh_token(request, &resolved) {
-            if let Ok(retried) = request_send(&resolved, &build(&refreshed)) {
+            if let Ok(retried) = request_send(&resolved, &send_envelope(&refreshed)) {
                 return Ok((retried, refreshed));
             }
         }
     }
     Ok((frames, resolved))
+}
+
+/// W21/AR-11/AR-23: every other verb's session_token is resolved
+/// transparently by `resolve`/`cache_path` for `(identity, file)` and
+/// attached to the outer envelope automatically -- `bulk_edit`'s per-item
+/// `session_token` field (the server-side check W01 adds) has no client-side
+/// counterpart, so an item addressing an already-open tab by `file` (the
+/// exact shape the pre-existing spike tests and the validated benchmark both
+/// use) would be refused with nothing the caller could have supplied. This
+/// fills what the client already fills for every other verb, per item: a
+/// `file`-addressed item carrying no explicit `session_token` gets this
+/// identity's own cached token for that file attached before the request is
+/// sent. An item naming `tab_id` needs no fill (W01's own exemption).
+///
+/// Deliberately not cold-start discovery itself: populating
+/// `ResolveRequest.file` in the first place (so a genuinely cold call can
+/// autostart or discover a server at all) is Goal 05's job in the CLI/MCP
+/// entry points that build `ResolveRequest` before `execute` is ever
+/// called. What this function adds on top is specific to the ONE file that
+/// drove that discovery: `request.file` (Goal 05's own cold-start target,
+/// when set). That file structurally cannot have a per-(identity, file)
+/// cache entry yet -- discovery fell back to it precisely because none
+/// existed -- but `execute`'s own pre-existing `refresh_token` step
+/// (unconditional for every verb but `open`) already fetched ITS current
+/// session_token into `resolved` before this closure ever ran, the exact
+/// mechanism that lets a cold `replace -f new.txt` work as any identity's
+/// first-ever call with no tracked token. Reusing it here, for the one
+/// item whose `file` matches `request.file`, closes the gap a cold
+/// `bulk_edit` would otherwise hit: the item that bootstrapped the
+/// connection is not in ANY cache yet, and the server-side freshness
+/// exemption (AR-06) does not cover it either, because an autostarted
+/// server's own startup already opened that exact file as its default
+/// tab before this request's own per-item loop ever ran -- predating the
+/// batch from the per-item loop's point of view, even though it is this
+/// identity's genuine first touch from the caller's.
+fn autofill_bulk_edit_session_tokens(
+    request: &ResolveRequest,
+    resolved: &Resolved,
+    envelope: &mut Envelope,
+) {
+    let identity = identity(request.explicit_identity.as_deref(), &request.agent_env_var);
+    let Some(edits) = envelope
+        .payload
+        .get_mut("edits")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for item in edits.iter_mut() {
+        let Some(object) = item.as_object_mut() else {
+            continue;
+        };
+        if object.contains_key("tab_id") || object.contains_key("session_token") {
+            continue;
+        }
+        let Some(file) = object
+            .get("file")
+            .and_then(serde_json::Value::as_str)
+            .map(PathBuf::from)
+        else {
+            continue;
+        };
+        if let Some(identity) = identity.as_deref() {
+            if let Ok(session) = read_session(&cache_path(identity, Some(&file))) {
+                if let Some(token) = session.session_token {
+                    object.insert("session_token".into(), serde_json::Value::String(token));
+                    continue;
+                }
+            }
+        }
+        if request.file.as_deref() == Some(file.as_path()) {
+            if let Some(token) = &resolved.session_token {
+                object.insert(
+                    "session_token".into(),
+                    serde_json::Value::String(token.clone()),
+                );
+            }
+        }
+    }
 }
 
 /// Re-open the file against the already-live endpoint to recover a current
@@ -790,6 +967,38 @@ fn request_send(
 ) -> Result<Vec<serde_json::Value>, String> {
     request(&resolved.endpoint, envelope)
         .map_err(|error| format!("{error} (endpoint {})", resolved.endpoint.display()))
+}
+
+/// The first frame carrying a `payload.revision`, as a `u64` -- `None` if no
+/// frame has one, or it is not an integer. Split out from
+/// `fetch_current_revision` so it is directly unit-testable against a
+/// hand-built frame with no transport involved (W17/AR-02).
+fn parse_revision_from_frames(frames: &[serde_json::Value]) -> Option<u64> {
+    frames.iter().find_map(|frame| {
+        frame
+            .pointer("/payload/revision")
+            .and_then(serde_json::Value::as_u64)
+    })
+}
+
+/// One-shot, uncached probe for the tab's current revision: sends a
+/// `history` request (not itself revision-guarded) over the already-resolved
+/// connection and reads the revision back out of the response. Never panics
+/// and never propagates an error -- any failure (no server, a malformed
+/// response, anything else) becomes `None`, and the caller proceeds exactly
+/// as it would without this feature.
+fn fetch_current_revision(resolved: &Resolved) -> Option<u64> {
+    let envelope = Envelope {
+        version: crate::PROTOCOL_VERSION,
+        request_id: "auto-revision-fetch".into(),
+        method: "history".into(),
+        revision: None,
+        auth_token: resolved.auth_token.clone(),
+        session_token: resolved.session_token.clone(),
+        payload: serde_json::json!({}),
+    };
+    let frames = request_send(resolved, &envelope).ok()?;
+    parse_revision_from_frames(&frames)
 }
 
 fn resolved_default(request: &ResolveRequest) -> Resolved {
@@ -846,4 +1055,56 @@ pub fn cold_discovery_frames(method: &str) -> Vec<serde_json::Value> {
         serde_json::json!({"type": "data", "version": 1, "request_id": "cold-default", "payload": payload}),
         serde_json::json!({"type": "complete", "version": 1, "request_id": "cold-default", "sequence": 1, "result_generation": "client_default"}),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AR-01: a transport failure during the auto-fill probe must degrade to
+    /// today's behavior (no auto-filled revision) rather than panic or
+    /// propagate an error. Binds an ephemeral TCP port and drops the listener
+    /// immediately, so the address is real but guaranteed to refuse the
+    /// connection `fetch_current_revision` attempts.
+    #[test]
+    fn fetch_current_revision_returns_none_when_nothing_is_listening() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let address = listener.local_addr().expect("local addr").to_string();
+        drop(listener);
+        let resolved = Resolved {
+            endpoint: Endpoint::Tcp(address),
+            auth_token: None,
+            session_token: None,
+            cache_path: None,
+        };
+        assert_eq!(fetch_current_revision(&resolved), None);
+    }
+
+    /// AR-02: a frame with no `payload.revision` (an error-shaped response,
+    /// or any other frame missing the key) must parse to `None` rather than
+    /// panic -- exercised directly, independent of any transport.
+    #[test]
+    fn parse_revision_from_frames_returns_none_without_a_revision_field() {
+        let frames = vec![serde_json::json!({
+            "type": "error",
+            "version": 1,
+            "request_id": "x",
+            "code": "revision_required",
+            "message": "missing revision",
+        })];
+        assert_eq!(parse_revision_from_frames(&frames), None);
+    }
+
+    /// A frame that DOES carry `payload.revision` is the positive case the
+    /// two failure-path tests above need a contrast against.
+    #[test]
+    fn parse_revision_from_frames_finds_the_revision_when_present() {
+        let frames = vec![serde_json::json!({
+            "type": "data",
+            "version": 1,
+            "request_id": "x",
+            "payload": {"revision": 7},
+        })];
+        assert_eq!(parse_revision_from_frames(&frames), Some(7));
+    }
 }

@@ -1,7 +1,7 @@
 {
   "name": "decision-board",
   "version": "0.1.0",
-  "description": "A pane with the project's open questions (DECISIONS.json), most urgent first, with buttons to answer one directly.",
+  "description": "A pane with the project's open questions (DECISIONS.json), most urgent first, with buttons to answer one directly or a field to type a free-text answer. Opens automatically when an agent raises a question.",
   "types": "./types/index.d.ts",
   "userConfig": {
     "enabled": {

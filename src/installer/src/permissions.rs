@@ -331,6 +331,35 @@ pub fn claude_project_specifics_permissions_remove(
     remove_allow_entries(&cfg, &project_specifics_entries(root))
 }
 
+/// A single wildcard rule, matching every tool call a given MCP server
+/// exposes -- the shape Claude Code itself writes when a user answers
+/// "don't ask again" to one of that server's own approval prompts, e.g.
+/// `mcp__codegraph__*`. Unlike `worktrees_entries`/`project_specifics_
+/// entries`, this is not path-scoped: an MCP server registered by this
+/// installer is not confined to one directory (ai-text-editor's own
+/// SKILL.md says so explicitly -- "treat the endpoint token as full
+/// file-access authority"), so granting it approves every tool that server
+/// exposes now or adds later, not one directory's worth of Read/Edit/Bash.
+fn mcp_tool_entries(skill: &str) -> Vec<String> {
+    vec![format!("mcp__{skill}__*")]
+}
+
+pub fn claude_mcp_tool_permissions(skill: &str, home: &Path) -> io::Result<PermissionOutcome> {
+    let cfg = claude_settings_path(home);
+    if !cfg.is_file() {
+        return Ok(PermissionOutcome::NoConfigFile);
+    }
+    merge_allow_entries(&cfg, &mcp_tool_entries(skill))
+}
+
+pub fn claude_mcp_tool_permissions_remove(
+    skill: &str,
+    home: &Path,
+) -> io::Result<PermissionRemovalOutcome> {
+    let cfg = claude_settings_path(home);
+    remove_allow_entries(&cfg, &mcp_tool_entries(skill))
+}
+
 pub fn claude_interactive_shell_permissions_remove(
     bins: &str,
     home: &Path,
@@ -1440,6 +1469,61 @@ mod tests {
         assert!(allow
             .iter()
             .any(|v| v == "Edit(/home/x/.config/tsch-ai-skills/**)"));
+    }
+
+    #[test]
+    fn claude_mcp_tool_permissions_grants_one_wildcard_entry() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = settings_at(home.path(), "{}");
+
+        let outcome = claude_mcp_tool_permissions("chat", home.path()).unwrap();
+        let added = match outcome {
+            PermissionOutcome::Changed { added, .. } => added,
+            _ => panic!("expected Changed"),
+        };
+        assert_eq!(added, vec!["mcp__chat__*".to_string()]);
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        let allow = doc["permissions"]["allow"].as_array().unwrap();
+        assert!(allow.iter().any(|v| v == "mcp__chat__*"));
+    }
+
+    #[test]
+    fn claude_mcp_tool_permissions_is_idempotent() {
+        let home = tempfile::tempdir().unwrap();
+        settings_at(home.path(), "{}");
+        claude_mcp_tool_permissions("tailpipe", home.path()).unwrap();
+
+        let outcome = claude_mcp_tool_permissions("tailpipe", home.path()).unwrap();
+        assert!(matches!(outcome, PermissionOutcome::AlreadyPresent));
+    }
+
+    #[test]
+    fn claude_mcp_tool_permissions_with_no_settings_file_is_reported_and_nothing_is_written() {
+        let home = tempfile::tempdir().unwrap();
+        let outcome = claude_mcp_tool_permissions("decisions", home.path()).unwrap();
+        assert!(matches!(outcome, PermissionOutcome::NoConfigFile));
+    }
+
+    #[test]
+    fn claude_mcp_tool_permissions_remove_does_not_touch_a_different_skills_grant() {
+        let home = tempfile::tempdir().unwrap();
+        settings_at(home.path(), "{}");
+        claude_mcp_tool_permissions("chat", home.path()).unwrap();
+        claude_mcp_tool_permissions("ai-text-editor", home.path()).unwrap();
+
+        let removed = claude_mcp_tool_permissions_remove("chat", home.path()).unwrap();
+        match removed {
+            PermissionRemovalOutcome::Removed(entries) => {
+                assert_eq!(entries, vec!["mcp__chat__*".to_string()])
+            }
+            _ => panic!("expected Removed"),
+        }
+
+        let cfg = claude_settings_path(home.path());
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        let allow = doc["permissions"]["allow"].as_array().unwrap();
+        assert!(!allow.iter().any(|v| v == "mcp__chat__*"));
+        assert!(allow.iter().any(|v| v == "mcp__ai-text-editor__*"));
     }
 
     #[test]

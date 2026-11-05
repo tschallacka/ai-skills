@@ -27,6 +27,9 @@ const PRIMARY_ADD_AND_INFRA: &[Row] = &[
     ("chat-server-rs", "chat-server-rs"),
     ("decisions", "decisions"),
     ("decisions-mcp", "decisions-mcp"),
+    ("tailpipe-server-rs", "tailpipe-server-rs"),
+    ("tailpipe-client-rs", "tailpipe-client-rs"),
+    ("tailpipe-mcp", "tailpipe-mcp"),
     ("chat-spool-watch", "chat-spool-watch"),
     ("monitor-once", "monitor-once"),
     ("configure-ui-story-cache", "configure-ui-story-cache"),
@@ -113,6 +116,8 @@ const SECONDARY: &[Row] = &[
     ("ci-scope", "ci-scope"),
     // Goal 22: appended after ci-scope.
     ("ci-test-scope", "ci-test-scope"),
+    // Appended after ci-test-scope.
+    ("pre-release-check", "pre-release-check"),
     // Goal 26: appended after ci-test-scope.
     ("test-mermaid-accuracy", "test-mermaid-accuracy"),
     // Built and staged here because planning/PACKAGE-MANIFEST.tsv promises

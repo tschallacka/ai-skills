@@ -1,0 +1,21 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "tailpipe-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "MCP adapter for tailpipe: list_streams/read/search/wait/save as typed tool calls"
+license = "MIT"
+
+[lib]
+name = "tailpipe_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tailpipe-mcp"
+path = "src/main.rs"
+
+[dependencies]
+tailpipe-client-rs = { path = "../tailpipe-client-rs" }
+tailpipe-server-rs = { path = "../tailpipe-server-rs" }
+serde_json.workspace = true

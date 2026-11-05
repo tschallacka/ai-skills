@@ -55,6 +55,22 @@ A reply of `Q1b, Q2a` is complete and unambiguous. A reply of just `Q1b`
 leaves Q2 open -- carry it forward as Q2 on the next turn, not as a new
 number.
 
+## Persisting a question past this turn
+
+A question asked in chat is gone once the conversation moves on: if it does
+not need an answer right now, raise it in the `decisions` skill's register
+instead of (or in addition to) asking inline, through its MCP tool
+(`mcp__decisions__add`) or the `decisions` CLI. It keeps the identical
+shape this skill already asks for -- a title and lettered options -- so a
+question that is worth numbering here is already shaped for that register
+with no rework. The escape letter ("something else -- tell me") is not just
+etiquette there: a human answer that is not one of the offered letters is
+recorded with `mcp__decisions__answer`'s `text` argument (or `decisions
+answer <ID> --text ...`), in the human's own words, rather than forced onto
+the closest-sounding letter or lost. Raising a question this way also opens
+the `decision-board` pane automatically, so it reaches the person rather
+than sitting unseen in a register they have not thought to check.
+
 ## What this does not cover
 
 - A single throwaway yes/no with no options and nothing at stake in

@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S17-post-implementation-review",
+  "title": "post-implementation-review",
+  "category": "convention",
+  "target_skills": ["post-implementation-review"],
+  "modes": ["n/a"],
+  "forbidden_vocabulary": ["post-implementation-review", "adversarial review"],
+  "adoption_signals": {
+    "behavioral": ["(?i)\\b(let me review|double[- ]check|second look|risk|edge case|worth (a )?review)\\b"]
+  },
+  "prompt": "Implement a rate limiter for the API in rate_limiter.py: a sliding window, max 100 requests per 60 seconds per client_id, thread-safe. Wire it into app.py's existing request handler.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Declaring done immediately after the implementation with no review pass -- adopted:false regardless of whether the implementation itself happens to be correct.",
+  "notes": "setup writes a minimal app.py with one request handler and no rate limiting. A real concurrency edge case is seeded in the task's own shape (per-client_id state shared across threads) without being named as a hint. verify's mechanical half runs a real concurrency smoke test (python3 -c spinning up threads hammering the limiter) and checks it never permits more than 100 in a window -- the actual correctness bar. The adoption_signals.behavioral regex is a weak proxy for 'did the agent proactively review itself' and is reported for reference, not required for task_correct, since whether a review happened and whether the code is actually correct are two different questions this scenario deliberately keeps separate (an agent could get lucky without reviewing, or review and still miss the race)."
+}

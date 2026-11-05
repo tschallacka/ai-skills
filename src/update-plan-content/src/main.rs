@@ -215,7 +215,13 @@ fn section_spec(plan: &Path, id: &str, section: &str) -> Result<(&'static str, u
             let valid = match kind {
                 planning_document::DocumentKind::Plan => "current-state desired-outcome approach approach-decisions scope affected-areas constraints-and-decisions risks-and-open-questions environment-facts",
                 planning_document::DocumentKind::Goal => "current-state-and-prior-goal-handoffs outcome-and-definition-of-done why-this-goal-is-needed scope affected-areas dependencies-and-handoffs implementation-approach-risks-and-edge-cases owned-work-units goal-size-exception",
-                planning_document::DocumentKind::Step => "objective instructions acceptance-criteria handoff atomicity-check",
+                // B400: atomicity-check was listed here but never accepted by
+                // section_spec below, so naming it refused in the same breath
+                // it was offered. The three atomicity boxes are ticked
+                // structurally, by update-step.sh's own atomicity_check, not
+                // by a narrative section replace -- not listed as a target
+                // here for that reason, not by oversight.
+                planning_document::DocumentKind::Step => "objective instructions acceptance-criteria handoff",
                 planning_document::DocumentKind::Testing => "automated-tests browser-verification backend-verification manual-verification",
                 planning_document::DocumentKind::Review | planning_document::DocumentKind::Reference => "",
             };

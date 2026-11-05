@@ -450,8 +450,8 @@ the CI map.
      hand edit. **The CLI takes the register from the current directory:** `--file
      PATH` if given, else `BUGS_JSON` / `TODO_JSON`, else `./BUGS.json` /
      `./TODO.json`. Run in the main tree it edits the main tree's copy, which the
-     gate then refuses. (`interactive-shell/TODO.json` is a second, unrelated
-     queue.) Pass `--file "$PWD/BUGS.json"` when in doubt, then `bugs check`.
+     gate then refuses. Pass `--file "$PWD/BUGS.json"` when in doubt, then
+     `bugs check`.
   4. **Commit and push `registers`.**
   5. **It lands by itself.** `registers.yml` runs `.github/registers-guard.sh` and
      fast-forwards `master` (section 3). A landing that fails says so in that

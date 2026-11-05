@@ -1,0 +1,1 @@
+ai-text-editor: disk-change detection, a revision guard, undo/redo with journaled history, six search modes, and span-addressed edits by byte range.

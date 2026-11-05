@@ -1,0 +1,1 @@
+ai-text-editor offers disk-change detection, a revision guard, undo/redo history, and span-addressed edits that need no re-quoting -- Edit/Write have none of these.

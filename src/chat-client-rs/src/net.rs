@@ -8,7 +8,7 @@ use std::fs;
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 pub type Client = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 
@@ -87,15 +87,20 @@ pub fn connect(
     Ok((tls, fp, message_tags))
 }
 
-/// Read CAP replies until message-tags is ACK'd, NAK'd, or a 2s deadline
-/// passes with no CAP reply at all -- the "does not speak CAP" case is a
-/// timeout, not a single read, because it is indistinguishable on the wire
-/// from "slow".
+/// Read CAP replies until message-tags is ACK'd, NAK'd, or two consecutive
+/// read timeouts pass with no CAP reply at all -- the "does not speak CAP"
+/// case is a timeout, not a single read, because it is indistinguishable on
+/// the wire from "slow". Bounded by consecutive timeouts rather than a wall-
+/// clock deadline for the same reason `wait_for_welcome` above is: a deadline
+/// computed before a CI-runner freeze can already be in the past the instant
+/// this process resumes, discarding an ACK/NAK that was already sitting in
+/// the socket's buffer unread (github-ci-runners.md "SIGSTOP, not CPU load").
 fn negotiate_message_tags(tls: &mut Client) -> bool {
-    let deadline = SystemTime::now() + Duration::from_secs(2);
-    while SystemTime::now() < deadline {
+    let mut consecutive_timeouts = 0u32;
+    while consecutive_timeouts < 2 {
         match read_line(tls) {
             Ok(l) => {
+                consecutive_timeouts = 0;
                 if l.contains("CAP") && l.contains("ACK") && l.contains("message-tags") {
                     return true;
                 }
@@ -107,6 +112,7 @@ fn negotiate_message_tags(tls: &mut Client) -> bool {
                 if !is_timeout(&e) {
                     return false;
                 }
+                consecutive_timeouts += 1;
             }
         }
     }
@@ -253,10 +259,23 @@ pub fn wait_for_welcome(
 ) -> Result<(), String> {
     let mut seen_001 = false;
     let mut attempt = 2u32;
-    let deadline = SystemTime::now() + Duration::from_secs(4);
-    while SystemTime::now() < deadline {
+    // B384's mechanism (github-ci-runners.md "Simulating... SIGSTOP, not CPU
+    // load"): a single wall-clock deadline computed before a hypervisor-level
+    // CI freeze can already be in the past the instant this process resumes,
+    // so the read that would have returned the already-buffered welcome line
+    // is never attempted -- the socket genuinely has it, nothing is lost on
+    // the wire, but the deadline check throws it away unread. Bounded by
+    // CONSECUTIVE timeouts instead of elapsed wall time: a frozen-then-resumed
+    // process just resumes counting from where it left off, so the next read
+    // is always tried rather than skipped by a stale check. Resetting the
+    // counter on every line also means a chatty MOTD of any length is never
+    // cut short -- the old deadline bounded total elapsed time, not line
+    // count, so this preserves that behavior for the healthy case.
+    let mut consecutive_timeouts = 0u32;
+    while consecutive_timeouts < 4 {
         match read_line(tls) {
             Ok(l) => {
+                consecutive_timeouts = 0;
                 if l.contains(" 001 ") || l.starts_with(":") && l.contains(" 001 ") {
                     seen_001 = true;
                 }
@@ -275,11 +294,12 @@ pub fn wait_for_welcome(
             }
             Err(e) => {
                 // EAGAIN/EWOULDBLOCK: the welcome hasn't arrived within this
-                // read's timeout but the connection is alive; keep waiting for
-                // the deadline rather than failing a noisy localhost exchange.
+                // read's timeout but the connection is alive; keep waiting
+                // rather than failing a noisy localhost exchange.
                 if !is_timeout(&e) {
                     return Err(e.to_string());
                 }
+                consecutive_timeouts += 1;
             }
         }
     }

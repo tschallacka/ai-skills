@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S09-rjq",
+  "title": "rjq",
+  "category": "cli-only",
+  "target_skills": ["rjq"],
+  "modes": ["skill"],
+  "forbidden_vocabulary": ["rjq", "jq-compatible"],
+  "adoption_signals": {
+    "skill": ["\\brjq\\b"]
+  },
+  "prompt": "Pull every id where status == \"failed\" out of results.json and list them.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "A hand-rolled Python/awk parse -- legitimate, since this measures a fallback choice (rjq's own trigger is explicitly 'when jq is not installed'), not a primary one. A run where `jq` is still reachable some other way is not a valid rep; verify.sh's setup step itself asserts `command -v jq` fails before the subject is ever launched, and refuses (exit 70) rather than silently running an invalid rep.",
+  "requires_path_without": ["jq"],
+  "notes": "setup writes results.json (12 records, 4 with status=failed) and must run in a shell/PATH environment where jq genuinely is not reachable -- make-experimenter-brief.py strips any PATH directory resolving requires_path_without's names before building the subject's launch command, so the setup step's own command -v jq check runs against the SAME effective PATH the subject gets, not the orchestrator's ambient one."
+}

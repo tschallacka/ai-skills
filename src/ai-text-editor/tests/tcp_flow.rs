@@ -442,3 +442,223 @@ fn an_explicit_endpoint_with_no_file_ignores_a_different_servers_cached_session(
         "server B answered for its own file, not server A's: {payload_b}"
     );
 }
+
+// ---- ai-text-editor-automatic-revision-guard (W11) -------------------------
+//
+// The initiative owner's explicit subagent concern: a genuinely separate
+// process identity -- its own session directory, its own in-process
+// Resolved, sharing no in-process state or cache file with another
+// connection -- addresses an already-open tab purely by tab_id and still
+// gets the correct revision auto-filled, because the fetch reads the
+// server's own live state fresh on every call rather than any per-identity
+// cache.
+
+#[test]
+fn a_separate_identity_with_its_own_empty_session_dir_auto_fills_the_revision_by_tab_id() {
+    let mut harness = TcpHarness::new("subagent");
+    let file = harness.path("shared.txt");
+    std::fs::write(&file, "alpha\nbeta\n").unwrap();
+    let auth = harness.auth_file("auth", "subagent-secret");
+    let endpoint = harness.start_tcp_server(&file, &auth);
+
+    // Connection A: the "parent" -- the harness's own identity and session
+    // directory, opening the tab and giving it one real edit so there is
+    // genuine history (its own explicit revision, decoupled from the
+    // mechanism under test).
+    let session_a = harness.path("session-a.json");
+    let opened = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "subagent-secret",
+        "--save-session-token",
+        session_a.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]);
+    assert!(opened.status.success(), "{}", stderr_text(&opened));
+    let payload = first_payload(&opened);
+    let tab_id = payload["tab_id"].as_str().expect("tab_id").to_owned();
+    let revision = payload["revision"].as_u64().expect("revision").to_string();
+
+    let edited_by_a = harness.client(&[
+        "replace",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "subagent-secret",
+        "--session-token",
+        session_a.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "5",
+        "-t",
+        "ALPHA",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        edited_by_a.status.success(),
+        "{}",
+        stderr_text(&edited_by_a)
+    );
+
+    // Connection B: a SEPARATE process identity, with its own fresh, empty
+    // session directory -- never written to by A, and proven empty before
+    // use so a reviewer can see the scenario below is not accidentally
+    // satisfied by shared state. It addresses the tab purely by --tab-id
+    // (no --endpoint, no --session-token, no --save-session-token of A's),
+    // with NO explicit revision, and must still succeed.
+    let session_dir_b = harness.path("session-dir-b");
+    std::fs::create_dir_all(&session_dir_b).unwrap();
+    assert_eq!(
+        std::fs::read_dir(&session_dir_b).unwrap().count(),
+        0,
+        "connection B's session dir must start out empty -- proof it holds nothing of A's"
+    );
+    let mut command_b = Command::new(env!("CARGO_BIN_EXE_ai-text-editor"));
+    command_b
+        .env("HOME", &harness.scratch)
+        .env("XDG_RUNTIME_DIR", harness.scratch.join("runtime"))
+        .env("TSCH_AI_EDITOR_METADATA_DIR", harness.scratch.join("meta"))
+        .env("TSCH_AI_EDITOR_SESSION_DIR", &session_dir_b)
+        .env("TSCH_AI_EDITOR_AGENT", "tcp-test-subagent-B")
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("CODEX_SESSION_ID")
+        .env_remove("OPENCODE_PID")
+        .args([
+            "replace",
+            "--tab-id",
+            &tab_id,
+            "--range-start-line",
+            "2",
+            "--range-end-line",
+            "2",
+            "-t",
+            "BETA\n",
+            "-p",
+            "structured",
+        ]);
+    let replaced_by_b = command_b.output().expect("client binary must run");
+    assert!(
+        replaced_by_b.status.success(),
+        "connection B -- a separate identity with its own empty session dir \
+         -- must auto-fill the current revision by tab_id alone and succeed: {}",
+        stderr_text(&replaced_by_b)
+    );
+    // B's session dir was proven EMPTY, above, before this call ran -- the
+    // auto-fill could not have read any cache of A's or any prior cache of
+    // its own. What the call itself then does with its own session dir
+    // afterward (e.g. persisting its own fresh focus/cache entry) is
+    // ordinary post-success bookkeeping, not evidence either way about
+    // where the revision it used came from.
+}
+
+/// W03/W16: before W16, `serve_tcp`'s `bulk_edit` arm never injected the
+/// connection's verified secret into the envelope it built, so every batch
+/// item's auth_token check (W01) saw the hardcoded `None` the spike gave it
+/// and failed closed regardless of whether the connection's own challenge
+/// secret was right. Case A proves the fix: a legitimate caller can now
+/// actually use `bulk_edit` over TCP at all, the secret threading all the
+/// way from the connection's challenge into each item's own check.
+///
+/// AR-05's own finding (confirmed again while writing this test) rules out
+/// a true "Case B" here: this protocol has one `auth_token` secret per
+/// SERVER instance, shared by every tab it opens, and TCP never lets that
+/// secret cross the wire in a request -- it is bound to the connection by
+/// the HMAC challenge instead. A connection that completes the challenge
+/// with the WRONG secret is refused before `bulk_edit` is ever parsed (the
+/// same connection-level refusal `a_wrong_token_on_the_port_is_refused_by_
+/// name_not_silently` already covers for every other verb); one that
+/// completes it with the RIGHT secret has that same secret injected into
+/// every item, which then always matches `tab.auth_token` -- there is no
+/// value a connection can authenticate with that disagrees with the one
+/// secret this server has. A per-item auth_token MISMATCH is only
+/// reachable on the one transport where the field is client-controlled
+/// end to end: the Unix socket, covered by
+/// `bulk_edit_refuses_every_item_when_the_envelopes_auth_token_is_wrong` in
+/// `cli_flow.rs` (W17).
+#[test]
+fn bulk_edit_over_tcp_refuses_an_item_without_the_connections_auth_token() {
+    let mut harness = TcpHarness::new("bulk-edit-auth");
+    let a = harness.path("a.txt");
+    std::fs::write(&a, "a one\na two\n").unwrap();
+    let b = harness.path("b.txt");
+    std::fs::write(&b, "b one\nb two\n").unwrap();
+    let auth = harness.auth_file("auth", "port-bulk-secret");
+    let endpoint = harness.start_tcp_server(&a, &auth);
+
+    let opened_a = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "port-bulk-secret",
+        "-f",
+        a.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]);
+    assert!(opened_a.status.success(), "{}", stderr_text(&opened_a));
+    let opened_b = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "port-bulk-secret",
+        "-f",
+        b.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]);
+    assert!(opened_b.status.success(), "{}", stderr_text(&opened_b));
+
+    // Case A: the right secret, threaded through the connection's own
+    // challenge, must reach every item's check and let a legitimate batch
+    // apply -- the regression W16 fixes.
+    let edits = serde_json::json!([
+        {"op": "replace", "file": a.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "A ONE\n"},
+        {"op": "replace", "file": b.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "B ONE\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&[
+        "bulk-edit",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "port-bulk-secret",
+        "--edits-json",
+        &edits,
+        "-p",
+        "structured",
+    ]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let payload = first_payload(&batch);
+    assert_eq!(payload["applied_count"], Value::from(2), "{payload:?}");
+    assert_eq!(payload["failed_count"], Value::from(0), "{payload:?}");
+
+    // The connection-level refusal every other verb already gets for a
+    // wrong challenge secret: `bulk_edit` must fail the same way, not
+    // silently.
+    let wrong = harness.client(&[
+        "bulk-edit",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "wrong-secret",
+        "--edits-json",
+        &edits,
+        "-p",
+        "text",
+    ]);
+    assert!(!wrong.status.success());
+    assert!(
+        stderr_text(&wrong).contains("authentication_failed"),
+        "the refusal must be named on stderr: {}",
+        stderr_text(&wrong)
+    );
+}

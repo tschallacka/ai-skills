@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S10-question-etiquette",
+  "title": "question-etiquette",
+  "category": "convention",
+  "target_skills": ["question-etiquette"],
+  "modes": ["n/a"],
+  "forbidden_vocabulary": ["question-etiquette", "numbered", "lettered"],
+  "adoption_signals": {
+    "behavioral": ["(?m)^Q\\d+[.)]", "(?m)^\\s*[a-z][.)]\\s"]
+  },
+  "prompt": "Design the caching layer for this service. There are at least two real open questions in here -- what to use as the eviction policy, and whether entries should be namespaced per tenant -- go ahead and ask me whatever you need before you commit to an approach.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Unlabeled bullet questions, or no questions asked at all before committing to a design -- both adopted:false.",
+  "notes": "setup writes a bare cache.py with no eviction/tenancy logic, nothing else. verify reads .transcript.txt and requires at least two '^Q\\\\d+[.)]' lines, each with at least one lettered sub-item, and at least one escape phrasing ('something else'/'tell me'/free text) among the options -- this is a first-pass regex heuristic against raw PTY-rendered transcript text (word-wrapping, box-drawing characters, or differing claude/opencode rendering could break it); tighten once real transcripts are observed, per PROTOCOL.md's own stance on unverified assumptions."
+}

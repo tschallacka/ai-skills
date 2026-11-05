@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tsch-ai-skills.local/benchmark/skill-adoption/scenario.schema.json",
+  "title": "skill-adoption scenario manifest",
+  "description": "Machine-readable form of one entry in SCENARIOS.md. The prose file is the rationale; this is what run-cell.sh and make-experimenter-brief.py actually consume. One scenario.json per directory under scenarios/<id>/.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "id", "title", "category", "target_skills", "modes",
+    "forbidden_vocabulary", "adoption_signals", "prompt", "verification",
+    "non_adoption_baseline"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "id": {
+      "type": "string",
+      "pattern": "^S[0-9]{2}-[a-z0-9-]+$",
+      "description": "Stable id, e.g. S04-decisions. Never renumber or reuse once a run has referenced it -- see DATA-SPEC.md Versioning."
+    },
+    "title": { "type": "string" },
+    "category": {
+      "enum": ["dual-surface", "cli-only", "convention"],
+      "description": "dual-surface: has both a CLI and an MCP tool, run under both modes. cli-only: a binary with no MCP adapter, skill mode only. convention: no binary at all, adoption is a behavioral marker in the transcript."
+    },
+    "target_skills": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Skill name(s) under test, as named in installer/src/05-config.sh's SKILL_NAMES. Used to build the --integration flags for the cell's mode and to label results; never sent to the subject."
+    },
+    "modes": {
+      "type": "array",
+      "items": { "enum": ["skill", "mcp", "n/a"] },
+      "minItems": 1,
+      "description": "n/a for convention scenarios with no binary at all -- run once, mode recorded as n/a rather than omitted, so every run record has the field."
+    },
+    "forbidden_vocabulary": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Case-insensitive substrings the experimenter must never introduce into the prompt or any of its own follow-up replies, per PROTOCOL.md rule 1."
+    },
+    "adoption_signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skill": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Regexes (Python re, case-sensitive unless (?i)) matched against the raw transcript when mode=skill -- a literal CLI invocation."
+        },
+        "mcp": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Regexes matched when mode=mcp -- an MCP tool call as either CLI renders it. Check both claude's mcp__<server>__<tool> form and opencode's own rendering; list both shapes."
+        },
+        "behavioral": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "For category=convention: regexes matched against the transcript regardless of mode (no binary to invoke)."
+        }
+      }
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Verbatim text pasted to the subject. Must not contain any forbidden_vocabulary entry -- make-experimenter-brief.py refuses to build a brief where it does. EXCEPTION: a value starting with the literal 'See ' is a delegation pointer (S01 only, for now), not the real prompt -- make-experimenter-brief.py resolves the referenced file's own content as the actual prompt and checks THAT against forbidden_vocabulary instead; the pointer string itself is exempt from the check since it is documentation, never pasted to a subject."
+    },
+    "setup": {
+      "type": "string",
+      "description": "Relative path (from this scenario's own directory) to an executable invoked as '<setup> setup WORKSPACE_DIR' before the subject is launched. Omitted when the scenario needs no fixture beyond a bare git init. In every scenario shipped so far this is the same script path as 'verification' (one scenario.sh, dispatching on its first argument) but the field is independent so a scenario is free to split them."
+    },
+    "verification": {
+      "type": "string",
+      "description": "Relative path to an executable invoked as '<verification> verify WORKSPACE_DIR' after the subject goes idle. Must print exactly one JSON object to stdout: {\"task_correct\": bool, \"notes\": string}. Its own exit code is informational only -- task_correct is the authoritative field."
+    },
+    "non_adoption_baseline": {
+      "type": "string",
+      "description": "What a reasonable non-adopting run looks like, so the experimenter can tell 'chose not to' from 'got stuck' -- the former is adopted:false, the latter is still adopted:false but worth an observer_note."
+    },
+    "requires_path_without": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Binary names that must be unreachable on the subject's PATH for this scenario's premise to hold (e.g. S09-rjq needs jq genuinely absent, since rjq's own trigger is 'when jq is not installed'). HOME swapping alone does not touch PATH, so make-experimenter-brief.py strips any PATH directory that resolves one of these names before building the subject's launch command. Omit when the scenario has no such precondition."
+    },
+    "notes": { "type": "string" }
+  }
+}

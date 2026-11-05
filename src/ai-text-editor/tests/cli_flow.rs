@@ -449,41 +449,24 @@ fn external_change_blocks_writes_loudly_without_blinding_reads() {
     );
 }
 
+/// bug-report register, "intuitive edit tool misinterpretations": a request
+/// naming a file with no tab anywhere on this server used to be refused as
+/// `file_mismatch`, worded as a dispute with whatever tab the session token
+/// or default fallback would otherwise have routed to -- confusing when the
+/// true state is simpler, there is no dispute, the file was just never
+/// opened. There is nothing to refuse in that case: the server now opens it
+/// instead, exactly as a standalone `open` would, and routes the request to
+/// the tab it just created.
 #[test]
-fn a_request_naming_another_file_cannot_edit_the_routed_tab() {
-    let harness = Harness::new("mismatch");
+fn a_request_naming_a_never_opened_file_opens_it_instead_of_refusing() {
+    let harness = Harness::new("autoopen");
     let first = harness.write("first.txt", "one\n");
     let second = harness.write("second.txt", "two\n");
-    harness.open(&first);
+    let first_id = tab_id_of(&harness.open(&first));
     // No tab exists for `second` under this identity; the registry's newest
-    // tab belongs to `first` and answered earlier calls, so its token would
-    // route here. It must be refused, not applied to the wrong buffer.
-    let refused = harness.client(&[
-        "replace",
-        "-f",
-        second.to_str().unwrap(),
-        "-o",
-        "0",
-        "-d",
-        "3",
-        "-t",
-        "X",
-        "-r",
-        "1",
-        "-p",
-        "text",
-    ]);
-    assert!(!refused.status.success());
-    let error = stderr_text(&refused);
-    assert!(
-        error.contains("file_mismatch") || error.contains("no server discovered"),
-        "refusal must name the mismatch or point at open: {error}"
-    );
-    assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
-    assert_eq!(std::fs::read_to_string(&second).unwrap(), "two\n");
-    // Opening the named file routes correctly and the same edit then lands.
-    let opened = harness.open(&second);
-    let revision = revision_of(&opened).to_string();
+    // tab belongs to `first` and answered earlier calls, so its session
+    // token would otherwise route here. `second` has never been opened, so
+    // this must open it rather than apply the edit to the wrong buffer.
     let applied = harness.client(&[
         "replace",
         "-f",
@@ -495,13 +478,94 @@ fn a_request_naming_another_file_cannot_edit_the_routed_tab() {
         "-t",
         "X",
         "-r",
-        &revision,
+        "0",
         "-p",
         "structured",
     ]);
     assert!(applied.status.success(), "{}", stderr_text(&applied));
+    let payload = first_payload(&applied);
+    assert_ne!(
+        payload["tab_id"], first_id,
+        "the edit must land in second.txt's own, newly opened tab, not first.txt's: {payload:?}"
+    );
+    assert_eq!(payload["dirty"], json!(true));
+    // Journaled, not yet saved.
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "two\n");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
     harness.client(&["save", "-f", second.to_str().unwrap(), "-r", "1"]);
     assert_eq!(std::fs::read_to_string(&second).unwrap(), "X\n");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
+}
+
+/// The other half of the same fix: when the named file DOES already have its
+/// own tab, routing to a different, explicitly addressed tab is a genuine
+/// dispute, not a never-opened file -- and must still be refused rather than
+/// silently reopening or editing the wrong buffer.
+#[test]
+fn a_request_naming_a_file_open_elsewhere_still_refuses_the_mismatched_tab() {
+    let harness = Harness::new("mismatch-dispute");
+    let first = harness.write("first.txt", "one\n");
+    let second = harness.write("second.txt", "two\n");
+    let first_id = tab_id_of(&harness.open(&first));
+    harness.open(&second);
+    let refused = harness.client(&[
+        "replace",
+        "--tab-id",
+        &first_id,
+        "-f",
+        second.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "3",
+        "-t",
+        "X",
+        "-r",
+        "0",
+        "-p",
+        "text",
+    ]);
+    assert!(!refused.status.success());
+    let error = stderr_text(&refused);
+    assert!(error.contains("file_mismatch"), "stderr named: {error}");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "two\n");
+}
+
+/// An explicit tab_id makes any `file` disagreement a genuine dispute, even
+/// when the named file has never been opened anywhere on this server -- the
+/// never-opened-file relaxation `should_autoopen_requested_file` exists for
+/// is for callers that named no tab at all, not for one that named this
+/// exact tab and a different file. Matches `handle_bulk_edit`'s identical
+/// treatment of an explicit tab_id.
+#[test]
+fn an_explicit_tab_id_with_a_never_opened_file_still_refuses_rather_than_autoopening() {
+    let harness = Harness::new("tab-id-never-opened");
+    let first = harness.write("first.txt", "one\n");
+    let typo = harness.write("typo.txt", "two\n");
+    let first_id = tab_id_of(&harness.open(&first));
+    let refused = harness.client(&[
+        "replace",
+        "--tab-id",
+        &first_id,
+        "-f",
+        typo.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "0",
+        "-t",
+        "X",
+        "-r",
+        "0",
+        "-p",
+        "text",
+    ]);
+    assert!(!refused.status.success());
+    let error = stderr_text(&refused);
+    assert!(error.contains("file_mismatch"), "stderr named: {error}");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
+    assert_eq!(std::fs::read_to_string(&typo).unwrap(), "two\n");
 }
 
 #[test]
@@ -640,6 +704,18 @@ fn bounded_text_reads_honour_their_line_range_and_refuse_the_impossible() {
     assert_eq!(payload["start_line"], json!(2));
     assert_eq!(payload["end_line"], json!(4));
     assert_eq!(payload["complete"], json!(false));
+    // bug-report register, "intuitive edit tool misinterpretations": a line
+    // range read back as one concatenated blob forced hand-counted newlines
+    // to address a later replace, and an off-by-one there silently deleted
+    // the wrong line. `lines` numbers the same bytes `text` already carries.
+    assert_eq!(
+        payload["lines"],
+        json!([
+            {"line": 2, "text": "two\n"},
+            {"line": 3, "text": "three\n"},
+            {"line": 4, "text": "four\n"},
+        ])
+    );
     // A range without its end is refused, never silently widened to the
     // whole document.
     let read = harness.client(&["read", "-f", path, "--range-start-line", "2"]);
@@ -1219,6 +1295,70 @@ fn expected_text_refuses_the_double_replace_that_corrupted_a_file() {
 }
 
 #[test]
+fn a_replace_that_unbalances_braces_carries_an_advisory_note() {
+    // bug-report register, "intuitive edit tool misinterpretations": a
+    // hand-counted line range swallowed a function's closing brace along with
+    // the line meant to be replaced, and nothing in the response said so
+    // until the file failed to parse. `note` is advisory, not a refusal --
+    // the edit still applies -- but it names what differed so a caller can
+    // catch the mistake before relying on the result.
+    let harness = Harness::new("bracketbalance");
+    let file = harness.write("wrap.js", "function wrap() {\n    doThing();\n}\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "3",
+        "-t",
+        "    doOtherThing();\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", refusal_text(&replaced));
+    let payload = first_payload(&replaced);
+    let note = payload["note"]
+        .as_str()
+        .unwrap_or_else(|| panic!("expected a bracket-balance note: {payload}"));
+    assert!(
+        note.contains("{}"),
+        "note should name the brace mismatch: {note}"
+    );
+
+    // A like-for-like edit whose deleted span and replacement are both
+    // internally balanced carries no note at all.
+    let revision = payload["revision"].as_u64().unwrap();
+    let balanced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "    doOtherThing();\n",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(balanced.status.success(), "{}", refusal_text(&balanced));
+    let balanced_payload = first_payload(&balanced);
+    assert!(
+        balanced_payload.get("note").is_none(),
+        "a balanced like-for-like edit should carry no bracket-balance note: {balanced_payload}"
+    );
+}
+
+#[test]
 fn a_replace_takes_a_pair_of_search_hit_bounds() {
     // The other half of B226: a span across two hits is the two numbers a
     // search already reports (B214 gave text hits absolute byte_start and
@@ -1337,10 +1477,16 @@ fn a_replace_addresses_a_match_id_from_a_prior_search() {
 
 #[test]
 fn a_match_id_is_refused_once_the_edit_it_addresses_has_moved() {
-    // Every successful edit clears tab.results (the same line emit_results
-    // populated it from), so a match_id from before an unrelated edit names a
-    // result set that no longer exists — refused, not silently misapplied to
-    // whatever now sits at that offset.
+    // A match_id's span is re-addressed, not blanket-discarded, across an
+    // edit that does not touch it: an edit entirely before or after a stored
+    // match shifts that match's byte_start/byte_end by the edit's own size
+    // change (shift_or_invalidate_results), so a sibling hit from the same
+    // search survives an edit to an unrelated one instead of forcing a fresh
+    // search for every remaining hit (bug-report register, "intuitive edit
+    // tool misinterpretations" -- a 10-hit search pushed an agent toward a
+    // risky hand-counted block replace once the first hit's edit staled
+    // every other one). An edit that OVERLAPS a stored match's span is a
+    // different case and still refuses it as `match_id_stale`.
     let harness = Harness::new("matchidstale");
     let file = harness.write("doc.txt", "alpha BEGIN middle END omega\n");
     let opened = harness.open(&file);
@@ -1362,7 +1508,7 @@ fn a_match_id_is_refused_once_the_edit_it_addresses_has_moved() {
         .unwrap()
         .to_string();
 
-    // An unrelated edit elsewhere in the file still clears every result set.
+    // An edit entirely before "middle" shifts it rather than discarding it.
     let unrelated = harness.client(&[
         "insert",
         "-f",
@@ -1379,7 +1525,7 @@ fn a_match_id_is_refused_once_the_edit_it_addresses_has_moved() {
     assert!(unrelated.status.success(), "{}", refusal_text(&unrelated));
     let revision = first_payload(&unrelated)["revision"].as_u64().unwrap();
 
-    let stale = harness.client(&[
+    let survived = harness.client(&[
         "replace",
         "-f",
         file.to_str().unwrap(),
@@ -1393,8 +1539,76 @@ fn a_match_id_is_refused_once_the_edit_it_addresses_has_moved() {
         "structured",
     ]);
     assert!(
+        survived.status.success(),
+        "a match_id whose span never overlapped the intervening edit must still resolve: {}",
+        refusal_text(&survived)
+    );
+    let revision = first_payload(&survived)["revision"].as_u64().unwrap();
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "Xalpha BEGIN CENTER END omega\n",
+        "the shifted span, not whatever now sits at the original offset, must have been replaced"
+    );
+
+    // A fresh match whose span an edit genuinely OVERLAPS is still refused.
+    let found_center = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "CENTER",
+        "-p",
+        "structured",
+    ]);
+    let center_match_id = first_payload(&found_center)["matches"][0]["match_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let center_start = first_payload(&found_center)["matches"][0]["byte_start"]
+        .as_u64()
+        .unwrap();
+
+    let overlapping = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-byte",
+        &(center_start + 2).to_string(),
+        "--range-end-byte",
+        &(center_start + 6).to_string(),
+        "-t",
+        "YY",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        overlapping.status.success(),
+        "{}",
+        refusal_text(&overlapping)
+    );
+    let revision = first_payload(&overlapping)["revision"].as_u64().unwrap();
+
+    let stale = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--match-id",
+        &center_match_id,
+        "-t",
+        "CENTER",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(
         !stale.status.success(),
-        "a match_id past its search must be refused, not silently applied"
+        "a match_id whose span an intervening edit overlapped must be refused, not silently applied"
     );
     assert!(
         refusal_text(&stale).contains("match_id_stale"),
@@ -1925,6 +2139,26 @@ fn wait_for_death(pid: u32, seconds: u64) -> bool {
     !process_alive(pid)
 }
 
+/// T1: a stand-in `claude` executable, placed first on PATH for a test's
+/// autostarted server, so `owning_session_is_alive`'s `claude agents --json`
+/// call finds this instead of (or absence of) a real `claude` binary.
+/// Always answers the same canned body regardless of its own arguments --
+/// these tests exercise the watchdog's own wiring and json-matching, not
+/// argument plumbing, which `agent_is_listed`'s unit tests already cover.
+#[cfg(unix)]
+fn write_fake_claude_agents(dir: &std::path::Path, json_body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let script = dir.join("claude");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\ncat <<'EOF'\n{json_body}\nEOF\n"),
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+}
+
 #[test]
 fn a_replayed_tab_arms_the_external_change_guard() {
     // B204: the journal buffer was stale against a disk that moved while
@@ -1982,6 +2216,100 @@ fn a_replayed_tab_arms_the_external_change_guard() {
         payload["external_change_pending"],
         json!(false),
         "{payload}"
+    );
+}
+
+/// A saved edit is already-saved: reopening a tab whose only journal history
+/// is `edit` then `save` must replay cleanly against that save point, not
+/// come up `dirty: true` just because disk has since moved on (a merge, an
+/// external tool, anything outside the editor). `saved_digest` used to be
+/// stamped from the pre-replay disk read, so it held the EXTERNAL change's
+/// bytes rather than the journal's own last save point, and every such
+/// reopen reported a real edit as still-unsaved even though the save
+/// response already said `dirty: false` before close. Reported against
+/// ZPlusOutfits/Helper/OutfitHelper.php: 16 pre-merge edits replayed as
+/// dirty on an open right after `git merge`.
+#[test]
+fn a_saved_edit_replays_clean_even_when_disk_has_since_moved_on() {
+    let harness = Harness::new("savedreplay");
+    let file = harness.write("doc.txt", "line one\nline two\nline three\n");
+    let opened = harness.open(&file);
+    assert_eq!(revision_of(&opened), 0);
+    let edited = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "line TWO edited in editor\n",
+        "-p",
+        "structured",
+    ]);
+    assert!(edited.status.success(), "{}", refusal_text(&edited));
+    assert_eq!(revision_of(&edited), 1);
+    assert_eq!(first_payload(&edited)["dirty"], json!(true));
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(first_payload(&saved)["dirty"], json!(false));
+    let closed = harness.client(&[
+        "close",
+        "-f",
+        file.to_str().unwrap(),
+        "--journal-action",
+        "preserve",
+    ]);
+    assert!(closed.status.success(), "{}", refusal_text(&closed));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    // Mirrors the real report: a new file written elsewhere and moved into
+    // place, the way `git merge`/`git checkout` replace a file, rather than
+    // an in-place write.
+    let outside = file.with_extension("outside");
+    std::fs::write(
+        &outside,
+        "line one\nline TWO edited in editor\nline three\nline four added outside the editor\n",
+    )
+    .unwrap();
+    std::fs::rename(&outside, &file).unwrap();
+    let reopened = harness.open(&file);
+    let payload = first_payload(&reopened);
+    assert!(
+        payload["journal_replay"]["edits"].is_number(),
+        "expected a replayed tab: {payload}"
+    );
+    assert_eq!(
+        payload["dirty"],
+        json!(false),
+        "the only journaled edit was already saved before close: {payload}"
+    );
+    assert_eq!(
+        payload["external_change_pending"],
+        json!(true),
+        "disk genuinely moved past the tab's last save: {payload}"
+    );
+    // Closing with `preserve` and reopening again must be stable, not
+    // re-trigger the same false `dirty: true` on every subsequent open.
+    harness
+        .client(&[
+            "close",
+            "-f",
+            file.to_str().unwrap(),
+            "--journal-action",
+            "preserve",
+        ])
+        .status
+        .success()
+        .then_some(())
+        .expect("close");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let reopened_again = harness.open(&file);
+    assert_eq!(
+        first_payload(&reopened_again)["dirty"],
+        json!(false),
+        "{}",
+        first_payload(&reopened_again)
     );
 }
 
@@ -2511,6 +2839,83 @@ fn a_detached_job_pins_the_watchdog_until_its_owner_releases_it() {
     assert!(
         wait_for_death(pid, 30),
         "the server kept living after its last detached job was released"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn t1_the_idle_watchdog_stays_up_while_claude_agents_lists_the_owning_session() {
+    let harness = Harness::new("watchdogalive");
+    let file = harness.write("doc.txt", "a\n");
+    let fake_bin = harness.path("fakebin");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    write_fake_claude_agents(
+        &fake_bin,
+        &format!(
+            r#"[{{"pid":1,"sessionId":"{}","status":"busy"}}]"#,
+            harness.agent
+        ),
+    );
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let opened = harness.client_env(
+        &[
+            "open",
+            "-f",
+            file.to_str().unwrap(),
+            "--idle-timeout-seconds",
+            "2",
+            "--verbosity",
+            "3",
+        ],
+        &[("PATH", path.as_str())],
+    );
+    assert!(opened.status.success(), "{}", refusal_text(&opened));
+    let pid = server_pid(&opened);
+    std::thread::sleep(std::time::Duration::from_secs(6));
+    assert!(
+        process_alive(pid),
+        "the watchdog must not idle-exit while `claude agents --json` still lists this identity"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn t1_the_idle_watchdog_still_exits_when_claude_agents_does_not_list_the_session() {
+    let harness = Harness::new("watchdogdead");
+    let file = harness.write("doc.txt", "a\n");
+    let fake_bin = harness.path("fakebin");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    // Lists a real array, just never this identity -- the "checked and ruled
+    // out" case, distinct from "claude is not on PATH at all" (also covered
+    // by every OTHER idle-timeout test in this file, which set no PATH
+    // override at all).
+    write_fake_claude_agents(&fake_bin, "[]");
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let opened = harness.client_env(
+        &[
+            "open",
+            "-f",
+            file.to_str().unwrap(),
+            "--idle-timeout-seconds",
+            "2",
+            "--verbosity",
+            "3",
+        ],
+        &[("PATH", path.as_str())],
+    );
+    assert!(opened.status.success(), "{}", refusal_text(&opened));
+    let pid = server_pid(&opened);
+    assert!(
+        wait_for_death(pid, 15),
+        "an empty `claude agents --json` listing must not block the idle timeout"
     );
 }
 
@@ -3650,6 +4055,90 @@ fn a_search_naming_a_page_argument_is_refused_and_points_at_page() {
     ]);
     assert!(paged.status.success(), "{}", stderr_text(&paged));
     assert_eq!(first_payload(&paged)["pager_key"], json!(pager_key));
+}
+
+/// `shift_or_invalidate_results` keeps a search hit's entry alive and
+/// re-addressed across an edit that does not touch it, so `resolve_match_id`
+/// can still resolve it for a follow-up edit with no fresh search -- but
+/// `page` must not let that same liveness serve the shifted view as if
+/// nothing had changed: a plain `page` after any edit still refuses by
+/// default, exactly as it did before an edit was possible to survive at all,
+/// and only the explicit `--historical` escape retrieves it (marked
+/// `stale: true`).
+#[test]
+fn a_plain_page_after_an_edit_still_refuses_only_historical_retrieves_it() {
+    let harness = Harness::new("pagestale");
+    let file = harness.write("pagestale.txt", "alpha\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "alpha",
+        "-p",
+        "structured",
+    ]);
+    let pager_key = first_payload(&found)["pager_key"]
+        .as_str()
+        .expect("a pager key")
+        .to_string();
+
+    // An edit entirely before the match: shifted, not discarded, by
+    // shift_or_invalidate_results -- but still a real edit since the search.
+    let inserted = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "Z",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(inserted.status.success(), "{}", stderr_text(&inserted));
+
+    let plain = harness.client(&[
+        "page",
+        "-f",
+        file.to_str().unwrap(),
+        "--pager-key",
+        &pager_key,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        !plain.status.success(),
+        "a post-edit page must still refuse by default: {}",
+        String::from_utf8_lossy(&plain.stdout)
+    );
+    let refusal = stdout_json(&plain)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("stale_result"));
+
+    let escaped = harness.client(&[
+        "page",
+        "-f",
+        file.to_str().unwrap(),
+        "--pager-key",
+        &pager_key,
+        "--historical",
+        "-p",
+        "structured",
+    ]);
+    assert!(escaped.status.success(), "{}", stderr_text(&escaped));
+    let payload = first_payload(&escaped);
+    assert_eq!(payload["stale"], json!(true));
+    assert_eq!(payload["matches"][0]["contents"], json!("alpha"));
 }
 
 /// B252: `index` refuses `action`, which no verb reads at all.
@@ -4921,18 +5410,24 @@ fn range_match_regex_reads_anchors_as_rust_regexes() {
 }
 
 #[test]
-fn an_incomplete_anchor_pair_is_refused_naming_what_is_missing() {
-    let harness = Harness::new("anchor-incomplete");
+fn a_start_anchor_with_no_end_anchor_runs_to_the_end_of_the_file() {
+    // Previously refused as `edit_range_incomplete` -- a caller wanting "from
+    // this anchor to the end of the file" had to name a `range_end_before_match`
+    // pattern that could never match, purely as a sentinel, and got
+    // `range_end_before_match_not_found` for the attempt (bug-report
+    // register, "intuitive edit tool misinterpretations"). Omitting
+    // `range_end_before_match` now means exactly that span.
+    let harness = Harness::new("anchor-to-eof");
     let file = harness.write("doc.txt", "alpha beta gamma\n");
     let opened = harness.open(&file);
     let revision = revision_of(&opened).to_string();
 
-    let only_start = harness.client(&[
+    let to_eof = harness.client(&[
         "replace",
         "-f",
         file.to_str().unwrap(),
         "--range-start-match",
-        "alpha",
+        "beta",
         "-t",
         "X",
         "-r",
@@ -4940,8 +5435,41 @@ fn an_incomplete_anchor_pair_is_refused_naming_what_is_missing() {
         "-p",
         "structured",
     ]);
-    assert!(!only_start.status.success());
-    assert!(refusal_text(&only_start).contains("edit_range_incomplete"));
+    assert!(to_eof.status.success(), "{}", refusal_text(&to_eof));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha X",
+        "everything from the start anchor onward, including the trailing newline, must be gone"
+    );
+}
+
+#[test]
+fn an_end_anchor_with_no_start_anchor_is_still_refused_naming_what_is_missing() {
+    // Unlike the end anchor, the start anchor has no "to the beginning of the
+    // file" shorthand -- an end-only anchor would be ambiguous with
+    // `resolve_span`'s own "no anchor span requested here" case, so it stays
+    // a named refusal rather than a guess.
+    let harness = Harness::new("anchor-no-start");
+    let file = harness.write("doc.txt", "alpha beta gamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let only_end = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-end-before-match",
+        "gamma",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!only_end.status.success());
+    assert!(refusal_text(&only_end).contains("edit_range_incomplete"));
 }
 
 #[test]
@@ -5276,4 +5804,1957 @@ fn copy_addresses_its_source_by_symbol_name() {
         std::fs::read_to_string(&file).unwrap(),
         "fn bar() {\n    other();\n}\nfn foo() {\n    body();\n}\n\nfn bar() {\n    other();\n}\n"
     );
+}
+
+// ---- ai-text-editor-automatic-revision-guard (W08-W10, W18) ---------------
+//
+// The client (not the caller) now sources the revision for a guarded verb
+// that did not supply one, fetched fresh immediately before each such
+// request. These tests prove: every guarded verb still succeeds with no
+// -r/--expected-revision anywhere on the command line (W08 the three
+// "simple" verbs, W09 the six "structural" ones); an EXPLICITLY supplied
+// stale revision is still refused exactly as before, proving the server's
+// own enforcement is untouched (W10); and the auto-filled revision survives
+// the existing session_unauthorized refresh-and-retry path (W18).
+
+#[test]
+fn insert_replace_and_save_succeed_with_no_explicit_revision_anywhere() {
+    let harness = Harness::new("autofill-simple");
+    let file = harness.write("autofill.txt", "one\ntwo\n");
+    harness.open(&file);
+
+    let inserted = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "zero\n",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        inserted.status.success(),
+        "insert with no -r must succeed via client auto-fill: {}",
+        stderr_text(&inserted)
+    );
+
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "ONE\n",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        replaced.status.success(),
+        "replace with no -r must succeed via client auto-fill: {}",
+        stderr_text(&replaced)
+    );
+
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(
+        saved.status.success(),
+        "save with no -r must succeed via client auto-fill: {}",
+        stderr_text(&saved)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "zero\nONE\ntwo\n",
+        "every edit above must actually have applied"
+    );
+}
+
+#[test]
+fn move_copy_undo_and_redo_succeed_with_no_explicit_revision() {
+    let harness = Harness::new("autofill-structural");
+    let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
+    harness.open(&file);
+
+    // move: no -r.
+    let moved = harness.client(&[
+        "move",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "3",
+        "--range-end-line",
+        "3",
+        "--dest-line",
+        "1",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        moved.status.success(),
+        "move with no -r must succeed via client auto-fill: {}",
+        stderr_text(&moved)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap_or_default(),
+        "alpha\nbeta\ngamma\n",
+        "move alone does not touch disk until save"
+    );
+
+    // copy: no -r.
+    let copied = harness.client(&[
+        "copy",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "--dest-line",
+        "4",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        copied.status.success(),
+        "copy with no -r must succeed via client auto-fill: {}",
+        stderr_text(&copied)
+    );
+
+    // undo: no -r.
+    let undone = harness.client(&["undo", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(
+        undone.status.success(),
+        "undo with no -r must succeed via client auto-fill: {}",
+        stderr_text(&undone)
+    );
+
+    // redo: no -r.
+    let redone = harness.client(&["redo", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(
+        redone.status.success(),
+        "redo with no -r must succeed via client auto-fill: {}",
+        stderr_text(&redone)
+    );
+
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "gamma\nalpha\nbeta\ngamma\n",
+        "the move (alpha..gamma -> gamma,alpha,beta) and the copy \
+         (undone then redone, duplicating the now-first \"gamma\" line \
+         at the end) applied together"
+    );
+}
+
+#[test]
+fn restore_succeeds_with_no_explicit_revision() {
+    // normalize_nfc is a server-startup-wide setting (state_guard.normalize_nfc
+    // in ai-text-editor-server.rs), applied to every tab THAT server opens --
+    // not a per-open-request flag like document_mode. So this needs its own
+    // fresh workspace whose FIRST open carries --normalize-nfc, rather than
+    // reusing a harness/server that already started without it.
+    let harness = Harness::new("autofill-restore");
+    let file = harness.write("normalized.txt", "hello\n");
+    let opened = harness.client(&[
+        "open",
+        "-f",
+        file.to_str().unwrap(),
+        "--normalize-nfc",
+        "-p",
+        "structured",
+    ]);
+    assert!(opened.status.success(), "{}", stderr_text(&opened));
+
+    // Plain ASCII normalizes trivially, so restore_original succeeds with
+    // nothing lossy to refuse -- and no -r anywhere on this call.
+    let restored = harness.client(&["restore", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(
+        restored.status.success(),
+        "restore with no -r must succeed via client auto-fill: {}",
+        refusal_text(&restored)
+    );
+}
+
+#[test]
+fn large_edit_with_no_explicit_revision_succeeds_via_client_auto_fill() {
+    let harness = Harness::new("autofill-large-edit");
+    let file = harness.write("large.txt", "alpha\nbeta\ngamma\n");
+
+    // large_edit only reaches a bounded large-file tab; force this small
+    // file to count as one by starting the server directly with a
+    // near-zero --large-threshold-bytes, since the per-file autostart the
+    // other tests in this file use has no flag to lower the threshold.
+    let mut server_command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor-server"));
+    server_command
+        .env("HOME", &harness.scratch)
+        .env("XDG_RUNTIME_DIR", harness.scratch.join("runtime"))
+        .env("TSCH_AI_EDITOR_METADATA_DIR", harness.scratch.join("meta"))
+        .env(
+            "TSCH_AI_EDITOR_SESSION_DIR",
+            harness.scratch.join("sessions"),
+        )
+        .env("TSCH_AI_EDITOR_AGENT", &harness.agent)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("CODEX_SESSION_ID")
+        .env_remove("OPENCODE_PID")
+        .arg("start")
+        .arg("--file")
+        .arg(&file)
+        .arg("--large-threshold-bytes")
+        .arg("1")
+        .stdout(std::process::Stdio::piped());
+    let mut server = server_command.spawn().expect("server binary must start");
+    let stdout = server.stdout.take().expect("piped stdout");
+    let endpoint = std::io::BufRead::lines(std::io::BufReader::new(stdout))
+        .map_while(Result::ok)
+        .find_map(|line| {
+            serde_json::from_str::<Value>(&line)
+                .ok()
+                .and_then(|value| value.get("endpoint")?.as_str().map(str::to_owned))
+        })
+        .expect("the server announces its endpoint on stdout");
+    assert!(endpoint.starts_with("unix:"), "endpoint: {endpoint}");
+
+    let session = harness.path("large-edit-session.json");
+    let opened = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint,
+        "--save-session-token",
+        session.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]);
+    assert!(opened.status.success(), "{}", stderr_text(&opened));
+    assert_eq!(
+        first_payload(&opened)["large_file"],
+        json!(true),
+        "the lowered threshold must make this tab a large-file tab"
+    );
+
+    let started = harness.client(&[
+        "job-start",
+        "--endpoint",
+        &endpoint,
+        "--session-token",
+        session.to_str().unwrap(),
+        "--owner",
+        "w09-large-edit",
+    ]);
+    assert!(started.status.success(), "{}", stderr_text(&started));
+    let job = &first_payload(&started)["job"];
+    let job_id = job["id"].to_string();
+    let resume_token = job["resume_token"].as_str().unwrap().to_owned();
+
+    // No -r/--expected-revision anywhere on this large-edit call.
+    let edited = harness.client(&[
+        "large-edit",
+        "--endpoint",
+        &endpoint,
+        "--session-token",
+        session.to_str().unwrap(),
+        "-j",
+        &job_id,
+        "--resume-token",
+        &resume_token,
+        "--acknowledge-large-edit",
+        "-o",
+        "0",
+        "-d",
+        "5",
+        "-t",
+        "ALPHA",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        edited.status.success(),
+        "large-edit with no -r must succeed via client auto-fill: {}",
+        stderr_text(&edited)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "ALPHA\nbeta\ngamma\n",
+        "large_edit rewrites the file directly, not just the in-memory buffer"
+    );
+
+    let _ = server.kill();
+    let _ = server.wait();
+}
+
+#[test]
+fn an_explicitly_supplied_stale_revision_is_still_refused() {
+    // The server's own enforcement must be completely untouched: an
+    // EXPLICIT, stale -r is refused exactly as before this initiative,
+    // regardless of the client's new ability to auto-fill an OMITTED one.
+    let harness = Harness::new("explicit-stale-regression");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let stale_revision = revision_of(&opened).to_string();
+
+    // Advance the real revision with an auto-filled (omitted) edit, so the
+    // captured revision above is now genuinely stale.
+    let advanced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "ALPHA\n",
+        "-p",
+        "structured",
+    ]);
+    assert!(advanced.status.success(), "{}", stderr_text(&advanced));
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "ALPHA\nbeta\n");
+
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "BETA\n",
+        "-r",
+        &stale_revision,
+        "-p",
+        "text",
+    ]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(
+        refused.stdout.is_empty(),
+        "a refused edit must not print a payload"
+    );
+    let error = stderr_text(&refused);
+    assert!(
+        error.contains("stale_revision"),
+        "an explicitly stale revision must still be refused: {error}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "ALPHA\nbeta\n",
+        "the refused explicit-revision call must not have touched the file"
+    );
+}
+
+#[test]
+fn an_auto_filled_revision_survives_the_session_unauthorized_retry() {
+    // AR-04: execute()'s existing session_unauthorized refresh-and-retry
+    // path must carry the retry through send_envelope too, not the bare
+    // build closure -- otherwise the retry's envelope reverts to
+    // revision: None and the retry itself fails with revision_required.
+    let harness = Harness::new("autofill-retry-survives");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    harness.open(&file);
+
+    // Corrupt the cached session token on disk so the NEXT call's first
+    // attempt is refused session_unauthorized, forcing execute() onto its
+    // refresh-and-retry path.
+    let session_dir = harness.scratch.join("sessions");
+    let mut corrupted_any = false;
+    for entry in std::fs::read_dir(&session_dir)
+        .expect("session dir must exist after the open above")
+        .flatten()
+    {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path).expect("read session file");
+        let Ok(mut value) = serde_json::from_str::<Value>(&content) else {
+            continue;
+        };
+        if value.get("session_token").is_none() {
+            continue;
+        }
+        value["session_token"] = json!("corrupted-not-a-real-token");
+        std::fs::write(&path, serde_json::to_string(&value).unwrap()).expect("rewrite session");
+        corrupted_any = true;
+    }
+    assert!(
+        corrupted_any,
+        "expected to find and corrupt at least one cached session file under {}",
+        session_dir.display()
+    );
+
+    // No -r here either: the retry must still auto-fill it.
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "ALPHA\n",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        replaced.status.success(),
+        "a guarded call with no -r must survive the session_unauthorized retry \
+         with the revision still auto-filled, not reverted to None: {}",
+        stderr_text(&replaced)
+    );
+
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "ALPHA\nbeta\n");
+}
+
+// ---------------------------------------------------------------------------
+// SPIKE: bulk_edit (ai-text-editor-usage benchmark follow-up, not yet
+// promoted to a plan). These three tests cover exactly the scenarios the
+// spike is meant to prove: a batch spanning several tabs in one call,
+// best-effort per-item results when one item fails, and the same
+// autostart-on-a-bare-`file` convention every other verb already gives.
+// ---------------------------------------------------------------------------
+
+fn undo_depth(history_output: &Output) -> u64 {
+    first_payload(history_output)
+        .get("text_undo_depth")
+        .and_then(Value::as_u64)
+        .unwrap()
+}
+
+#[test]
+fn bulk_edit_applies_across_two_tabs_in_one_call_as_one_undo_step_each() {
+    let harness = Harness::new("bulk-multi-tab");
+    let first = harness.write("a.txt", "line one\nline two\nline three\n");
+    let second = harness.write("b.txt", "alpha\nbeta\ngamma\n");
+    harness.open(&first);
+    harness.open(&second);
+
+    let edits = json!([
+        {"op": "replace", "file": first.to_str().unwrap(), "range_start_line": 2, "range_end_line": 2, "text": "LINE TWO CHANGED\n"},
+        {"op": "replace", "file": first.to_str().unwrap(), "range_start_line": 3, "range_end_line": 3, "text": "LINE THREE CHANGED\n"},
+        {"op": "replace", "file": second.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "ALPHA CHANGED\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let payload = first_payload(&batch);
+    assert_eq!(payload["applied_count"], json!(3));
+    assert_eq!(payload["failed_count"], json!(0));
+    let results = payload["results"].as_array().unwrap();
+    assert!(
+        results.iter().all(|entry| entry["applied"] == json!(true)),
+        "{results:?}"
+    );
+
+    let read_first = harness.client(&["read", "-f", first.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&read_first)["text"],
+        json!("line one\nLINE TWO CHANGED\nLINE THREE CHANGED\n")
+    );
+    let read_second = harness.client(&["read", "-f", second.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&read_second)["text"],
+        json!("ALPHA CHANGED\nbeta\ngamma\n")
+    );
+
+    // Two edits landed on `first` within this one batch call; they must
+    // collapse into exactly one undo step, the same guarantee
+    // begin_transaction/end_transaction gives across separate requests.
+    let history_first = harness.client(&[
+        "history",
+        "-f",
+        first.to_str().unwrap(),
+        "--verbosity",
+        "3",
+        "-p",
+        "structured",
+    ]);
+    assert_eq!(
+        undo_depth(&history_first),
+        1,
+        "{:?}",
+        first_payload(&history_first)
+    );
+    let history_second = harness.client(&[
+        "history",
+        "-f",
+        second.to_str().unwrap(),
+        "--verbosity",
+        "3",
+        "-p",
+        "structured",
+    ]);
+    assert_eq!(
+        undo_depth(&history_second),
+        1,
+        "{:?}",
+        first_payload(&history_second)
+    );
+
+    let undone = harness.client(&["undo", "-f", first.to_str().unwrap(), "-p", "structured"]);
+    assert!(undone.status.success(), "{}", stderr_text(&undone));
+    let read_after_undo =
+        harness.client(&["read", "-f", first.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&read_after_undo)["text"],
+        json!("line one\nline two\nline three\n"),
+        "one undo must revert BOTH of this tab's edits from the batch, since they were one undo step"
+    );
+}
+
+#[test]
+fn bulk_edit_is_best_effort_a_failing_item_does_not_block_the_others() {
+    let harness = Harness::new("bulk-best-effort");
+    let file = harness.write("doc.txt", "one\ntwo\nthree\n");
+    harness.open(&file);
+
+    let edits = json!([
+        {"op": "replace", "file": file.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "ONE\n"},
+        // Index 1 deliberately addresses a match_id that was never produced
+        // by a search on this tab, so it fails by name while 0 and 2 still
+        // apply.
+        {"op": "replace", "file": file.to_str().unwrap(), "match_id": "nonexistent-result#0", "text": "TWO\n"},
+        {"op": "replace", "file": file.to_str().unwrap(), "range_start_line": 3, "range_end_line": 3, "text": "THREE\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let payload = first_payload(&batch);
+    assert_eq!(payload["applied_count"], json!(2));
+    assert_eq!(payload["failed_count"], json!(1));
+    let results = payload["results"].as_array().unwrap();
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0]["applied"], json!(true));
+    assert_eq!(results[0]["index"], json!(0));
+    assert_eq!(results[1]["applied"], json!(false));
+    assert_eq!(results[1]["index"], json!(1));
+    assert!(
+        results[1]["error"].as_str().is_some(),
+        "a failing item must name its own error code: {:?}",
+        results[1]
+    );
+    assert_eq!(results[2]["applied"], json!(true));
+    assert_eq!(results[2]["index"], json!(2));
+
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&read)["text"],
+        json!("ONE\ntwo\nTHREE\n"),
+        "indices 0 and 2 must apply even though index 1 failed"
+    );
+}
+
+#[test]
+fn bulk_edit_opens_a_files_tab_automatically_like_every_other_verb() {
+    let harness = Harness::new("bulk-autostart");
+    // A server must already exist for the batch to reach, but this test's
+    // point is that the FILE named in an edit item -- never passed to
+    // `open` -- gets its tab opened automatically, the same autostart
+    // convention `read`/`search`/`history` already give a bare `file`.
+    let anchor = harness.write("anchor.txt", "anchor\n");
+    harness.open(&anchor);
+    let target = harness.write("never-opened.txt", "hello\nworld\n");
+
+    let edits = json!([
+        {"op": "replace", "file": target.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "HELLO\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let payload = first_payload(&batch);
+    assert_eq!(payload["applied_count"], json!(1));
+    assert_eq!(payload["failed_count"], json!(0));
+
+    let read = harness.client(&["read", "-f", target.to_str().unwrap(), "-p", "structured"]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(
+        first_payload(&read)["text"],
+        json!("HELLO\nworld\n"),
+        "the batch item's file must have had its tab opened automatically"
+    );
+}
+
+#[test]
+fn bulk_edit_refuses_an_item_targeting_a_tab_the_caller_has_no_session_token_for() {
+    let harness = Harness::new("bulk-session-token");
+    let a = harness.write("a.txt", "a one\na two\n");
+    let opened_a = harness.open_verbose(&a);
+    let a_tab_id = tab_id_of(&opened_a);
+    // A bare `--file` discovers a server per-FILE, not per-workspace: a
+    // second identity naming a never-before-seen file autostarts its OWN
+    // separate server rather than landing on this one (confirmed directly
+    // against the real binaries while writing this test). `--endpoint`
+    // forces identity 2's open of `b` onto the exact server `a` is already
+    // on, so both tabs genuinely share one server -- the shape this test
+    // needs, and the shape a real multi-agent-per-server workspace has.
+    let server_pid = first_payload(&opened_a)["server_pid"].as_u64().unwrap();
+    let endpoint_record_path = endpoint_record(&harness, server_pid as u32);
+    let endpoint =
+        serde_json::from_str::<Value>(&std::fs::read_to_string(&endpoint_record_path).unwrap())
+            .unwrap()["endpoint"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let b = harness.write("b.txt", "b one\nb two\n");
+    // Opened under a SECOND identity, so identity 1's own client-side cache
+    // never learns b's session_token the way it would if identity 1 had
+    // opened it itself.
+    let opened_b = harness.client(&[
+        "open",
+        "-f",
+        b.to_str().unwrap(),
+        "--session",
+        "identity-2",
+        "--endpoint",
+        &endpoint,
+        "-p",
+        "structured",
+    ]);
+    assert!(opened_b.status.success(), "{}", stderr_text(&opened_b));
+
+    let edits = json!([
+        // 0: tab_id addressing is always exempt from session_token.
+        {"op": "replace", "tab_id": a_tab_id, "range_start_line": 1, "range_end_line": 1, "text": "A ONE\n"},
+        // 1: file addressing a tab that predates this batch and belongs to
+        // a different identity -- not exempt, and identity 1 has no token
+        // for it.
+        {"op": "replace", "file": b.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "B ONE\n"},
+        // 2: a brand-new file, first touched by this very batch -- exempt
+        // (AR-06).
+        {"op": "insert", "file": harness.path("c.txt").to_str().unwrap(), "offset": 0, "text": "fresh\n"},
+        // 3: the SAME brand-new file, touched again later in this batch --
+        // still exempt, from the cached freshness of item 2's own touch.
+        {"op": "insert", "file": harness.path("c.txt").to_str().unwrap(), "offset": 0, "text": "still fresh\n"},
+        // 4: tab_id and file agreeing on the same tab -- exempt via tab_id.
+        {"op": "replace", "tab_id": a_tab_id, "file": a.to_str().unwrap(), "range_start_line": 2, "range_end_line": 2, "text": "A TWO\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let payload = first_payload(&batch);
+    let results = payload["results"].as_array().unwrap();
+    assert_eq!(results.len(), 5);
+    assert_eq!(results[0]["applied"], json!(true), "{:?}", results[0]);
+    assert_eq!(results[1]["applied"], json!(false), "{:?}", results[1]);
+    assert_eq!(
+        results[1]["error"],
+        json!("session_unauthorized"),
+        "{:?}",
+        results[1]
+    );
+    assert_eq!(results[2]["applied"], json!(true), "{:?}", results[2]);
+    assert_eq!(results[3]["applied"], json!(true), "{:?}", results[3]);
+    assert_eq!(results[4]["applied"], json!(true), "{:?}", results[4]);
+
+    // Every applied item's result entry echoes the resolved tab's own
+    // canonical path, never the raw (possibly relative/unresolved) string
+    // the item supplied.
+    let canonical_a = std::fs::canonicalize(&a).unwrap();
+    for index in [0usize, 4] {
+        assert_eq!(
+            results[index]["file"],
+            json!(canonical_a.to_str().unwrap()),
+            "{:?}",
+            results[index]
+        );
+    }
+}
+
+/// W17/AR-05's real regression: a Unix-socket server's `envelope.auth_token`
+/// travels exactly as the client sent it (`serve()` performs no server-side
+/// override, unlike `serve_tcp()`), so the per-item auth_token check W01
+/// adds is genuinely exercisable here, over the one transport where the
+/// field is client-controlled.
+#[test]
+fn bulk_edit_refuses_every_item_when_the_envelopes_auth_token_is_wrong() {
+    let harness = Harness::new("bulk-auth-token");
+    let a = harness.write("a.txt", "line one\nline two\n");
+    let b = harness.write("b.txt", "beta one\nbeta two\n");
+
+    let mut server_command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor-server"));
+    server_command
+        .env("HOME", &harness.scratch)
+        .env("XDG_RUNTIME_DIR", harness.scratch.join("runtime"))
+        .env("TSCH_AI_EDITOR_METADATA_DIR", harness.scratch.join("meta"))
+        .env(
+            "TSCH_AI_EDITOR_SESSION_DIR",
+            harness.scratch.join("sessions"),
+        )
+        .env("TSCH_AI_EDITOR_AGENT", &harness.agent)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("CODEX_SESSION_ID")
+        .env_remove("OPENCODE_PID")
+        .arg("start")
+        .arg("--file")
+        .arg(&a)
+        .arg("--auth-token")
+        .arg("SECRET")
+        .stdout(std::process::Stdio::piped());
+    let mut server = server_command.spawn().expect("server binary must start");
+    let stdout = server.stdout.take().expect("piped stdout");
+    let endpoint = std::io::BufRead::lines(std::io::BufReader::new(stdout))
+        .map_while(Result::ok)
+        .find_map(|line| {
+            serde_json::from_str::<Value>(&line)
+                .ok()
+                .and_then(|value| value.get("endpoint")?.as_str().map(str::to_owned))
+        })
+        .expect("the server announces its endpoint on stdout");
+    assert!(endpoint.starts_with("unix:"), "endpoint: {endpoint}");
+
+    let opened_a = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "SECRET",
+        "-f",
+        a.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]);
+    assert!(opened_a.status.success(), "{}", stderr_text(&opened_a));
+    let opened_b = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "SECRET",
+        "-f",
+        b.to_str().unwrap(),
+        "-p",
+        "structured",
+    ]);
+    assert!(opened_b.status.success(), "{}", stderr_text(&opened_b));
+
+    let edits = json!([
+        {"op": "replace", "file": a.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "LINE ONE\n"},
+        {"op": "replace", "file": b.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "BETA ONE\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&[
+        "bulk-edit",
+        "--endpoint",
+        &endpoint,
+        "--auth-token",
+        "WRONG",
+        "--edits-json",
+        &edits,
+        "-p",
+        "structured",
+    ]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let payload = first_payload(&batch);
+    assert_eq!(payload["applied_count"], json!(0), "{payload:?}");
+    assert_eq!(payload["failed_count"], json!(2), "{payload:?}");
+    let results = payload["results"].as_array().unwrap();
+    for result in results {
+        assert_eq!(result["applied"], json!(false), "{result:?}");
+        assert_eq!(
+            result["error"],
+            json!("authentication_failed"),
+            "auth_token is one value on the whole outer envelope, not per-item, so a mismatch refuses every item uniformly: {result:?}"
+        );
+    }
+
+    let _ = server.kill();
+    let _ = server.wait();
+}
+
+/// AR-10 regression: a batch item naming BOTH `tab_id` and `file` must agree
+/// on which tab they name -- the same check `select_tab` runs for a
+/// standalone request, via the same `ensure_tab_file`.
+#[test]
+fn bulk_edit_refuses_an_item_naming_a_tab_id_and_file_that_disagree() {
+    let harness = Harness::new("bulk-file-mismatch");
+    let a = harness.write("a.txt", "a one\n");
+    let a_tab_id = tab_id_of(&harness.open(&a));
+    let b = harness.write("b.txt", "b one\n");
+    harness.open(&b);
+
+    let edits = json!([
+        {"op": "replace", "tab_id": a_tab_id, "file": b.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "X\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let payload = first_payload(&batch);
+    let results = payload["results"].as_array().unwrap();
+    assert_eq!(results[0]["applied"], json!(false), "{:?}", results[0]);
+    assert_eq!(
+        results[0]["error"],
+        json!("file_mismatch"),
+        "{:?}",
+        results[0]
+    );
+}
+
+/// AR-08/AR-39/AR-41 regression: the documented fixed per-item check order
+/// (auth_token, then session_token, then the key door, then external_change,
+/// then large_file_edit_requires_acknowledgement) decides which single error
+/// code an item carrying more than one problem actually reports, and a
+/// refused item never blocks a sibling that passes its own checks.
+#[test]
+fn bulk_edit_applies_its_per_item_checks_in_the_documented_fixed_order() {
+    // Scenario 1: an item failing two independent checks at once -- a wrong
+    // auth_token (envelope-wide, so it is wrong for every item alike) and a
+    // key its own op does not read -- must report authentication_failed,
+    // not unknown_argument: auth_token is checked first.
+    {
+        let harness = Harness::new("bulk-order-auth-vs-key");
+        let a = harness.write("a.txt", "a one\n");
+        let mut server_command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor-server"));
+        server_command
+            .env("HOME", &harness.scratch)
+            .env("XDG_RUNTIME_DIR", harness.scratch.join("runtime"))
+            .env("TSCH_AI_EDITOR_METADATA_DIR", harness.scratch.join("meta"))
+            .env(
+                "TSCH_AI_EDITOR_SESSION_DIR",
+                harness.scratch.join("sessions"),
+            )
+            .env("TSCH_AI_EDITOR_AGENT", &harness.agent)
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .env_remove("CODEX_SESSION_ID")
+            .env_remove("OPENCODE_PID")
+            .arg("start")
+            .arg("--file")
+            .arg(&a)
+            .arg("--auth-token")
+            .arg("SECRET")
+            .stdout(std::process::Stdio::piped());
+        let mut server = server_command.spawn().expect("server binary must start");
+        let stdout = server.stdout.take().expect("piped stdout");
+        let endpoint = std::io::BufRead::lines(std::io::BufReader::new(stdout))
+            .map_while(Result::ok)
+            .find_map(|line| {
+                serde_json::from_str::<Value>(&line)
+                    .ok()
+                    .and_then(|value| value.get("endpoint")?.as_str().map(str::to_owned))
+            })
+            .expect("the server announces its endpoint on stdout");
+        let opened = harness.client(&[
+            "open",
+            "--endpoint",
+            &endpoint,
+            "--auth-token",
+            "SECRET",
+            "-f",
+            a.to_str().unwrap(),
+            "-p",
+            "structured",
+        ]);
+        assert!(opened.status.success(), "{}", stderr_text(&opened));
+
+        let edits = json!([
+            {"op": "replace", "file": a.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "X\n", "pager_key": "not-a-replace-key"},
+        ])
+        .to_string();
+        let batch = harness.client(&[
+            "bulk-edit",
+            "--endpoint",
+            &endpoint,
+            "--auth-token",
+            "WRONG",
+            "--edits-json",
+            &edits,
+            "-p",
+            "structured",
+        ]);
+        assert!(batch.status.success(), "{}", stderr_text(&batch));
+        let results = first_payload(&batch)["results"].as_array().unwrap().clone();
+        assert_eq!(results[0]["applied"], json!(false), "{:?}", results[0]);
+        assert_eq!(
+            results[0]["error"],
+            json!("authentication_failed"),
+            "auth_token must be checked before the key door: {:?}",
+            results[0]
+        );
+
+        let _ = server.kill();
+        let _ = server.wait();
+    }
+
+    // Scenario 2: a tab changed externally on disk refuses a replace item
+    // with external_change; a sibling item on an unaffected tab still
+    // applies.
+    {
+        let harness = Harness::new("bulk-order-external-change");
+        let changed = harness.write("changed.txt", "alpha\nbeta\n");
+        harness.open(&changed);
+        let mut appended = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&changed)
+            .unwrap();
+        appended.write_all(b"EXTERN\n").unwrap();
+        drop(appended);
+        let unaffected = harness.write("unaffected.txt", "one\ntwo\n");
+        harness.open(&unaffected);
+
+        let edits = json!([
+            {"op": "replace", "file": changed.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "ALPHA\n"},
+            {"op": "replace", "file": unaffected.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "ONE\n"},
+        ])
+        .to_string();
+        let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+        assert!(batch.status.success(), "{}", stderr_text(&batch));
+        let results = first_payload(&batch)["results"].as_array().unwrap().clone();
+        assert_eq!(results[0]["applied"], json!(false), "{:?}", results[0]);
+        assert_eq!(
+            results[0]["error"],
+            json!("external_change"),
+            "{:?}",
+            results[0]
+        );
+        assert_eq!(results[1]["applied"], json!(true), "{:?}", results[1]);
+    }
+
+    // Scenario 3: a large-file tab refuses a replace item with
+    // large_file_edit_requires_acknowledgement before the placeholder buffer
+    // is ever touched; a sibling item on an ordinary tab still applies.
+    {
+        let harness = Harness::new("bulk-order-large-file");
+        let large = harness.write("large.txt", "alpha\nbeta\ngamma\n");
+        let mut server_command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor-server"));
+        server_command
+            .env("HOME", &harness.scratch)
+            .env("XDG_RUNTIME_DIR", harness.scratch.join("runtime"))
+            .env("TSCH_AI_EDITOR_METADATA_DIR", harness.scratch.join("meta"))
+            .env(
+                "TSCH_AI_EDITOR_SESSION_DIR",
+                harness.scratch.join("sessions"),
+            )
+            .env("TSCH_AI_EDITOR_AGENT", &harness.agent)
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .env_remove("CODEX_SESSION_ID")
+            .env_remove("OPENCODE_PID")
+            .arg("start")
+            .arg("--file")
+            .arg(&large)
+            .arg("--large-threshold-bytes")
+            // Server-wide, not per-file: low enough that `large` (18 bytes)
+            // crosses it but high enough that `ordinary` (8 bytes) stays
+            // under it -- both tabs live on this one server.
+            .arg("10")
+            .stdout(std::process::Stdio::piped());
+        let mut server = server_command.spawn().expect("server binary must start");
+        let stdout = server.stdout.take().expect("piped stdout");
+        let endpoint = std::io::BufRead::lines(std::io::BufReader::new(stdout))
+            .map_while(Result::ok)
+            .find_map(|line| {
+                serde_json::from_str::<Value>(&line)
+                    .ok()
+                    .and_then(|value| value.get("endpoint")?.as_str().map(str::to_owned))
+            })
+            .expect("the server announces its endpoint on stdout");
+        let opened_large = harness.client(&[
+            "open",
+            "--endpoint",
+            &endpoint,
+            "-f",
+            large.to_str().unwrap(),
+            "-p",
+            "structured",
+        ]);
+        assert!(
+            opened_large.status.success(),
+            "{}",
+            stderr_text(&opened_large)
+        );
+        assert_eq!(
+            first_payload(&opened_large)["large_file"],
+            json!(true),
+            "the lowered threshold must make this tab a large-file tab"
+        );
+        let ordinary = harness.write("ordinary.txt", "one\ntwo\n");
+        let opened_ordinary = harness.client(&[
+            "open",
+            "--endpoint",
+            &endpoint,
+            "-f",
+            ordinary.to_str().unwrap(),
+            "-p",
+            "structured",
+        ]);
+        assert!(
+            opened_ordinary.status.success(),
+            "{}",
+            stderr_text(&opened_ordinary)
+        );
+        assert_eq!(
+            first_payload(&opened_ordinary)["large_file"],
+            json!(false),
+            "ordinary must stay under the threshold, or this scenario tests nothing"
+        );
+
+        let edits = json!([
+            {"op": "replace", "file": large.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "ALPHA\n"},
+            {"op": "replace", "file": ordinary.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "ONE\n"},
+        ])
+        .to_string();
+        let batch = harness.client(&[
+            "bulk-edit",
+            "--endpoint",
+            &endpoint,
+            "--edits-json",
+            &edits,
+            "-p",
+            "structured",
+        ]);
+        assert!(batch.status.success(), "{}", stderr_text(&batch));
+        let results = first_payload(&batch)["results"].as_array().unwrap().clone();
+        assert_eq!(results[0]["applied"], json!(false), "{:?}", results[0]);
+        assert_eq!(
+            results[0]["error"],
+            json!("large_file_edit_requires_acknowledgement"),
+            "{:?}",
+            results[0]
+        );
+        assert_eq!(results[1]["applied"], json!(true), "{:?}", results[1]);
+
+        let _ = server.kill();
+        let _ = server.wait();
+    }
+}
+
+/// AR-09 regression, adapted: the plan's own wording imagines a per-item
+/// "wrong vs. correct auth_token", but auth_token is one value on the whole
+/// outer envelope (W01/W17), so two items in one batch cannot disagree on
+/// it. The invariant AR-09 actually guards -- the freshness cache is
+/// populated when a path is first TOUCHED (resolved), not only when the
+/// touching item itself goes on to succeed -- is exercised instead with a
+/// refusal that genuinely is per-item: a bad key the key door catches,
+/// which happens strictly after tab resolution in the documented order.
+#[test]
+fn bulk_edit_caches_a_fresh_paths_freshness_even_when_the_first_item_touching_it_is_refused() {
+    let harness = Harness::new("bulk-cache-timing");
+    let anchor = harness.write("anchor.txt", "anchor\n");
+    harness.open(&anchor);
+    let fresh = harness.path("fresh.txt");
+
+    let edits = json!([
+        // Index 0 is the first item to touch `fresh` -- refused by the key
+        // door (replace does not read `pager_key`), strictly after the file
+        // was resolved/opened.
+        {"op": "replace", "file": fresh.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "X\n", "pager_key": "bogus"},
+        // Index 1 touches the SAME path again -- still exempt from
+        // session_token, from the freshness cached at index 0's own touch,
+        // not re-checked against live state (which would now see the tab
+        // index 0's own resolution created and wrongly call it
+        // pre-existing).
+        {"op": "insert", "file": fresh.to_str().unwrap(), "offset": 0, "text": "hello\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let payload = first_payload(&batch);
+    let results = payload["results"].as_array().unwrap();
+    assert_eq!(results[0]["applied"], json!(false), "{:?}", results[0]);
+    assert_eq!(
+        results[0]["error"],
+        json!("unknown_argument"),
+        "{:?}",
+        results[0]
+    );
+    assert_eq!(
+        results[1]["applied"],
+        json!(true),
+        "item 1 must still apply with no session_token, since the path was first touched (and so cached as fresh) by item 0: {:?}",
+        results[1]
+    );
+}
+
+/// AR-11/AR-19 regression: confirms W21's client-side autofill directly, and
+/// confirms all THREE pre-existing spike tests (part of this plan's
+/// spike/bulk-edit starting point, owned by no work unit here) still pass
+/// unchanged now that W01's session_token check is active, because W21
+/// transparently fills what they never supplied.
+#[test]
+fn bulk_edit_autofills_session_token_for_items_this_identitys_client_already_opened() {
+    let harness = Harness::new("bulk-autofill");
+    let a = harness.write("a.txt", "a one\na two\n");
+    harness.open(&a);
+    let b = harness.write("b.txt", "b one\nb two\n");
+    harness.open(&b);
+
+    // Neither item below names a session_token -- W21 must fill both from
+    // this identity's own per-(identity, file) cache, the same cache every
+    // other verb already resolves through transparently.
+    let edits = json!([
+        {"op": "replace", "file": a.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "A ONE\n"},
+        {"op": "replace", "file": b.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "B ONE\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let payload = first_payload(&batch);
+    assert_eq!(payload["applied_count"], json!(2), "{payload:?}");
+    assert_eq!(payload["failed_count"], json!(0), "{payload:?}");
+}
+
+/// AR-40 regression: the per-item key door, both doors -- the key-NAME
+/// door (W04's own direct equivalent of handle()'s `unknown_argument`) and
+/// the key-VALUE door (the same `is_count_key` check closing the B267 bug
+/// class for the batch surface) -- refuse only the one item with the
+/// problem, naming it in that item's own result entry, while best-effort
+/// semantics keep applying its siblings.
+#[test]
+fn bulk_edit_refuses_an_items_bad_key_in_its_own_result_entry_without_blocking_the_rest() {
+    let harness = Harness::new("bulk-key-door");
+    let file = harness.write("doc.txt", "one\ntwo\nthree\n");
+    harness.open(&file);
+
+    // Scenario 1: the key-NAME door. `pager_key` belongs to `page`, not
+    // `replace`.
+    let edits = json!([
+        {"op": "replace", "file": file.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "ONE\n"},
+        {"op": "replace", "file": file.to_str().unwrap(), "range_start_line": 2, "range_end_line": 2, "text": "TWO\n", "pager_key": "not-a-replace-key"},
+        {"op": "replace", "file": file.to_str().unwrap(), "range_start_line": 3, "range_end_line": 3, "text": "THREE\n"},
+    ])
+    .to_string();
+    let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let results = first_payload(&batch)["results"].as_array().unwrap().clone();
+    assert_eq!(results[0]["applied"], json!(true), "{:?}", results[0]);
+    assert_eq!(results[1]["applied"], json!(false), "{:?}", results[1]);
+    assert_eq!(
+        results[1]["error"],
+        json!("unknown_argument"),
+        "{:?}",
+        results[1]
+    );
+    assert_eq!(
+        results[1]["offending_key"],
+        json!("pager_key"),
+        "the refusal must name the offending key: {:?}",
+        results[1]
+    );
+    assert_eq!(results[2]["applied"], json!(true), "{:?}", results[2]);
+
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&read)["text"],
+        json!("ONE\ntwo\nTHREE\n"),
+        "indices 0 and 2 must apply even though index 1 failed"
+    );
+
+    // Scenario 2 (AR-40): the key-VALUE door. `insert`'s own `offset` is a
+    // count key; a negative/non-integer value is refused by name, not
+    // silently treated as absent (the B267 bug class).
+    let file2 = harness.write("doc2.txt", "alpha\nbeta\n");
+    harness.open(&file2);
+    let edits2 = json!([
+        {"op": "insert", "file": file2.to_str().unwrap(), "offset": 0, "text": "ONE-"},
+        {"op": "insert", "file": file2.to_str().unwrap(), "offset": -1, "text": "TWO-"},
+        {"op": "insert", "file": file2.to_str().unwrap(), "offset": 0, "text": "THREE-"},
+    ])
+    .to_string();
+    let batch2 = harness.client(&["bulk-edit", "--edits-json", &edits2, "-p", "structured"]);
+    assert!(batch2.status.success(), "{}", stderr_text(&batch2));
+    let results2 = first_payload(&batch2)["results"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(results2[0]["applied"], json!(true), "{:?}", results2[0]);
+    assert_eq!(results2[1]["applied"], json!(false), "{:?}", results2[1]);
+    assert_eq!(
+        results2[1]["error"],
+        json!("argument_out_of_range"),
+        "{:?}",
+        results2[1]
+    );
+    assert_eq!(results2[2]["applied"], json!(true), "{:?}", results2[2]);
+}
+
+/// AR-41 regression, two scenarios: `save` is a real batch op (W06) and
+/// persists only its own tab, and a large-file tab's `save` item is
+/// refused the same acknowledgement every replace/insert item already is
+/// -- the one case where silently applying would overwrite the real file
+/// with an empty placeholder buffer.
+#[test]
+fn bulk_edit_save_item_persists_only_its_own_tabs_edits_to_disk() {
+    // Scenario 1: a save item naming only tab A persists A and leaves B
+    // dirty and untouched on disk.
+    {
+        let harness = Harness::new("bulk-save-scoped");
+        let a = harness.write("a.txt", "a one\na two\n");
+        harness.open(&a);
+        let b = harness.write("b.txt", "b one\nb two\n");
+        harness.open(&b);
+
+        let edits = json!([
+            {"op": "replace", "file": a.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "A ONE\n"},
+            {"op": "replace", "file": b.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "B ONE\n"},
+            {"op": "save", "file": a.to_str().unwrap()},
+        ])
+        .to_string();
+        let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+        assert!(batch.status.success(), "{}", stderr_text(&batch));
+        let results = first_payload(&batch)["results"].as_array().unwrap().clone();
+        assert!(
+            results.iter().all(|entry| entry["applied"] == json!(true)),
+            "{results:?}"
+        );
+        assert_eq!(results[2]["dirty"], json!(false), "{:?}", results[2]);
+
+        assert_eq!(
+            std::fs::read_to_string(&a).unwrap(),
+            "A ONE\na two\n",
+            "the save item must have persisted tab A's edit to disk"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&b).unwrap(),
+            "b one\nb two\n",
+            "tab B's edit must stay unsaved on disk -- the save item never named it"
+        );
+        let read_b = harness.client(&["read", "-f", b.to_str().unwrap(), "-p", "structured"]);
+        assert_eq!(
+            first_payload(&read_b)["dirty"],
+            json!(true),
+            "tab B's own buffer must still report dirty: its edit was never saved"
+        );
+    }
+
+    // Scenario 2 (AR-41): a save item on a large-file tab is refused, and
+    // the real file on disk is left untouched -- not silently overwritten
+    // with an empty placeholder buffer.
+    {
+        let harness = Harness::new("bulk-save-large-file");
+        let large = harness.write("large.txt", "alpha\nbeta\ngamma\n");
+        let on_disk_before = std::fs::read_to_string(&large).unwrap();
+        let mut server_command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor-server"));
+        server_command
+            .env("HOME", &harness.scratch)
+            .env("XDG_RUNTIME_DIR", harness.scratch.join("runtime"))
+            .env("TSCH_AI_EDITOR_METADATA_DIR", harness.scratch.join("meta"))
+            .env(
+                "TSCH_AI_EDITOR_SESSION_DIR",
+                harness.scratch.join("sessions"),
+            )
+            .env("TSCH_AI_EDITOR_AGENT", &harness.agent)
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .env_remove("CODEX_SESSION_ID")
+            .env_remove("OPENCODE_PID")
+            .arg("start")
+            .arg("--file")
+            .arg(&large)
+            .arg("--large-threshold-bytes")
+            .arg("1")
+            .stdout(std::process::Stdio::piped());
+        let mut server = server_command.spawn().expect("server binary must start");
+        let stdout = server.stdout.take().expect("piped stdout");
+        let endpoint = std::io::BufRead::lines(std::io::BufReader::new(stdout))
+            .map_while(Result::ok)
+            .find_map(|line| {
+                serde_json::from_str::<Value>(&line)
+                    .ok()
+                    .and_then(|value| value.get("endpoint")?.as_str().map(str::to_owned))
+            })
+            .expect("the server announces its endpoint on stdout");
+        let opened = harness.client(&[
+            "open",
+            "--endpoint",
+            &endpoint,
+            "-f",
+            large.to_str().unwrap(),
+            "-p",
+            "structured",
+        ]);
+        assert!(opened.status.success(), "{}", stderr_text(&opened));
+        assert_eq!(first_payload(&opened)["large_file"], json!(true));
+
+        let edits = json!([{"op": "save", "file": large.to_str().unwrap()}]).to_string();
+        let batch = harness.client(&[
+            "bulk-edit",
+            "--endpoint",
+            &endpoint,
+            "--edits-json",
+            &edits,
+            "-p",
+            "structured",
+        ]);
+        assert!(batch.status.success(), "{}", stderr_text(&batch));
+        let results = first_payload(&batch)["results"].as_array().unwrap().clone();
+        assert_eq!(results[0]["applied"], json!(false), "{:?}", results[0]);
+        assert_eq!(
+            results[0]["error"],
+            json!("large_file_edit_requires_acknowledgement"),
+            "{:?}",
+            results[0]
+        );
+        assert_eq!(
+            std::fs::read_to_string(&large).unwrap(),
+            on_disk_before,
+            "the real file must be left untouched, not overwritten with an empty placeholder buffer"
+        );
+
+        let _ = server.kill();
+        let _ = server.wait();
+    }
+}
+
+/// New test, locking in the existing (spike-era) behavior as a documented
+/// non-goal: `move`/`copy`/`large_edit` batching is explicitly out of
+/// scope for this pass.
+#[test]
+fn bulk_edit_does_not_support_move_copy_or_large_edit_ops() {
+    let harness = Harness::new("bulk-deferred-ops");
+    let file = harness.write("doc.txt", "one\ntwo\nthree\n");
+    harness.open(&file);
+
+    for (index, op) in ["move", "copy", "large_edit"].iter().enumerate() {
+        let edits = json!([
+            {"op": "replace", "file": file.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": format!("VALID {index}\n")},
+            {"op": op, "file": file.to_str().unwrap()},
+        ])
+        .to_string();
+        let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+        assert!(batch.status.success(), "{}", stderr_text(&batch));
+        let results = first_payload(&batch)["results"].as_array().unwrap().clone();
+        assert_eq!(
+            results[0]["applied"],
+            json!(true),
+            "op {op}: a sibling valid item must still apply: {:?}",
+            results[0]
+        );
+        assert_eq!(
+            results[1]["applied"],
+            json!(false),
+            "op {op}: {:?}",
+            results[1]
+        );
+        assert_eq!(
+            results[1]["error"],
+            json!("bulk_edit_op_invalid"),
+            "op {op}: {:?}",
+            results[1]
+        );
+        assert!(
+            results[1]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("not supported")),
+            "op {op}: the refusal must name move/copy/large_edit batching as not supported: {:?}",
+            results[1]
+        );
+    }
+}
+
+/// AR-23/AR-27/AR-28/AR-32/AR-37 regression: `bulk_edit`'s own targets live
+/// inside `--edits-json`/`--edits-file`, which the normal `--file`-driven
+/// cold-start/autostart machinery (B225) never sees -- this covers the four
+/// states W23 (CLI) and W26 (`focus_is_live`) must tell apart.
+#[test]
+fn bulk_edit_autostarts_from_its_first_items_file_with_no_prior_open() {
+    // Cold: no prior open under this identity at all. Must autostart from
+    // the first edits item's own `file`.
+    {
+        let harness = Harness::new("bulk-cold-start");
+        let target = harness.write("target.txt", "hello\nworld\n");
+        let edits = json!([
+            {"op": "insert", "file": target.to_str().unwrap(), "offset": 0, "text": "HI "},
+        ])
+        .to_string();
+        let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+        assert!(batch.status.success(), "{}", stderr_text(&batch));
+        let payload = first_payload(&batch);
+        assert_eq!(payload["applied_count"], json!(1), "{payload:?}");
+        let read = harness.client(&["read", "-f", target.to_str().unwrap(), "-p", "structured"]);
+        assert_eq!(first_payload(&read)["text"], json!("HI hello\nworld\n"));
+    }
+
+    // Warm: this identity already has a live focused tab. Must reuse it --
+    // leaving `resolve_request.file` untouched -- even though the batch's
+    // own target is a file this identity never opened.
+    {
+        let harness = Harness::new("bulk-warm-start");
+        let anchor = harness.write("anchor.txt", "anchor\n");
+        let opened_anchor = harness.open_verbose(&anchor);
+        let anchor_server_pid = server_pid(&opened_anchor);
+        let target = harness.write("warm-target.txt", "alpha\nbeta\n");
+        let edits = json!([
+            {"op": "replace", "file": target.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "ALPHA\n"},
+        ])
+        .to_string();
+        let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+        assert!(batch.status.success(), "{}", stderr_text(&batch));
+        let payload = first_payload(&batch);
+        assert_eq!(payload["applied_count"], json!(1), "{payload:?}");
+        // `server_pid` is only reported by `open`'s own response; re-open
+        // (idempotent -- the tab already exists) to check which server
+        // actually answered.
+        let reopened_target = harness.open_verbose(&target);
+        assert_eq!(
+            server_pid(&reopened_target),
+            anchor_server_pid,
+            "a warm identity's bulk_edit must reuse the already-live workspace, not autostart a second server"
+        );
+        let read = harness.client(&["read", "-f", target.to_str().unwrap(), "-p", "structured"]);
+        assert_eq!(first_payload(&read)["text"], json!("ALPHA\nbeta\n"));
+    }
+
+    // Dead focus: a stale on-disk record naming a server that is no longer
+    // running must read as cold-start, not warm -- `focus_is_live` checks
+    // liveness, not just the cache file's existence.
+    {
+        let harness = Harness::new("bulk-dead-focus");
+        let anchor = harness.write("anchor.txt", "anchor\n");
+        let opened_anchor = harness.open_verbose(&anchor);
+        terminate(server_pid(&opened_anchor));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        let target = harness.write("dead-target.txt", "x\ny\n");
+        let edits = json!([
+            {"op": "replace", "file": target.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "X\n"},
+        ])
+        .to_string();
+        let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+        assert!(
+            batch.status.success(),
+            "a dead focus must fall to the first item's own file and autostart a replacement, not refuse: {}",
+            stderr_text(&batch)
+        );
+        let read = harness.client(&["read", "-f", target.to_str().unwrap(), "-p", "structured"]);
+        assert_eq!(first_payload(&read)["text"], json!("X\ny\n"));
+    }
+
+    // Corrupted focus: an unreadable cache file must surface as a genuine
+    // error, never be silently folded into "cold-start".
+    {
+        let harness = Harness::new("bulk-corrupted-focus");
+        let anchor = harness.write("anchor.txt", "anchor\n");
+        harness.open(&anchor);
+        // Computed directly, matching `cache_path(identity, None)`'s own
+        // formula -- that library function reads
+        // `TSCH_AI_EDITOR_SESSION_DIR` from the CURRENT process's own
+        // environment, which is this test binary's ambient env, not the
+        // scratch-scoped env the harness only ever sets on the CHILD CLI
+        // processes it spawns.
+        let key = blake3::hash(harness.agent.as_bytes()).to_hex().to_string();
+        let focus_path = harness.scratch.join("sessions").join(format!("{key}.json"));
+        assert!(
+            focus_path.exists(),
+            "a successful call must have persisted this identity's focus"
+        );
+        // Invalid UTF-8 -- genuinely unreadable as a session file, not just
+        // unparseable as JSON (which `read_session` tolerates by treating
+        // the whole content as a raw endpoint string instead).
+        std::fs::write(&focus_path, [0xFFu8, 0xFE, 0xFD]).unwrap();
+
+        let target = harness.write("corrupt-target.txt", "x\n");
+        let edits = json!([
+            {"op": "replace", "file": target.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "X\n"},
+        ])
+        .to_string();
+        let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+        assert!(
+            !batch.status.success(),
+            "a corrupted focus cache must be a real error, not a silent cold-start"
+        );
+        assert!(
+            stderr_text(&batch).contains("cannot read session token"),
+            "{}",
+            stderr_text(&batch)
+        );
+    }
+}
+
+/// AR-21/AR-24 regression: every one of the 22 reachable single-edit error
+/// codes (`revision_required`/`stale_revision` stay explicitly out of scope
+/// per AR-15: bulk_edit has no per-item revision at all) must surface
+/// through `bulk_edit` identically to a standalone call hitting the exact
+/// same problem. For each row: trigger the scenario with a standalone
+/// `replace`/`insert` first (proving the expected code), then the same
+/// scenario as one `bulk_edit` item, asserting the identical code.
+fn assert_bulk_edit_matches_standalone_error(
+    harness: &Harness,
+    standalone_args: &[&str],
+    item: Value,
+    expected_code: &str,
+) {
+    // `-p text` so the refusal is named on stderr -- structured presentation
+    // (the harness's own default) puts the error frame on stdout instead.
+    let mut full_args = standalone_args.to_vec();
+    full_args.extend_from_slice(&["-p", "text"]);
+    let standalone = harness.client(&full_args);
+    assert!(
+        !standalone.status.success(),
+        "{standalone_args:?} was expected to refuse"
+    );
+    assert!(
+        stderr_text(&standalone).contains(expected_code),
+        "{standalone_args:?} must refuse with {expected_code}: {}",
+        stderr_text(&standalone)
+    );
+    let edits = json!([item]).to_string();
+    let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+    assert!(batch.status.success(), "{}", stderr_text(&batch));
+    let results = first_payload(&batch)["results"].as_array().unwrap().clone();
+    assert_eq!(
+        results[0]["error"],
+        json!(expected_code),
+        "bulk_edit must surface the same code as the standalone call: {:?}",
+        results[0]
+    );
+}
+
+#[test]
+fn bulk_edit_surfaces_every_single_edit_error_code_in_its_own_result_entry() {
+    let harness = Harness::new("bulk-error-vocab");
+    let doc = harness.write("doc.txt", "one\ntwo\nthree\nfour\n");
+    harness.open(&doc);
+    let file = doc.to_str().unwrap();
+
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "--range-start-line",
+            "1",
+            "--range-end-line",
+            "1",
+            "-o",
+            "0",
+            "-d",
+            "1",
+            "-t",
+            "x",
+        ],
+        json!({"op": "replace", "file": file, "range_start_line": 1, "range_end_line": 1, "offset": 0, "delete_len": 1, "text": "x"}),
+        "edit_range_conflict",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &["replace", "-f", file, "--range-start-line", "1", "-t", "x"],
+        json!({"op": "replace", "file": file, "range_start_line": 1, "text": "x"}),
+        "edit_range_incomplete",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "--range-start-line",
+            "0",
+            "--range-end-line",
+            "1",
+            "-t",
+            "x",
+        ],
+        json!({"op": "replace", "file": file, "range_start_line": 0, "range_end_line": 1, "text": "x"}),
+        "edit_range_invalid",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "insert",
+            "-f",
+            file,
+            "--range-start-line",
+            "1",
+            "--range-end-line",
+            "1",
+            "-t",
+            "x",
+        ],
+        json!({"op": "insert", "file": file, "range_start_line": 1, "range_end_line": 1, "text": "x"}),
+        "edit_range_unsupported",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "-o",
+            "0",
+            "-d",
+            "3",
+            "--expected-text",
+            "xyz",
+            "-t",
+            "ONE",
+        ],
+        json!({"op": "replace", "file": file, "offset": 0, "delete_len": 3, "expected_text": "xyz", "text": "ONE"}),
+        "expected_text_mismatch",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "-o",
+            "0",
+            "-d",
+            "99",
+            "--expected-text",
+            "o",
+            "-t",
+            "X",
+        ],
+        json!({"op": "replace", "file": file, "offset": 0, "delete_len": 99, "expected_text": "o", "text": "X"}),
+        "expected_text_length_mismatch",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "insert",
+            "-f",
+            file,
+            "-o",
+            "0",
+            "--expected-text",
+            "o",
+            "-t",
+            "X",
+        ],
+        json!({"op": "insert", "file": file, "offset": 0, "expected_text": "o", "text": "X"}),
+        "expected_text_unsupported",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "-o",
+            "0",
+            "-d",
+            "1",
+            "--expected-text",
+            "o",
+            "--expected-bytes-base64",
+            "bw==",
+            "-t",
+            "X",
+        ],
+        json!({"op": "replace", "file": file, "offset": 0, "delete_len": 1, "expected_text": "o", "expected_bytes_base64": "bw==", "text": "X"}),
+        "expected_text_conflict",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "--match-id",
+            "fakeresult#0",
+            "-t",
+            "x",
+        ],
+        json!({"op": "replace", "file": file, "match_id": "fakeresult#0", "text": "x"}),
+        "match_id_stale",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "--match-id",
+            "not-shaped-right",
+            "-t",
+            "x",
+        ],
+        json!({"op": "replace", "file": file, "match_id": "not-shaped-right", "text": "x"}),
+        "match_id_invalid",
+    );
+    // match_id_unsupported: a path_wildcard search's own match_id names a
+    // path, not a span -- the one case `resolve_match_id` refuses by name
+    // rather than reporting a nonexistent span.
+    let searched = harness.client(&[
+        "search",
+        "-f",
+        file,
+        "--mode",
+        "path_wildcard",
+        "-m",
+        "path_wildcard",
+        "--query",
+        "*",
+        "-p",
+        "structured",
+    ]);
+    assert!(searched.status.success(), "{}", stderr_text(&searched));
+    let path_match_id = first_payload(&searched)["matches"][0]["match_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "--match-id",
+            &path_match_id,
+            "-t",
+            "x",
+        ],
+        json!({"op": "replace", "file": file, "match_id": path_match_id, "text": "x"}),
+        "match_id_unsupported",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "--range-start-match",
+            "nomatch",
+            "--range-end-before-match",
+            "two",
+            "-t",
+            "x",
+        ],
+        json!({"op": "replace", "file": file, "range_start_match": "nomatch", "range_end_before_match": "two", "text": "x"}),
+        "range_start_match_not_found",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "--range-start-match",
+            "one",
+            "--range-end-before-match",
+            "nomatch",
+            "-t",
+            "x",
+        ],
+        json!({"op": "replace", "file": file, "range_start_match": "one", "range_end_before_match": "nomatch", "text": "x"}),
+        "range_end_before_match_not_found",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "--range-start-match",
+            "o",
+            "--range-end-before-match",
+            "four",
+            "-t",
+            "x",
+        ],
+        json!({"op": "replace", "file": file, "range_start_match": "o", "range_end_before_match": "four", "text": "x"}),
+        "range_start_match_ambiguous",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "--range-start-match",
+            "one",
+            "--range-end-before-match",
+            "o",
+            "-t",
+            "x",
+        ],
+        json!({"op": "replace", "file": file, "range_start_match": "one", "range_end_before_match": "o", "text": "x"}),
+        "range_end_before_match_ambiguous",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "replace",
+            "-f",
+            file,
+            "--range-start-match",
+            "[",
+            "--range-end-before-match",
+            "two",
+            "--range-match-regex",
+            "-t",
+            "x",
+        ],
+        json!({"op": "replace", "file": file, "range_start_match": "[", "range_end_before_match": "two", "range_match_regex": true, "text": "x"}),
+        "range_match_invalid",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &["replace", "-f", file, "--symbol", "foo", "-t", "x"],
+        json!({"op": "replace", "file": file, "symbol": "foo", "text": "x"}),
+        "symbol_unavailable",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &["insert", "-f", file, "-o", "0", "-t", ""],
+        json!({"op": "insert", "file": file, "offset": 0, "text": ""}),
+        "empty_edit",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &[
+            "insert",
+            "-f",
+            file,
+            "-o",
+            "0",
+            "--bytes-base64",
+            "not-valid-base64!!!",
+        ],
+        json!({"op": "insert", "file": file, "offset": 0, "bytes_base64": "not-valid-base64!!!"}),
+        "invalid_base64",
+    );
+    assert_bulk_edit_matches_standalone_error(
+        &harness,
+        &["replace", "-f", file, "-o", "9999", "-d", "0", "-t", "x"],
+        json!({"op": "replace", "file": file, "offset": 9999, "delete_len": 0, "text": "x"}),
+        "edit_refused",
+    );
+
+    // symbol_not_found / symbol_ambiguous need their own seeded (and
+    // distinct) codegraph fixture per row -- a shared one would leave an
+    // earlier row's seed able to satisfy a later row's "not found".
+    {
+        let harness = Harness::new("bulk-error-vocab-symbol-not-found");
+        let doc = harness.write("sym.rs", "fn bar() {}\n");
+        harness.open(&doc);
+        seed_codegraph_symbol(&harness, "sym.rs", "bar", 1, 1);
+        assert_bulk_edit_matches_standalone_error(
+            &harness,
+            &[
+                "replace",
+                "-f",
+                doc.to_str().unwrap(),
+                "--symbol",
+                "foo",
+                "-t",
+                "x",
+            ],
+            json!({"op": "replace", "file": doc.to_str().unwrap(), "symbol": "foo", "text": "x"}),
+            "symbol_not_found",
+        );
+    }
+    {
+        let harness = Harness::new("bulk-error-vocab-symbol-ambiguous");
+        let doc = harness.write("sym.rs", "fn bar() {}\nfn bar() {}\n");
+        harness.open(&doc);
+        seed_codegraph_symbol(&harness, "sym.rs", "bar", 1, 1);
+        seed_codegraph_symbol(&harness, "sym.rs", "bar", 2, 2);
+        assert_bulk_edit_matches_standalone_error(
+            &harness,
+            &[
+                "replace",
+                "-f",
+                doc.to_str().unwrap(),
+                "--symbol",
+                "bar",
+                "-t",
+                "x",
+            ],
+            json!({"op": "replace", "file": doc.to_str().unwrap(), "symbol": "bar", "text": "x"}),
+            "symbol_ambiguous",
+        );
+    }
+}
+
+/// Session-cache gap, proven and fixed: `bulk_edit` is the first verb that
+/// creates/touches tabs without writing the per-(identity, file)
+/// session-token cache every other verb populates and reads (`client.rs`'s
+/// `cache_path`/`persist_cache`, now reached for `bulk_edit` too via
+/// `persist_bulk_edit_item_caches`, fed by the per-item `session_token` the
+/// server now echoes in `handle_bulk_edit`'s own success branch). Before the
+/// fix, a standalone verb addressing a file that only a `bulk_edit` batch
+/// had touched -- once this identity had 2+ registered tabs -- hit
+/// `session::resolve`'s own `session_ambiguous` refusal and fell through to
+/// autostarting a SEPARATE, duplicate server for that file, masked by
+/// journal replay into looking like the same tab.
+#[test]
+fn bulk_edit_then_a_standalone_read_lands_on_the_same_tab_no_duplicate_server() {
+    // Cold: no prior open at all under this identity. The batch's own first
+    // item bootstraps the connection (W23/W26); a standalone `read` for that
+    // SAME file, right after, must land on the one real server.
+    {
+        let harness = Harness::new("bulk-cache-cold-then-read");
+        let a = harness.write("a.txt", "a one\na two\n");
+        let edits = json!([
+            {"op": "replace", "file": a.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "A ONE\n"},
+        ])
+        .to_string();
+        let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+        assert!(batch.status.success(), "{}", stderr_text(&batch));
+        assert_eq!(
+            first_payload(&batch)["applied_count"],
+            json!(1),
+            "{:?}",
+            first_payload(&batch)
+        );
+
+        let read = harness.client(&["read", "-f", a.to_str().unwrap(), "-p", "structured"]);
+        assert!(
+            read.status.success(),
+            "a standalone read for a cold bulk_edit's own bootstrap file must not refuse: {}",
+            stderr_text(&read)
+        );
+        assert_eq!(
+            first_payload(&read)["text"],
+            json!("A ONE\na two\n"),
+            "the read must see the batch's own in-memory edit, proving it reached the SAME tab rather than a fresh autostart reading stale bytes from disk"
+        );
+    }
+
+    // The 2+-tabs case that actually triggers session_ambiguous: a batch
+    // touching TWO files (so this identity ends up with 2 registered tabs),
+    // then a standalone `read` for B -- the file that did NOT bootstrap the
+    // cold start -- must still land on the one real server, not a
+    // duplicate autostarted just for B.
+    {
+        let harness = Harness::new("bulk-cache-cold-multitab-then-read");
+        let a = harness.write("a.txt", "a one\na two\n");
+        let b = harness.write("b.txt", "b one\nb two\n");
+        let edits = json!([
+            {"op": "replace", "file": a.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "A ONE\n"},
+            {"op": "replace", "file": b.to_str().unwrap(), "range_start_line": 1, "range_end_line": 1, "text": "B ONE\n"},
+        ])
+        .to_string();
+        let batch = harness.client(&["bulk-edit", "--edits-json", &edits, "-p", "structured"]);
+        assert!(batch.status.success(), "{}", stderr_text(&batch));
+        assert_eq!(
+            first_payload(&batch)["applied_count"],
+            json!(2),
+            "{:?}",
+            first_payload(&batch)
+        );
+
+        // Confirm the real server identity via an `open` of A (the
+        // bootstrap file), then prove B -- never used to discover/autostart
+        // anything -- reads from that SAME server, not a fresh one.
+        let opened_a = harness.open_verbose(&a);
+        let real_server_pid = server_pid(&opened_a);
+
+        let read_b = harness.client(&["read", "-f", b.to_str().unwrap(), "-p", "structured"]);
+        assert!(
+            read_b.status.success(),
+            "a standalone read for B (not the bootstrap file) must not refuse with session_ambiguous: {}",
+            stderr_text(&read_b)
+        );
+        assert_eq!(
+            first_payload(&read_b)["text"],
+            json!("B ONE\nb two\n"),
+            "{:?}",
+            first_payload(&read_b)
+        );
+        let reopened_b = harness.open_verbose(&b);
+        assert_eq!(
+            server_pid(&reopened_b),
+            real_server_pid,
+            "B must resolve to the SAME server A is on, not a duplicate autostarted for B alone"
+        );
+    }
 }

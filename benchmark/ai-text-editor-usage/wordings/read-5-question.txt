@@ -1,0 +1,1 @@
+Do you need the whole file, or just where a pattern occurs? ai-text-editor's search answers the second question directly, with the byte range a later edit can use as-is.

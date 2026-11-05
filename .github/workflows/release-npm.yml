@@ -159,7 +159,7 @@ jobs:
           set -euo pipefail
           dest="$RUNNER_TEMP/release-npm-payload"
           mkdir -p "$dest"
-          for skill in chat planning todo interactive-shell bug-report ai-text-editor; do
+          for skill in chat planning todo interactive-shell bug-report ai-text-editor decisions tailpipe; do
             if [ -d "$skill/bin/${{ matrix.target }}" ]; then
               mkdir -p "$dest/$skill/bin"
               cp -R "$skill/bin/${{ matrix.target }}" "$dest/$skill/bin/${{ matrix.target }}"

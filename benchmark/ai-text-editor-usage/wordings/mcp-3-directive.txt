@@ -1,0 +1,1 @@
+Prefer ai-text-editor over Read/Edit/Write whenever a file might change under you while you work, or when an edit needs no re-quoting of the matched text.

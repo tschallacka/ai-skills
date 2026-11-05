@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tsch-ai-skills.local/benchmark/skill-adoption/run-record.schema.json",
+  "title": "skill-adoption run record",
+  "description": "One line of results/runs.jsonl per completed cell. This is the raw, unaggregated unit of evidence -- aggregate.py derives everything else from a file of these and nothing else, so a third party re-deriving the published numbers needs only this schema plus runs.jsonl, not any intermediate state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "run_id", "scenario_id", "cli", "mode", "rep",
+    "started_at_utc", "finished_at_utc", "duration_s", "environment",
+    "adoption", "consideration", "regression", "transcript_path"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "scenario_id": { "type": "string", "pattern": "^S[0-9]{2}-[a-z0-9-]+$" },
+    "cli": { "enum": ["claude", "opencode"] },
+    "mode": { "enum": ["skill", "mcp", "n/a"] },
+    "rep": { "type": "integer", "minimum": 1 },
+    "started_at_utc": { "type": "string", "format": "date-time" },
+    "finished_at_utc": { "type": "string", "format": "date-time" },
+    "duration_s": { "type": "number", "minimum": 0 },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ai_skills_commit", "cli_version", "subject_model", "experimenter_model", "os", "host"],
+      "properties": {
+        "ai_skills_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "git rev-parse HEAD of the ai-skills checkout the installer ran from. A dirty worktree (uncommitted changes, e.g. this very benchmark's own in-flight feature work) is recorded separately -- see worktree_dirty."
+        },
+        "worktree_dirty": {
+          "type": "boolean",
+          "description": "true if `git status --porcelain` was non-empty at install time. A run against a dirty tree is still valid evidence but is not byte-reproducible from the commit hash alone -- aggregate.py must surface this per cell, never silently average it in with clean-tree runs."
+        },
+        "cli_version": { "type": "string", "description": "verbatim `claude --version` / `opencode --version` output" },
+        "interactive_shell_version": { "type": "string" },
+        "subject_model": { "type": "string", "description": "the model id the subject actually ran under, as reported by the CLI itself (e.g. /cost or /status output), never assumed from an env var" },
+        "experimenter_model": { "type": "string", "const": "haiku", "description": "fixed by design -- PROTOCOL.md's experimenter role is always the cheap steering model" },
+        "os": { "type": "string" },
+        "host": { "type": "string" }
+      }
+    },
+    "subject_session_id": { "type": "string", "description": "claude only; the pinned --session-id. Present even when PROTOCOL.md's resume probe later finds it does not resolve -- absence of a working resume is itself data." },
+    "experimenter_session_id": { "type": "string", "description": "the headless claude -p session id of the experimenter process itself; always resolvable (see LAB-PROTOCOL.md precedent)." },
+    "adoption": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "null", "boolean"] },
+      "required": ["adopted"],
+      "properties": {
+        "adopted": { "type": "boolean" },
+        "evidence": { "type": ["string", "null"], "description": "the literal transcript line (or a short excerpt) that matched an adoption_signals regex; null when adopted is false" },
+        "signal_matched": { "type": ["string", "null"], "description": "which regex (verbatim) matched" },
+        "partial_or_misuse": {
+          "type": ["string", "null"],
+          "description": "free text for the 'adopted but against the scenario's own instruction' case (S4/S11's don't-block violation, S6's file-without-asking violation) -- kept distinct from regression_notes because it is about HOW the tool was reached for, not whether the end state was correct."
+        }
+      }
+    },
+    "consideration": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "null", "boolean"] },
+      "required": ["considered"],
+      "description": "Separate from adoption: whether the subject engaged with this skill's mechanism at all, independent of whether that engagement ever reached a clean, completed invocation. A subject can read a skill or search for its MCP tools and still not finish using it (interrupted, gave up, decided against it after looking) -- this still counts as real consideration, and this benchmark treats it as worth knowing on its own, not only whether the task got done 'correctly'. additionalProperties is permissive (not false) for the same reason permission_prompts_handled's own items are: this is Haiku's free-form observational evidence, not structurally-consumed data -- aggregate.py only ever reads 'considered' by key -- and a measured real failure (schema validation rejecting an extra 'toolsearch_evidence_note' field Haiku added) confirmed an exact-keys contract aborts an otherwise-good run over phrasing variance rather than a real defect.",
+      "properties": {
+        "considered": { "type": "boolean", "description": "true if any of the three evidence fields below is non-null" },
+        "skill_read_evidence": { "type": ["string", "null"], "description": "a transcript excerpt showing this skill's own SKILL.md was opened/read, or the Skill tool was invoked naming this skill" },
+        "toolsearch_evidence": { "type": ["string", "null"], "description": "a transcript excerpt showing a ToolSearch call naming this skill -- most relevant in mcp mode, where this skill's own MCP tools are deferred until searched for" },
+        "invocation_evidence": { "type": ["string", "null"], "description": "a transcript excerpt showing an attempt (complete or not) to call this skill's own tool/command; same evidence as adoption.evidence when adoption.adopted is true, but may also be non-null for an attempted-but-incomplete or malformed call that adoption.adopted's stricter match missed" }
+      }
+    },
+    "regression": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_correct", "verification_exit_code"],
+      "properties": {
+        "task_correct": { "type": "boolean", "description": "from the scenario's own verification script's JSON output -- never from the subject's self-reported claim of success." },
+        "verification_exit_code": { "type": "integer" },
+        "verification_notes": { "type": "string" }
+      }
+    },
+    "observer_notes": { "type": "string", "description": "free text: anything the experimenter noticed worth flagging, same role as LAB-PROTOCOL.md's field of the same name" },
+    "permission_prompts_handled": {
+      "type": "array",
+      "description": "Observational evidence only -- never read by key downstream (aggregate.py never touches this field), so each item's shape is kept permissive rather than tightly validated: the experimenter (haiku) phrases this freely from one run to the next (e.g. an added 'note' field, or 'choice_made' reported as null when the dialog auto-cleared) and none of that variance should abort an otherwise-good run.",
+      "items": {
+        "type": "object",
+        "additionalProperties": { "type": ["string", "null", "boolean"] },
+        "properties": {
+          "screen_excerpt": { "type": ["string", "null"] },
+          "choice_made": { "type": ["string", "null"] },
+          "prompt": { "type": ["string", "null"], "description": "optional: what the permission dialog was asking approval for, when the experimenter captured it" }
+        }
+      }
+    },
+    "known_limitations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "per-run carry-forward of anything from PROTOCOL.md's 'Known limitations and unverified assumptions' that actually bit this run (e.g. opencode session not resumable, env-stripping fix unconfirmed for opencode)."
+    },
+    "transcript_path": { "type": "string", "description": "path, relative to results/, of the saved verbatim scrollback" }
+  }
+}

@@ -254,6 +254,23 @@ decision_reminder_plugin_files() {
     printf 'decision-reminder-plugin/hooks/session-start.sh\n'
 }
 
+# chat-interrupt-plugin's own files, parallel to the four functions above
+# (src/installer/src/plugins.rs's own CHAT_INTERRUPT_PLUGIN_FILES carries the
+# identical list). B1: this function did not exist before it was added here: the
+# plugin had no entry in collect() at all since its own introduction, so
+# every release tarball cut since then silently omitted it -- the exact
+# tui-hint-plugin/editor-gate-plugin failure mode the comment above warns
+# about, just never caught for this one. The npm package was unaffected
+# (package.json's own bare "chat-interrupt-plugin" files entry ships the
+# whole directory regardless of this function), which is why only a real
+# tarball-based install ever would have shown the gap.
+chat_interrupt_plugin_files() {
+    printf 'chat-interrupt-plugin/.claude-plugin/plugin.json\n'
+    printf 'chat-interrupt-plugin/hooks/hooks.json\n'
+    printf 'chat-interrupt-plugin/hooks/lib.sh\n'
+    printf 'chat-interrupt-plugin/hooks/pre-tool-use.sh\n'
+}
+
 # T102: agent profiles are not a skill (no entry in skill_files()) and their
 # canonical source is JSON, a format with no comment syntax a MODE marker
 # could sit in -- the same reason the three plugin-file functions above are
@@ -277,7 +294,7 @@ profile_files_for_release() {
 # names are plugins::MODS in src/installer/src/plugins.rs; the test that holds
 # the two equal is tests/test-mods-package.sh. loading is not listed: the boards
 # carry their own copy of it.
-MODS_BOARDS="chat-board ci-board plan-board brainstorm-board register-board bugs-board todo-board tui-hint-board signal-bus decision-board boards"
+MODS_BOARDS="chat-board ci-board plan-board brainstorm-board register-board bugs-board todo-board tui-hint-board signal-bus decision-board boards tailpipe-board"
 
 mods_files() {
     local board
@@ -293,6 +310,7 @@ collect() {
         editor_gate_plugin_files
         agent_identity_plugin_files
         decision_reminder_plugin_files
+        chat_interrupt_plugin_files
         mods_files
         profile_files_for_release
         local path
@@ -457,6 +475,29 @@ case "$mode" in
             ls "$repo_root/decisions/bin/"*/"decisions$skill_exe" >/dev/null 2>&1 \
                 && ls "$repo_root/decisions/bin/"*/"decisions-mcp$skill_exe" >/dev/null 2>&1 || {
                 printf '%s: cargo not found and decisions/bin binaries absent\n' "${0##*/}" >&2
+                exit 66
+            }
+        fi
+        # tailpipe-server-rs/tailpipe-client-rs/tailpipe-mcp (the log-pipe
+        # server, its reader/ingest CLI, and its stdio MCP adapter): same
+        # cargo-then-require-prebuilt structure as the decisions pair above.
+        if command -v cargo >/dev/null 2>&1; then
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package tailpipe-server-rs ) \
+                || { printf '%s: cargo build tailpipe-server-rs failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package tailpipe-client-rs ) \
+                || { printf '%s: cargo build tailpipe-client-rs failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --target "$skill_dir" --package tailpipe-mcp ) \
+                || { printf '%s: cargo build tailpipe-mcp failed\n' "${0##*/}" >&2; exit 66; }
+            mkdir -p "$repo_root/tailpipe/bin/$skill_dir"
+            tp_release="$repo_root/target/$skill_dir/release"
+            cp "$tp_release/tailpipe-server-rs$skill_exe" "$repo_root/tailpipe/bin/$skill_dir/tailpipe-server-rs$skill_exe"
+            cp "$tp_release/tailpipe-client-rs$skill_exe" "$repo_root/tailpipe/bin/$skill_dir/tailpipe-client-rs$skill_exe"
+            cp "$tp_release/tailpipe-mcp$skill_exe" "$repo_root/tailpipe/bin/$skill_dir/tailpipe-mcp$skill_exe"
+        else
+            ls "$repo_root/tailpipe/bin/"*/"tailpipe-server-rs$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/tailpipe/bin/"*/"tailpipe-client-rs$skill_exe" >/dev/null 2>&1 \
+                && ls "$repo_root/tailpipe/bin/"*/"tailpipe-mcp$skill_exe" >/dev/null 2>&1 || {
+                printf '%s: cargo not found and tailpipe/bin binaries absent\n' "${0##*/}" >&2
                 exit 66
             }
         fi

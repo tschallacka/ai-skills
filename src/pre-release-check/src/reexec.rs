@@ -1,0 +1,66 @@
+// MODE: DEV
+// PACKAGE: PROD
+
+//! The gates shell out to cargo, npm, shellcheck and bash32 -- all from the
+//! flake's dev shell. Re-enter it once, using a marker variable, before any
+//! gate runs. Mirrors pre-push-check's own reexec.rs.
+
+use std::env;
+use std::process::Command;
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
+// The literal script file name, not the compiled binary's own bare name.
+const PROGRAM: &str = "pre-release-check.sh";
+// The compiled binary's own file name -- must NOT carry the ".sh" suffix,
+// since no such file exists for the compiled binary.
+const SELF_BINARY_NAME: &str = "pre-release-check";
+
+use crate::platform::which;
+
+/// Exits 69 if nix is required and absent; execs into `nix develop` and
+/// never returns if a re-exec is needed and nix is present; returns
+/// otherwise (already inside the flake, or a marker is already set).
+pub fn maybe_reexec(repo_root: &std::path::Path) {
+    if env::var_os("AI_SKILLS_PRERELEASE_IN_NIX").is_some() || env::var_os("IN_NIX_SHELL").is_some()
+    {
+        return;
+    }
+    // nix does not run natively on Windows; the toolchain there is the
+    // rustup one rust-toolchain.toml pins.
+    if cfg!(windows) {
+        return;
+    }
+    if !which("nix") {
+        eprintln!("{PROGRAM}: nix develop .#default is required for these gates");
+        std::process::exit(69);
+    }
+    let self_path = env::current_exe().unwrap_or_else(|_| SELF_BINARY_NAME.into());
+    let args: Vec<String> = env::args().skip(1).collect();
+
+    let mut command = Command::new("nix");
+    command
+        .arg("develop")
+        .arg(repo_root)
+        .arg("--command")
+        .arg("env")
+        .arg("AI_SKILLS_PRERELEASE_IN_NIX=1")
+        .arg(&self_path)
+        .args(&args);
+
+    #[cfg(unix)]
+    {
+        let error = command.exec();
+        eprintln!("{PROGRAM}: could not exec nix develop: {error}");
+        std::process::exit(1);
+    }
+    #[cfg(not(unix))]
+    {
+        let status = command.status().unwrap_or_else(|error| {
+            eprintln!("{PROGRAM}: could not run nix develop: {error}");
+            std::process::exit(1);
+        });
+        std::process::exit(status.code().unwrap_or(1));
+    }
+}

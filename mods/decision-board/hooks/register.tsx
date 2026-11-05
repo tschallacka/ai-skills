@@ -180,6 +180,14 @@ function implementArgs(bin: string, id: string, note: string, file: string): str
   return args
 }
 
+// `decisions answer <id> --text TEXT --file PATH` -- the question-etiquette
+// "something else -- tell me" escape, carried into the register: a pick
+// that is not one of the question's own lettered options, recorded in the
+// person's own words rather than forced into the closest-sounding letter.
+function answerTextArgs(bin: string, id: string, text: string, file: string): string[] {
+  return [bin, 'answer', id, '--text', text, '--file', file]
+}
+
 // "Date when asked", in the loose relative phrasing a person reads faster
 // than a timestamp: same-day counts in minutes/hours, this month in days,
 // the next in "last month", older in whole months, then whole years. An
@@ -226,6 +234,7 @@ function chosenLabel(question: Question): string {
 export const __test = {
   sortQuestionsUrgentFirst,
   answerArgs,
+  answerTextArgs,
   implementArgs,
   filterQuestions,
   pendingQuestions,
@@ -308,6 +317,20 @@ export const register: Register = (on, options) => {
     }
     await $.ui.open({ id: PANE, title: 'Questions' })
     return { text: 'Decision board opened.' }
+  })
+
+  // A question raised through the decisions-mcp server (the stdio adapter
+  // registered as "decisions", not this plugin's own tools) should reach
+  // the person right away, rather than sitting unseen until they happen to
+  // run /decision-board or the agent happens to call show_decision_board.
+  // This only opens the pane -- it never touches what decisions-mcp's own
+  // `add` tool actually did.
+  on('tool.call', { tool: 'mcp__decisions__add' }, async ($, e, next) => {
+    const result = await next(e)
+    if (!result.isError) {
+      await $.ui.open({ id: PANE, title: 'Questions' })
+    }
+    return result
   })
 
   // The agent's tools (show/read/answer/implement) deliberately never apply
@@ -393,7 +416,7 @@ export const register: Register = (on, options) => {
   let refresh: { cancel: () => void } | undefined
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const { Box, Button, Input, Text } = $.ui.resolve(e)
     const root = await $.session.root()
     const home = (await $.env.get('HOME')) ?? ''
     const xdg = (await $.env.get('XDG_CONFIG_HOME')) ?? ''
@@ -425,6 +448,19 @@ export const register: Register = (on, options) => {
       // resolve-path call here would double the process cost per press.
       const bin = decisionsBin(home, xdg)
       const run = await $.process.run(answerArgs(bin, id, letter, file))
+      if (run.exitCode === 0) {
+        await update($, lastLoggedKey, () => ({ id, at: Date.now() }))
+      }
+      $.ui.invalidate('ui.render')
+    }
+
+    // The question-etiquette "something else -- tell me" escape, from the
+    // pane itself: a blank submit is a no-op rather than an empty resolution.
+    const answerText = async (id: string, typed: string) => {
+      const text = typed.trim()
+      if (text === '') return
+      const bin = decisionsBin(home, xdg)
+      const run = await $.process.run(answerTextArgs(bin, id, text, file))
       if (run.exitCode === 0) {
         await update($, lastLoggedKey, () => ({ id, at: Date.now() }))
       }
@@ -523,6 +559,15 @@ export const register: Register = (on, options) => {
                     <Button onPress={() => answer(q.id, option.letter)}>{`${option.letter}: ${option.label}`}</Button>
                   </Box>
                 ))}
+                <Box flexDirection="row">
+                  <Input
+                    key={`decision-answer-${q.id}`}
+                    label="or, in your own words: "
+                    placeholder="none of these -- type the real answer"
+                    submitLabel="answer"
+                    onSubmit={value => answerText(q.id, value)}
+                  />
+                </Box>
               </Box>
             )}
             {q.status === 'decided' && (

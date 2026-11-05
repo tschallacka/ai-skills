@@ -7,7 +7,8 @@
 //! the register, behaves the same everywhere this ships.
 
 use decisions::{
-    add, answer, close, implement, list, migrate, stub, Filter, NewQuestion, Priority, Register,
+    add, answer, answer_with_text, close, implement, list, migrate, remove_options,
+    reorder_options, set_option, stub, Filter, NewQuestion, Priority, Register,
 };
 use std::io::{Read, Write};
 use std::process::ExitCode;
@@ -26,10 +27,16 @@ Usage:
   decisions list [--status open|decided|implemented|closed|dropped|obsolete]
                  [--priority urgent|high|normal|low|someday] [--branch B] [--file PATH]
   decisions answer <ID> <LETTER> [--file PATH]
+  decisions answer <ID> --text <TEXT> [--file PATH]   (the human's own words,
+                           not one of the offered letters)
   decisions stub <ID> <ASSUMPTION> [--file PATH]
   decisions implement <ID> [NOTE] [--file PATH]
   decisions apply <ID> <RESOLUTION> [--file PATH]
   decisions close <ID> <RESOLUTION> [--file PATH]   (an alias for apply)
+  decisions option-set <ID> <LETTER> <LABEL> [--file PATH]
+                           add a new lettered option, or relabel an existing one
+  decisions option-remove <ID> <LETTER> [<LETTER> ...] [--file PATH]
+  decisions option-reorder <ID> <LETTER,LETTER,...> [--file PATH]
   decisions resolve-path   print the register path a mutating command would
                            use, with no prompting and nothing created
   decisions --help
@@ -40,7 +47,18 @@ the register is DECISIONS_JSON, else ./DECISIONS.json.
 A question's lifecycle is open -> decided -> implemented: `answer` records
 the user's pick and moves it to decided; `implement` then records that the
 pick was actually carried out in the code. `close`/`apply` can withdraw a
-question from any status, with or without ever implementing it.
+question from any status, with or without ever implementing it. `answer
+--text` records a pick that is not one of the question's own lettered
+options -- the human said something else -- and moves it to decided the same
+way a lettered answer does.
+
+`option-set`/`option-remove`/`option-reorder` edit what a question offers
+before anyone has picked from it: only while the question is still open.
+`option-set` adds a new letter or relabels an existing one; `option-remove`
+takes any number of letters at once, atomically, and refuses to leave a
+question with no options at all; `option-reorder` takes a comma-separated
+list that must name exactly the question's current letters, nothing added
+or dropped.
 
 `add` records the current git branch automatically, as context on the
 question: it travels with the question, it is not a separate filter
@@ -97,6 +115,9 @@ fn run(argv: &[String]) -> Result<ExitCode, Failure> {
         "stub" => stub_command(&path, argv),
         "implement" => implement_command(&path, argv),
         "apply" | "close" => close_command(&path, argv),
+        "option-set" => option_set_command(&path, argv),
+        "option-remove" => option_remove_command(&path, argv),
+        "option-reorder" => option_reorder_command(&path, argv),
         other => fail(format!("unknown command: {other}"), EX_USAGE),
     }
 }
@@ -242,11 +263,78 @@ fn list_command(path: &str, argv: &[String]) -> Result<ExitCode, Failure> {
 
 fn answer_command(path: &str, argv: &[String]) -> Result<ExitCode, Failure> {
     let positional = positional(argv);
+    if let Some(text) = flag_value(argv, "--text") {
+        let [id] = positional[..] else {
+            return fail("answer --text needs an id, and no option letter", EX_USAGE);
+        };
+        let mut register = read(path)?;
+        answer_with_text(&mut register, id, &text).map_err(|message| Failure {
+            message,
+            code: EX_DATAERR,
+        })?;
+        return write(path, &register).map(|_| ExitCode::SUCCESS);
+    }
     let [id, letter] = positional[..] else {
-        return fail("answer needs an id and an option letter", EX_USAGE);
+        return fail(
+            "answer needs an id and an option letter, or an id and --text",
+            EX_USAGE,
+        );
     };
     let mut register = read(path)?;
     answer(&mut register, id, letter).map_err(|message| Failure {
+        message,
+        code: EX_DATAERR,
+    })?;
+    write(path, &register).map(|_| ExitCode::SUCCESS)
+}
+
+/// `LABEL` is free text, like `stub`'s assumption and `close`'s resolution:
+/// everything after the letter is joined back with single spaces.
+fn option_set_command(path: &str, argv: &[String]) -> Result<ExitCode, Failure> {
+    let positional = positional(argv);
+    if positional.len() < 3 {
+        return fail("option-set needs an id, a letter, and a label", EX_USAGE);
+    }
+    let id = positional[0];
+    let letter = positional[1];
+    let label = positional[2..].join(" ");
+    let mut register = read(path)?;
+    set_option(&mut register, id, letter, &label).map_err(|message| Failure {
+        message,
+        code: EX_DATAERR,
+    })?;
+    write(path, &register).map(|_| ExitCode::SUCCESS)
+}
+
+fn option_remove_command(path: &str, argv: &[String]) -> Result<ExitCode, Failure> {
+    let positional = positional(argv);
+    if positional.len() < 2 {
+        return fail(
+            "option-remove needs an id and at least one letter",
+            EX_USAGE,
+        );
+    }
+    let id = positional[0];
+    let letters: Vec<String> = positional[1..].iter().map(|s| s.to_string()).collect();
+    let mut register = read(path)?;
+    remove_options(&mut register, id, &letters).map_err(|message| Failure {
+        message,
+        code: EX_DATAERR,
+    })?;
+    write(path, &register).map(|_| ExitCode::SUCCESS)
+}
+
+fn option_reorder_command(path: &str, argv: &[String]) -> Result<ExitCode, Failure> {
+    let positional = positional(argv);
+    let [id, order] = positional[..] else {
+        return fail(
+            "option-reorder needs an id and a comma-separated letter order",
+            EX_USAGE,
+        );
+    };
+    let letters: Vec<String> = order.split(',').map(|s| s.trim().to_string()).collect();
+    let mut register = read(path)?;
+    reorder_options(&mut register, id, &letters).map_err(|message| Failure {
         message,
         code: EX_DATAERR,
     })?;

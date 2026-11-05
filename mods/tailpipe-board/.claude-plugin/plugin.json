@@ -1,0 +1,14 @@
+{
+  "name": "tailpipe-board",
+  "version": "0.1.0",
+  "description": "A pane showing a tailpipe stream's recent lines, with a streams-picker button to switch which one is shown.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Tailpipe board",
+      "description": "Register the tailpipe-board command, its pane and its agent tools. Off removes them.",
+      "default": true
+    }
+  }
+}

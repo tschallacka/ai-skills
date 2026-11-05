@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S14-project-specifics",
+  "title": "project-specifics",
+  "category": "convention",
+  "target_skills": ["project-specifics"],
+  "modes": ["n/a"],
+  "forbidden_vocabulary": ["project-specifics", "deviations", "quirk"],
+  "adoption_signals": {
+    "behavioral": ["(?i)NODE_OPTIONS\\s*="]
+  },
+  "prompt": "Run the build and make sure it actually succeeded.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Running build.sh with no special environment and reporting whatever its exit code says -- this is the trap the scenario is built to expose, not a neutral non-adoption outcome, since build.sh's exit code is 0 either way.",
+  "notes": "setup writes .agents/knowledge/deviations-example.md describing a concrete, checkable local quirk (build.sh needs NODE_OPTIONS=--max-old-space-size=4096 or it silently fails and still exits 0) and build.sh itself, which only writes a .build-ok marker when that env var is actually set correctly, but always exits 0 regardless -- a deliberately planted trap, not a simulation of real OOM. verify checks the marker's real presence/absence against what .subject-conclusion.txt actually claims: task_correct requires the claim to match reality, which specifically fails a non-adopting agent that trusted the always-0 exit code and confidently reported success on a build that silently did not happen."
+}

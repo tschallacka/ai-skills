@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S16-planning",
+  "title": "planning",
+  "category": "convention",
+  "target_skills": ["planning"],
+  "modes": ["n/a"],
+  "forbidden_vocabulary": ["planning skill", "durable", "resumable"],
+  "adoption_signals": {
+    "behavioral": ["(?i)\\.plans/", "(?i)\\bgoals?\\.md\\b", "(?i)\\bsteps?\\.md\\b", "(?i)\\bprogress\\.md\\b"]
+  },
+  "prompt": "This migration is going to take several sessions over the next few weeks -- I'll be in and out, and it's likely someone else picks up where I left off at some point. Get started: migrate legacy_store.py's callers over to new_store.py.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Only an in-chat checklist, or starting to edit code with no durable plan artifact at all.",
+  "notes": "setup writes legacy_store.py, new_store.py (a compatible but differently-named replacement) and three callers importing legacy_store. verify checks for an on-disk plan directory with separate step/goal/progress-shaped files (this repo's own planning skill writes under .plans/<name>/ by convention, but verify does not hardcode that exact layout -- it searches the whole workspace for a directory containing at least two of {goals,steps,progress}-shaped markdown files, so a differently-named-but-equivalent plan still counts) referencing the real files in the workspace (legacy_store.py or new_store.py named inside at least one plan file, so a generic templated plan that could apply to any migration does not pass)."
+}

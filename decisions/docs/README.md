@@ -15,7 +15,14 @@ open.
   user answers later, whenever they are back — this never replaces a
   harness's own blocking question or confirmation mechanism.
 - **Lettered options, not a guess.** Every question offers concrete choices
-  (`a`, `b`, `c`, ...), so answering is a pick, not free-form prose to parse.
+  (`a`, `b`, `c`, ...), so answering is a pick, not free-form prose to parse
+  -- and `answer --text` is the escape hatch for when none of them fit,
+  recording the human's own words as the pick instead.
+- **The options are not fixed at filing time.** `option-set`, `option-remove`,
+  and `option-reorder` add, relabel, drop, or resort a question's own
+  choices, while it is still open -- useful when the first draft of a
+  question's options turns out incomplete or wrong before anyone has
+  answered it.
 - **Priority is a fact.** `urgent`/`high`/`normal`/`low`/`someday`, so "what
   needs an answer first" is a filter, not an inference.
 - **The branch travels as context.** `add` records the current git branch
@@ -23,11 +30,14 @@ open.
   not as a separate mechanism to merge or reconcile across branches.
 - **Three ways in.** The `decisions` CLI, the `decisions-mcp` stdio adapter
   (no daemon, no port) for an agent that wants typed tool calls, and the
-  `decision-board` mod for a person to see and answer questions in a pane.
-  The CLI installs in every mode (the pane needs it either way); whether
-  `decisions-mcp` also installs and gets registered is an install-time
-  choice (`--integration decisions=skill|mcp`), for a harness that cannot
-  register an MCP server at all.
+  `decision-board` mod for a person to see and answer questions in a pane --
+  raising one through `decisions-mcp`'s own `add` tool opens that pane
+  automatically, so a question reaches the person right away rather than
+  waiting for them to go looking for it. The CLI installs in every mode
+  (the pane needs it either way); whether `decisions-mcp` also installs and
+  gets registered is an install-time choice (`--integration
+  decisions=skill|mcp`), for a harness that cannot register an MCP server
+  at all.
 - **Decided is not done.** A question's lifecycle is `open -> decided ->
   implemented`. The user answering it does not make it vanish: a decided
   question stays visible everywhere (the pane, the CLI, the session-start
@@ -62,6 +72,21 @@ decisions close Q1 "Withdrawn: load testing landed, caching is not worth it"
 `close`/`apply` can withdraw a question from any status, with or without
 ever implementing it — a decided question that turns out not to be worth
 doing is `close`d, not `implement`ed.
+
+When the real answer is not one of the options that were offered, `answer
+--text` records it anyway, in the human's own words:
+
+```
+decisions answer Q1 --text "Actually, cache it but invalidate on file mtime"
+```
+
+And a question's own options can be fixed up before anyone answers it:
+
+```
+decisions option-set Q1 c "Cache with mtime invalidation"
+decisions option-remove Q1 a
+decisions option-reorder Q1 c,b
+```
 
 ## Where DECISIONS.json actually lives
 

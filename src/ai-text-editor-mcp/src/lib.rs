@@ -76,7 +76,22 @@ pub fn handle(message: Value) -> Value {
         "initialize" => {
             // Seed the stamp for this session before answering.
             let _ = adapter_replaced();
-            json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{"subscribe":false,"listChanged":false}},"serverInfo":{"name":"ai-text-editor","version":"0.1.0"}}})
+            let mut result = json!({"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{"subscribe":false,"listChanged":false}},"serverInfo":{"name":"ai-text-editor","version":"0.1.0"}});
+            // Unset by default -- no top-level `instructions` field, exactly
+            // today's shipped shape. Set (to a non-empty string) only by
+            // benchmark/ai-text-editor-usage's hook-matrix sweep, to measure
+            // whether the one lever this server never used -- an MCP
+            // server-level pitch, the same mechanism chat-mcp and
+            // decisions-mcp already carry as their own INSTRUCTIONS consts --
+            // changes unprompted adoption, independent of editor-gate-
+            // plugin's two hooks and the task prompt, which the sweep holds
+            // fixed throughout.
+            if let Ok(instructions) = std::env::var("AI_TEXT_EDITOR_MCP_INSTRUCTIONS") {
+                if !instructions.is_empty() {
+                    result["instructions"] = json!(instructions);
+                }
+            }
+            json!({"jsonrpc":"2.0","id":id,"result":result})
         }
         "notifications/initialized" => Value::Null,
         "tools/list" => json!({"jsonrpc":"2.0","id":id,"result":{"tools": tool_definitions()}}),
@@ -140,16 +155,8 @@ fn boolean(description: &str) -> Value {
     json!({"type": "boolean", "description": description})
 }
 
-fn revision_guard() -> Value {
-    string("Server revision guard; REQUIRED for this operation and must be the revision most recently returned by open, history, or a completed mutation. Missing revisions are refused, stale ones never merged.")
-}
-
 fn number(description: &str) -> Value {
     json!({"type": "number", "description": description})
-}
-
-fn mutating_required() -> Vec<&'static str> {
-    vec!["expected_revision"]
 }
 
 /// T127 (Codex prompts for approval on every ai-text-editor call, unlike a
@@ -207,8 +214,10 @@ type ToolSpec = (
 /// payload. `path` (B310/T124) IS here: it is a synonym a caller may send
 /// instead of `file`, coalesced into `file` before the strip loop below runs
 /// so the server only ever sees the one key it understands.
-/// `expected_revision` is not here either — it is declared on the mutating
-/// tools only, and `mutating_required` is what pins that.
+/// `expected_revision` is not declared on any tool's schema at all any more
+/// (ai-text-editor-automatic-revision-guard): the client auto-fills the
+/// revision for the ordinary case, so it is not a payload key a caller is
+/// offered in the first place.
 pub const ADAPTER_ARGUMENTS: &[&str] = &[
     "endpoint",
     "agent",
@@ -323,7 +332,7 @@ fn tool_definitions() -> Vec<Value> {
         properties
     };
     let mut tools: Vec<ToolSpec> = Vec::new();
-    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors, and get the revision a mutation must carry. Opens the file if the workspace does not have it yet, starting a server when none runs, and document_mode chooses the mode of the tab it opens whether or not a workspace is already running.", Vec::from([
+    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors. Opens the file if the workspace does not have it yet, starting a server when none runs, and document_mode chooses the mode of the tab it opens whether or not a workspace is already running.", Vec::from([
         // B238: this description is the whole point of the fix. The mode used
         // to be a property of the SERVER, so the honest schema had to say it
         // "shapes only a newly started server" — and since B225 made every
@@ -376,11 +385,10 @@ fn tool_definitions() -> Vec<Value> {
                     "bytes_base64",
                     string("Base64 bytes to insert, alternative to text."),
                 ),
-                ("expected_revision", revision_guard()),
             ]));
             p
         },
-        mutating_required(),
+        vec![],
     ));
     tools.push((
         "replace",
@@ -446,11 +454,10 @@ fn tool_definitions() -> Vec<Value> {
                     "symbol",
                     string("A name CodeGraph's index (.codegraph/codegraph.db) has for this file, resolved to that symbol's own defining line extent — the caller says what to edit, not where it starts and ends. Refused as symbol_unavailable with no index, symbol_not_found with no matching node, or symbol_ambiguous if more than one node in this file shares the name."),
                 ),
-                ("expected_revision", revision_guard()),
             ]));
             p
         },
-        mutating_required(),
+        vec![],
     ));
     for verb in ["move", "copy"] {
         tools.push((
@@ -514,11 +521,10 @@ fn tool_definitions() -> Vec<Value> {
                         "dest_line",
                         int("Destination line (1-based, text tabs only): insert immediately before this line. One past the last line appends at end of file."),
                     ),
-                    ("expected_revision", revision_guard()),
                 ]));
                 p
             },
-            mutating_required(),
+            vec![],
         ));
     }
     tools.push(("large_edit", "Stream an acknowledged job-owned rewrite of a large file and atomically replace it.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
@@ -529,49 +535,61 @@ fn tool_definitions() -> Vec<Value> {
         ("delete_len", int("Byte length replaced.")),
         ("text", string("Replacement text.")),
         ("bytes_base64", string("Replacement bytes, alternative to text.")),
-        ("expected_revision", revision_guard()),
-    ])); p }, mutating_required()));
-    tools.push(("begin_transaction", "Begin an explicit undo transaction; subsequent ordinary edits are grouped until end_transaction.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
+    ])); p }, vec![]));
+    // A batch of replace/insert/save ops, each addressing its own
+    // file or tab_id, applied in one call instead of one round trip per
+    // edit. Best-effort per item -- a failing item is reported and the rest
+    // still apply -- and edits that succeed within the same tab in one
+    // batch group into one undo step for that tab, the way
+    // begin_transaction/end_transaction already do across separate
+    // requests (both still exist: begin_transaction/end_transaction for a
+    // caller that wants to interleave other reads between edits, bulk_edit
+    // for the common case of many edits with no interleaving). No per-item
+    // revision: each item is applied against its tab's live revision, the
+    // same automatic-revision-guard behavior every other mutating tool now
+    // has. move/copy/large_edit batching is not supported.
+    tools.push((
+        "bulk_edit",
+        "Apply several replace/insert/save ops -- each its own {op, file|tab_id, ...the usual addressing/content keys} -- in one call. Best-effort per item: a failing item is reported in its own result entry and does not block the rest. Edits that land on the same tab within this one call group into one undo step for that tab. move/copy/large_edit batching is not supported.",
+        {
+            let mut p: ToolProperties = Vec::new();
+            p.extend(Vec::from([(
+                "edits",
+                json!({
+                    "description": "Array of edit items, applied in order. Each item: {op: \"replace\"|\"insert\"|\"save\", file: <path> (opens the tab automatically if not already open) or tab_id: <id> (exactly one of the two), plus the same addressing/content keys a standalone replace/insert call takes -- offset, delete_len, cursor_id, range_start_line/range_end_line, range_start_byte/range_end_byte, expected_text/expected_bytes_base64, match_id, range_start_match/range_end_before_match/range_match_regex, symbol, text/bytes_base64 (a save item takes only its target, no other keys). session_token: optional per item, required when the item addresses a tab this identity did not just create in this same call and has no cached token for -- a caller that already opened the file through this same identity never needs to supply it. No per-item revision -- each item is applied against its tab's current revision automatically.",
+                    "type": "array",
+                    "items": {"type": "object"},
+                }),
+            )]));
+            p
+        },
+        vec!["edits"],
+    ));
+    tools.push(("begin_transaction", "Begin an explicit undo transaction; subsequent ordinary edits are grouped until end_transaction.", Vec::new(), vec![]));
     tools.push((
         "end_transaction",
         "Close the explicit undo transaction and commit its grouped undo step.",
-        {
-            let mut p: ToolProperties = Vec::new();
-            p.extend(Vec::from([("expected_revision", revision_guard())]));
-            p
-        },
-        mutating_required(),
+        Vec::new(),
+        vec![],
     ));
-    tools.push(("restore", "Turn off lossless NFC presentation; refuses with not_normalized when the tab never normalized, and refuses when edits made restoration lossy.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
+    tools.push(("restore", "Turn off lossless NFC presentation; refuses with not_normalized when the tab never normalized, and refuses when edits made restoration lossy.", Vec::new(), vec![]));
     tools.push((
         "undo",
         "Undo one server history transaction; the server returns the new revision.",
-        {
-            let mut p: ToolProperties = Vec::new();
-            p.extend(Vec::from([("expected_revision", revision_guard())]));
-            p
-        },
-        mutating_required(),
+        Vec::new(),
+        vec![],
     ));
     tools.push((
         "redo",
         "Redo one server history transaction; the server returns the new revision.",
-        {
-            let mut p: ToolProperties = Vec::new();
-            p.extend(Vec::from([("expected_revision", revision_guard())]));
-            p
-        },
-        mutating_required(),
+        Vec::new(),
+        vec![],
     ));
     tools.push((
         "save",
         "Atomically save the current working view after external-change resolution.",
-        {
-            let mut p: ToolProperties = Vec::new();
-            p.extend(Vec::from([("expected_revision", revision_guard())]));
-            p
-        },
-        mutating_required(),
+        Vec::new(),
+        vec![],
     ));
     tools.push(("save_as", "Atomically create a new target file without changing the active tab; existing targets are refused.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("target_path", string("New file to create; must not already exist."))])); p }, vec![]));
     tools.push((
@@ -800,14 +818,9 @@ fn tool_definitions() -> Vec<Value> {
                 });
                 properties.insert((*key).to_string(), value);
             }
-            // The revision guard rides the envelope, not the payload, so it is
-            // the one described key with no row in the table.
-            if let Some(value) = described.get("expected_revision") {
-                properties.insert("expected_revision".into(), value.clone());
-            }
             for key in described.keys() {
                 assert!(
-                    *key == "expected_revision" || accepted.contains(key),
+                    accepted.contains(key),
                     "{name} advertises {key}, which {method} does not read - the server would refuse it as an unknown argument"
                 );
             }
@@ -855,7 +868,7 @@ fn call_tool(id: Value, params: Value) -> Value {
         .get("file")
         .and_then(Value::as_str)
         .map(PathBuf::from);
-    let resolve_request = ResolveRequest {
+    let mut resolve_request = ResolveRequest {
         file: file.clone(),
         // Read, and left in the payload: the server routes on both.
         tab_id: payload
@@ -900,6 +913,43 @@ fn call_tool(id: Value, params: Value) -> Value {
             .unwrap_or(false),
         force_refresh: false,
     };
+    // W24/AR-23/AR-28/AR-32/AR-37: the MCP mirror of the CLI's W23 fix.
+    // `bulk_edit`'s own targets live inside `payload["edits"]`, which none
+    // of `file`/`tab_id`/`tab_path`/`endpoint` above ever see -- checked
+    // only when every one of those is absent (a caller naming any of them
+    // means what it always means). `focus_is_live` checks liveness, not
+    // just whether the cache file exists (AR-32): a stale on-disk record
+    // naming a dead server must fall to the same autostart/discovery path
+    // a brand-new identity takes, not be mistaken for a live workspace.
+    if method == "bulk_edit"
+        && resolve_request.file.is_none()
+        && resolve_request.tab_id.is_none()
+        && resolve_request.tab_path.is_none()
+        && resolve_request.explicit_endpoint.is_none()
+    {
+        let identity = client::identity(
+            resolve_request.explicit_identity.as_deref(),
+            &resolve_request.agent_env_var,
+        );
+        let warm = match identity.as_deref() {
+            Some(identity) => match client::focus_is_live(identity) {
+                Ok(warm) => warm,
+                Err(error) => return tool_error(id, &error),
+            },
+            None => false,
+        };
+        if !warm {
+            if let Some(first_file) = payload
+                .get("edits")
+                .and_then(Value::as_array)
+                .and_then(|edits| edits.first())
+                .and_then(|item| item.get("file"))
+                .and_then(Value::as_str)
+            {
+                resolve_request.file = Some(PathBuf::from(first_file));
+            }
+        }
+    }
     let auth_token = payload
         .get("auth_token")
         .and_then(|value| value.as_str().map(str::to_owned));
@@ -985,6 +1035,12 @@ fn call_tool(id: Value, params: Value) -> Value {
             auth_token.as_deref().or(resolved.auth_token.as_deref()),
             returned_session_token.or(resolved.session_token.as_deref()),
         );
+        client::persist_bulk_edit_item_caches(
+            &resolve_request,
+            &resolved,
+            auth_token.as_deref().or(resolved.auth_token.as_deref()),
+            &frames,
+        );
     }
     // A refusal must look refused on the MCP wire too: the CLI exits
     // non-zero when an error frame is in the answer, and an MCP harness
@@ -1060,7 +1116,7 @@ mod tests {
         assert_eq!(content[1]["text"], "the notice");
     }
 
-    use super::{handle, mutating_required, parse_revision_argument, ADAPTER_ARGUMENTS};
+    use super::{handle, parse_revision_argument, ADAPTER_ARGUMENTS};
     use serde_json::{json, Value};
 
     fn tools() -> Vec<Value> {
@@ -1158,30 +1214,53 @@ mod tests {
         }
     }
 
-    /// The mutating tools' revision guard is the one adapter-consumed
-    /// argument that is deliberately not on every tool, so it is pinned
-    /// where it does belong rather than left to the sweep above.
+    /// ai-text-editor-automatic-revision-guard: the client auto-fills the
+    /// revision for every revision-guarded request that did not already
+    /// carry one, so expected_revision is not offered as a property at all
+    /// on any tool any more -- not merely absent from `required`. Checked
+    /// against the exact nine guarded verbs plus begin_transaction/
+    /// end_transaction, replacing the old test's `found >= 7` bound (which
+    /// is how a two-verb undercount went unnoticed for as long as it did).
     #[test]
-    fn the_revision_guard_is_declared_wherever_it_is_required() {
-        let guard = mutating_required();
-        assert_eq!(guard, vec!["expected_revision"]);
+    fn expected_revision_is_no_longer_part_of_the_mutating_schema() {
+        const FORMERLY_GUARDED_TOOLS: &[&str] = &[
+            "insert",
+            "replace",
+            "move",
+            "copy",
+            "large_edit",
+            "restore",
+            "undo",
+            "redo",
+            "save",
+            "begin_transaction",
+            "end_transaction",
+        ];
         let mut found = 0;
         for tool in tools() {
+            let name = tool.get("name").and_then(Value::as_str).unwrap_or("?");
+            if FORMERLY_GUARDED_TOOLS.contains(&name) {
+                found += 1;
+            }
+            assert!(
+                !properties(&tool).contains_key("expected_revision"),
+                "{name} still advertises expected_revision"
+            );
             let required = tool
                 .pointer("/inputSchema/required")
                 .and_then(Value::as_array)
                 .cloned()
                 .unwrap_or_default();
-            if required.iter().any(|key| key == "expected_revision") {
-                let name = tool.get("name").and_then(Value::as_str).unwrap_or("?");
-                assert!(
-                    properties(&tool).contains_key("expected_revision"),
-                    "{name} requires the revision guard and does not declare it"
-                );
-                found += 1;
-            }
+            assert!(
+                !required.iter().any(|key| key == "expected_revision"),
+                "{name} still requires expected_revision"
+            );
         }
-        assert!(found >= 7, "expected the mutating tools, found {found}");
+        assert_eq!(
+            found,
+            FORMERLY_GUARDED_TOOLS.len(),
+            "expected exactly the nine guarded verbs plus begin_transaction/end_transaction"
+        );
     }
 
     /// search accepts `query` OR `query_base64` -- the server itself refuses

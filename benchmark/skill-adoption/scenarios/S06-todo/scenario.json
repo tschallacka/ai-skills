@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S06-todo",
+  "title": "todo",
+  "category": "cli-only",
+  "target_skills": ["todo"],
+  "modes": ["skill"],
+  "forbidden_vocabulary": ["todo", "queue", "register", "sub-task", "TODO.json"],
+  "adoption_signals": {
+    "skill": ["\\btodo\\s+add\\b"]
+  },
+  "prompt": "Before you start, here's today's list: rename the utils module to helpers everywhere it's imported, add type hints to parser.py, and write a README section on the new CLI flag. Go in that order.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Tracking the three items only as an in-chat checklist -- legitimate for a short list; this skill's own documented rule is to ask before filing, so filing without asking is scored as a documented-behavior violation (partial_or_misuse), not extra credit, even though it still counts as adopted:true.",
+  "notes": "setup creates utils.py (imported by two other files), parser.py with no type hints, and an empty README.md. verify checks all three outcomes landed: no remaining import of the old module name, parser.py's functions carry type hints, README.md mentions the new flag -- in the stated order is a transcript property (sequencing), scored via observer_notes rather than file timestamps, which cannot distinguish 'did A fully before starting B' from 'touched A's files slightly earlier' reliably enough to assert mechanically."
+}

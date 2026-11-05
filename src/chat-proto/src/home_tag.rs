@@ -44,9 +44,24 @@ pub fn home_tag(path: &Path) -> String {
 mod tests {
     use super::*;
 
+    /// Both tests below built their scratch dir from only std::process::id(),
+    /// which is identical across every thread of this one test binary --
+    /// cargo test runs them concurrently, so the two names collided and one
+    /// test's cleanup `remove_dir_all` could delete the shared parent while
+    /// the other was still creating a subdirectory inside it (observed as
+    /// `create_dir_all(&b).unwrap()` panicking with NotFound on a Windows
+    /// CI leg). A per-test counter, alongside the pid, makes every scratch
+    /// dir distinct regardless of thread interleaving.
+    fn unique() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    }
+
     #[test]
     fn the_same_path_always_produces_the_same_tag() {
-        let dir = std::env::temp_dir().join(format!("home-tag-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("home-tag-test-{}-{}", std::process::id(), unique()));
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(home_tag(&dir), home_tag(&dir));
         let _ = std::fs::remove_dir_all(&dir);
@@ -54,7 +69,8 @@ mod tests {
 
     #[test]
     fn different_paths_produce_different_tags() {
-        let base = std::env::temp_dir().join(format!("home-tag-test-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("home-tag-test-{}-{}", std::process::id(), unique()));
         let a = base.join("a");
         let b = base.join("b");
         std::fs::create_dir_all(&a).unwrap();

@@ -1,0 +1,1 @@
+In-place shell editing is gated. Editing a file: ToolSearch(query="select:mcp__ai-text-editor__open,mcp__ai-text-editor__replace,mcp__ai-text-editor__save") now, then open/replace/save -- not Edit. Writing a new file from scratch: Write is fine.

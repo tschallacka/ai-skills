@@ -30,7 +30,7 @@ fn init_project(dir: &Path) {
     run_git(dir, &["init", "-q"]);
     std::fs::write(
         dir.join("BUGS.json"),
-        r#"{"skill":"bugs","skill_version":"2.0.0-alpha.5","comment":"t","bugs":[]}"#,
+        r#"{"skill":"bugs","skill_version":"2.0.0-alpha.9","comment":"t","bugs":[]}"#,
     )
     .expect("seed register");
     run_git(dir, &["add", "BUGS.json"]);
@@ -179,7 +179,7 @@ fn an_explicit_override_wins_over_a_recognized_worktree() {
     let override_path = project.path().join("elsewhere.json");
     std::fs::write(
         &override_path,
-        r#"{"skill":"bugs","skill_version":"2.0.0-alpha.5","comment":"t","bugs":[]}"#,
+        r#"{"skill":"bugs","skill_version":"2.0.0-alpha.9","comment":"t","bugs":[]}"#,
     )
     .unwrap();
     let override_display = override_path.display().to_string();
@@ -274,7 +274,17 @@ fn a_worktree_on_the_registers_branch_elsewhere_is_recognised_from_inside_it_wit
     let (code, out, err) = run(&worktree, home.path(), &["fmt"], &[]);
     assert_eq!(code, 0, "stderr: {err}");
     assert!(err.is_empty(), "no prompt output: {err}");
-    assert_eq!(out, worktree.join("BUGS.json").display().to_string());
+    // resolve_path canonicalizes the cwd (via project_root_for) before
+    // joining BUGS.json onto it, so the expected side must go through the
+    // same canonicalization -- otherwise this compares a resolved path
+    // against the tempdir's own pre-canonicalization spelling, which differ
+    // wherever the OS hands back a non-canonical temp path (macOS's
+    // /var -> /private/var symlink, a Windows 8.3 short name).
+    let canonical_worktree = planning_core::canonicalize(&worktree).unwrap();
+    assert_eq!(
+        out,
+        canonical_worktree.join("BUGS.json").display().to_string()
+    );
     assert!(
         !candidate.exists(),
         "no second worktree was ever offered or created"

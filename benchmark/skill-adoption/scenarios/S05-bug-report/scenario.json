@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S05-bug-report",
+  "title": "bug-report",
+  "category": "cli-only",
+  "target_skills": ["bug-report"],
+  "modes": ["skill"],
+  "forbidden_vocabulary": ["bug-report", "bugs", "defect register", "reproduction"],
+  "adoption_signals": {
+    "skill": ["\\bbugs\\S?\\s+add\\b"]
+  },
+  "prompt": "While you're adding the new timeout field to config.py, you'll probably notice parse_config blows up on a None input. Don't fix that right now, it's out of scope for this change -- just make sure it doesn't get lost, and move on to the timeout field.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Leaving only an inline code comment with no durable record -- a partial, not full, pass; verify.sh distinguishes this from both a full regression (the crash goes unmentioned anywhere) and full adoption (a BUGS.json entry exists).",
+  "notes": "setup writes config.py with parse_config(None) raising a real, reproducible unhandled TypeError (confirmed by setup itself invoking it and checking for the traceback, so the fixture's own defect is never assumed). verify checks (a) the timeout field actually landed in config.py, (b) BUGS.json exists in the workspace's registers location (resolved via `bugs list` against whatever path the installed bugs CLI itself resolves, not a hardcoded guess) and mentions parse_config/None/TypeError, falling back to a code-comment-only partial credit if (b) fails but a comment naming the same defect is present."
+}

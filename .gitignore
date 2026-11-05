@@ -55,6 +55,21 @@ benchmark/results/*/current/
 # until a specific run is deliberately kept.
 benchmark/ai-text-editor-usage/results/*/
 
+# lab mode's cross-run subject index (LAB-PROTOCOL.md) -- a top-level file
+# in results/, not caught by the per-run-id directory glob above, and the
+# same "not committed evidence" rule applies to it.
+benchmark/ai-text-editor-usage/results/subjects-registry.jsonl
+
+# skill-adoption benchmark: raw per-run evidence from live interactive
+# `claude -p`/`opencode` sessions (runs.jsonl, registry.jsonl, transcripts/)
+# plus the aggregate.json/AGGREGATE.md regenerated from them -- same
+# "exploratory evidence, not committed until deliberately kept" rule as
+# ai-text-editor-usage/results/ above. See
+# benchmark/skill-adoption/DATA-SPEC.md. The scenario manifests, schemas and
+# orchestration scripts themselves are NOT under this directory and are
+# committed normally -- they are the method, not the evidence.
+benchmark/skill-adoption/results/
+
 # nix build output symlinks and direnv cache. The dev environment is a
 # development dependency only; see CONTRIBUTING.md.
 /result
@@ -167,6 +182,7 @@ bug-report/bin/*/
 todo/bin/*/
 rjq/bin/*/
 decisions/bin/*/
+tailpipe/bin/*/
 
 # A local .env is where a credential ends up -- REGISTERS_PUSH_TOKEN was written
 # to one on 2026-09-04. It was NOT ignored, so one `git add -A` in this
@@ -188,3 +204,6 @@ decisions/bin/*/
 # its per-drive notes. Never committed; the drives read and write them in place.
 .opencode/
 .Ai-EDITOR-BRUTAL-REVIEW-PROMPT.md
+
+# Python bytecode.
+*.pyc

@@ -1,0 +1,7 @@
+In-place shell editing is gated. Do this now, in this order:
+
+1. If you are editing an existing file: call ToolSearch(query="select:mcp__ai-text-editor__open,mcp__ai-text-editor__replace,mcp__ai-text-editor__save", max_results=5) first. Then call mcp__ai-text-editor__open, then replace, then save. Do not fall back to Edit as a substitute for this step.
+2. If you are generating a new file wholesale, with no existing content at risk: use Write instead.
+3. If this is a mechanical sweep across many files the editor cannot express: mint a token with ${CLAUDE_PLUGIN_ROOT}/hooks/editor-token and prefix your command with it.
+
+Pick the matching case and act on it immediately.

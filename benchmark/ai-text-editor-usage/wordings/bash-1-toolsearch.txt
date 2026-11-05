@@ -1,0 +1,40 @@
+In-place shell editing is gated -- the ai-text-editor MCP/skill is the better tool.
+
+Before retrying, ask which of these you are doing:
+
+  1. EDITING A FILE. Use the ai-text-editor MCP tool, in whichever form this
+     session has. If mcp__ai-text-editor__open/replace/save are not yet
+     callable (this session loads many tool schemas lazily, so a tool can be
+     named in your tool list without its schema being loaded yet), call
+     ToolSearch first to load them -- for example:
+       ToolSearch(query="select:mcp__ai-text-editor__open,mcp__ai-text-editor__replace,mcp__ai-text-editor__save", max_results=5)
+     Then call them directly:
+       mcp__ai-text-editor__open      -> gives you a tab_id and a revision
+       mcp__ai-text-editor__replace   -> range_start_line/range_end_line, plus
+                                         expected_text so a mismatch REFUSES
+                                         instead of silently doing nothing
+       mcp__ai-text-editor__save      -> carries the revision guard
+     No MCP registered here? Invoke the ai-text-editor skill directly instead.
+     Do this now, in this same turn, before trying anything else -- do not
+     fall back to the Edit tool as a substitute for this step.
+
+  2. GENERATING a file wholesale, where no existing content is at risk -- a
+     scratch fixture, a probe script, a temp file under $TMPDIR. Use the
+     Write tool, or mint a token if it must be a shell redirect.
+
+  3. A MECHANICAL SWEEP the editor genuinely cannot express -- the same
+     change across dozens of files. That is a real case, and it is what the
+     token is for. Say so when you mint it.
+
+     ${CLAUDE_PLUGIN_ROOT}/hooks/editor-token \
+       --why '<why the editor cannot do this one>' \
+       --command '<the exact command you are about to run>'
+
+     It prints EDIT_OK=<token>; prefix the command with that. The token
+     works once, expires in 120 seconds, and is bound to that exact command.
+
+Why this exists: sed -i rewrites and exits 0 whether or not the pattern
+matched, so a typo looks like success. A heredoc stacks the shell's escaping
+on top of the target file's own syntax. Neither verifies what it replaces,
+while the editor's expected_text refuses on mismatch and its journal
+survives a git checkout that had discarded a shell rewrite.

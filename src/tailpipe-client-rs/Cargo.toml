@@ -1,0 +1,24 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "tailpipe-client-rs"
+version = "0.1.0"
+edition = "2021"
+description = "tailpipe's reader/ingest CLI: pipes stdin into a stream, and lists/reads/searches/tails/saves it back"
+license = "MIT"
+
+[lib]
+name = "tailpipe_client_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tailpipe-client-rs"
+path = "src/main.rs"
+
+[dependencies]
+tailpipe-server-rs = { path = "../tailpipe-server-rs" }
+stale-lock = { path = "../stale-lock" }
+serde_json.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true

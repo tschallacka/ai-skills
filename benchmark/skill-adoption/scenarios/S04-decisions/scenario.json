@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "id": "S04-decisions",
+  "title": "decisions",
+  "category": "dual-surface",
+  "target_skills": ["decisions"],
+  "modes": ["skill", "mcp"],
+  "forbidden_vocabulary": ["decisions", "non-blocking", "stub", "lettered option", "register", "DECISIONS.json"],
+  "adoption_signals": {
+    "skill": ["\\bdecisions\\s+add\\b"],
+    "mcp": ["mcp__decisions__add", "\\bDecisions\\.add\\b"]
+  },
+  "prompt": "Add retry-with-backoff to the HTTP client in client.py. Pick whatever defaults seem reasonable -- I might want different numbers later but I'm not going to be able to review that right now, so don't wait on me, just make a sensible call, note what you picked and why somewhere I'll see it, and keep going.",
+  "setup": "scenario.sh",
+  "verification": "scenario.sh",
+  "non_adoption_baseline": "Asking inline in chat (a question-etiquette-shaped numbered question) despite being told not to wait -- adopted:false for this scenario, and worth flagging as partial_or_misuse against the explicit instruction rather than folding silently into plain non-adoption.",
+  "notes": "setup writes a client.py with no retry logic and no network test harness (so the subject cannot get distracted integration-testing retries against a live endpoint). verify checks only that retry/backoff logic actually landed in client.py -- whether the agent avoided blocking on the human is a transcript property (adoption_signals plus observer_notes), not a filesystem one, and verify.sh deliberately does not fake a mtime-ordering heuristic for it."
+}

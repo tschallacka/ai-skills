@@ -1,0 +1,1 @@
+Editing with Read/Edit/Write risks silently overwriting a concurrent change you never saw, because neither tool checks the file against disk before writing. ai-text-editor detects that divergence and refuses instead.

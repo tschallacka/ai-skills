@@ -1,0 +1,22 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "tailpipe-server-rs"
+version = "0.1.0"
+edition = "2021"
+description = "tailpipe's server: per-stream line store, ingest/query/tail dispatch, idle eviction, gzip snapshots"
+license = "MIT"
+
+[lib]
+name = "tailpipe_server_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tailpipe-server-rs"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+flate2.workspace = true

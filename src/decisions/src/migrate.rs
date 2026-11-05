@@ -21,7 +21,12 @@ use crate::register::{Question, Register};
 /// in this enum, so `attempt` below reports it as unconvertible rather than
 /// archiving or guessing, the same honesty this module already gives any
 /// other foreign shape it cannot parse.
-pub const SUPPORTED: &str = "2.0.0-alpha.5";
+///
+/// Bumped again for alpha.9 in lockstep with every other register skill's
+/// SUPPORTED and package.json's own version; this register's own shape did
+/// not change this release (three bug fixes in ai-text-editor/tailpipe, not
+/// a data-format change here).
+pub const SUPPORTED: &str = "2.0.0-alpha.9";
 
 pub struct Unconvertible {
     pub id: String,

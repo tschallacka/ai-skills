@@ -155,29 +155,43 @@ pub struct UninstallReport {
     pub opencode_tui_hint_plugin_removed: bool,
 }
 
-/// Reverses `skill`'s own per-skill permission grant, if it has one. Only
-/// interactive-shell's Bash-execute grant is per-skill today; the planning
-/// and worktree grants are run-wide (added once for the whole run, not tied
-/// to any one skill's install), so they are deliberately left untouched here
-/// and remain a future whole-run "deprovision" command's job.
+/// Reverses `skill`'s own per-skill permission grant, if it has one.
+/// interactive-shell's Bash-execute grant and the dual-surface skills' own
+/// `mcp__<skill>__*` wildcard (written by `run_mcp_tool_permission_step` when
+/// installed in mcp mode) are both per-skill; the planning and worktree
+/// grants are run-wide (added once for the whole run, not tied to any one
+/// skill's install), so they are deliberately left untouched here and remain
+/// a future whole-run "deprovision" command's job.
 ///
-/// `target_root` plays no part in locating the grant: since T72 the binaries
-/// it grants execute on live in the shared XDG bin directory, keyed only by
-/// `home`, not under any one target root.
-fn revoke_skill_permissions(skill: &str, kind: &str, home: &Path) -> Vec<String> {
-    if skill != "interactive-shell" {
+/// `is_mcp` must be computed by the caller BEFORE `dest_dir` is deleted:
+/// `integration::installed_mode` reads a marker file that lives inside
+/// `dest_dir`, so deriving it in here would always see `None` once
+/// `uninstall_skill` has already removed the directory.
+///
+/// `target_root` plays no part in locating either grant: since T72 the
+/// binaries interactive-shell's grant covers live in the shared XDG bin
+/// directory, keyed only by `home`, not under any one target root, and the
+/// mcp-tool grant is keyed by `is_mcp`, not by a hardcoded skill list -- any
+/// current or future mcp-capable skill is covered by construction.
+fn revoke_skill_permissions(skill: &str, kind: &str, is_mcp: bool, home: &Path) -> Vec<String> {
+    if kind != "claude" {
         return Vec::new();
     }
-    let bins = shared_bin::shared_bin_dir(home);
-    let bins = bins.to_string_lossy();
-    let removed = match kind {
-        "claude" => permissions::claude_interactive_shell_permissions_remove(&bins, home).ok(),
-        _ => None,
-    };
-    match removed {
-        Some(permissions::PermissionRemovalOutcome::Removed(entries)) => entries,
-        _ => Vec::new(),
+    if skill == "interactive-shell" {
+        let bins = shared_bin::shared_bin_dir(home);
+        let bins = bins.to_string_lossy();
+        return match permissions::claude_interactive_shell_permissions_remove(&bins, home) {
+            Ok(permissions::PermissionRemovalOutcome::Removed(entries)) => entries,
+            _ => Vec::new(),
+        };
     }
+    if is_mcp {
+        return match permissions::claude_mcp_tool_permissions_remove(skill, home) {
+            Ok(permissions::PermissionRemovalOutcome::Removed(entries)) => entries,
+            _ => Vec::new(),
+        };
+    }
+    Vec::new()
 }
 
 pub struct UninstallPreview {
@@ -301,8 +315,11 @@ pub fn uninstall_skill(
         .collect();
 
     let mut mcp_entry_removed = false;
+    let mut is_mcp = false;
     if let Some(kind) = kind {
-        if integration::installed_mode(source_root, skill, &dest_dir).as_deref() == Some("mcp") {
+        is_mcp =
+            integration::installed_mode(source_root, skill, &dest_dir).as_deref() == Some("mcp");
+        if is_mcp {
             let shared_dir = shared_bin::shared_bin_dir(home);
             mcp_entry_removed = mcp::unregister_for_kind(kind, skill, &shared_dir, home)?;
         }
@@ -358,7 +375,7 @@ pub fn uninstall_skill(
     }
 
     let permissions_removed = match kind {
-        Some(kind) => revoke_skill_permissions(skill, kind, home),
+        Some(kind) => revoke_skill_permissions(skill, kind, is_mcp, home),
         None => Vec::new(),
     };
 
@@ -759,6 +776,45 @@ mod tests {
         let doc: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(settings).unwrap()).unwrap();
         assert!(doc["permissions"]["allow"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn uninstalling_an_mcp_mode_skill_revokes_its_own_mcp_tool_grant() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("chat").join("SKILL.md"), "content");
+        let home = tempfile::tempdir().unwrap();
+        let claude_root = home.path().join(".claude/skills");
+        install_into(source_root.path(), "chat", &claude_root, home.path());
+        // install_into passes mode: None, so the marker that signals mcp mode
+        // is written by hand here, exactly as a real mcp-mode install would
+        // leave it -- see integration::mode_marker_path.
+        fs::write(
+            crate::integration::mode_marker_path(&claude_root.join("chat")),
+            "mcp",
+        )
+        .unwrap();
+        let settings = home.path().join(".claude").join("settings.json");
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        fs::write(&settings, "{}").unwrap();
+        crate::permissions::claude_mcp_tool_permissions("chat", home.path()).unwrap();
+
+        let report = uninstall_skill(
+            source_root.path(),
+            "chat",
+            &claude_root,
+            home.path(),
+            Some("claude"),
+        )
+        .unwrap();
+
+        assert_eq!(report.permissions_removed, vec!["mcp__chat__*".to_string()]);
+        let doc: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        assert!(!doc["permissions"]["allow"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "mcp__chat__*"));
     }
 
     #[test]

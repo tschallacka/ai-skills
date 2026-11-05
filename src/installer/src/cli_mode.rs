@@ -262,7 +262,20 @@ pub fn install_skill_cli(
         if let Some(filename) = shared_bin::shared_binary_filename(relative) {
             let shared_dir = shared_bin::shared_bin_dir(home);
             fs::create_dir_all(&shared_dir).map_err(|e| e.to_string())?;
-            fs::copy(&source_file, shared_dir.join(filename)).map_err(|e| e.to_string())?;
+            let dest_file = shared_dir.join(filename);
+            // B4: same reason install::install_skill's own shared-binary
+            // branch does this -- a direct fs::copy opens the destination
+            // for write, which fails ETXTBSY the moment another process
+            // (this skill's own already-running MCP adapter, e.g.) has it
+            // mapped executable. copy_file_atomic renames a sibling temp
+            // file over it instead, which that running process is
+            // unaffected by; skipping the copy entirely when the bytes
+            // already match avoids even that in the common case.
+            if !dest_file.is_file()
+                || !install::files_equal(&source_file, &dest_file).map_err(|e| e.to_string())?
+            {
+                install::copy_file_atomic(&source_file, &dest_file).map_err(|e| e.to_string())?;
+            }
             continue;
         }
         let dest_file = dest_dir.join(relative);
@@ -561,5 +574,47 @@ mod tests {
         .unwrap();
         assert!(matches!(outcome, CliInstallOutcome::Collision));
         assert!(target.path().join("todo/SKILL.md").is_symlink());
+    }
+
+    // B4: this branch used to `fs::copy` straight into the shared binary's
+    // own final path, which opens that path for write -- on Linux, ETXTBSY
+    // the moment another process (this skill's own already-running MCP
+    // adapter, say) has it mapped executable. A read-only destination is the
+    // portable way to prove the same failure class without actually
+    // exec'ing a child binary in a unit test: an in-place open-for-write
+    // fails on it exactly as it would on a busy text segment, while
+    // copy_file_atomic's rename-over-a-sibling-temp-file succeeds regardless,
+    // since rename only needs write access to the directory entry.
+    #[cfg(unix)]
+    #[test]
+    fn install_skill_cli_overwrites_a_changed_shared_binary_even_when_it_cannot_be_opened_for_write(
+    ) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let triple = installer_platform::current()
+            .expect("test host must be a supported platform")
+            .as_str()
+            .to_string();
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("todo/SKILL.md"), "# todo\n");
+        write(
+            &dir.path().join(format!("todo/bin/{triple}/todo")),
+            "new content\n",
+        );
+        let home = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+
+        let shared_dir = shared_bin::shared_bin_dir(home.path());
+        fs::create_dir_all(&shared_dir).unwrap();
+        let dest = shared_dir.join("todo");
+        fs::write(&dest, "old content\n").unwrap();
+        let mut perms = fs::metadata(&dest).unwrap().permissions();
+        perms.set_mode(0o444);
+        fs::set_permissions(&dest, perms).unwrap();
+
+        let outcome =
+            install_skill_cli(dir.path(), "todo", target.path(), home.path(), true, false).unwrap();
+        assert!(matches!(outcome, CliInstallOutcome::Installed(_)));
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "new content\n");
     }
 }

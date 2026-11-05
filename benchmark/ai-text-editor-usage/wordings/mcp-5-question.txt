@@ -1,0 +1,1 @@
+Could this file change while you work on it, from another process or a teammate's own edit? If so, ai-text-editor's revision guard is built for exactly that; Read/Edit/Write are not.
