@@ -116,13 +116,14 @@ struct LargeHistory {
 /// stdout. It lives here because this is the one binary every integration mode
 /// installs. EDITOR_GATE_OFF comes from the harness's environment, not an agent's.
 fn strict_gate() {
+    // Always drained, so whoever is writing the payload never hits a closed pipe.
+    // Input that cannot be read stays empty, which the gate answers with a deny.
+    let mut input = String::new();
+    let _ = io::Read::read_to_string(&mut io::stdin(), &mut input);
     if std::env::var("EDITOR_GATE_OFF").as_deref() == Ok("1") {
         print!("{{}}");
         return;
     }
-    // Input that cannot be read stays empty, which the gate answers with a deny.
-    let mut input = String::new();
-    let _ = io::Read::read_to_string(&mut io::stdin(), &mut input);
     print!("{}", ai_text_editor::strict_gate::answer(&input));
 }
 
