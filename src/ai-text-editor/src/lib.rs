@@ -53,6 +53,7 @@ pub mod resources;
 pub mod revision;
 pub mod search;
 pub mod session;
+pub mod strict_gate;
 pub mod transport;
 pub mod verbosity;
 pub mod verbs;

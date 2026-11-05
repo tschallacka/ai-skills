@@ -44,9 +44,12 @@ Usage:
                      (--all | --skill NAME [--skill NAME ...])
                      [--source DIR] [--integration MODE|SKILL=MODE ...]
                      [--editor-integration skill|mcp] [--yes]
-                     [--package prod|dev]
+                     [--package prod|dev] [--editor-gate current|strict]
                      runs the planning/worktrees/interactive-shell/editor
                      permission prompts unless --yes auto-answers them;
+                     --editor-gate strict (recommended; default current, and
+                     --yes alone never chooses it) makes ai-text-editor binding:
+                     native Edit/Write and single-file search are denied;
                      --package dev (default prod; also read from
                      $PACKAGE_SELECTION) also ships MODE:DEV-marked files
                      (tests, maintainer docs) instead of filtering them out,
@@ -74,6 +77,7 @@ Usage:
                      the single portable plan root
   installer install-tui-hint-plugin --agent claude|opencode --source DIR [--target DIR]
   installer install-editor-gate-plugin --source DIR --target DIR
+                     [--editor-gate current|strict]
                      install the vendor-shipped plugin that rides with
                      interactive-shell / ai-text-editor
   installer install-agent-identity-plugin --source DIR --target DIR
@@ -99,7 +103,7 @@ Usage:
                      up (exit 2 declined, 3 collision, 0 installed)
   installer interactive [--target DIR | --agent NAME] [--source DIR]
                      [--integration MODE|SKILL=MODE ...] [--yes]
-                     [--package prod|dev]
+                     [--package prod|dev] [--editor-gate current|strict]
                      full-screen skill picker; installs the confirmed
                      selection, or does nothing if the user quits. With
                      neither --target nor --agent, prompts to choose an
@@ -228,6 +232,8 @@ struct InstallArgs {
     integration: Vec<String>,
     yes: bool,
     package_dev: bool,
+    /// `--editor-gate`; `None` carries the installed choice forward or asks.
+    editor_gate: Option<bool>,
 }
 
 fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
@@ -239,6 +245,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
     let mut integration = Vec::new();
     let mut yes = false;
     let mut package_dev = package_selection_env_default();
+    let mut editor_gate: Option<bool> = None;
 
     let mut i = 0;
     while i < argv.len() {
@@ -281,6 +288,12 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
                 package_dev =
                     parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
             }
+            "--editor-gate" => {
+                i += 1;
+                editor_gate = Some(parse_editor_gate_flag(
+                    argv.get(i).ok_or("--editor-gate needs current or strict")?,
+                )?);
+            }
             other => return Err(format!("install: unknown option: {other}")),
         }
         i += 1;
@@ -294,6 +307,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
         integration,
         yes,
         package_dev,
+        editor_gate,
     })
 }
 
@@ -310,17 +324,24 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
 struct Confirms {
     yes: bool,
     bridge: Option<ui::progress::AskBridge>,
+    /// `--editor-gate`, the one answer that `--yes` must not supply.
+    editor_gate: Option<bool>,
 }
 
 impl Confirms {
     fn new(yes: bool) -> Self {
-        Confirms { yes, bridge: None }
+        Confirms {
+            yes,
+            bridge: None,
+            editor_gate: None,
+        }
     }
 
     fn with_bridge(yes: bool, bridge: ui::progress::AskBridge) -> Self {
         Confirms {
             yes,
             bridge: Some(bridge),
+            editor_gate: None,
         }
     }
 
@@ -1779,15 +1800,77 @@ fn run_editor_steering_and_gate_step(
         return;
     }
     run_editor_steering_step(home, confirms, sink);
+    let strict = choose_editor_gate_strict(&claude_roots, confirms);
     for target in &claude_roots {
-        match plugins::install_editor_gate_plugin(source, target) {
+        let installed = plugins::install_editor_gate_plugin(source, target).and_then(|dir| {
+            plugins::set_editor_gate_strict(&dir, strict)?;
+            Ok(dir)
+        });
+        match installed {
             Ok(destination) => sink.log(&format!(
-                "Installed: {} (gates sed -i/perl -i/heredoc writes behind a minted token)",
-                destination.display()
+                "Installed: {} ({})",
+                destination.display(),
+                editor_gate_summary(strict)
             )),
             Err(e) => sink.log(&format!("editor-gate-plugin: {e}")),
         }
     }
+}
+
+fn choose_editor_gate_strict(claude_roots: &[&Path], confirms: &mut Confirms) -> bool {
+    let already_strict = claude_roots
+        .iter()
+        .any(|target| plugins::editor_gate_is_strict(target));
+    let (explicit, unattended) = (confirms.editor_gate, confirms.yes);
+    plugins::resolve_editor_gate_strict(explicit, already_strict, unattended, || {
+        confirms.ask(
+            "Turn on the editor gate's strict mode? [recommended]",
+            "The current gate stops sed -i, perl -i and heredoc writes unless a token is minted, \
+             and only reminds about the rest, which an agent told otherwise simply ignores.\n\
+             Strict mode makes it binding, with no token:\n\
+             - the native Edit, Write and MultiEdit tools are denied\n\
+             - searching one file with grep, rg, sed, awk or a small script is denied\n\
+             - echo, printf and tee writing to a real path are denied\n\
+             The agent is sent to ai-text-editor instead. Searching command output, searching \
+             many files, and shell writes to temp paths still work. Answering no keeps the \
+             current behaviour; change it later with --editor-gate strict or current.",
+        )
+    })
+}
+
+fn editor_gate_summary(strict: bool) -> &'static str {
+    if strict {
+        "strict mode: native edits and single-file search go through ai-text-editor"
+    } else {
+        "gates sed -i/perl -i/heredoc writes behind a minted token; --editor-gate strict is \
+         the recommended stronger mode"
+    }
+}
+
+fn parse_editor_gate_flag(value: &str) -> Result<bool, String> {
+    match value {
+        "current" => Ok(false),
+        "strict" => Ok(true),
+        other => Err(format!(
+            "--editor-gate must be current or strict, not {other}"
+        )),
+    }
+}
+
+/// Splits `--editor-gate` off the arguments shared by every plugin subcommand.
+fn take_editor_gate_flag(argv: &[String]) -> Result<(Option<bool>, Vec<String>), String> {
+    let mut chosen = None;
+    let mut rest = Vec::with_capacity(argv.len());
+    let mut args = argv.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--editor-gate" {
+            let value = args.next().ok_or("--editor-gate needs current or strict")?;
+            chosen = Some(parse_editor_gate_flag(value)?);
+        } else {
+            rest.push(arg.clone());
+        }
+    }
+    Ok((chosen, rest))
 }
 
 /// Two independent off-switches; declining both leaves the setting
@@ -1898,6 +1981,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     // first root's prompt must still auto-answer every later root's
     // prompts too.
     let mut confirms = Confirms::new(args.yes);
+    confirms.editor_gate = args.editor_gate;
     let mut summary = Summary::default();
     let mut installed_skills: Vec<String> = Vec::new();
     // `install` (this CLI subcommand, always requiring an explicit --target
@@ -2718,15 +2802,20 @@ fn run_install_tui_hint_plugin(argv: &[String]) -> Result<ExitCode, String> {
 }
 
 fn run_install_editor_gate_plugin(argv: &[String]) -> Result<ExitCode, String> {
-    let args = parse_plugin_args("install-editor-gate-plugin", argv)?;
+    let (editor_gate, argv) = take_editor_gate_flag(argv)?;
+    let args = parse_plugin_args("install-editor-gate-plugin", &argv)?;
     let target = args
         .target
         .ok_or("install-editor-gate-plugin: --target is required")?;
     let destination =
         plugins::install_editor_gate_plugin(&args.source, &target).map_err(|e| e.to_string())?;
+    if let Some(strict) = editor_gate {
+        plugins::set_editor_gate_strict(&destination, strict).map_err(|e| e.to_string())?;
+    }
     println!(
-        "Installed: {} (gates sed -i/perl -i/heredoc writes behind a minted token; see editor-gate-plugin/README.md)",
-        destination.display()
+        "Installed: {} ({}; see editor-gate-plugin/README.md)",
+        destination.display(),
+        editor_gate_summary(plugins::editor_gate_is_strict(&target))
     );
     Ok(ExitCode::SUCCESS)
 }
@@ -2995,6 +3084,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
     let mut integration_args = Vec::new();
     let mut yes = false;
     let mut package_dev = package_selection_env_default();
+    let mut editor_gate: Option<bool> = None;
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -3030,6 +3120,12 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 i += 1;
                 package_dev =
                     parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
+            }
+            "--editor-gate" => {
+                i += 1;
+                editor_gate = Some(parse_editor_gate_flag(
+                    argv.get(i).ok_or("--editor-gate needs current or strict")?,
+                )?);
             }
             other => return Err(format!("interactive: unknown option: {other}")),
         }
@@ -3209,6 +3305,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                         Some(bridge) => Confirms::with_bridge(yes, bridge),
                         None => Confirms::new(yes),
                     };
+                    confirms.editor_gate = editor_gate;
                     let mut summary = Summary::default();
                     let mut installed_skills: Vec<String> = Vec::new();
                     for (root, _root_kind) in &roots_for_thread {

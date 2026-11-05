@@ -33,13 +33,19 @@ const EDITOR_GATE_PLUGIN_FILES: &[&str] = &[
     "hooks/editor-token",
     "hooks/pre-tool-use-bash.sh",
     "hooks/pre-tool-use-edit-write.sh",
+    "hooks/pre-tool-use-read.sh",
+    "hooks/pre-tool-use-strict.sh",
 ];
 const EDITOR_GATE_PLUGIN_EXECUTABLES: &[&str] = &[
     "hooks/editor-token",
     "hooks/lib.sh",
     "hooks/pre-tool-use-bash.sh",
     "hooks/pre-tool-use-edit-write.sh",
+    "hooks/pre-tool-use-read.sh",
+    "hooks/pre-tool-use-strict.sh",
 ];
+/// Present in the installed plugin root when strict mode is on; the hooks read it.
+const EDITOR_GATE_STRICT_MARKER: &str = "strict-mode";
 
 const AGENT_IDENTITY_PLUGIN_FILES: &[&str] = &[
     ".claude-plugin/plugin.json",
@@ -242,6 +248,38 @@ pub fn install_editor_gate_plugin(source_root: &Path, target_root: &Path) -> io:
         EDITOR_GATE_PLUGIN_EXECUTABLES,
         target_root,
     )
+}
+
+/// Whether `target_root`'s installed editor-gate-plugin is already in strict mode.
+pub fn editor_gate_is_strict(target_root: &Path) -> bool {
+    target_root
+        .join("editor-gate-plugin")
+        .join(EDITOR_GATE_STRICT_MARKER)
+        .is_file()
+}
+
+/// Writes or removes the strict-mode marker in an installed plugin directory.
+pub fn set_editor_gate_strict(plugin_dir: &Path, strict: bool) -> io::Result<()> {
+    let marker = plugin_dir.join(EDITOR_GATE_STRICT_MARKER);
+    if strict {
+        return fs::write(marker, "strict\n");
+    }
+    match fs::remove_file(marker) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// An explicit flag wins, then an earlier strict install carries forward. Only
+/// then is the question asked, and an unattended run stays on the default, since
+/// `--yes` accepts what a run needs rather than opting in to a stricter one.
+pub fn resolve_editor_gate_strict(
+    explicit: Option<bool>,
+    already_strict: bool,
+    unattended: bool,
+    ask: impl FnOnce() -> bool,
+) -> bool {
+    explicit.unwrap_or_else(|| already_strict || (!unattended && ask()))
 }
 
 /// T122/T123: rides unconditionally with chat/ai-text-editor/interactive-shell
@@ -481,6 +519,73 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o111, 0o111);
         }
+    }
+
+    #[test]
+    fn editor_gate_ships_every_hook_its_hooks_json_names() {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let hooks_json = manifest.join("../../editor-gate-plugin/hooks/hooks.json");
+        let text = fs::read_to_string(hooks_json).unwrap();
+        let named = text
+            .split("${CLAUDE_PLUGIN_ROOT}/")
+            .skip(1)
+            .map(|rest| rest.split('"').next().unwrap());
+        for script in named {
+            assert!(
+                EDITOR_GATE_PLUGIN_FILES.contains(&script),
+                "hooks.json runs {script}, which is never installed"
+            );
+            assert!(
+                EDITOR_GATE_PLUGIN_EXECUTABLES.contains(&script),
+                "hooks.json runs {script}, which is not marked executable"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_mode_is_never_chosen_by_default_or_by_an_unattended_run() {
+        let never_asked = || panic!("asked when it should not have");
+        assert!(!resolve_editor_gate_strict(None, false, true, never_asked));
+        assert!(!resolve_editor_gate_strict(None, false, false, || false));
+        assert!(resolve_editor_gate_strict(None, false, false, || true));
+    }
+
+    #[test]
+    fn strict_mode_flag_wins_and_an_earlier_choice_carries_forward() {
+        let never_asked = || panic!("asked when it should not have");
+        assert!(resolve_editor_gate_strict(
+            Some(true),
+            false,
+            true,
+            never_asked
+        ));
+        assert!(!resolve_editor_gate_strict(
+            Some(false),
+            true,
+            false,
+            never_asked
+        ));
+        assert!(resolve_editor_gate_strict(None, true, true, never_asked));
+    }
+
+    #[test]
+    fn strict_marker_survives_a_reinstall_until_it_is_turned_off() {
+        let source_root = tempfile::tempdir().unwrap();
+        let dir = source_root.path().join("editor-gate-plugin");
+        write(&dir.join("hooks/hooks.json"), "{}");
+        let target_root = tempfile::tempdir().unwrap();
+        let root = target_root.path();
+
+        let plugin = install_editor_gate_plugin(source_root.path(), root).unwrap();
+        assert!(!editor_gate_is_strict(root));
+
+        set_editor_gate_strict(&plugin, true).unwrap();
+        install_editor_gate_plugin(source_root.path(), root).unwrap();
+        assert!(editor_gate_is_strict(root));
+
+        set_editor_gate_strict(&plugin, false).unwrap();
+        assert!(!editor_gate_is_strict(root));
+        set_editor_gate_strict(&plugin, false).unwrap();
     }
 
     #[test]

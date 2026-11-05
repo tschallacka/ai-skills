@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# editor-gate-plugin/hooks/lib.sh -- shared by pre-tool-use-bash.sh,
-# pre-tool-use-edit-write.sh, pre-tool-use-read.sh, and the token
-# minting/consuming helpers.
+# editor-gate-plugin/hooks/lib.sh -- shared by this plugin's hooks and token
+# helpers.
 #
 # rjq is this repo's real JSON tool. install_shared_rjq (installer/src/
 # 20-runtime-tools.sh) copies it to a fixed, install-root-independent path
@@ -20,6 +19,19 @@ editor_gate_rjq_bin() {
     # Never PATH: the shipped rjq lives in the shared bin, and an ambient
     # rjq is whatever the machine happens to have first.
     return 1
+}
+
+# Strict mode is on when the installer has left this marker in the plugin root.
+editor_gate_is_strict() {
+    [ -f "$(dirname "${BASH_SOURCE[0]}")/../strict-mode" ]
+}
+
+# The installed editor client, from the same fixed location as rjq and for the
+# same reason: a hook cannot assume anything about PATH.
+editor_gate_editor_bin() {
+    local bin="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/ai-text-editor"
+    [ -x "$bin" ] || return 1
+    printf '%s\n' "$bin"
 }
 
 # Emits a non-blocking PreToolUse additionalContext note through rjq -- the

@@ -104,6 +104,8 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
     printf 'editor-gate-plugin/hooks/editor-token\n'
     printf 'editor-gate-plugin/hooks/pre-tool-use-bash.sh\n'
     printf 'editor-gate-plugin/hooks/pre-tool-use-edit-write.sh\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-read.sh\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-strict.sh\n'
     printf 'agent-identity-plugin/.claude-plugin/plugin.json\n'
     printf 'agent-identity-plugin/hooks/hooks.json\n'
     printf 'agent-identity-plugin/hooks/lib.sh\n'

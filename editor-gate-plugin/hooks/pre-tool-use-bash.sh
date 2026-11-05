@@ -15,6 +15,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=editor-gate-plugin/hooks/lib.sh
 source "$script_dir/lib.sh"
 
+generate_with='Use the Write tool'
+if editor_gate_is_strict; then
+    generate_with='Create it with ai-text-editor (open, insert, save)'
+fi
+
 MESSAGE='In-place shell editing is gated -- the ai-text-editor MCP/skill is the better tool.
 
 Before retrying, ask which of these you are doing:
@@ -29,8 +34,8 @@ Before retrying, ask which of these you are doing:
      No MCP registered here? Invoke the ai-text-editor skill directly instead.
 
   2. GENERATING a file wholesale, where no existing content is at risk -- a
-     scratch fixture, a probe script, a temp file under $TMPDIR. Use the
-     Write tool, or mint a token if it must be a shell redirect.
+     scratch fixture, a probe script, a temp file under $TMPDIR. '"$generate_with"',
+     or mint a token if it must be a shell redirect.
 
   3. A MECHANICAL SWEEP the editor genuinely cannot express -- the same
      change across dozens of files. That is a real case, and it is what the

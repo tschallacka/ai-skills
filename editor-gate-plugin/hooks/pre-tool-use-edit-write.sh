@@ -18,6 +18,13 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=editor-gate-plugin/hooks/lib.sh
 source "$script_dir/lib.sh"
 
+# Under strict mode this call is denied, so "not required here" would be false.
+if editor_gate_is_strict; then
+    cat >/dev/null
+    printf '{}'
+    exit 0
+fi
+
 rjq_bin="$(editor_gate_rjq_bin)" || { printf '{}'; exit 0; }
 payload="$(cat)"
 tool_name="$(printf '%s' "$payload" | "$rjq_bin" -r '.tool_name // empty')"
