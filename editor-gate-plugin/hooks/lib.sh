@@ -26,10 +26,10 @@ editor_gate_is_strict() {
     [ -f "$(dirname "${BASH_SOURCE[0]}")/../strict-mode" ]
 }
 
-# The installed editor client, from the same fixed location as rjq and for the
-# same reason: a hook cannot assume anything about PATH.
+# The binary holding the strict gate, from the same fixed location as rjq. It is
+# the server because every integration mode installs it; the client is skill-only.
 editor_gate_editor_bin() {
-    local bin="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/ai-text-editor"
+    local bin="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/ai-text-editor-server"
     [ -x "$bin" ] || return 1
     printf '%s\n' "$bin"
 }

@@ -105,11 +105,11 @@ fn bash_verdict(dir: &tempfile::TempDir, command: &str) -> Option<String> {
     decide(&payload(dir, "Bash", json!({ "command": command })))
 }
 
-/// Runs the real client's subcommand on a `Write` call, optionally with the off switch.
+/// Runs the real server's subcommand on a `Write` call, optionally with the off switch.
 fn client_answer(off_switch: bool) -> String {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    let mut command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor-server"));
     command
         .arg("strict-gate")
         .stdin(Stdio::piped())

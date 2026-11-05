@@ -5,20 +5,6 @@ use ai_text_editor::protocol::Envelope;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
-/// editor-gate-plugin's strict hook: a tool call as JSON on stdin, its answer on
-/// stdout. EDITOR_GATE_OFF comes from the harness's environment, so an agent's
-/// own command prefix cannot set it.
-fn strict_gate() {
-    if std::env::var("EDITOR_GATE_OFF").as_deref() == Ok("1") {
-        print!("{{}}");
-        return;
-    }
-    // Input that cannot be read stays empty, which the gate answers with a deny.
-    let mut input = String::new();
-    let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
-    print!("{}", ai_text_editor::strict_gate::answer(&input));
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 || args.iter().any(|arg| arg == "--help" || arg == "-h") {
@@ -27,10 +13,6 @@ fn main() {
     }
     if args[1] == "help" {
         help();
-        return;
-    }
-    if args[1] == "strict-gate" {
-        strict_gate();
         return;
     }
     let method = match args[1].as_str() {
@@ -583,7 +565,6 @@ fn help() {
     println!(
         "         job-start job-poll job-progress job-complete job-cancel job-transfer job-release"
     );
-    println!("Hook: strict-gate reads a PreToolUse payload on stdin and prints its answer; editor-gate-plugin's strict mode runs it. EDITOR_GATE_OFF=1 in the session's environment opens it.");
     println!("Response size: --verbosity 0|1|2|3 (default 1). 0 is the answer and the tab that gave it, nothing else. 1 adds what verification and the next step need - revision, dirty, the tab mode, the resolved edit span, completeness, and a searchs pager key and count. 2 adds navigation - cursors, byte windows, block paging, undo depths. 3 is everything. capabilities and resources are exempt (their payload IS metadata), and a refusal always carries its full code, message and choices whatever the level.");
     println!("Addressing a tab: every response reports a tab_id, and -T/--tab-id ID addresses that tab for any command with no --file and no --endpoint. The reported id is the shortest prefix unambiguous among currently open tabs, git-style, not always the full id; a shorter one you supply that now names more than one tab is refused with tab_ambiguous AND the candidates with their ids, the same as an ambiguous --tab-path. --tab-path FRAGMENT names a tab by filename or by a trailing run of path components (component boundaries, not substrings) and is the recovery when the id is lost; several matches are refused with tab_ambiguous AND the candidates with their ids, none with tab_unmatched and the open tabs. A command naming nothing runs on the focused tab - the tab the last successful call was served by, which open sets and a refusal never moves.");
     println!("Common flags (long / short): --file -f, --tab-id -T, --tab-path, --endpoint -e, --line -l, --column -c, --action -a, --text -t, --query -q, --mode -m (search only), --expected-revision -r, --offset -o, --length -L, --delete-len -d, --limit -n, --cursor-id -C (edit anchor), --id (which numbered cursor a navigation command moves; default 0), --job-id -j, --presentation -p, --before -b, --after -B, --gradient -g, --wrap-width -w, --session -s, --agent -A.");

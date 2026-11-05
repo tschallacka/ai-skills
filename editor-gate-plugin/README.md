@@ -69,7 +69,8 @@ never choose it. A reinstall keeps whatever was chosen, and `--editor-gate curre
 turns it back off.
 
 With it on, `hooks/pre-tool-use-strict.sh` hands every call to
-`ai-text-editor strict-gate`, and these are denied with **no token**, because an
+`ai-text-editor-server strict-gate`, the one editor binary every integration mode
+installs, and these are denied with **no token**, because an
 agent can mint a token itself:
 
 - the native `Edit`, `Write` and `MultiEdit` tools, and native `Grep` on one file
@@ -85,7 +86,7 @@ reads such as `sed -n '10,20p' file`; and shell writes to temp paths and `/dev`.
 
 Two things to know before relying on it:
 
-- **It fails closed.** A missing client, or one older than this plugin, denies
+- **It fails closed.** A missing server binary, or one older than this plugin, denies
   every gated call and says to re-run the installer. Start a session with
   `EDITOR_GATE_OFF=1` to get out of that; a prefix on an agent's own command
   cannot set it, because the hook reads the harness's environment.

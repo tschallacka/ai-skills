@@ -29,8 +29,8 @@ edit_hook="$installed/hooks/pre-tool-use-edit-write.sh"
 write_call='{"tool_name":"Write","tool_input":{"file_path":"/x"}}'
 
 write_client() { # <script body>
-    printf '#!/bin/sh\n%s\n' "$1" >"$shared_bin/ai-text-editor"
-    chmod +x "$shared_bin/ai-text-editor"
+    printf '#!/bin/sh\n%s\n' "$1" >"$shared_bin/ai-text-editor-server"
+    chmod +x "$shared_bin/ai-text-editor-server"
 }
 
 run_strict() {
@@ -59,7 +59,7 @@ t_assert_eq 'a client without the subcommand denies' "$(decision "$(run_strict 2
 write_client 'exit 0'
 t_assert_eq 'a client answering nothing denies' "$(decision "$(run_strict)")" 'deny'
 
-rm -f "$shared_bin/ai-text-editor"
+rm -f "$shared_bin/ai-text-editor-server"
 denied="$(run_strict)"
 t_assert_eq 'a missing client denies' "$(decision "$denied")" 'deny'
 t_assert_contains 'a missing client says what to do' 're-run the installer' "$denied"

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # MODE: PROD
 # PreToolUse hook for strict mode, which the installer turns on with a marker
-# file: `ai-text-editor strict-gate` decides, this hook only hands it the call.
+# file: `ai-text-editor-server strict-gate` decides, this hook only hands it the
+# call.
 # Does nothing without the marker. With it, every failure to get an answer is a
 # deny, because a hook that dies lets the tool call through.
 set -euo pipefail
@@ -22,12 +23,12 @@ fi
 
 if ! editor_bin="$(editor_gate_editor_bin)"; then
     cat >/dev/null
-    deny_closed 'editor-gate strict mode: the ai-text-editor client is missing from its installed location; re-run the installer. Denying rather than skipping this gate.'
+    deny_closed 'editor-gate strict mode: ai-text-editor-server is missing from its installed location; re-run the installer. Denying rather than skipping this gate.'
     exit 0
 fi
 
 if answer="$("$editor_bin" strict-gate)" && [ -n "$answer" ]; then
     printf '%s' "$answer"
 else
-    deny_closed 'editor-gate strict mode: ai-text-editor strict-gate gave no answer, so the installed client may be older than this plugin; re-run the installer. Denying rather than skipping this gate.'
+    deny_closed 'editor-gate strict mode: ai-text-editor-server strict-gate gave no answer, so the installed server may be older than this plugin; re-run the installer. Denying rather than skipping this gate.'
 fi
