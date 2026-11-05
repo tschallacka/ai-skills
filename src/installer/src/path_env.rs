@@ -22,6 +22,9 @@
 //! `~/.cargo/env` is the same shape, for the same reason -- one place to
 //! read or change the actual logic, no risk of the copies drifting.
 
+// A Windows build reaches none of the Unix path below, though its tests still do.
+#![cfg_attr(windows, allow(dead_code))]
+
 use crate::backup;
 use crate::permissions;
 use crate::shared_bin;
@@ -228,8 +231,7 @@ mod windows {
         if status.success() {
             Ok(())
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
+            Err(io::Error::other(
                 "reg.exe add HKCU\\Environment /v Path failed",
             ))
         }

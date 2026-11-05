@@ -162,6 +162,36 @@ fn ensure_built(bin_dir: &Path, name: &str) -> PathBuf {
     program
 }
 
+/// Stops the server a test autostarted, found by the unique directory on its
+/// command line. Left running it holds this test's inherited handles on Windows,
+/// so whatever reads the suite's output never sees end of file.
+struct StopAutostartedServer(String);
+
+impl Drop for StopAutostartedServer {
+    fn drop(&mut self) {
+        let mut command = if cfg!(windows) {
+            let mut powershell = Command::new("powershell");
+            powershell.args(["-NoProfile", "-NonInteractive", "-Command"]);
+            powershell.arg(format!(
+                "Get-CimInstance Win32_Process -Filter \"Name='tailpipe-server-rs.exe'\" | \
+                 Where-Object {{ $_.CommandLine -like '*{}*' }} | \
+                 ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}",
+                self.0
+            ));
+            powershell
+        } else {
+            let mut pkill = Command::new("pkill");
+            pkill.args(["-f", &self.0]);
+            pkill
+        };
+        let _ = command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
 fn unique() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -209,6 +239,7 @@ fn a_cold_endpoint_autostarts_tailpipe_server_rs_with_no_manual_start() {
         unique()
     ));
     std::fs::create_dir_all(&dir).unwrap();
+    let stop = StopAutostartedServer(dir.file_name().unwrap().to_string_lossy().into_owned());
     let endpoint = dir.join("tailpipe.sock");
     let endpoint_str = endpoint.to_str().unwrap();
     assert!(!endpoint.exists(), "nothing should be listening yet");
@@ -235,6 +266,7 @@ fn a_cold_endpoint_autostarts_tailpipe_server_rs_with_no_manual_start() {
     );
     assert_eq!(read_out.lines().collect::<Vec<_>>(), vec!["1\talpha"]);
 
+    drop(stop);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -112,12 +112,32 @@ struct LargeHistory {
     after: PathBuf,
 }
 
+/// editor-gate-plugin's strict hook: a tool call as JSON on stdin, its answer on
+/// stdout. It lives here because this is the one binary every integration mode
+/// installs. EDITOR_GATE_OFF comes from the harness's environment, not an agent's.
+fn strict_gate() {
+    // Always drained, so whoever is writing the payload never hits a closed pipe.
+    // Input that cannot be read stays empty, which the gate answers with a deny.
+    let mut input = String::new();
+    let _ = io::Read::read_to_string(&mut io::stdin(), &mut input);
+    if std::env::var("EDITOR_GATE_OFF").as_deref() == Ok("1") {
+        print!("{{}}");
+        return;
+    }
+    print!("{}", ai_text_editor::strict_gate::answer(&input));
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!("Usage: ai-text-editor-server start --file PATH [--mode text_utf8|raw_bytes|hex_view] [--normalize-nfc] [--idle-timeout-seconds N] [--takeover-stale-endpoint] [--tcp HOST:PORT --auth-token TOKEN|--auth-token-file PATH]");
         println!("The server owns the initial tab and accepts one newline-delimited JSON request per connection. Use client open --endpoint ENDPOINT --file PATH to add isolated tabs; each tab has its own session token and metadata. Files above 256 MiB use bounded access; override with --large-threshold-bytes. A stale Unix endpoint is retained and requires --takeover-stale-endpoint for explicit replacement.");
         println!("This binary is not meant to be invoked directly by an agent: the ai-text-editor client's `open` command starts one itself when none is running. --idle-timeout-seconds sets how long the server waits with no request before exiting on its own (default 600, 0 disables); the next open replays the journal and picks up where it left off.");
+        println!("ai-text-editor-server strict-gate reads a PreToolUse payload on stdin and prints its answer; editor-gate-plugin's strict mode runs it. EDITOR_GATE_OFF=1 in the session's environment opens it.");
+        return;
+    }
+    if args.get(1).map(String::as_str) == Some("strict-gate") {
+        strict_gate();
         return;
     }
     if args.get(1).map(String::as_str) != Some("start") {

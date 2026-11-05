@@ -307,6 +307,19 @@ mod tests {
     // value, so that disagreement is now structurally impossible rather
     // than detected and refused; there is nothing left here to test.
 
+    /// editor-gate-plugin's strict hook runs this binary, and denies every call
+    /// without it, so a mode that dropped it would lock that install out.
+    #[test]
+    fn the_binary_the_strict_gate_runs_ships_in_every_real_mode() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let lib = fs::read_to_string(repo.join("editor-gate-plugin/hooks/lib.sh")).unwrap();
+        assert!(lib.contains("tsch-ai-skills/bin/ai-text-editor-server\""));
+        assert_eq!(
+            binary_mode(&repo, "ai-text-editor", "ai-text-editor-server"),
+            None
+        );
+    }
+
     #[test]
     fn mcp_adapter_path_finds_the_installed_mcp_binary() {
         let dir = tempfile::tempdir().unwrap();

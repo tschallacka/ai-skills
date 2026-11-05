@@ -226,6 +226,7 @@ editor_gate_plugin_files() {
     printf 'editor-gate-plugin/hooks/pre-tool-use-bash.sh\n'
     printf 'editor-gate-plugin/hooks/pre-tool-use-edit-write.sh\n'
     printf 'editor-gate-plugin/hooks/pre-tool-use-read.sh\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-strict.sh\n'
 }
 
 # The exact files src/installer/src/plugins.rs's own

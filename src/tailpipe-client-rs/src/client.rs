@@ -44,6 +44,27 @@ fn server_binary_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
+/// A Windows child inherits every inheritable handle, not just the three it is
+/// given, so a long-lived server would hold this process's stdout pipe open and
+/// whoever reads it would never see end of file.
+#[cfg(windows)]
+fn keep_std_handles_from_children() {
+    use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE_FLAG_INHERIT};
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: both take plain values and only touch this process's handle
+        // table; a failure leaves a handle as it was, which costs nothing here.
+        unsafe {
+            SetHandleInformation(GetStdHandle(id), HANDLE_FLAG_INHERIT, 0);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn keep_std_handles_from_children() {}
+
 /// Start `tailpipe-server-rs` at `endpoint` if nothing answers there yet,
 /// and return once it does (or the attempt fails). A `StaleLock` next to the
 /// endpoint coordinates two callers racing to notice the same missing
@@ -69,6 +90,7 @@ fn autostart(endpoint: &Path) -> std::io::Result<()> {
     let log_path = endpoint.with_extension(format!("start-{}.log", std::process::id()));
     let log = std::fs::File::create(&log_path)?;
     let log_capture = log.try_clone()?;
+    keep_std_handles_from_children();
     let mut child = std::process::Command::new(&binary)
         .arg(endpoint)
         .arg("--snapshot-dir")
