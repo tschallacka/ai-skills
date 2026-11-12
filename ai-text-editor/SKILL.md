@@ -62,7 +62,8 @@ once a tab exists, but it cannot invent one for a tab that never has. `open`
 (or any read) first.
 
 Opening a path that does not exist yet is how you create a file: the tab
-starts empty and the file appears on disk only when the first `save`
+starts empty and the file appears on disk with the first write (autosave) or,
+under `--no-autosave`, when the first `save`
 succeeds. A path whose *parent directory* does not exist is refused with that
 directory named, and nothing is created; retry with
 `--acknowledge-create-parents` to create the chain and open the tab. The
@@ -126,8 +127,17 @@ verbs are the MCP tools (`open`, `read`, `insert`, `page`, …) rather than
 shell commands. If `ai-text-editor` is not on disk you are in an `mcp`
 install: call the tool of the same name instead of the CLI line.
 
-Edits are journal-and-buffer operations: a successful `insert`/`replace`
-returns a new revision but changes nothing on disk until a `save` succeeds.
+Edits autosave: a successful `insert`, `replace`, `move`, `copy`, `undo`,
+`redo`, `restore` or `end_transaction` is written to disk at once and answers
+`autosaved: true`, so no separate `save` is needed. `--no-autosave` (MCP:
+`autosave: false`) keeps that edit in the journal and buffer until a `save`
+succeeds, as before; inside an open transaction the save waits for
+`end_transaction`, so the group lands as one. A file changed on disk since the
+tab read it is never overwritten: the write is refused with the ordinary
+`external_change` refusal and its recovery choices. If the file changes in the
+instant between an edit applying and its save, the edit stands, `autosaved`
+is `false` and `autosave_refused` carries the save's refusal — that edit was
+not refused, so do not repeat it.
 Every mutating and reading response carries three flags you must branch on:
 `dirty` (this tab's buffer has unsaved edits of its own), `disk_diverged` (the
 file on disk differs from what this tab last synced with — someone else's
@@ -194,8 +204,8 @@ job verb needs the `resume_token` `job_start` issued, and it is never shown to
 a caller who does not hold it. A command that did not apply always says why — errors are
 written to stderr in every presentation with a code, a message, and the
 recovery choices where there are any — so exit status plus stderr is the
-complete story of any call; a silent success-shaped output means the work is
-in the journal, not yet that it is on disk.
+complete story of any call; a success-shaped output means the work is in the
+journal, and on disk only where it says `autosaved: true` or `saved: true`.
 
 Every high-frequency flag has a short form (`-f`, `-l`, `-t`, `-o`, `-r`, …) —
 run `ai-text-editor help` or `man -l ai-text-editor.1` for the exact,

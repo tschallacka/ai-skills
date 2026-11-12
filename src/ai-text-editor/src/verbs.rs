@@ -105,7 +105,10 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
         // payload for this one verb after stripping it for every other.
         "open" => &["document_mode"],
         "capabilities" | "resources" | "history" | "jump_points" => &[],
-        "begin_transaction" | "end_transaction" | "restore" | "undo" | "redo" | "save" => &[],
+        "begin_transaction" | "save" => &[],
+        // `autosave`: every write verb saves after it applies unless this is
+        // false (see the server's `autosave_after_write`).
+        "end_transaction" | "restore" | "undo" | "redo" => &["autosave"],
         "read" => &[
             "cursor_id",
             "before",
@@ -118,8 +121,9 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
             "range_start_byte",
             "range_end_byte",
         ],
-        "insert" => &["offset", "cursor_id", "text", "bytes_base64"],
+        "insert" => &["offset", "cursor_id", "text", "bytes_base64", "autosave"],
         "replace" => &[
+            "autosave",
             "offset",
             "cursor_id",
             "delete_len",
@@ -143,6 +147,7 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
         // plus a destination POINT (`dest_offset`/`dest_line`, exactly one
         // of the two) neither `replace` nor `insert` has any use for.
         "move" | "copy" => &[
+            "autosave",
             "range_start_line",
             "range_end_line",
             "range_start_byte",
