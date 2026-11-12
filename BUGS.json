@@ -196,9 +196,31 @@
       "fix": null,
       "verification": null,
       "found_by": "",
-      "notes": "Measured 2026-11-05 on the installed MCP binary and on a build of origin/master plus the strict-gate branch, each with fresh session ids. Fails: 1 and 3 extra tabs with verbosity 0 on all calls; open at verbosity 0 then failed replace and save at default. Passes: no extra tab at verbosity 0; open at default verbosity then failed replace; open at verbosity 0 then save directly; open at verbosity 0 then successful replace and save. The CLI with a fresh single-tab session also passes. Batching calls is not a factor. No data is at risk: the file is untouched and reopening recovers. Separately, once and not isolated: open with acknowledge_create_parents at verbosity 0 did not create the missing directory, and save failed with save_failed; the same call at default verbosity had created it earlier.",
+      "notes": "Measured 2026-11-05 on the installed MCP binary and on a build of origin/master plus the strict-gate branch, each with fresh session ids. Fails: 1 and 3 extra tabs with verbosity 0 on all calls; open at verbosity 0 then failed replace and save at default. Passes: no extra tab at verbosity 0; open at default verbosity then failed replace; open at verbosity 0 then save directly; open at verbosity 0 then successful replace and save. The CLI with a fresh single-tab session also passes. Batching calls is not a factor. No data is at risk: the file is untouched and reopening recovers. Separately, once and not isolated: open with acknowledge_create_parents at verbosity 0 did not create the missing directory, and save failed with save_failed; the same call at default verbosity had created it earlier. Second sighting 2026-11-12, during GH #194/#195 work: open with acknowledge_create_parents: true at verbosity 0 did not create the missing src/update-ui-story/tests/ directory, and the following save failed with save_failed. Matches the not-isolated observation in this entry's notes, so that half is now seen twice.",
       "created_at": "2026-11-05T12:39:14Z",
-      "updated_at": "2026-11-05T12:39:14Z"
+      "updated_at": "2026-11-12T21:48:55Z"
+    },
+    {
+      "id": "B10",
+      "title": "tailpipe: the client and MCP autostart tests leave a tailpipe-server-rs running after every run",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run cargo test -p tailpipe-client-rs -p tailpipe-mcp, then list processes: ps -axo pid,etime,command | awk '/tailpipe-server-rs/'.",
+      "observed": "Each run leaves two servers, one on /tmp/tailpipe-autostart-<pid>-3/tailpipe.sock (client cli_flow) and one on /tmp/tailpipe-mcp-flow-<pid>-2/tailpipe.sock (mcp mcp_flow), both from target/debug. They never exit: on 2026-11-12 this machine held 14, the oldest 7 days old, each with its socket and snapshots directory under /tmp.",
+      "expected": "A test that autostarts a server stops it (and removes its /tmp directory) when the test ends, pass or fail.",
+      "mechanism": "Not traced. The autostart path spawns the server detached so it outlives the client that started it, which is the intended production behaviour; the tests appear not to stop it afterwards. The server's 15-minute idle eviction removes streams, not the process.",
+      "surfaces": [
+        "tailpipe-client-rs",
+        "tailpipe-mcp"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "GH #197 work, 2026-11-12",
+      "notes": null,
+      "created_at": "2026-11-12T21:48:55Z",
+      "updated_at": "2026-11-12T21:48:55Z"
     }
   ]
 }
