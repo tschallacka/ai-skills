@@ -48,8 +48,10 @@ document. The documents that are not narrative — inventory, coverage,
 adversarial-review, stories, bugs, fixes, fix-keys, approval — default to the
 whole-document `full` view; every other id defaults to `summary`, and
 `--view full` is available for
-any of them. A page that withheld records reports next_token — pass it back as
---token and keep going until no next_token comes back. You have NOT read a
+any of them. A page that withheld records reports next_token, and on stderr a
+next_command= line: the exact command for the next page (your arguments plus
+--token). Run it, and keep running each next_command, until no next_token comes
+back; there is no need to read the script to learn how. You have NOT read a
 document until a page returns without one; treat a page you stopped early on as
 an unread document and say so. **The `summary` view is an excerpt of the head of
 the file, not a condensation of it, and it truncates before paging — so it
@@ -504,6 +506,9 @@ teaches the detector that tool word, so registering `pytest -q` makes
 
 ### 3.3 Validate, then create progress trackers
 
+<!-- SKILL-LOAD-PROOF part=part-3 token=b6120a688c546bb0 -->
+
+
 Run the validator before creating trackers or presenting the plan as ready:
 
 ```bash
@@ -519,9 +524,6 @@ never changes the exit status, so a plan is not blocked by it and its output doe
 not need clearing before the plan is ready. Read the warnings and judge each one:
 measured on real plans the count phrases were right 0 times in 24 hits, because a
 count that has drifted reads exactly like one that cannot. What *is* gated is the
-
-<!-- SKILL-LOAD-PROOF part=part-3 token=1140bbd20ae67ea6 -->
-
 part that can be decided: an acceptance criterion declaring a comparison in the
 step's `## Artifact comparisons` table is checked against
 `planning/artifact-comparisons.json`, so asking for `exact` on a PDF or an image
