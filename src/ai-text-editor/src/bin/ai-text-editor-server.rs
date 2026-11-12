@@ -2611,6 +2611,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         "job_release" => job_release(&envelope, &mut tab, &mut frames),
         _ => frames.push(error(&envelope.request_id, "unknown_method", format!("unsupported method {}", envelope.method))),
     }
+    autosave_after_write(&envelope, &mut tab, &mut frames);
     // T99: the ladder, applied once here rather than at each of the ~forty
     // places a payload is built. A level outside the range is a caller error
     // and is refused by name rather than clamped, so a typo does not silently
@@ -4755,6 +4756,84 @@ fn position_offset(document: &Document, position: Position) -> usize {
                 }
             }
             text.len()
+        }
+    }
+}
+
+/// The verbs whose success autosave follows with a save.
+const AUTOSAVE_VERBS: &[&str] = &[
+    "insert",
+    "replace",
+    "move",
+    "copy",
+    "undo",
+    "redo",
+    "restore",
+    "end_transaction",
+];
+
+/// Autosave: after a write that applied and left the tab dirty, save it, so
+/// an edit reaches the disk with no separate `save`. On by default; a request
+/// carrying `autosave: false` keeps the edit in the buffer as before. Inside
+/// an open transaction nothing is saved until `end_transaction`, so the group
+/// still lands as one.
+///
+/// The save is the ordinary `save`, so every one of its refusals applies -- a
+/// file changed on disk since it was read is not overwritten, and the usual
+/// external-change choices come back. The edit itself DID apply, so that
+/// refusal is reported inside the edit's own answer (`autosaved: false`,
+/// `autosave_refused`), never as an error frame: a successful edit that looks
+/// refused invites a retry that applies it twice.
+fn autosave_after_write(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &mut Tab,
+    frames: &mut [Value],
+) {
+    if !AUTOSAVE_VERBS.contains(&envelope.method.as_str())
+        || !envelope
+            .payload
+            .get("autosave")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+        || tab.transaction_before.is_some()
+        || tab.large_file.is_some()
+        || frames
+            .iter()
+            .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        || !tab_dirty(tab)
+    {
+        return;
+    }
+    let mut saved = Vec::new();
+    save(envelope, tab, &mut saved);
+    let refusal = saved
+        .iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .cloned();
+    let dirty = tab_dirty(tab);
+    let disk_diverged = tab_disk_diverged(tab);
+    let Some(payload) = frames
+        .iter_mut()
+        .rev()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
+        .and_then(|frame| frame.get_mut("payload"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    payload.insert("autosaved".into(), json!(refusal.is_none()));
+    payload.insert("dirty".into(), json!(dirty));
+    payload.insert("disk_diverged".into(), json!(disk_diverged));
+    if let Some(refusal) = refusal {
+        let mut detail = serde_json::Map::new();
+        for key in ["code", "message", "details"] {
+            if let Some(value) = refusal.get(key) {
+                detail.insert(key.into(), value.clone());
+            }
+        }
+        payload.insert("autosave_refused".into(), Value::Object(detail));
+        if refusal.get("code").and_then(Value::as_str) == Some("external_change") {
+            payload.insert("external_change_pending".into(), json!(true));
         }
     }
 }

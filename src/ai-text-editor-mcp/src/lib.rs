@@ -794,6 +794,16 @@ fn tool_definitions() -> Vec<Value> {
             .collect(),
         vec!["job_id", "resume_token"],
     ));
+    // Autosave: declared on exactly the verbs `ai_text_editor::verbs` gives the
+    // key to, in one place, so the eight write tools cannot drift apart.
+    for (name, _, props, _) in tools.iter_mut() {
+        if ai_text_editor::verbs::reads_payload_key(name, "autosave") {
+            props.push((
+                "autosave",
+                boolean("Save to disk as soon as this edit applies (default true), so no separate save call is needed. False keeps the edit in the buffer until save, as before. Inside an open transaction the save waits for end_transaction. A file changed on disk since it was read is never overwritten: the edit still applies, autosaved comes back false, and autosave_refused carries the save's own refusal (external_change and its choices) -- the edit is not refused, so do not retry it."),
+            ));
+        }
+    }
     tools
         .into_iter()
         .map(|(name, description, props, required)| {

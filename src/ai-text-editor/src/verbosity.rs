@@ -92,6 +92,10 @@ fn declared_tier(key: &str) -> Option<u8> {
         // Terminal facts of a verb that has no other content: without these
         // the answer is empty rather than terse.
         "saved" | "closed" | "restored" | "resolved" | "transaction" | "job" | "id" => 0,
+        // Autosave: whether this edit reached the disk, and if not, the save's
+        // own refusal. The edit applied either way, so this is part of the
+        // answer, not diagnostics -- dropping it would hide an unsaved edit.
+        "autosaved" | "autosave_refused" => 0,
         // A stream's own framing. Dropping these would break the reader's
         // ability to reassemble the document at all.
         "stream" | "restart" => 0,

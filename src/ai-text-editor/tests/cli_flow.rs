@@ -77,6 +77,10 @@ struct Harness {
     /// See `run` for why the session and not the pid, and `Drop` for what is
     /// done with them.
     sessions: std::cell::RefCell<Vec<u32>>,
+    /// Autosave is on by default. A test whose subject IS an unsaved buffer
+    /// (merge, journal replay, dirty and diverged state) builds its harness
+    /// with `buffered`, which sends every write with `--no-autosave`.
+    buffered: bool,
 }
 
 impl Harness {
@@ -106,7 +110,16 @@ impl Harness {
             // A literal identity keeps each test's workspace isolated from
             // any harness session this test process itself runs under.
             agent: format!("flow-test-{name}"),
+            buffered: false,
         }
+    }
+
+    /// A harness whose writes keep their edits in the buffer (`--no-autosave`),
+    /// for the tests whose premise is an unsaved edit.
+    fn buffered(name: &str) -> Self {
+        let mut harness = Self::new(name);
+        harness.buffered = true;
+        harness
     }
 
     /// The two directories an endpoint record for this harness can be in.
@@ -126,6 +139,22 @@ impl Harness {
     }
 
     fn client(&self, args: &[&str]) -> Output {
+        const WRITES: &[&str] = &[
+            "insert",
+            "replace",
+            "move",
+            "copy",
+            "undo",
+            "redo",
+            "restore",
+            "end-transaction",
+            "end_transaction",
+        ];
+        if self.buffered && args.first().is_some_and(|verb| WRITES.contains(verb)) {
+            let mut buffered = args.to_vec();
+            buffered.push("--no-autosave");
+            return self.client_env(&buffered, &[]);
+        }
         self.client_env(args, &[])
     }
 
@@ -331,7 +360,7 @@ fn server_pid(open_output: &Output) -> u32 {
 
 #[test]
 fn new_file_opens_edits_and_is_created_by_save() {
-    let harness = Harness::new("newfile");
+    let harness = Harness::buffered("newfile");
     let target = harness.path("created.txt");
     assert!(!target.exists());
     let opened = harness.open(&target);
@@ -459,7 +488,7 @@ fn external_change_blocks_writes_loudly_without_blinding_reads() {
 /// the tab it just created.
 #[test]
 fn a_request_naming_a_never_opened_file_opens_it_instead_of_refusing() {
-    let harness = Harness::new("autoopen");
+    let harness = Harness::buffered("autoopen");
     let first = harness.write("first.txt", "one\n");
     let second = harness.write("second.txt", "two\n");
     let first_id = tab_id_of(&harness.open(&first));
@@ -570,7 +599,7 @@ fn an_explicit_tab_id_with_a_never_opened_file_still_refuses_rather_than_autoope
 
 #[test]
 fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
-    let harness = Harness::new("killed");
+    let harness = Harness::buffered("killed");
     let file = harness.write("journal.txt", "alpha\nbeta\n");
     let opened = harness.open_verbose(&file);
     let pid = server_pid(&opened);
@@ -629,7 +658,7 @@ fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
 
 #[test]
 fn text_reads_honor_a_byte_window_and_deletes_report_line_spans() {
-    let harness = Harness::new("window");
+    let harness = Harness::buffered("window");
     let file = harness.write("window.txt", "0123456789\nabcdefgh\n");
     harness.open(&file);
     let window = harness.client(&[
@@ -2041,7 +2070,7 @@ fn my_own_unsaved_edit_is_not_a_diverged_disk() {
     // `disk_diverged: true` with nothing having touched the disk, so the
     // one flag an agent has for "somebody else moved this file" was true
     // on every dirty tab and carried no information.
-    let harness = Harness::new("dirtynotdiverged");
+    let harness = Harness::buffered("dirtynotdiverged");
     let file = harness.write("doc.txt", "mine\n");
     harness.open(&file);
     let inserted = harness.client(&[
@@ -2231,7 +2260,7 @@ fn a_replayed_tab_arms_the_external_change_guard() {
 /// dirty on an open right after `git merge`.
 #[test]
 fn a_saved_edit_replays_clean_even_when_disk_has_since_moved_on() {
-    let harness = Harness::new("savedreplay");
+    let harness = Harness::buffered("savedreplay");
     let file = harness.write("doc.txt", "line one\nline two\nline three\n");
     let opened = harness.open(&file);
     assert_eq!(revision_of(&opened), 0);
@@ -2444,7 +2473,7 @@ fn merge_automerges_non_overlapping_concurrent_edits_and_reports_changed_lines()
     // Case A: equal-line-count edits on separate, non-adjacent regions
     // combine cleanly, and the response names exactly which base lines each
     // side touched.
-    let harness = Harness::new("mergeauto");
+    let harness = Harness::buffered("mergeauto");
     let file = harness.write("doc.txt", "one\ntwo\nthree\nfour\nfive\nsix\n");
     let opened = harness.open(&file);
     let revision = revision_of(&opened).to_string();
@@ -2500,7 +2529,7 @@ fn merge_automerges_non_overlapping_concurrent_edits_and_reports_changed_lines()
     // W21). The external edit touches a base line below the shift; the
     // merged file must still be correct end to end through the real
     // resolve_external call.
-    let harness2 = Harness::new("mergeautoshift");
+    let harness2 = Harness::buffered("mergeautoshift");
     let file2 = harness2.write("doc.txt", "one\ntwo\nthree\nfour\nfive\n");
     let opened2 = harness2.open(&file2);
     let revision2 = revision_of(&opened2).to_string();
@@ -2549,7 +2578,7 @@ fn merge_automerges_non_overlapping_concurrent_edits_and_reports_changed_lines()
 fn merge_refuses_as_conflict_when_edits_touch_adjacent_lines() {
     // The conservative adjacency rule: a zero-line gap between the buffer's
     // own edit and the external edit is still a conflict, not an automerge.
-    let harness = Harness::new("mergeadjacent");
+    let harness = Harness::buffered("mergeadjacent");
     let file = harness.write("doc.txt", "one\ntwo\nthree\nfour\nfive\n");
     let opened = harness.open(&file);
     let revision = revision_of(&opened).to_string();
@@ -2596,7 +2625,7 @@ fn merge_refuses_as_conflict_when_edits_overlap() {
     // Previously untested existing behavior, now pinned: two edits touching
     // the exact same base line are a conflict under both the old
     // fast-forward-only check and the new hunk-diff path.
-    let harness = Harness::new("mergeoverlap");
+    let harness = Harness::buffered("mergeoverlap");
     let file = harness.write("doc.txt", "one\ntwo\nthree\n");
     let opened = harness.open(&file);
     let revision = revision_of(&opened).to_string();
@@ -2636,7 +2665,7 @@ fn merge_still_fast_forwards_when_only_one_side_changed() {
     // succeeds without ever reaching the new hunk-diff logic.
 
     // (a) only the external file changes; the buffer has no unsaved edits.
-    let harness = Harness::new("mergeffexternal");
+    let harness = Harness::buffered("mergeffexternal");
     let file = harness.write("doc.txt", "alpha\nbeta\n");
     harness.open(&file);
     std::fs::write(&file, "alpha\nbeta\nEXTERNAL\n").unwrap();
@@ -2662,7 +2691,7 @@ fn merge_still_fast_forwards_when_only_one_side_changed() {
     // (b) only the buffer has unsaved edits; the external file's own
     // *content* is untouched (a metadata-only divergence, e.g. a rewrite of
     // the identical bytes, is still enough to arm the guard).
-    let harness2 = Harness::new("mergeffbuffer");
+    let harness2 = Harness::buffered("mergeffbuffer");
     let file2 = harness2.write("doc.txt", "alpha\nbeta\n");
     let opened2 = harness2.open(&file2);
     let revision2 = revision_of(&opened2).to_string();
@@ -2714,7 +2743,7 @@ fn merge_on_a_raw_bytes_tab_stays_fast_forward_only() {
     // with the same non-overlapping-by-line-position edits as the success
     // case above must still refuse merge_conflict, since a line-based diff
     // is meaningless/unsafe for raw bytes.
-    let harness = Harness::new("mergerawbytes");
+    let harness = Harness::buffered("mergerawbytes");
     let file = harness.write("doc.bin", "one\ntwo\nthree\nfour\nfive\nsix\n");
     let opened = harness.client(&[
         "open",
@@ -4572,7 +4601,7 @@ fn verbosity_0_omits_tab_id_only_when_the_caller_already_supplied_it() {
 /// an agent would.
 #[test]
 fn jump_points_reports_the_outbound_reference_and_tracks_staleness_across_save() {
-    let harness = Harness::new("jump-points");
+    let harness = Harness::buffered("jump-points");
     std::fs::create_dir_all(harness.path(".codegraph")).unwrap();
     {
         let conn =
@@ -5874,7 +5903,7 @@ fn insert_replace_and_save_succeed_with_no_explicit_revision_anywhere() {
 
 #[test]
 fn move_copy_undo_and_redo_succeed_with_no_explicit_revision() {
-    let harness = Harness::new("autofill-structural");
+    let harness = Harness::buffered("autofill-structural");
     let file = harness.write("doc.txt", "alpha\nbeta\ngamma\n");
     harness.open(&file);
 
@@ -7757,4 +7786,100 @@ fn bulk_edit_then_a_standalone_read_lands_on_the_same_tab_no_duplicate_server() 
             "B must resolve to the SAME server A is on, not a duplicate autostarted for B alone"
         );
     }
+}
+
+/// Autosave, on by default: a write that applies is on disk at once, and
+/// `--no-autosave` keeps it in the buffer until `save`, as before.
+#[test]
+fn a_write_autosaves_unless_no_autosave_is_passed() {
+    let harness = Harness::new("autosave");
+    let file = harness.write("doc.txt", "one\n");
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let saved_edit = harness.client(&["insert", "-f", path, "-o", "0", "-t", "zero\n"]);
+    assert!(saved_edit.status.success(), "{}", stderr_text(&saved_edit));
+    let payload = first_payload(&saved_edit);
+    assert_eq!(payload["autosaved"], json!(true), "{payload}");
+    assert_eq!(payload["dirty"], json!(false), "{payload}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "zero\none\n");
+
+    let buffered = harness.client(&[
+        "insert",
+        "-f",
+        path,
+        "-o",
+        "0",
+        "-t",
+        "minus\n",
+        "--no-autosave",
+    ]);
+    assert!(buffered.status.success(), "{}", stderr_text(&buffered));
+    let payload = first_payload(&buffered);
+    assert!(payload.get("autosaved").is_none(), "{payload}");
+    assert_eq!(payload["dirty"], json!(true), "{payload}");
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "zero\none\n",
+        "--no-autosave must not touch the disk"
+    );
+    let saved = harness.client(&["save", "-f", path]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "minus\nzero\none\n"
+    );
+}
+
+/// A file changed on disk since it was read is never overwritten by an
+/// autosave: the server refuses the write itself with its ordinary
+/// `external_change` refusal before anything applies, so the normal recovery
+/// choices come back and the outside change is left as it is.
+#[test]
+fn autosave_never_overwrites_an_external_change() {
+    let harness = Harness::new("autosave-external");
+    let file = harness.write("doc.txt", "one\n");
+    harness.open(&file);
+    std::fs::write(&file, "changed elsewhere\n").unwrap();
+    let edited = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "zero\n",
+    ]);
+    assert!(!edited.status.success());
+    let refusal = refusal_text(&edited);
+    assert!(refusal.contains("external_change"), "{refusal}");
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "changed elsewhere\n",
+        "an autosave overwrote a change made outside the editor"
+    );
+}
+
+/// Inside an open transaction nothing is saved until `end-transaction`, which
+/// saves the whole group at once.
+#[test]
+fn autosave_waits_for_the_end_of_a_transaction() {
+    let harness = Harness::new("autosave-transaction");
+    let file = harness.write("doc.txt", "one\n");
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let began = harness.client(&["begin-transaction", "-f", path]);
+    assert!(began.status.success(), "{}", stderr_text(&began));
+    for text in ["b\n", "a\n"] {
+        let edited = harness.client(&["insert", "-f", path, "-o", "0", "-t", text]);
+        assert!(edited.status.success(), "{}", stderr_text(&edited));
+    }
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "one\n",
+        "an edit inside a transaction was saved before it ended"
+    );
+    let ended = harness.client(&["end-transaction", "-f", path]);
+    assert!(ended.status.success(), "{}", stderr_text(&ended));
+    assert_eq!(first_payload(&ended)["autosaved"], json!(true));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\nb\none\n");
 }
