@@ -221,6 +221,28 @@
       "notes": "Already fixed on an unmerged branch: commit 9d1aea64 (\"tailpipe: stop the server the autostart tests start\") on editor-gate-strict-mode, PR #196, adds a StopAutostartedServer guard (pkill -f on the test's unique directory) to both tests. Verified 2026-11-12: with that commit's two test files on current master, cargo test -p tailpipe-client-rs -p tailpipe-mcp (33 tests) left no new server (9 before, 9 after); master's files leave two per run. Closes when PR #196 merges.",
       "created_at": "2026-11-12T21:48:55Z",
       "updated_at": "2026-11-12T22:01:39Z"
+    },
+    {
+      "id": "B11",
+      "title": "ai-text-editor: match_ids from one search go stale after an edit, contrary to 65702913's sibling-hit shift",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "CLI, current master build (target/debug, 2026-11-12): file 'alpha x\\nbeta x\\ngamma x\\n', open, search -m exact_text -q x --limit 10 (3 hits, match_ids <id>#0..#2), then replace --match-id <id>#0 -t XXXXX --no-autosave. MCP (installed binary): regex search with many hits in cli_flow.rs, replace hit #0 via match_id (text 5 bytes longer, no line change), then replace hit #3 via its match_id.",
+      "observed": "CLI: the very first replace by a match_id from a fresh search is refused match_id_stale ('no live result set has this id'). MCP: the first replace applied, then every other match_id from the same search (12 tried) was refused match_id_stale.",
+      "expected": "Commit 65702913 says a stored hit wholly before or after an edited span is re-addressed by the edit's size change rather than discarded, so sibling hits survive an edit to one of them; on the CLI a match_id from the search just made should resolve at all.",
+      "mechanism": "Not traced. The CLI case suggests the result set is not found across separate client connections (per-connection or per-token storage, or a refreshed session token pointing elsewhere); the MCP case suggests the shift path drops the whole result set when one hit is replaced. Untested whether the installed MCP binary predates 65702913 (its mtime is normalised, so it cannot be told from the file).",
+      "surfaces": [
+        "ai-text-editor",
+        "ai-text-editor-mcp"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "editor-card work, 2026-11-12",
+      "notes": null,
+      "created_at": "2026-11-12T23:43:06Z",
+      "updated_at": "2026-11-12T23:43:06Z"
     }
   ]
 }
