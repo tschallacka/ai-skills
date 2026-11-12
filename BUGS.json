@@ -196,9 +196,9 @@
       "fix": null,
       "verification": null,
       "found_by": "",
-      "notes": "Measured 2026-11-05 on the installed MCP binary and on a build of origin/master plus the strict-gate branch, each with fresh session ids. Fails: 1 and 3 extra tabs with verbosity 0 on all calls; open at verbosity 0 then failed replace and save at default. Passes: no extra tab at verbosity 0; open at default verbosity then failed replace; open at verbosity 0 then save directly; open at verbosity 0 then successful replace and save. The CLI with a fresh single-tab session also passes. Batching calls is not a factor. No data is at risk: the file is untouched and reopening recovers. Separately, once and not isolated: open with acknowledge_create_parents at verbosity 0 did not create the missing directory, and save failed with save_failed; the same call at default verbosity had created it earlier. Second sighting 2026-11-12, during GH #194/#195 work: open with acknowledge_create_parents: true at verbosity 0 did not create the missing src/update-ui-story/tests/ directory, and the following save failed with save_failed. Matches the not-isolated observation in this entry's notes, so that half is now seen twice.",
+      "notes": "Measured 2026-11-05 on the installed MCP binary and on a build of origin/master plus the strict-gate branch, each with fresh session ids. Fails: 1 and 3 extra tabs with verbosity 0 on all calls; open at verbosity 0 then failed replace and save at default. Passes: no extra tab at verbosity 0; open at default verbosity then failed replace; open at verbosity 0 then save directly; open at verbosity 0 then successful replace and save. The CLI with a fresh single-tab session also passes. Batching calls is not a factor. No data is at risk: the file is untouched and reopening recovers. Separately, once and not isolated: open with acknowledge_create_parents at verbosity 0 did not create the missing directory, and save failed with save_failed; the same call at default verbosity had created it earlier. Second sighting 2026-11-12, during GH #194/#195 work: open with acknowledge_create_parents: true at verbosity 0 did not create the missing src/update-ui-story/tests/ directory, and the following save failed with save_failed. Matches the not-isolated observation in this entry's notes, so that half is now seen twice. Third sighting 2026-11-12, and at verbosity 1, so the create-parents half is not specific to verbosity 0: open with acknowledge_create_parents: true and verbosity: 1 on a path under a missing directory returned a tab, but save failed with save_failed naming the missing parent. Creating the directory by hand and saving again worked.",
       "created_at": "2026-11-05T12:39:14Z",
-      "updated_at": "2026-11-12T21:48:55Z"
+      "updated_at": "2026-11-12T22:01:39Z"
     },
     {
       "id": "B10",
@@ -218,9 +218,9 @@
       "fix": null,
       "verification": null,
       "found_by": "GH #197 work, 2026-11-12",
-      "notes": null,
+      "notes": "Already fixed on an unmerged branch: commit 9d1aea64 (\"tailpipe: stop the server the autostart tests start\") on editor-gate-strict-mode, PR #196, adds a StopAutostartedServer guard (pkill -f on the test's unique directory) to both tests. Verified 2026-11-12: with that commit's two test files on current master, cargo test -p tailpipe-client-rs -p tailpipe-mcp (33 tests) left no new server (9 before, 9 after); master's files leave two per run. Closes when PR #196 merges.",
       "created_at": "2026-11-12T21:48:55Z",
-      "updated_at": "2026-11-12T21:48:55Z"
+      "updated_at": "2026-11-12T22:01:39Z"
     }
   ]
 }
