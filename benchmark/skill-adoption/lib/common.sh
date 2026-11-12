@@ -91,6 +91,40 @@ wa_install_skills() {
         --integration "interactive-shell=skill"
 }
 
+# The binaries each dual-surface skill must have staged in its own
+# bin/<triple>/ before the installer copies the skill: its CLI, its MCP
+# adapter, and the server it autostarts where it has one.
+WA_STAGED_BINARIES="ai-text-editor:ai-text-editor ai-text-editor:ai-text-editor-server
+ai-text-editor:ai-text-editor-mcp chat:chat-client-rs chat:chat-server-rs chat:chat-mcp
+decisions:decisions decisions:decisions-mcp tailpipe:tailpipe-client-rs
+tailpipe:tailpipe-server-rs tailpipe:tailpipe-mcp interactive-shell:interactive-shell
+interactive-shell:interactive-shell-mcp"
+
+# wa_require_staged_binaries REPO_ROOT: returns 0 when every binary in
+# WA_STAGED_BINARIES is staged under REPO_ROOT/<skill>/bin/<triple>/, else
+# names each missing one on stderr and returns 69. The installer copies a
+# skill directory as it finds it, so without this a cell silently ships a
+# skill whose binary is absent (T2); ./setup-dev-env.sh is what stages them.
+wa_require_staged_binaries() {
+    local repo_root="$1" missing="" pair skill bin candidate found
+    for pair in $WA_STAGED_BINARIES; do
+        skill="${pair%%:*}"
+        bin="${pair#*:}"
+        found=""
+        for candidate in "$repo_root/$skill"/bin/*/"$bin" "$repo_root/$skill"/bin/*/"$bin.exe"; do
+            if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+                found=1
+                break
+            fi
+        done
+        [ -n "$found" ] || missing="$missing $skill/bin/<triple>/$bin"
+    done
+    [ -z "$missing" ] && return 0
+    printf 'wa_require_staged_binaries: not staged in %s:%s\n' "$repo_root" "$missing" >&2
+    printf 'wa_require_staged_binaries: run ./setup-dev-env.sh there first; the installer copies each skill directory as it finds it\n' >&2
+    return 69
+}
+
 # wa_dev_bin_dir REPO_ROOT NAME: prints the directory holding a compiled
 # dev-tree binary called NAME (checking target/release/ then bin/<triple>/,
 # same search order as wa_installer_bin), or fails with nothing printed if
