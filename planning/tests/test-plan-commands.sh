@@ -308,6 +308,16 @@ fi
 grep -Fq 'Valid plan section ids' "$temporary_root/bogus-sec.log"
 # remove-work-unit --help exits 0.
 "$script_dir/remove-work-unit.sh" --help >/dev/null 2>&1
+# GH #194: US-01 links only W02, so removing W02 would leave the story with
+# no links. That refuses by name, even with --confirm-cascade, and changes
+# nothing; relinking the story through update-ui-story (GH #195) clears it.
+if "$script_dir/remove-work-unit.sh" "$plan_dir" W02 --confirm-cascade >"$temporary_root/remove-w02.log" 2>&1; then
+    echo 'Removing the only link of US-01 unexpectedly passed.' >&2
+    exit 1
+fi
+grep -Fq 'US-01' "$temporary_root/remove-w02.log"
+grep -Fq '| W02 |' "$plan_dir/work-unit-inventory.md"
+"$script_dir/update-ui-story.sh" "$plan_dir" US-01 --work-units W03 >/dev/null
 # Removing W02 reconciles inventory, coverage, owned work units, and progress.
 "$script_dir/remove-work-unit.sh" "$plan_dir" W02 >/dev/null 2>&1
 if grep -Fq '| W02 |' "$plan_dir/work-unit-inventory.md"; then

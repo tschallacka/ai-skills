@@ -17,7 +17,7 @@ fn name() -> String {
 }
 fn usage(code: i32) -> ! {
     let n = name();
-    println!("Usage: {n} [--plan-dir] <plan-directory> <US-NN>\n           [--persona <text>] [--actions <text>] [--interaction <text>]\n           [--expected <text>] [--status <value>] [--evidence <text>]\n       {n} --help");
+    println!("Usage: {n} [--plan-dir] <plan-directory> <US-NN>\n           [--persona <text>] [--actions <text>] [--interaction <text>]\n           [--expected <text>] [--status <value>] [--evidence <text>]\n           [--work-units <WNN[,WNN...]>]\n       {n} --help\n\n--work-units replaces the story's whole related-work-units list; every id\nmust exist in work-unit-inventory.md.");
     std::process::exit(code)
 }
 
@@ -80,6 +80,21 @@ fn safe(label: &str, value: &str) {
 fn cell(line: &str, index: usize) -> String {
     line.split('|').nth(index).unwrap_or("").trim().to_string()
 }
+/// The same id syntax add-ui-story accepts: comma-separated WNN.
+fn valid_units(value: &str) -> bool {
+    value.split(',').all(|part| {
+        let part = part.trim();
+        part.len() >= 3 && part.starts_with('W') && part[1..].bytes().all(|b| b.is_ascii_digit())
+    })
+}
+/// Whether the inventory has a work-unit row for `unit` -- the check
+/// add-ui-story-links applies, so a replaced list cannot name an unknown id.
+fn inventory_names(inventory: &str, unit: &str) -> bool {
+    inventory
+        .lines()
+        .skip_while(|line| !line.starts_with("## Work units"))
+        .any(|line| line.starts_with('|') && cell(line, 1).trim_matches('`') == unit)
+}
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let mut plan_option = None;
@@ -89,6 +104,7 @@ fn main() {
     let mut expected = None;
     let mut status = None;
     let mut evidence = None;
+    let mut work_units: Option<String> = None;
     let mut positional = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -102,7 +118,7 @@ fn main() {
                 plan_option = Some(value["--plan-dir=".len()..].to_string())
             }
             "--persona" | "--actions" | "--interaction" | "--expected" | "--status"
-            | "--evidence" => {
+            | "--evidence" | "--work-units" => {
                 i += 1;
                 let value = args.get(i).cloned().unwrap_or_else(|| usage(64));
                 match args[i - 1].as_str() {
@@ -111,6 +127,7 @@ fn main() {
                     "--interaction" => interaction = Some(value),
                     "--status" => status = Some(value),
                     "--evidence" => evidence = Some(value),
+                    "--work-units" => work_units = Some(value),
                     _ => expected = Some(value),
                 }
             }
@@ -149,6 +166,7 @@ fn main() {
         expected.as_ref(),
         status.as_ref(),
         evidence.as_ref(),
+        work_units.as_ref(),
     ]
     .iter()
     .all(Option::is_none)
@@ -175,12 +193,37 @@ fn main() {
             )
         }
     }
+    // Normalised to "W01,W02" -- the form add-ui-story writes.
+    let work_units = work_units.map(|value| {
+        if !valid_units(&value) {
+            die("Work units must be comma-separated IDs such as W01,W02", 64)
+        }
+        value
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(",")
+    });
     let stories = plan.join("ui-user-stories.md");
     if !stories.is_file() {
         die(
             "UI story artifact not found; run create-ui-validation.sh first",
             66,
         )
+    }
+    if let Some(units) = &work_units {
+        let inventory = plan.join("work-unit-inventory.md");
+        let inventory_text = fs::read_to_string(&inventory).unwrap_or_else(|_| {
+            die(
+                format!("Work-unit inventory not found: {}", inventory.display()),
+                66,
+            )
+        });
+        for unit in units.split(',') {
+            if !inventory_names(&inventory_text, unit) {
+                die(format!("Related work unit not found: {unit}"), 66)
+            }
+        }
     }
     let text = fs::read_to_string(&stories).unwrap_or_else(|e| die(e.to_string(), 64));
     let row = text
@@ -240,6 +283,15 @@ fn main() {
             fields[5] = format!(" {expected} ");
             fields[6] = format!(" {status} ");
             fields[7] = format!(" {evidence} ");
+            if let Some(units) = &work_units {
+                if fields.len() < 10 {
+                    die(
+                        format!("{id} has no related-work-units column to replace"),
+                        65,
+                    )
+                }
+                fields[8] = format!(" {units} ");
+            }
             output.push_str(&fields.join("|"));
             output.push('\n');
             touched = true
@@ -283,6 +335,20 @@ mod tests {
         assert!(rewritten.contains("- Evidence: clicked it\n"));
         assert!(rewritten.contains("- Cache validity: ok\n"));
         assert!(!rewritten.contains("Pending browser run"));
+    }
+
+    #[test]
+    fn work_unit_ids_are_checked_against_the_units_section_only() {
+        let inventory = "## Definition-of-done coverage\n\n| W09 | W01 | n |\n\n## Work units\n\n| ID | Type |\n|---|---|\n| W01 | source |\n| `W02` | test |\n";
+        assert!(inventory_names(inventory, "W01"));
+        assert!(inventory_names(inventory, "W02"));
+        assert!(
+            !inventory_names(inventory, "W09"),
+            "a coverage outcome is not a unit"
+        );
+        assert!(valid_units("W01, W02"));
+        assert!(!valid_units("W01,"));
+        assert!(!valid_units("US-01"));
     }
 
     #[test]
