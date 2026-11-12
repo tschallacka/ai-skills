@@ -7,6 +7,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tailpipe_server_rs::hub::Hub;
@@ -28,6 +29,37 @@ const USAGE: &str = r#"tailpipe-server-rs <endpoint-path> [--idle-timeout-ms N] 
 const DEFAULT_IDLE_TIMEOUT_MS: u64 = 15 * 60 * 1000;
 /// How often the eviction thread wakes to check every stream's idle time.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+/// Connections served at once; one more is refused by name and logged.
+/// Each holds a thread, so this bounds the thread count GH #197 saw grow.
+const MAX_CONNECTIONS: usize = 512;
+/// How long a connection may take to send its one request line.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+static OPEN_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
+
+/// Counts one served connection for as long as it lives.
+struct ConnectionSlot;
+
+impl ConnectionSlot {
+    fn claim() -> Option<Self> {
+        let previous = OPEN_CONNECTIONS.fetch_add(1, Ordering::SeqCst);
+        if previous >= MAX_CONNECTIONS {
+            OPEN_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(ConnectionSlot)
+    }
+}
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        OPEN_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn write_response(stream: &mut Stream, response: &Response) -> bool {
+    writeln!(stream, "{}", serde_json::to_string(response).unwrap()).is_ok()
+}
 
 struct Args {
     endpoint: PathBuf,
@@ -86,7 +118,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
 
 /// Reads one Request line, dispatches or long-polls it, and writes the
 /// response(s). One connection, one Request -- except Tail, which keeps the
-/// connection open and keeps writing as new lines arrive.
+/// connection open and keeps writing as new lines arrive, until its client
+/// goes (GH #197): a failed write or a closed socket ends it.
 fn serve_connection(hub: &Arc<Hub>, mut stream: Stream) {
     if !stream.authenticate().unwrap_or(false) {
         return;
@@ -95,6 +128,9 @@ fn serve_connection(hub: &Arc<Hub>, mut stream: Stream) {
         Ok(clone) => clone,
         Err(_) => return,
     });
+    if reader.get_ref().set_read_timeout(Some(REQUEST_TIMEOUT)).is_err() {
+        return;
+    }
     let mut line = String::new();
     if reader.read_line(&mut line).unwrap_or(0) == 0 {
         return;
@@ -102,14 +138,12 @@ fn serve_connection(hub: &Arc<Hub>, mut stream: Stream) {
     let request: Request = match serde_json::from_str(line.trim_end()) {
         Ok(request) => request,
         Err(error) => {
-            let _ = writeln!(
-                stream,
-                "{}",
-                serde_json::to_string(&Response::Error {
+            write_response(
+                &mut stream,
+                &Response::Error {
                     code: "bad_request".into(),
                     message: error.to_string(),
-                })
-                .unwrap()
+                },
             );
             return;
         }
@@ -124,18 +158,20 @@ fn serve_connection(hub: &Arc<Hub>, mut stream: Stream) {
             &name,
             since,
             |received| {
-                let response = Response::Lines {
-                    lines: vec![received],
-                };
-                let _ = writeln!(stream, "{}", serde_json::to_string(&response).unwrap());
+                write_response(
+                    &mut stream,
+                    &Response::Lines {
+                        lines: vec![received],
+                    },
+                )
             },
-            || false,
+            || reader.get_mut().peer_gone(),
         );
         return;
     }
 
     let response = hub.dispatch(request);
-    let _ = writeln!(stream, "{}", serde_json::to_string(&response).unwrap());
+    write_response(&mut stream, &response);
 }
 
 fn main() {
@@ -170,9 +206,27 @@ fn main() {
 
     loop {
         match listener.accept() {
-            Ok(stream) => {
+            Ok(mut stream) => {
+                let Some(slot) = ConnectionSlot::claim() else {
+                    eprintln!(
+                        "tailpipe-server-rs: refusing a connection, {MAX_CONNECTIONS} already open"
+                    );
+                    write_response(
+                        &mut stream,
+                        &Response::Error {
+                            code: "too_many_connections".into(),
+                            message: format!(
+                                "the server already holds {MAX_CONNECTIONS} connections"
+                            ),
+                        },
+                    );
+                    continue;
+                };
                 let hub = Arc::clone(&hub);
-                std::thread::spawn(move || serve_connection(&hub, stream));
+                std::thread::spawn(move || {
+                    let _slot = slot;
+                    serve_connection(&hub, stream);
+                });
             }
             Err(error) => {
                 eprintln!("tailpipe-server-rs: accept failed: {error}");
