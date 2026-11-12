@@ -118,8 +118,18 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
             "range_start_byte",
             "range_end_byte",
         ],
-        "insert" => &["offset", "cursor_id", "text", "bytes_base64"],
+        // `base_revision`: the revision the caller read its line and byte
+        // coordinates at; the server maps them to the current one, so several
+        // positional edits need not be made bottom-up.
+        "insert" => &[
+            "offset",
+            "cursor_id",
+            "text",
+            "bytes_base64",
+            "base_revision",
+        ],
         "replace" => &[
+            "base_revision",
             "offset",
             "cursor_id",
             "delete_len",
@@ -326,6 +336,7 @@ pub fn is_count_key(key: &str) -> bool {
             | "preview_lines"
             | "dest_offset"
             | "dest_line"
+            | "base_revision"
     )
 }
 

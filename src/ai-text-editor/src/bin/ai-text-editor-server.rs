@@ -86,6 +86,211 @@ struct Tab {
     /// The revision `jump_points` was computed at; a dirty tab whose
     /// `revision` has since moved past this is reported `stale`.
     jump_points_revision: Option<u64>,
+    /// The span of every `insert`/`replace` that produced a revision, newest
+    /// last, so a positional edit can name coordinates in an earlier revision
+    /// (`base_revision`) and have them mapped forward (no bottom-up editing).
+    edit_log: EditLog,
+}
+
+/// One `insert`/`replace` as it changed the document: the byte span it
+/// deleted from the revision before it, how many bytes replaced that span,
+/// and the same in lines -- `line_start..=line_end` are the 1-based lines the
+/// deleted bytes touched (for a pure insert, the line it went into) and
+/// `line_delta` how many lines the edit added (negative: removed).
+#[derive(Debug, Clone, Copy)]
+struct EditLogEntry {
+    revision: u64,
+    byte_start: usize,
+    byte_deleted: usize,
+    byte_inserted: usize,
+    line_start: u64,
+    line_end: u64,
+    line_delta: i64,
+}
+
+/// A bounded log of `EditLogEntry`s. Only `insert`/`replace` record one; a
+/// revision produced any other way (undo, redo, restore, move, a reload)
+/// leaves a gap, and a mapping across a gap refuses rather than guesses.
+#[derive(Debug, Default)]
+struct EditLog {
+    entries: std::collections::VecDeque<EditLogEntry>,
+}
+
+impl EditLog {
+    const CAPACITY: usize = 512;
+
+    fn record(&mut self, entry: EditLogEntry) {
+        if self.entries.len() == Self::CAPACITY {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(entry);
+    }
+
+    /// The entries that took the document from `base` to `current`, oldest
+    /// first, or None when they are not all here -- older than the log, or a
+    /// revision in between was produced by something that records no span.
+    fn since(&self, base: u64, current: u64) -> Option<Vec<EditLogEntry>> {
+        let wanted: Vec<EditLogEntry> = self
+            .entries
+            .iter()
+            .filter(|entry| entry.revision > base && entry.revision <= current)
+            .copied()
+            .collect();
+        let contiguous = wanted.len() as u64 == current - base
+            && wanted
+                .iter()
+                .enumerate()
+                .all(|(index, entry)| entry.revision == base + 1 + index as u64);
+        contiguous.then_some(wanted)
+    }
+}
+
+/// Maps an inclusive 1-based line range in an earlier revision to the current
+/// one through `entries`, or names the entry that touched it. An edit wholly
+/// above the range shifts it by its line delta; one wholly below leaves it;
+/// anything else changed those lines and is a conflict, never a guess.
+fn map_line_range(
+    mut start: u64,
+    mut end: u64,
+    entries: &[EditLogEntry],
+) -> Result<(u64, u64), EditLogEntry> {
+    for entry in entries {
+        if entry.line_end < start {
+            start = (start as i64 + entry.line_delta) as u64;
+            end = (end as i64 + entry.line_delta) as u64;
+        } else if entry.line_start > end {
+            continue;
+        } else {
+            return Err(*entry);
+        }
+    }
+    Ok((start, end))
+}
+
+/// The byte-range counterpart of `map_line_range`: `start..end` is half-open,
+/// and an empty range is a point (an insert position). An edit touching the
+/// point itself is a conflict -- which side of it the caller meant is unknown.
+fn map_byte_range(
+    mut start: usize,
+    mut end: usize,
+    entries: &[EditLogEntry],
+) -> Result<(usize, usize), EditLogEntry> {
+    for entry in entries {
+        let entry_end = entry.byte_start + entry.byte_deleted;
+        let before = if entry.byte_deleted == 0 {
+            entry.byte_start < start
+        } else {
+            entry_end <= start
+        };
+        let after = if start == end {
+            entry.byte_start > start
+        } else {
+            entry.byte_start >= end
+        };
+        if before {
+            let delta = entry.byte_inserted as i64 - entry.byte_deleted as i64;
+            start = (start as i64 + delta) as usize;
+            end = (end as i64 + delta) as usize;
+        } else if !after {
+            return Err(*entry);
+        }
+    }
+    Ok((start, end))
+}
+
+/// `base_revision` on an `insert`/`replace`: rewrites the request's line and
+/// byte coordinates from that revision into the current one, so several
+/// positional edits can be made top-down against one read. A request with no
+/// `base_revision` is returned as None (use it unchanged).
+fn map_base_revision(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &Tab,
+) -> Result<Option<ai_text_editor::protocol::Envelope>, (&'static str, String)> {
+    let Some(base) = envelope
+        .payload
+        .get("base_revision")
+        .and_then(Value::as_u64)
+    else {
+        return Ok(None);
+    };
+    let mut mapped = envelope.clone();
+    if base > tab.revision {
+        return Err((
+            "base_revision_ahead",
+            format!(
+                "base_revision {base} is ahead of this tab's revision {}; pass the revision you read",
+                tab.revision
+            ),
+        ));
+    }
+    let payload = &envelope.payload;
+    let positional = ["range_start_line", "range_start_byte", "offset"]
+        .iter()
+        .any(|key| payload.get(*key).is_some());
+    if !positional {
+        return Err((
+            "base_revision_without_position",
+            "base_revision maps line and byte coordinates; this request names its span another way (match_id, an anchor pair, a symbol, or the cursor), which needs no mapping".to_owned(),
+        ));
+    }
+    let entries = if base == tab.revision {
+        Vec::new()
+    } else {
+        tab.edit_log.since(base, tab.revision).ok_or_else(|| {
+            (
+                "base_revision_unmappable",
+                format!(
+                    "revision {base} cannot be mapped to {}: a revision in between was not made by insert/replace (undo, redo, restore, move, copy, a reload), or it is older than the edit log; read again and use the current revision",
+                    tab.revision
+                ),
+            )
+        })?
+    };
+    let conflict = |entry: EditLogEntry| {
+        (
+            "base_range_conflict",
+            format!(
+                "revision {}'s edit (lines {}-{}, bytes {}..{}) changed the span this request names in revision {base}, so it was not applied; read again and address the current text",
+                entry.revision,
+                entry.line_start,
+                entry.line_end,
+                entry.byte_start,
+                entry.byte_start + entry.byte_deleted
+            ),
+        )
+    };
+    let map = mapped
+        .payload
+        .as_object_mut()
+        .expect("an insert/replace payload is an object");
+    map.remove("base_revision");
+    if let (Some(start), Some(end)) = (
+        payload.get("range_start_line").and_then(Value::as_u64),
+        payload.get("range_end_line").and_then(Value::as_u64),
+    ) {
+        let (start, end) = map_line_range(start, end, &entries).map_err(conflict)?;
+        map.insert("range_start_line".into(), json!(start));
+        map.insert("range_end_line".into(), json!(end));
+    }
+    if let (Some(start), Some(end)) = (
+        payload.get("range_start_byte").and_then(Value::as_u64),
+        payload.get("range_end_byte").and_then(Value::as_u64),
+    ) {
+        let (start, end) =
+            map_byte_range(start as usize, end as usize, &entries).map_err(conflict)?;
+        map.insert("range_start_byte".into(), json!(start));
+        map.insert("range_end_byte".into(), json!(end));
+    }
+    if let Some(offset) = payload.get("offset").and_then(Value::as_u64) {
+        let length = payload
+            .get("delete_len")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        let (start, _) = map_byte_range(offset as usize, offset as usize + length, &entries)
+            .map_err(conflict)?;
+        map.insert("offset".into(), json!(start));
+    }
+    Ok(Some(mapped))
 }
 
 struct ServerState {
@@ -351,6 +556,7 @@ fn main() {
         replayed_edits,
         jump_points: None,
         jump_points_revision: None,
+        edit_log: EditLog::default(),
     };
     // B204 (both constructors): a tab recovered from the journal holds the
     // journal's buffer while `disk_digest` was stamped from the disk that
@@ -923,6 +1129,7 @@ fn open_additional_tab(
         replayed_edits,
         jump_points: None,
         jump_points_revision: None,
+        edit_log: EditLog::default(),
     };
     // B204: a tab recovered from the journal holds the journal's buffer,
     // while `disk_digest` was stamped from the disk that exists now. When
@@ -3157,6 +3364,17 @@ fn apply_edit_verb(
     tab: &mut Tab,
     frames: &mut Vec<Value>,
 ) {
+    // `base_revision`: line and byte coordinates read at an earlier revision
+    // are mapped to this one first, so everything below sees current
+    // coordinates and needs no other change.
+    let mapped = match map_base_revision(envelope, tab) {
+        Ok(mapped) => mapped,
+        Err((code, message)) => {
+            frames.push(error(&envelope.request_id, code, message));
+            return;
+        }
+    };
+    let envelope = mapped.as_ref().unwrap_or(envelope);
     // B226/T114: a match_id, an anchor pair, a symbol, a line range, or a
     // pair of search-hit byte bounds all resolve to the same (offset,
     // delete_len), so everything below — the journal record, cursor
@@ -3286,6 +3504,27 @@ fn apply_edit_verb(
                         tab.history.record(&before, &after);
                     }
                     tab.revision = revision;
+                    {
+                        let bytes = before.bytes();
+                        let count =
+                            |span: &[u8]| span.iter().filter(|&&byte| byte == b'\n').count() as u64;
+                        let line_start = count(&bytes[..offset]) + 1;
+                        let line_end = if delete_len == 0 {
+                            line_start
+                        } else {
+                            line_start + count(&bytes[offset..offset + delete_len - 1])
+                        };
+                        tab.edit_log.record(EditLogEntry {
+                            revision,
+                            byte_start: offset,
+                            byte_deleted: delete_len,
+                            byte_inserted: replacement.len(),
+                            line_start,
+                            line_end,
+                            line_delta: count(&replacement) as i64
+                                - count(&bytes[offset..offset + delete_len]) as i64,
+                        });
+                    }
                     // A deleted-or-shifted search result set used to be
                     // cleared wholesale on every edit, so replacing ONE of
                     // several identical search hits staled every sibling hit

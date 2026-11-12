@@ -7758,3 +7758,132 @@ fn bulk_edit_then_a_standalone_read_lands_on_the_same_tab_no_duplicate_server() 
         );
     }
 }
+
+/// `base_revision`: several line-range edits made top-down against ONE read.
+/// The first adds a line; the second still names its line as it was at the
+/// revision both were read at, and lands on it -- no bottom-up ordering.
+#[test]
+fn base_revision_maps_later_line_ranges_through_earlier_edits() {
+    let harness = Harness::new("baserev-lines");
+    let file = harness.write("doc.txt", "one\ntwo\nthree\nfour\nfive\nsix\n");
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let replace = |start: &str, end: &str, text: &str| {
+        harness.client(&[
+            "replace",
+            "-f",
+            path,
+            "--range-start-line",
+            start,
+            "--range-end-line",
+            end,
+            "-t",
+            text,
+            "--base-revision",
+            "0",
+        ])
+    };
+    let first = replace("2", "2", "TWO-a\nTWO-b\n");
+    assert!(first.status.success(), "{}", stderr_text(&first));
+    let second = replace("5", "5", "FIVE\n");
+    assert!(second.status.success(), "{}", stderr_text(&second));
+    let third = replace("1", "1", "ONE\n");
+    assert!(third.status.success(), "{}", stderr_text(&third));
+    let saved = harness.client(&["save", "-f", path]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "ONE\nTWO-a\nTWO-b\nthree\nfour\nFIVE\nsix\n"
+    );
+}
+
+/// A span an edit since `base_revision` already changed is refused by name,
+/// and the buffer is left as it was -- never a guess at what was meant.
+#[test]
+fn base_revision_refuses_a_span_changed_since() {
+    let harness = Harness::new("baserev-conflict");
+    let file = harness.write("doc.txt", "one\ntwo\nthree\n");
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let edit = |start: &str, end: &str, text: &str| {
+        harness.client(&[
+            "replace",
+            "-f",
+            path,
+            "--range-start-line",
+            start,
+            "--range-end-line",
+            end,
+            "-t",
+            text,
+            "--base-revision",
+            "0",
+        ])
+    };
+    let first = edit("2", "2", "TWO\n");
+    assert!(first.status.success(), "{}", stderr_text(&first));
+    let overlapping = edit("2", "3", "x\n");
+    assert!(!overlapping.status.success());
+    assert!(
+        refusal_text(&overlapping).contains("base_range_conflict"),
+        "{}",
+        refusal_text(&overlapping)
+    );
+    let ahead = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "x\n",
+        "--base-revision",
+        "99",
+    ]);
+    assert!(refusal_text(&ahead).contains("base_revision_ahead"));
+    let saved = harness.client(&["save", "-f", path]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\nTWO\nthree\n");
+}
+
+/// A revision made by anything other than insert/replace records no span, so
+/// mapping across it refuses; a byte offset is mapped like a line range.
+#[test]
+fn base_revision_refuses_across_an_undo_and_maps_byte_offsets() {
+    let harness = Harness::new("baserev-gap");
+    let file = harness.write("doc.txt", "abc\ndef\n");
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let insert = |offset: &str, text: &str, base: &str| {
+        harness.client(&[
+            "insert",
+            "-f",
+            path,
+            "-o",
+            offset,
+            "-t",
+            text,
+            "--base-revision",
+            base,
+        ])
+    };
+    // "def" starts at byte 4 in revision 0; an insert at 0 shifts it to 7.
+    assert!(insert("0", "XY\n", "0").status.success());
+    let mapped = insert("4", "-", "0");
+    assert!(mapped.status.success(), "{}", stderr_text(&mapped));
+    let undone = harness.client(&["undo", "-f", path]);
+    assert!(undone.status.success(), "{}", stderr_text(&undone));
+    let across = insert("0", "Z", "1");
+    assert!(
+        refusal_text(&across).contains("base_revision_unmappable"),
+        "{}",
+        refusal_text(&across)
+    );
+    let redone = harness.client(&["redo", "-f", path]);
+    assert!(redone.status.success(), "{}", stderr_text(&redone));
+    let saved = harness.client(&["save", "-f", path]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "XY\nabc\n-def\n");
+}

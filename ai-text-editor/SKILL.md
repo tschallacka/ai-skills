@@ -197,6 +197,18 @@ recovery choices where there are any — so exit status plus stderr is the
 complete story of any call; a silent success-shaped output means the work is
 in the journal, not yet that it is on disk.
 
+Several positional edits in one file need neither bottom-up ordering nor a
+re-read between them: read once, then pass that read's revision as
+`--base-revision N` (MCP: `base_revision`) on every `insert`/`replace` that
+names a line range, byte range or offset. The server maps those coordinates
+through the edits made since, so the edits can go top-down in any order and
+each lands where it was read. A span that an edit since then already changed
+is refused as `base_range_conflict`, with nothing applied; a revision in
+between that `insert`/`replace` did not make (undo, redo, restore, move, copy,
+a reload) is refused as `base_revision_unmappable`. Read again in either case.
+`match_id`, anchors and `--symbol` already follow the text, so they take no
+`--base-revision`.
+
 Every high-frequency flag has a short form (`-f`, `-l`, `-t`, `-o`, `-r`, …) —
 run `ai-text-editor help` or `man -l ai-text-editor.1` for the exact,
 current list rather than trusting prose here to have kept up with it.

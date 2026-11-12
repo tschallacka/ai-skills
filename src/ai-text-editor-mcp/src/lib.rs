@@ -385,6 +385,10 @@ fn tool_definitions() -> Vec<Value> {
                     "bytes_base64",
                     string("Base64 bytes to insert, alternative to text."),
                 ),
+                (
+                    "base_revision",
+                    int("The revision offset was read at. The server maps it to the current revision through the inserts and replaces made since, so several positional edits can be made top-down against one read instead of bottom-up. Refused as base_range_conflict if an edit since then touched this point, or base_revision_unmappable if a revision in between came from anything but insert/replace."),
+                ),
             ]));
             p
         },
@@ -405,6 +409,10 @@ fn tool_definitions() -> Vec<Value> {
                     int("Numeric cursor to replace at when offset is omitted."),
                 ),
                 ("delete_len", int("Byte length to delete before inserting. Omit it when expected_text names the span: its own length is then the length, so there is no arithmetic to get wrong.")),
+                (
+                    "base_revision",
+                    int("The revision the line range, byte range or offset was read at. The server maps them to the current revision through the inserts and replaces made since, so several positional edits in one file can be made top-down against one read instead of bottom-up. Refused as base_range_conflict if an edit since then touched the span, or base_revision_unmappable if a revision in between came from anything but insert/replace. Not for match_id, anchors or symbol, which need no mapping."),
+                ),
                 (
                     "range_start_line",
                     int("Inclusive first line of a line-range replace (text tabs). Needs range_end_line, and may not be combined with offset, delete_len or cursor_id."),
