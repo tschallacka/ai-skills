@@ -19,6 +19,7 @@
 
 use std::io::{self, Read, Write};
 use std::path::Path;
+use std::time::Duration;
 
 #[cfg(unix)]
 mod imp {
@@ -48,6 +49,10 @@ mod imp {
 
         pub fn try_clone(&self) -> io::Result<Self> {
             self.0.try_clone().map(Stream)
+        }
+
+        pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+            self.0.set_read_timeout(timeout)
         }
 
         /// Nothing to prove on a Unix socket: the filesystem already limited
@@ -160,6 +165,10 @@ mod imp {
             })
         }
 
+        pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+            self.stream.set_read_timeout(timeout)
+        }
+
         /// Reads the nonce line an accepted connection must open with. Done
         /// here, on the connection's own thread, rather than in `accept`, so
         /// one client that never sends it cannot stall everyone else's.
@@ -203,6 +212,29 @@ mod imp {
 }
 
 pub use imp::{Listener, Stream};
+
+impl Stream {
+    /// Whether the other end has closed the connection (GH #197). Waits at
+    /// most a millisecond. A client sends nothing after its one request
+    /// line, so any bytes that do arrive are read and dropped.
+    pub fn peer_gone(&mut self) -> bool {
+        if self
+            .set_read_timeout(Some(Duration::from_millis(1)))
+            .is_err()
+        {
+            return true;
+        }
+        let mut discard = [0u8; 256];
+        match self.read(&mut discard) {
+            Ok(0) => true,
+            Ok(_) => false,
+            Err(error) => !matches!(
+                error.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted
+            ),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

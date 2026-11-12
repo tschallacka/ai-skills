@@ -189,3 +189,128 @@ fn an_idle_stream_is_evicted_and_its_gzip_snapshot_is_readable() {
     std::io::Read::read_to_string(&mut decoder, &mut text).unwrap();
     assert_eq!(text, "soon to be evicted\n");
 }
+
+/// The server process's own live thread count, or None where this platform
+/// has no cheap way to ask. One thread per connection is the server's whole
+/// concurrency model, so this is the count GH #197 watched grow to 434.
+#[cfg(target_os = "linux")]
+fn thread_count(pid: u32) -> Option<usize> {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("Threads:"))
+        .and_then(|count| count.trim().parse().ok())
+}
+
+/// `ps -M` prints a header and then one row per thread.
+#[cfg(target_os = "macos")]
+fn thread_count(pid: u32) -> Option<usize> {
+    let output = Command::new("ps")
+        .args(["-M", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    let rows = String::from_utf8_lossy(&output.stdout).lines().count();
+    rows.checked_sub(1)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn thread_count(_pid: u32) -> Option<usize> {
+    None
+}
+
+/// Polls until `done` holds for the server's thread count, returning the
+/// last count seen. A ceiling, not a sleep: the healthy case returns at once.
+fn wait_for_threads(pid: u32, budget: Duration, done: impl Fn(usize) -> bool) -> usize {
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        let count = thread_count(pid).expect("thread count is readable");
+        if done(count) || std::time::Instant::now() >= deadline {
+            return count;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Opens a Tail connection and leaves it for the caller to drop.
+fn open_tail(server: &Server, stream: &str) -> Stream {
+    let mut tail = connect_with_retry(&server.endpoint);
+    let request = Request::Tail {
+        stream: stream.into(),
+        since: 0,
+    };
+    writeln!(tail, "{}", serde_json::to_string(&request).unwrap()).unwrap();
+    tail
+}
+
+/// GH #197: a Tail whose client has gone must end its thread. Before the fix
+/// a tail's thread had no stop condition at all and ignored its write
+/// errors, so every abandoned tail (a killed `tail`, an MCP `wait` that timed
+/// out) kept a thread waking 50 times a second for the life of the server.
+#[test]
+fn a_tail_whose_client_has_gone_releases_its_thread() {
+    let server = Server::start(&[]);
+    let pid = server.child.id();
+    if thread_count(pid).is_none() {
+        eprintln!("SKIP: no thread count on this platform");
+        return;
+    }
+    server.request(&Request::Ingest {
+        stream: "busy".into(),
+        line: "first".into(),
+    });
+    let baseline = wait_for_threads(pid, Duration::from_secs(5), |_| true);
+
+    // Half tail a stream that keeps receiving lines (a gone client's writes
+    // fail), half a stream that never exists (nothing is ever written, so
+    // only noticing the closed socket can end them).
+    const TAILS: usize = 40;
+    let tails: Vec<Stream> = (0..TAILS)
+        .map(|n| open_tail(&server, if n % 2 == 0 { "busy" } else { "silent" }))
+        .collect();
+    let peak = wait_for_threads(pid, Duration::from_secs(10), |count| {
+        count >= baseline + TAILS
+    });
+    assert!(
+        peak >= baseline + TAILS,
+        "the tails never all started: baseline {baseline}, peak {peak}"
+    );
+
+    drop(tails);
+    for n in 0..20 {
+        server.request(&Request::Ingest {
+            stream: "busy".into(),
+            line: format!("after the clients left {n}"),
+        });
+    }
+
+    let settled = wait_for_threads(pid, Duration::from_secs(10), |count| count <= baseline);
+    assert!(
+        settled <= baseline,
+        "abandoned tails kept their threads: baseline {baseline}, peak {peak}, \
+         still {settled} after the clients left"
+    );
+}
+
+/// The other half of GH #197's fix: noticing a gone client must not end a
+/// tail whose client is still there but has simply had nothing to read for
+/// longer than the liveness check's own interval.
+#[test]
+fn a_live_tail_survives_a_quiet_spell_and_still_receives_lines() {
+    let server = Server::start(&[]);
+    let tail = open_tail(&server, "quiet");
+    tail.set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(2500));
+    server.request(&Request::Ingest {
+        stream: "quiet".into(),
+        line: "after the quiet spell".into(),
+    });
+
+    let mut reader = BufReader::new(tail);
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    match serde_json::from_str(line.trim_end()).unwrap() {
+        Response::Lines { lines } => assert_eq!(lines[0].text, "after the quiet spell"),
+        other => panic!("unexpected response: {other:?}"),
+    }
+}
