@@ -151,4 +151,5 @@ planning/scripts/update-ui-story	scripts/update-ui-story	rustification	review-ap
 planning/scripts/update-work-unit	scripts/update-work-unit	rustification	review-approved	backup-then-replace	false
 planning/scripts/validate-plan	scripts/validate-plan	rustification	review-approved	backup-then-replace	false
 planning/scripts/verify-fix-keys	scripts/verify-fix-keys	rustification	review-approved	backup-then-replace	false
+planning/scripts/verify-skill-load	scripts/verify-skill-load	rustification	review-approved	backup-then-replace	false
 planning/scripts/verify-target	scripts/verify-target	rustification	review-approved	backup-then-replace	false

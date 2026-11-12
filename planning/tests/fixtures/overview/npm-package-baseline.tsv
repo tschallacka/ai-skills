@@ -216,7 +216,7 @@ package/mods/tui-hint-board/hooks/register.tsx	15890
 package/mods/tui-hint-board/types/index.d.ts	213
 package/package.json	2839
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15237
-package/planning/PACKAGE-MANIFEST.tsv	17811
+package/planning/PACKAGE-MANIFEST.tsv	17928
 package/planning/REVIEWER.md	26888
 package/planning/ROLES.md	5080
 package/planning/RUST-ARTIFACT-MANIFEST.md	716
