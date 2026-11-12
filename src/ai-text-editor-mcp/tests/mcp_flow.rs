@@ -406,3 +406,138 @@ fn file_wins_when_both_file_and_path_are_given() {
         "file must win over path when both are given: {frames:?}"
     );
 }
+
+/// B9: a refused edit must not cost a file its tab. Opened at verbosity 0 the
+/// file's cached session has no token, so the replace first recovers one, and
+/// that recovery used to delete the cache entry and leave it deleted when the
+/// replace was then refused. With a second tab in the workspace the following
+/// save could no longer find this file's tab and refused with "no tab".
+#[test]
+fn a_refused_edit_after_a_verbosity_0_open_keeps_the_tab_for_the_next_call_b9() {
+    let Some(mut h) = Harness::new("b9") else {
+        return;
+    };
+    let other = h.scratch.join("other.txt");
+    std::fs::write(&other, "one\ntwo\n").unwrap();
+    let opened_other = h.call(1, "open", vec![("file", json!(other))]);
+    assert!(
+        !Harness::refused(&opened_other),
+        "open refused: {opened_other}"
+    );
+    let opened = h.call(
+        2,
+        "open",
+        vec![("file", json!(h.file())), ("verbosity", json!(0))],
+    );
+    assert!(!Harness::refused(&opened), "open refused: {opened}");
+    let replaced = h.call(
+        3,
+        "replace",
+        vec![
+            ("file", json!(h.file())),
+            ("range_start_match", json!("no-such-text")),
+            ("range_end_before_match", json!("beta")),
+            ("text", json!("x")),
+        ],
+    );
+    assert!(
+        Harness::refused(&replaced),
+        "a replace with no matching anchor applied: {replaced}"
+    );
+    assert_eq!(
+        Harness::frames(&replaced)[0]["code"],
+        json!("range_start_match_not_found"),
+        "{replaced}"
+    );
+    let saved = h.call(4, "save", vec![("file", json!(h.file()))]);
+    assert!(
+        !Harness::refused(&saved),
+        "the refused replace cost the file its tab: {saved}"
+    );
+}
+
+/// B9's other half: create-parents lived only on the cold-start path, so an
+/// `open` answered by an already-running workspace ignored the flag, created
+/// nothing, and returned a tab whose save could only fail. A running workspace
+/// must refuse an unacknowledged missing parent and create an acknowledged
+/// one, exactly as a cold start does.
+#[test]
+fn a_running_workspace_honours_create_parents_on_open_b9() {
+    let Some(mut h) = Harness::new("b9parents") else {
+        return;
+    };
+    let warm = h.call(1, "open", vec![("file", json!(h.file()))]);
+    assert!(!Harness::refused(&warm), "open refused: {warm}");
+    let nested = h.scratch.join("new").join("deeper").join("c.txt");
+
+    let refused = h.call(2, "open", vec![("file", json!(nested))]);
+    assert!(
+        Harness::refused(&refused),
+        "a missing parent was opened without acknowledgement: {refused}"
+    );
+    assert!(
+        Harness::content(&refused).contains("does not exist"),
+        "the refusal must name the missing parent: {refused}"
+    );
+    assert!(
+        !h.scratch.join("new").exists(),
+        "a refused open created directories"
+    );
+
+    let opened = h.call(
+        3,
+        "open",
+        vec![
+            ("file", json!(nested)),
+            ("acknowledge_create_parents", json!(true)),
+        ],
+    );
+    assert!(!Harness::refused(&opened), "open refused: {opened}");
+    assert!(
+        nested.parent().unwrap().is_dir(),
+        "an acknowledged open on a running workspace created nothing"
+    );
+    let inserted = h.call(
+        4,
+        "insert",
+        vec![
+            ("file", json!(nested)),
+            ("offset", json!(0)),
+            ("text", json!("hello\n")),
+        ],
+    );
+    assert!(!Harness::refused(&inserted), "insert refused: {inserted}");
+    let saved = h.call(5, "save", vec![("file", json!(nested))]);
+    assert!(!Harness::refused(&saved), "save refused: {saved}");
+    assert_eq!(std::fs::read_to_string(&nested).unwrap(), "hello\n");
+}
+
+/// B9's cold-start half: with two parent levels missing under a path that
+/// runs through a symlink, the client keyed the endpoint record it waited for
+/// on the raw path, while the server announced under the canonical one once
+/// the directories existed, so the open reported "never announced an
+/// endpoint" even though the server was up.
+#[test]
+fn a_cold_open_through_a_symlink_with_missing_parents_finds_its_server_b9() {
+    let Some(mut h) = Harness::new("b9cold") else {
+        return;
+    };
+    let real = h.scratch.join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    let link = h.scratch.join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let nested = link.join("new").join("deeper").join("c.txt");
+    let opened = h.call(
+        1,
+        "open",
+        vec![
+            ("file", json!(nested)),
+            ("acknowledge_create_parents", json!(true)),
+        ],
+    );
+    assert!(
+        !Harness::refused(&opened),
+        "a cold open with created parents did not find its server: {opened}"
+    );
+    assert!(real.join("new").join("deeper").is_dir());
+}

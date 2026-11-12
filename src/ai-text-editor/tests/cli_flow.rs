@@ -2921,18 +2921,20 @@ fn t1_the_idle_watchdog_still_exits_when_claude_agents_does_not_list_the_session
 
 #[test]
 fn save_into_a_missing_parent_names_the_path_and_the_parent() {
-    // B200: `open` promises creation on first save; the save then failed
-    // with a bare unnamed ENOENT that named neither side.
+    // B200: a save whose parent directory is missing failed with a bare
+    // unnamed ENOENT that named neither side. An open no longer accepts a
+    // missing parent on any route (B9: a running workspace now refuses or
+    // creates it exactly as an autostart does), so the parent here is
+    // removed AFTER the open -- the way a save still meets a missing parent.
     let harness = Harness::new("saveparent");
-    // The server must already be up: an autostart refuses a path whose
-    // parent does not exist, loudly and named; the unnamed failure this
-    // test pins happens when a live server accepts the open on the
-    // create-promise and the save dies later (observed on drive three).
     let anchor = harness.write("anchor.txt", "a\n");
     harness.open(&anchor);
-    let target = harness.scratch.join("nope/new.txt");
+    let parent = harness.scratch.join("nope");
+    std::fs::create_dir_all(&parent).unwrap();
+    let target = parent.join("new.txt");
     let opened = harness.client(&["open", "-f", target.to_str().unwrap()]);
     assert!(opened.status.success(), "{}", refusal_text(&opened));
+    std::fs::remove_dir_all(&parent).unwrap();
     let inserted = harness.client(&[
         "insert",
         "-f",

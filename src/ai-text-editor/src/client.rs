@@ -198,6 +198,15 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
         }
     });
 
+    // B9: before any route, so an `open` served by an already-running
+    // workspace refuses or creates a missing parent exactly as a cold start
+    // does, instead of returning a tab that can never be saved.
+    if request.method == "open" {
+        if let Some(file) = &request.file {
+            ensure_parent_dir(file, request.acknowledge_create_parents)?;
+        }
+    }
+
     if let Some(value) = &request.explicit_endpoint {
         // The cache is an optimization here, never a prerequisite: a named
         // endpoint must work as the *first* call under an identity, before
@@ -396,6 +405,12 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
         )),
         _ => {
             let autostart_auth = autostart_server(request, file)?;
+            // Recomputed, not reused: with two or more missing parent levels
+            // the record above was keyed on the raw path, and once the
+            // directories exist the server announces under the canonical one
+            // (on macOS /tmp is /private/tmp), so the stale key named a record
+            // that never appears (B9's cold-start half).
+            let discovery = endpoint_for_file(file);
             let endpoint = read_endpoint(&discovery).map_err(|error| {
                 format!(
                     "server was started but never announced an endpoint for {}: {error}",
@@ -417,8 +432,42 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
     }
 }
 
+/// Refuses, or with `acknowledged` creates, a missing parent directory of a
+/// file about to be opened. B229: a missing parent used to surface as a server
+/// failing to start, blaming the server and offering no recovery. Two steps,
+/// not one: the refusal names the parent and asks for confirmation, and only
+/// an acknowledged retry creates the chain -- a silent `mkdir -p` would build
+/// a tree nobody asked for out of a typo. B9: this lived only in
+/// `autostart_server`, so an `open` served by an already-running workspace
+/// skipped it, created nothing, and handed back a tab whose `save` could
+/// never succeed; `resolve` now runs it for every `open` before any route.
+pub fn ensure_parent_dir(file: &Path, acknowledged: bool) -> Result<(), String> {
+    let Some(parent) = file
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return Ok(());
+    };
+    if parent.is_dir() {
+        return Ok(());
+    }
+    if !acknowledged {
+        return Err(format!(
+            "cannot open {}: the parent directory {} does not exist. If the path is right, retry with acknowledge_create_parents (CLI: --acknowledge-create-parents) and the directories will be created; if it is a typo, fix the path — nothing was created",
+            file.display(),
+            parent.display()
+        ));
+    }
+    std::fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "cannot create the parent directory {} for {}: {error}",
+            parent.display(),
+            file.display()
+        )
+    })
+}
+
 /// Persist a resolution for next time, if it has a `cache_path` at all — an
-/// explicit `--endpoint` call has nothing of its own to remember.
 pub fn persist_cache(
     cache_path: Option<&Path>,
     endpoint: &Endpoint,
@@ -581,42 +630,7 @@ pub fn autostart_server(request: &ResolveRequest, file: &Path) -> Result<Option<
         *acknowledge_create_parents,
         *takeover_stale_endpoint,
     );
-    // B229: a path whose parent directory is missing used to be reported as
-    // "server for <path> failed to start: ai-text-editor-server: cannot
-    // resolve <path>: No such file or directory (os error 2)" — blaming the
-    // server, when nothing about the server is wrong, and offering no
-    // recovery. With the parent present that same open succeeds, the tab
-    // starts empty and `save` writes the file, so the two cases differ only in
-    // the parent directory and only one of them said so.
-    //
-    // The wording is `save`'s own for the identical condition, which the
-    // server already gets right; this only reaches it from the other end.
-    //
-    // Two steps, not one: the refusal names the parent and asks for a
-    // confirmation, and only an acknowledged retry creates the chain. A
-    // silent `mkdir -p` would build a directory tree nobody asked for out of
-    // a typo, which is what the verify step exists to prevent.
-    if let Some(parent) = file
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        if !parent.is_dir() {
-            if !acknowledge_create_parents {
-                return Err(format!(
-                    "cannot open {}: the parent directory {} does not exist. If the path is right, retry with acknowledge_create_parents (CLI: --acknowledge-create-parents) and the directories will be created; if it is a typo, fix the path — nothing was created",
-                    file.display(),
-                    parent.display()
-                ));
-            }
-            std::fs::create_dir_all(parent).map_err(|error| {
-                format!(
-                    "cannot create the parent directory {} for {}: {error}",
-                    parent.display(),
-                    file.display()
-                )
-            })?;
-        }
-    }
+    ensure_parent_dir(file, acknowledge_create_parents)?;
     let discovery = endpoint_for_file(file);
     let lock_path = discovery.with_extension("start.lock");
     let _lock = StaleLock::acquire(&lock_path, Duration::from_secs(20))
@@ -932,9 +946,18 @@ fn autofill_bulk_edit_session_tokens(
 /// Re-open the file against the already-live endpoint to recover a current
 /// tab-scoped session token after a server restart. Never autostarts; if the
 /// open itself does not answer with a token, there is nothing to refresh.
+///
+/// The recovered token is cached here, at once (B9). The cache entry is
+/// removed first, and the caller only rewrites it when ITS request succeeds,
+/// so a refused request after a refresh -- a replace whose anchor matched
+/// nothing -- left this file with no cache at all; in a workspace with more
+/// than one tab, the next guarded verb on it then read as "no tab". The token
+/// came from an `open` naming this file, so it is this file's own tab
+/// whatever the request that follows does.
 fn refresh_token(request: &ResolveRequest, resolved: &Resolved) -> Option<Resolved> {
     let file = request.file.as_ref()?;
-    if let Some(path) = recovery_cache_path(request) {
+    let recovery_path = recovery_cache_path(request);
+    if let Some(path) = &recovery_path {
         let _ = std::fs::remove_file(path);
     }
     let open_envelope = Envelope {
@@ -953,6 +976,12 @@ fn refresh_token(request: &ResolveRequest, resolved: &Resolved) -> Option<Resolv
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
     })?;
+    let _ = persist_cache(
+        recovery_path.as_deref(),
+        &resolved.endpoint,
+        resolved.auth_token.as_deref(),
+        Some(&session_token),
+    );
     Some(Resolved {
         endpoint: resolved.endpoint.clone(),
         auth_token: resolved.auth_token.clone(),
