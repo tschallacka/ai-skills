@@ -152,6 +152,7 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/add-ui-story.sh" <plan-directory> US-01 "<persona>" "<browser actions>" "<direct interaction>" "<expected result>" W01,W02
 "$PLANNING_SKILL_DIR/scripts/configure-ui-story-cache.sh" <plan-directory> US-01 "<starting state>" "<direct UI input>" "<target/value>" "<readiness signal>" "<maximum wait>"
 "$PLANNING_SKILL_DIR/scripts/update-ui-story.sh" <plan-directory> US-01 --expected "<corrected expectation>"   # correct a story that turned out to contradict the plan; re-checks the interaction rule against the resulting row
+"$PLANNING_SKILL_DIR/scripts/update-ui-story.sh" <plan-directory> US-01 --work-units W01,W03   # replace a story's whole related-work-units list; every id must exist in the inventory
 "$PLANNING_SKILL_DIR/scripts/add-goal.sh" <plan-directory> 01-<goal> "<title>" "<outcome>"
 "$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> --id W01 --type <type> --file <file|N/A> --scope <scope> --subscope <subscope|N/A> --change "<change>" --depends-on <dependencies|—> --goal 01-<goal> --step 01-step-<slug>
 "$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W01 --depends-on "W23,W24"   # change scope/file/type/depends-on/description in place; retargeting lists the verification units that grade it
@@ -322,9 +323,6 @@ resume the same manifest rather than installing a partial package.
 ### 4.7 A plan from an older skill version is obsolete, not migrated
 
 This skill does no backwards compatibility, and a plan directory is one of its
-
-<!-- SKILL-LOAD-PROOF part=part-4 token=096115d6a833c09a -->
-
 interfaces. A plan built by an older version of the skill is therefore not
 resumed, not repaired, and not migrated: it is marked obsolete, and the
 initiative is rebuilt as a new plan in a new plan directory with the current
@@ -350,6 +348,9 @@ replaced-by: <new plan directory name>
 `replaced-by:` is mandatory and names the plan that supersedes this one. The
 marker is a separate file rather than a key in `.env` or a status line in
 `plan-description.md`, because neither of those can carry it: `.env` is a closed
+
+<!-- SKILL-LOAD-PROOF part=part-4 token=23def8e43dc759ec -->
+
 manifest whose key allow-list rejects an unknown key and whose schema check
 demands the current version, and the `- Status:` field is already owned by the
 review-status gate, which permits only `💤 pending` and `✅ approved`. A file is
