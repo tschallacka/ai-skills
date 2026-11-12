@@ -57,6 +57,17 @@ fn main() {
         std::process::exit(1);
     }
     let skill = skill_root();
+    // GH #193: without the registries every registered goal table looks
+    // hand-written, so each plan check after this would accuse the plan of
+    // edits it never had. Report the install, once, and check nothing.
+    let goal_tables = skill.join("goal-tables.json");
+    if !goal_tables.is_file() {
+        eprintln!(
+            "FAIL: goal-tables.json registry is missing at {}: the planning skill install is incomplete, so the plan was not checked. Run validate-plan through planning/scripts/validate-plan.sh, or reinstall the planning skill.",
+            goal_tables.display()
+        );
+        std::process::exit(69);
+    }
     let documents = validate_plan_documents(&plan, options.complete, &mut findings);
     validate_step_numbers(&plan, &mut findings);
     let placeholders = PlaceholderValidator::from_registry(&skill.join("placeholders.json"));
@@ -271,17 +282,19 @@ fn parse(args: Vec<String>) -> Result<Options, i32> {
 /// The directory the registries (goal-tables.json, placeholders.json, ...)
 /// live in. `PLANNING_SKILL_ROOT`, when set, is the directory that CONTAINS
 /// `planning/scripts`, so the registries sit in its `planning/`
-/// subdirectory; without the variable the cwd-relative `planning` already
-/// names that subdirectory. Reading the variable as the registry directory
-/// itself made every wrapper-launched run fail with "goal-tables.json
-/// registry is missing at <root>/goal-tables.json".
+/// subdirectory. Reading the variable as the registry directory itself made
+/// every wrapper-launched run fail with "goal-tables.json registry is missing
+/// at <root>/goal-tables.json". Without the variable -- the binary run
+/// directly rather than through validate-plan.sh -- the registries are found
+/// from the binary's own location, never from the working directory (GH #193).
 fn skill_root() -> PathBuf {
     registry_dir(env::var_os("PLANNING_SKILL_ROOT").map(PathBuf::from))
 }
 
 fn registry_dir(skill_root: Option<PathBuf>) -> PathBuf {
     match skill_root {
-        None => PathBuf::from("planning"),
+        None => registry_dir_beside(env::current_exe().ok().as_deref())
+            .unwrap_or_else(|| PathBuf::from("planning")),
         // The wrapper exports an EMPTY root when no ancestor of the script has
         // a `planning/scripts` directory -- a hand-copied skill tree. That must
         // read as "the registries are not there", not fall back to whatever
@@ -294,15 +307,85 @@ fn registry_dir(skill_root: Option<PathBuf>) -> PathBuf {
     }
 }
 
+/// The registry directory nearest above `exe`: an installed skill directory
+/// (goal-tables.json beside scripts/, the binary in its scripts/) or a
+/// checkout (planning/goal-tables.json, the binary in bin/<triple>/ or
+/// target/). None when no ancestor holds one, e.g. the shared bin directory.
+fn registry_dir_beside(exe: Option<&Path>) -> Option<PathBuf> {
+    exe?.ancestors().skip(1).find_map(|dir| {
+        if dir.join("goal-tables.json").is_file() && dir.join("scripts").is_dir() {
+            Some(dir.to_path_buf())
+        } else if dir.join("planning/goal-tables.json").is_file() {
+            Some(dir.join("planning"))
+        } else {
+            None
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse, registry_dir};
+    use super::{parse, registry_dir, registry_dir_beside};
     use std::fs;
     use std::path::PathBuf;
 
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("validate-plan-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// GH #193: run directly from an installed skill, the binary finds the
+    /// registries beside its own scripts/ directory, whatever the cwd is.
     #[test]
-    fn registry_dir_defaults_to_the_relative_planning_directory() {
-        assert_eq!(registry_dir(None), PathBuf::from("planning"));
+    fn an_installed_binary_finds_the_registries_of_its_own_skill() {
+        let root = scratch("installed");
+        let skill = root.join("skills/planning");
+        fs::create_dir_all(skill.join("scripts")).unwrap();
+        fs::write(skill.join("goal-tables.json"), "{}").unwrap();
+        let exe = skill.join("scripts/validate-plan");
+        assert_eq!(registry_dir_beside(Some(&exe)), Some(skill.clone()));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A checkout build (bin/<triple>/ or target/debug/) finds planning/.
+    #[test]
+    fn a_checkout_binary_finds_the_planning_directory_above_it() {
+        let checkout = scratch("checkout");
+        fs::create_dir_all(checkout.join("planning")).unwrap();
+        fs::write(checkout.join("planning/goal-tables.json"), "{}").unwrap();
+        let exe = checkout.join("bin/aarch64-apple-darwin/validate-plan");
+        assert_eq!(
+            registry_dir_beside(Some(&exe)),
+            Some(checkout.join("planning"))
+        );
+        let _ = fs::remove_dir_all(&checkout);
+    }
+
+    /// No registries above the binary (the shared bin directory) is None, so
+    /// the caller falls back rather than inventing a directory.
+    #[test]
+    fn a_binary_with_no_registries_above_it_finds_none() {
+        let shared = scratch("shared-bin");
+        assert_eq!(
+            registry_dir_beside(Some(&shared.join("validate-plan"))),
+            None
+        );
+        assert_eq!(registry_dir_beside(None), None);
+        let _ = fs::remove_dir_all(&shared);
+    }
+
+    /// Without the variable the test binary itself, built in this checkout's
+    /// target/, resolves to the checkout's planning/ -- not to "planning".
+    #[test]
+    fn registry_dir_without_a_root_is_not_cwd_relative() {
+        let dir = registry_dir(None);
+        assert!(dir.is_absolute(), "resolved to {dir:?}");
+        assert!(
+            dir.join("goal-tables.json").is_file(),
+            "resolved to {dir:?}"
+        );
     }
 
     #[test]
