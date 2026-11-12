@@ -21,7 +21,7 @@ const ROLES: &[(&str, &str)] = &[
 ];
 
 fn usage(code: u8) -> ! {
-    print!("role-context.sh — role-gated context reader (persona registry + scope docs).\n\nGiven a role id or canonical name, print the .md documents that single role\nneeds, concatenated with provenance headers and the role's voice preamble, so\nan agent gets a scoped payload instead of loading unrelated knowledge.\n\nUsage:\n  role-context.sh <role-id|name> [-p N|--page N] [--page-size BYTES]\n  role-context.sh --list                    # -l; identity-free (safe mode)\n  ROLE_ID=maintainer role-context.sh --paths <role-id|name>  # maintainer-only\n  role-context.sh --help\n\nOutput is BYTE-budgeted and paginated: -p2 (or -p 2) prints the next page when\na \"more: ...\" footer is shown; --page-size sets the per-page byte budget\n(default 12000). Every page is a deterministic slice; no TTY is needed.\n\nGATING: identity-aware and FAILS CLOSED. Any content read requires a ROLE_ID\nresolving to a registered persona; reads are restricted to the caller's own\nrole (reviewer family mutual, maintainer may read all). --list is open.\n");
+    print!("role-context.sh — role-gated context reader (persona registry + scope docs).\n\nGiven a role id or canonical name, print the .md documents that single role\nneeds, concatenated with provenance headers and the role's voice preamble, so\nan agent gets a scoped payload instead of loading unrelated knowledge.\n\nUsage:\n  role-context.sh <role-id|name> [-p N|--page N] [--page-size BYTES]\n  role-context.sh --list                    # -l; identity-free (safe mode)\n  ROLE_ID=maintainer role-context.sh --paths <role-id|name>  # maintainer-only\n  role-context.sh --help\n\nOutput is BYTE-budgeted and paginated: a page that is not the last ends in a\n\"# more:\" footer naming the exact command for the next page (same role, same\n--page-size, -p N+1); run it until no footer is printed. --page-size sets the\nper-page byte budget (default 12000). Every page is a deterministic slice.\n\nGATING: identity-aware and FAILS CLOSED. Any content read requires a ROLE_ID\nresolving to a registered persona; reads are restricted to the caller's own\nrole (reviewer family mutual, maintainer may read all). --list is open.\n");
     std::process::exit(code.into());
 }
 
@@ -266,7 +266,21 @@ fn main() -> ExitCode {
     }
     print!("{}", lines[starts[page - 1]..ends[page - 1]].concat());
     if page < total {
-        println!("\n# more: role-context.sh <{target}|name> -p {}", page + 1);
+        // The exact runnable next command: the role as given and the same
+        // page size, since a page number only means something at one size.
+        let script = match env::var("PLANNING_SKILL_ROOT") {
+            Ok(root) if !root.is_empty() => format!("{root}/planning/scripts/role-context.sh"),
+            _ => "role-context.sh".into(),
+        };
+        let size = if budget == 12000 {
+            String::new()
+        } else {
+            format!(" --page-size {budget}")
+        };
+        println!(
+            "\n# more: this is page {page} of {total}. Next page: {script} {role}{size} -p {}\n# Repeat with the next page number until no \"# more:\" line is printed.",
+            page + 1
+        );
     }
     ExitCode::SUCCESS
 }

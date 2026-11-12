@@ -57,8 +57,12 @@ overwritten or repaired. Ask for human resolution before refreshing. Agents
 invoke the shell helpers; helpers own snapshot, state, and plan-file writes.
 
 **A read returns one page, and the budgets bound the page, not the document.**
-Whenever a page withholds records it reports `next_token`; pass that value back
-as `--token` and repeat until a page comes back without one. The token carries
+Whenever a page withholds records it reports `next_token` on stdout and, on
+stderr, a `paging=` line (which records this page holds, how many are withheld)
+and `next_command=`, the exact command for the next page: your own arguments,
+the view pinned, and `--token` added (`--format json` carries the same as the
+`next_token` and `next_command` fields). Run it and repeat until a page comes
+back without a `next_token`. The token carries
 the document's hash and view, so a token replayed after the document changed is
 refused (exit 65) rather than resuming into shifted records — re-read from page
 one after such a refusal. Raising `--max-records`/`--max-bytes` enlarges the
@@ -321,10 +325,10 @@ resume the same manifest rather than installing a partial package.
 
 ### 4.7 A plan from an older skill version is obsolete, not migrated
 
+<!-- SKILL-LOAD-PROOF part=part-4 token=bd29ad2bf1a8dfc9 -->
+
+
 This skill does no backwards compatibility, and a plan directory is one of its
-
-<!-- SKILL-LOAD-PROOF part=part-4 token=096115d6a833c09a -->
-
 interfaces. A plan built by an older version of the skill is therefore not
 resumed, not repaired, and not migrated: it is marked obsolete, and the
 initiative is rebuilt as a new plan in a new plan directory with the current

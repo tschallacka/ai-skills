@@ -56,9 +56,11 @@ assert_files_identical() {
 
 count_rows() { { grep -c "$1" "$2" || true; } | tr -d ' '; }
 # `read` writes content on stdout; a truncated page appends one
-# `next_token=<token>` line. Split them rather than grep -q (pipefail-grep-q).
+# `next_token=<token>` line, and its stderr carries the header plus `paging=`
+# and `next_command=`. Split them rather than grep -q (pipefail-grep-q).
 token_of() { sed -n 's/^next_token=//p' "$1"; }
-content_of() { sed '/^next_token=/d; /^entry_id=/d; /^view=/d; /^returned_records=/d; /^total_records=/d; /^truncated=/d' "$1"; }
+command_of() { sed -n 's/^next_command=//p' "$1"; }
+content_of() { sed '/^next_token=/d; /^entry_id=/d; /^view=/d; /^returned_records=/d; /^total_records=/d; /^truncated=/d; /^paging=/d; /^next_command=/d' "$1"; }
 
 findings=30
 plan="$tmp/plan"
@@ -172,6 +174,52 @@ done
 assert_eq 'the byte-driven walk consumed every page' "$token" ''
 assert_files_identical 'a byte-driven walk also reassembles the document exactly' "$byte_walk" "$review"
 assert_ge 'the byte-driven walk really paged' "$byte_pages" 2
+
+# ---- 4b. a page names the exact command that reads the next one ----------
+# GH #1: a withholding page used to end in a bare next_token line, and agents
+# that did not know the --token protocol opened plan-context.sh to find out.
+# Each such page now prints `paging=` and the runnable `next_command=` on
+# stderr. Following next_command verbatim, and nothing else, must reassemble the
+# document, carry the caller's own budget and pin the view the token is bound to.
+guided="$tmp/guided.md"
+: > "$guided"
+guided_pages=0
+next="$(printf '%q ' "$reader" read --plan-dir "$plan" --document adversarial-review --read-only --max-records "$page_size")"
+while [ -n "$next" ] && [ "$guided_pages" -lt "$page_limit" ]; do
+    guided_pages=$((guided_pages + 1))
+    page="$tmp/guided-$guided_pages"
+    eval "$next" > "$page.out" 2> "$page.err"
+    content_of "$page.out" >> "$guided"
+    next="$(command_of "$page.err")"
+    if [ -n "$(token_of "$page.out")" ]; then
+        [ -n "$next" ] || note_fail "withholding page $guided_pages printed no next_command"
+        case "$(cat "$page.err")" in
+            *'paging=this page holds records '*' more are withheld'*) ;;
+            *) note_fail "withholding page $guided_pages printed no paging= line" ;;
+        esac
+    else
+        assert_eq "the last page ($guided_pages) prints no next_command" "$next" ''
+    fi
+done
+assert_ge 'following next_command really paged' "$guided_pages" 2
+assert_files_identical 'pages fetched only by following next_command reassemble the document' "$guided" "$review"
+first_command="$(command_of "$tmp/guided-1.err")"
+for expected in "--max-records $page_size" '--read-only' '--view full' '--token continue:' '--document adversarial-review' "$reader"; do
+    case "$first_command" in
+        *"$expected"*) note_pass "next_command carries $expected" ;;
+        *) note_fail "next_command carries $expected (got '$first_command')" ;;
+    esac
+done
+json="$("$reader" read --plan-dir "$plan" --document adversarial-review --read-only --max-records "$page_size" --format json)"
+case "$json" in
+    *'"next_command":"'*'--token continue:'*'--format json'*) note_pass 'a truncated json page carries next_command' ;;
+    *) note_fail "a truncated json page carries next_command (got ${json##*\"next_token\"})" ;;
+esac
+json="$("$reader" read --plan-dir "$plan" --document adversarial-review --read-only --max-records 100000 --format json)"
+case "$json" in
+    *'"next_command":null'*) note_pass 'a complete json page reports next_command null' ;;
+    *) note_fail 'a complete json page reports next_command null' ;;
+esac
 
 # ---- 5. a token minted against changed content is refused fail-closed ------
 stale_token="$(token_of "$tmp/page1.txt")"
