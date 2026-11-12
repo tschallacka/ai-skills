@@ -218,7 +218,10 @@ impl Stream {
     /// most a millisecond. A client sends nothing after its one request
     /// line, so any bytes that do arrive are read and dropped.
     pub fn peer_gone(&mut self) -> bool {
-        if self.set_read_timeout(Some(Duration::from_millis(1))).is_err() {
+        if self
+            .set_read_timeout(Some(Duration::from_millis(1)))
+            .is_err()
+        {
             return true;
         }
         let mut discard = [0u8; 256];

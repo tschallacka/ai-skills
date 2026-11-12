@@ -127,12 +127,11 @@ impl Hub {
         mut on_line: impl FnMut(Line) -> bool,
         mut should_stop: impl FnMut() -> bool,
     ) {
-        let pending = |streams: &mut HashMap<String, StreamLog>, since: u64| match streams
-            .get_mut(stream)
-        {
-            Some(log) => log.read_range(since + 1, u64::MAX),
-            None => Vec::new(),
-        };
+        let pending =
+            |streams: &mut HashMap<String, StreamLog>, since: u64| match streams.get_mut(stream) {
+                Some(log) => log.read_range(since + 1, u64::MAX),
+                None => Vec::new(),
+            };
         while !should_stop() {
             let new_lines = {
                 let mut streams = self.streams.lock().unwrap();
@@ -342,7 +341,11 @@ mod tests {
             },
             || std::time::Instant::now() >= backstop,
         );
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "it stopped at the first failed write");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "it stopped at the first failed write"
+        );
     }
 
     /// GH #197: a tail on a stream that never gets a line must still ask

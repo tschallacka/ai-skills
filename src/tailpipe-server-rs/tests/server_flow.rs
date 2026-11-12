@@ -298,7 +298,8 @@ fn a_tail_whose_client_has_gone_releases_its_thread() {
 fn a_live_tail_survives_a_quiet_spell_and_still_receives_lines() {
     let server = Server::start(&[]);
     let tail = open_tail(&server, "quiet");
-    tail.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    tail.set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
     std::thread::sleep(Duration::from_millis(2500));
     server.request(&Request::Ingest {
         stream: "quiet".into(),

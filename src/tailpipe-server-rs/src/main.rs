@@ -128,7 +128,11 @@ fn serve_connection(hub: &Arc<Hub>, mut stream: Stream) {
         Ok(clone) => clone,
         Err(_) => return,
     });
-    if reader.get_ref().set_read_timeout(Some(REQUEST_TIMEOUT)).is_err() {
+    if reader
+        .get_ref()
+        .set_read_timeout(Some(REQUEST_TIMEOUT))
+        .is_err()
+    {
         return;
     }
     let mut line = String::new();
