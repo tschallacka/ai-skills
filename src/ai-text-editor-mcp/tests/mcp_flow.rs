@@ -406,3 +406,88 @@ fn file_wins_when_both_file_and_path_are_given() {
         "file must win over path when both are given: {frames:?}"
     );
 }
+
+/// A file that does not exist yet, in a directory that does, opens as an
+/// empty tab and `save` creates it -- both as the call that starts the server
+/// and through a workspace that is already running.
+#[test]
+fn a_new_file_in_an_existing_directory_opens_and_save_creates_it() {
+    let Some(mut h) = Harness::new("newfile") else {
+        return;
+    };
+    let mut id = 0;
+    for (name, warm_first) in [("cold.txt", false), ("warm.txt", true)] {
+        if warm_first {
+            id += 1;
+            let anchor = h.call(id, "open", vec![("file", json!(h.file()))]);
+            assert!(!Harness::refused(&anchor), "open refused: {anchor}");
+        }
+        let target = h.scratch.join(name);
+        assert!(!target.exists());
+        id += 1;
+        let opened = h.call(id, "open", vec![("file", json!(target))]);
+        assert!(!Harness::refused(&opened), "{name}: open refused: {opened}");
+        id += 1;
+        let inserted = h.call(
+            id,
+            "insert",
+            vec![
+                ("file", json!(target)),
+                ("offset", json!(0)),
+                ("text", json!(format!("{name}\n"))),
+            ],
+        );
+        assert!(
+            !Harness::refused(&inserted),
+            "{name}: insert refused: {inserted}"
+        );
+        id += 1;
+        let saved = h.call(id, "save", vec![("file", json!(target))]);
+        assert!(!Harness::refused(&saved), "{name}: save refused: {saved}");
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            format!("{name}\n")
+        );
+    }
+}
+
+/// `search` naming a file needs no `open` first: cold, as the call that starts
+/// the server, and warm, on a file a running workspace has never opened.
+#[test]
+fn search_opens_a_never_opened_file_itself() {
+    let Some(mut h) = Harness::new("searchopen") else {
+        return;
+    };
+    let cold = h.call(
+        1,
+        "search",
+        vec![
+            ("file", json!(h.file())),
+            ("mode", json!("exact_text")),
+            ("query", json!("beta")),
+        ],
+    );
+    assert!(!Harness::refused(&cold), "cold search refused: {cold}");
+    assert_eq!(
+        Harness::frames(&cold)[0]["payload"]["matches"][0]["line"],
+        json!(2),
+        "{cold}"
+    );
+    let other = h.scratch.join("other.txt");
+    std::fs::write(&other, "one\nneedle\n").unwrap();
+    let warm = h.call(
+        2,
+        "search",
+        vec![
+            ("file", json!(other)),
+            ("mode", json!("exact_text")),
+            ("query", json!("needle")),
+        ],
+    );
+    assert!(!Harness::refused(&warm), "warm search refused: {warm}");
+    assert_eq!(
+        Harness::frames(&warm)[0]["payload"]["matches"][0]["line"],
+        json!(2),
+        "{warm}"
+    );
+}

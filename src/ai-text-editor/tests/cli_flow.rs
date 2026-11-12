@@ -7758,3 +7758,68 @@ fn bulk_edit_then_a_standalone_read_lands_on_the_same_tab_no_duplicate_server() 
         );
     }
 }
+
+/// A file that does not exist yet, in a directory that does, opens as an
+/// empty tab and is created by `save` -- through a workspace that is already
+/// running, not only through the open that starts the server
+/// (`new_file_opens_edits_and_is_created_by_save` covers that one).
+#[test]
+fn a_running_workspace_opens_a_new_file_and_save_creates_it() {
+    let harness = Harness::new("newfile-warm");
+    let anchor = harness.write("anchor.txt", "a\n");
+    harness.open(&anchor);
+    let target = harness.path("created-warm.txt");
+    assert!(!target.exists());
+    let opened = harness.open(&target);
+    assert!(opened.status.success(), "{}", stderr_text(&opened));
+    let inserted = harness.client(&[
+        "insert",
+        "-f",
+        target.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "made by a warm workspace\n",
+    ]);
+    assert!(inserted.status.success(), "{}", stderr_text(&inserted));
+    let saved = harness.client(&["save", "-f", target.to_str().unwrap()]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "made by a warm workspace\n"
+    );
+}
+
+/// `search` naming a file needs no `open` first, whether it is the call that
+/// starts the server or a running workspace has never seen that file.
+#[test]
+fn search_opens_a_never_opened_file_itself() {
+    let harness = Harness::new("search-autoopen");
+    let search = |file: &std::path::Path| {
+        harness.client(&[
+            "search",
+            "-f",
+            file.to_str().unwrap(),
+            "-m",
+            "exact_text",
+            "-q",
+            "needle",
+        ])
+    };
+    let cold = harness.write("cold.txt", "alpha\nneedle one\n");
+    let found = search(&cold);
+    assert!(found.status.success(), "{}", stderr_text(&found));
+    assert_eq!(
+        first_payload(&found)["matches"][0]["line"],
+        json!(2),
+        "a cold search did not find the line"
+    );
+    let warm = harness.write("warm.txt", "beta\nneedle two\n");
+    let found = search(&warm);
+    assert!(found.status.success(), "{}", stderr_text(&found));
+    assert_eq!(
+        first_payload(&found)["matches"][0]["line"],
+        json!(2),
+        "a warm search on a never-opened file did not find the line"
+    );
+}
