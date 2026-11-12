@@ -69,8 +69,11 @@ MUST be read via `plan-context.sh read --plan-dir <PLAN_DIR> --document ID`
 the `.plans/` tree. A wholesale plan read is a context-overflow violation; if
 the gate cannot serve something, report it as a limitation rather than
 bypassing it. Each read returns one **page**: while a page reports
-`next_token`, records are still withheld — pass it back as `--token` until a
-page returns without one, and never treat a single page as the whole document.
+`next_token`, records are still withheld. Such a page also prints, on stderr,
+`next_command=` — the exact command for the next page (your own arguments plus
+`--token`). Run it, then each `next_command` after it, until a page returns
+without a `next_token`. Never treat a single page as the whole document, and do
+not open `plan-context.sh` to work out how to page: the page says how.
 
 ## Operating rules
 
@@ -257,6 +260,9 @@ exception for ordinary source, configuration, test, or documentation edits.
 A goal owns one coherent, independently demonstrable outcome and contains
 **2–10 work units** (MUST). A single-work-unit goal is allowed only for a
 genuinely standalone documentation, configuration, discovery, verification, or
+
+<!-- SKILL-LOAD-PROOF part=part-1 token=5ecafd5e830cdfc7 -->
+
 relocation outcome; state the reason in its `goal.md`. A goal with more than
 10 work units is invalid and MUST be split at the next stable product,
 contract, deployability, or ownership boundary. Do not split merely by file
@@ -267,9 +273,6 @@ claiming completion of later goals. If it cannot be demonstrated independently,
 it is a segment of another goal, not a goal.
 
 ### Target reachability gate
-
-
-<!-- SKILL-LOAD-PROOF part=part-1 token=aa2e72c5f9282cca -->
 
 Before a work unit may target a template, block, or layout, the plan must
 record evidence that the target actually renders on the surface in question. A

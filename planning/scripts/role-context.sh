@@ -12,9 +12,10 @@
 #   ROLE_ID=maintainer role-context.sh --paths <role-id|name>  # maintainer-only
 #   role-context.sh --help
 #
-# Output is BYTE-budgeted and paginated: -p2 (or -p 2) prints the next page when
-# a "more: ..." footer is shown; --page-size sets the per-page byte budget
-# (default 12000). Every page is a deterministic slice; no TTY is needed.
+# Output is BYTE-budgeted and paginated: a page that is not the last ends in a
+# "# more:" footer naming the exact command for the next page (same role, same
+# --page-size, -p N+1); run it until no footer is printed. --page-size sets the
+# per-page byte budget (default 12000). Every page is a deterministic slice.
 #
 # GATING: identity-aware and FAILS CLOSED. Any content read requires a ROLE_ID
 # resolving to a registered persona; reads are restricted to the caller's own

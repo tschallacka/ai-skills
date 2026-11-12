@@ -64,8 +64,11 @@ MUST be read via `plan-context.sh read --plan-dir <PLAN_DIR> --document ID`
 the `.plans/` tree. A wholesale plan read is a context-overflow violation; if
 the gate cannot serve something, report it as a limitation rather than
 bypassing it. Each read returns one **page**: while a page reports
-`next_token`, records are still withheld — pass it back as `--token` until a
-page returns without one, and never treat a single page as the whole document.
+`next_token`, records are still withheld. Such a page also prints, on stderr,
+`next_command=` — the exact command for the next page (your own arguments plus
+`--token`). Run it, then each `next_command` after it, until a page returns
+without a `next_token`. Never treat a single page as the whole document, and do
+not open `plan-context.sh` to work out how to page: the page says how.
 
 ## Operating rules
 
@@ -769,8 +772,10 @@ document. The documents that are not narrative — inventory, coverage,
 adversarial-review, stories, bugs, fixes, fix-keys, approval — default to the
 whole-document `full` view; every other id defaults to `summary`, and
 `--view full` is available for
-any of them. A page that withheld records reports next_token — pass it back as
---token and keep going until no next_token comes back. You have NOT read a
+any of them. A page that withheld records reports next_token, and on stderr a
+next_command= line: the exact command for the next page (your arguments plus
+--token). Run it, and keep running each next_command, until no next_token comes
+back; there is no need to read the script to learn how. You have NOT read a
 document until a page returns without one; treat a page you stopped early on as
 an unread document and say so. **The `summary` view is an excerpt of the head of
 the file, not a condensation of it, and it truncates before paging — so it
@@ -1366,8 +1371,12 @@ overwritten or repaired. Ask for human resolution before refreshing. Agents
 invoke the shell helpers; helpers own snapshot, state, and plan-file writes.
 
 **A read returns one page, and the budgets bound the page, not the document.**
-Whenever a page withholds records it reports `next_token`; pass that value back
-as `--token` and repeat until a page comes back without one. The token carries
+Whenever a page withholds records it reports `next_token` on stdout and, on
+stderr, a `paging=` line (which records this page holds, how many are withheld)
+and `next_command=`, the exact command for the next page: your own arguments,
+the view pinned, and `--token` added (`--format json` carries the same as the
+`next_token` and `next_command` fields). Run it and repeat until a page comes
+back without a `next_token`. The token carries
 the document's hash and view, so a token replayed after the document changed is
 refused (exit 65) rather than resuming into shifted records — re-read from page
 one after such a refusal. Raising `--max-records`/`--max-bytes` enlarges the

@@ -219,6 +219,20 @@ if [ -n "$page1" ] && [ -n "$page2" ] && [ "$page1" != "$page2" ] && [ "$page1_c
 else
     fail=$((fail+1)); echo "FAIL: role-context --page does not paginate"
 fi
+# GH #1: the "# more:" footer must be the exact runnable next command -- the
+# role as given and the same --page-size -- not a <role|name> placeholder that
+# silently re-pages at the default size. Running it must yield page 2.
+more_cmd="$(printf '%s\n' "$page1" | sed -n 's/^# more: .*Next page: //p')"
+case "$more_cmd" in
+    *'role-context.sh maintainer --page-size 500 -p 2')
+        followed="$(export ROLE_ID=maintainer; eval "$more_cmd" 2>/dev/null || true)"
+        if [ -n "$followed" ] && [ "$followed" = "$page2" ]; then
+            pass=$((pass+1)); echo "PASS: role-context more: footer is the runnable next-page command"
+        else
+            fail=$((fail+1)); echo "FAIL: role-context more: footer command does not yield page 2"
+        fi ;;
+    *) fail=$((fail+1)); echo "FAIL: role-context more: footer is not a runnable next-page command (got '$more_cmd')" ;;
+esac
 # --paths lists the role's doc paths (maintainer-only).
 paths_out="$(ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" --paths maintainer 2>/dev/null || true)"
 case "$paths_out" in *'ROLES.md'*) paths_listed=true ;; *) paths_listed=false ;; esac

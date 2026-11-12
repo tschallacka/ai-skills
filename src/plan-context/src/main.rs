@@ -15,7 +15,7 @@ const COMMAND: &str = "plan-context.sh";
 
 fn usage(code: u8) -> ! {
     print!(
-        "Usage:\n  {COMMAND} init --plan-dir DIR\n  {COMMAND} read --plan-dir DIR (--document ID | --unit WNN) [--view VIEW] [--token TOKEN] [--format text|json] [--max-bytes N] [--max-records N] [--read-only]\n  {COMMAND} check --plan-dir DIR (--entry ID | --changed | --all) [--format text|json]\n  {COMMAND} refresh --plan-dir DIR (--entry ID | --stale) [--format text|json]\n  {COMMAND} checkpoint --plan-dir DIR --phase PHASE --state STATE --findings-file FILE --changed-files FILE --source-hash HASH --plan-hash HASH\n\nValid --document IDs:\n  plan                 plan-description.md\n  inventory            work-unit-inventory.md\n  progress             progress.md\n  adversarial-review   adversarial-review.md\n  coverage             work-unit-inventory.md     (the coverage table)\n  stories              ui-user-stories.md\n  bugs                 bugs.md\n  planning-bugs        planning-bugs.json\n  fixes                fixes.md\n  fix-keys             fix-keys.json\n  approval             approval.json\n  goal-progress:<goal> <goal>/progress.md\n  goal:<goal id>       <goal>/goal.md\n  step:<goal>/<step>   <goal>/steps/<step>.md\n  --unit WNN           the step a work unit maps to in work-unit-inventory.md\n\nViews: full, summary, metadata, ownership, instructions, acceptance, handoff,\ntesting, dependencies, execution-summary, changed-documents, inventory-row,\nvalidator. Default is full for inventory and review, summary otherwise.\n\nPaging: a page that withholds records reports next_token; pass it back as --token.\n"
+        "Usage:\n  {COMMAND} init --plan-dir DIR\n  {COMMAND} read --plan-dir DIR (--document ID | --unit WNN) [--view VIEW] [--token TOKEN] [--format text|json] [--max-bytes N] [--max-records N] [--read-only]\n  {COMMAND} check --plan-dir DIR (--entry ID | --changed | --all) [--format text|json]\n  {COMMAND} refresh --plan-dir DIR (--entry ID | --stale) [--format text|json]\n  {COMMAND} checkpoint --plan-dir DIR --phase PHASE --state STATE --findings-file FILE --changed-files FILE --source-hash HASH --plan-hash HASH\n\nValid --document IDs:\n  plan                 plan-description.md\n  inventory            work-unit-inventory.md\n  progress             progress.md\n  adversarial-review   adversarial-review.md\n  coverage             work-unit-inventory.md     (the coverage table)\n  stories              ui-user-stories.md\n  bugs                 bugs.md\n  planning-bugs        planning-bugs.json\n  fixes                fixes.md\n  fix-keys             fix-keys.json\n  approval             approval.json\n  goal-progress:<goal> <goal>/progress.md\n  goal:<goal id>       <goal>/goal.md\n  step:<goal>/<step>   <goal>/steps/<step>.md\n  --unit WNN           the step a work unit maps to in work-unit-inventory.md\n\nViews: full, summary, metadata, ownership, instructions, acceptance, handoff,\ntesting, dependencies, execution-summary, changed-documents, inventory-row,\nvalidator. Default is full for inventory and review, summary otherwise.\n\nPaging: one read returns one PAGE. A page that withholds records ends with\nnext_token=<token> on stdout and, on stderr, a paging= line (which records this\npage holds, how many are withheld) and next_command=<the exact command for the\nnext page, your own arguments plus --token>. Run next_command, and keep running\nthe next_command each page prints, until a page prints no next_token. The\ndocument is read only when that happens. --format json carries the same as the\nnext_token and next_command fields.\n"
     );
     std::process::exit(code.into());
 }
@@ -551,10 +551,16 @@ fn read_command(args: &Args, plan: &Path) {
     let bounded = bounded.trim_end_matches('\n').to_string();
     let summary_excerpt = view == "summary" && !more && file_line_count(&file) > total;
     if args.format == "json" {
-        let next = if more {
-            format!("\"continue:{hash}:{view}:{}\"", start + emitted)
+        let token = format!("continue:{hash}:{view}:{}", start + emitted);
+        let (next, next_command) = if more {
+            (
+                json_string(&token),
+                json_string(&next_read_command(args, id, view, Some(&token))),
+            )
+        } else if summary_excerpt {
+            ("null".into(), json_string(&next_read_command(args, id, "full", None)))
         } else {
-            "null".into()
+            ("null".into(), "null".into())
         };
         let excerpt = if summary_excerpt {
             format!(
@@ -565,7 +571,7 @@ fn read_command(args: &Args, plan: &Path) {
             "null".into()
         };
         println!(
-            "{{\"command\":\"read\",\"status\":\"ok\",\"entry_id\":{},\"view\":{},\"returned_records\":{emitted},\"total_records\":{total},\"truncated\":{more},\"content\":{},\"next_token\":{next},\"excerpt\":{excerpt}}}",
+            "{{\"command\":\"read\",\"status\":\"ok\",\"entry_id\":{},\"view\":{},\"returned_records\":{emitted},\"total_records\":{total},\"truncated\":{more},\"content\":{},\"next_token\":{next},\"next_command\":{next_command},\"excerpt\":{excerpt}}}",
             json_string(id),
             json_string(view),
             json_string(&bounded)
@@ -573,13 +579,25 @@ fn read_command(args: &Args, plan: &Path) {
     } else {
         eprintln!("entry_id={id}\nview={view}\nreturned_records={emitted}\ntotal_records={total}\ntruncated={more}");
         print!("{page_text}");
+        // The header and these two lines go to stderr so a caller that
+        // reassembles pages from stdout is unchanged; the next_command line is
+        // the exact runnable continuation, so nobody has to open this script.
         if more {
-            println!("next_token=continue:{hash}:{view}:{}", start + emitted);
+            let token = format!("continue:{hash}:{view}:{}", start + emitted);
+            println!("next_token={token}");
+            eprintln!(
+                "paging=this page holds records {}-{} of {total}; {} more are withheld. Run next_command for the next page, and repeat until a page prints no next_token.",
+                start + 1,
+                start + emitted,
+                total.saturating_sub(start + emitted)
+            );
+            eprintln!("next_command={}", next_read_command(args, id, view, Some(&token)));
         } else if summary_excerpt {
             println!(
                 "excerpt=summary shows {total} of {} line(s); this is not the whole document. Re-read with --view full (which pages, and reports next_token until nothing is withheld) before drawing a conclusion from it.",
                 file_line_count(&file)
             );
+            eprintln!("next_command={}", next_read_command(args, id, "full", None));
         }
     }
     if !args.read_only {
@@ -594,6 +612,62 @@ fn read_command(args: &Args, plan: &Path) {
         lines.push(format!("{id}\t{hash}"));
         lines.sort_unstable();
         write_file(&state, format!("{}\n", lines.join("\n")).as_bytes());
+    }
+}
+
+/// The exact command that reads the next page (or, with no token, the full
+/// view of a summary excerpt): the caller's own arguments, with only the view
+/// pinned and the token added. Page size may change between pages, so the
+/// budgets are kept only when the caller set them.
+fn next_read_command(args: &Args, id: &str, view: &str, token: Option<&str>) -> String {
+    let mut words = vec![reader_script("plan-context"), "read".into(), "--plan-dir".into()];
+    words.push(args.plan_dir.as_deref().unwrap_or(Path::new(".")).display().to_string());
+    match id.strip_prefix("unit:") {
+        Some(unit) => words.extend(["--unit".into(), unit.to_string()]),
+        None => words.extend(["--document".into(), id.to_string()]),
+    }
+    words.extend(["--view".into(), view.to_string()]);
+    if let Some(token) = token {
+        words.extend(["--token".into(), token.to_string()]);
+    }
+    if args.format == "json" {
+        words.extend(["--format".into(), "json".into()]);
+    }
+    if args.max_bytes != 32768 {
+        words.extend(["--max-bytes".into(), args.max_bytes.to_string()]);
+    }
+    if args.max_records != 128 {
+        words.extend(["--max-records".into(), args.max_records.to_string()]);
+    }
+    if args.read_only {
+        words.push("--read-only".into());
+    }
+    words.iter().map(|word| shell_word(word)).collect::<Vec<_>>().join(" ")
+}
+
+/// The script an agent runs, by its real path when the wrapper exported
+/// PLANNING_SKILL_ROOT (it always does on the exec path), else its bare name.
+fn reader_script(name: &str) -> String {
+    match env::var("PLANNING_SKILL_ROOT") {
+        Ok(root) if !root.is_empty() => Path::new(&root)
+            .join("planning/scripts")
+            .join(format!("{name}.sh"))
+            .display()
+            .to_string(),
+        _ => format!("{name}.sh"),
+    }
+}
+
+/// One word quoted for a POSIX shell, left bare when it needs no quoting.
+fn shell_word(word: &str) -> String {
+    let plain = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_./:=@%+,-".contains(c));
+    if plain {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', r"'\''"))
     }
 }
 
