@@ -7,20 +7,27 @@
 //! wraps the shared state in a `Mutex`.
 //!
 //! `dispatch` serves the five single-round-trip requests (Ingest/List/Read/
-//! Search/Save). `Tail` is handled separately by `tail_since`, which never
-//! holds the mutex across its own wait: each poll iteration locks briefly,
-//! takes whatever is new, and releases the lock again before sleeping.
+//! Search/Save). `Tail` is handled separately by `tail_since`, which blocks
+//! on a condition variable an ingest signals, so the mutex is released for
+//! the whole of its wait and an idle tail does not poll.
 
 use crate::protocol::{Line, Request, Response};
 use crate::snapshot::write_gzip_snapshot;
 use crate::store::StreamLog;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 use std::time::Duration;
+
+/// The longest an idle tail sleeps before it wakes to ask whether its
+/// client is still there (GH #197). It bounds how long a gone client's
+/// thread outlives it, and is how often an idle tail wakes at all.
+pub const TAIL_LIVENESS_INTERVAL: Duration = Duration::from_millis(500);
 
 pub struct Hub {
     streams: Mutex<HashMap<String, StreamLog>>,
+    /// Signalled after every ingest; tails wait on it with `streams`.
+    ingested: Condvar,
     snapshot_dir: PathBuf,
 }
 
@@ -28,6 +35,7 @@ impl Hub {
     pub fn new(snapshot_dir: PathBuf) -> Self {
         Hub {
             streams: Mutex::new(HashMap::new()),
+            ingested: Condvar::new(),
             snapshot_dir,
         }
     }
@@ -39,6 +47,8 @@ impl Hub {
             Request::Ingest { stream, line } => {
                 let mut streams = self.streams.lock().unwrap();
                 let id = streams.entry(stream).or_default().ingest(line);
+                drop(streams);
+                self.ingested.notify_all();
                 Response::Ingested { id }
             }
             Request::List => {
@@ -104,29 +114,44 @@ impl Hub {
         }
     }
 
-    /// Long-polls `stream` for lines past `since`, calling `on_line` for
-    /// each as they appear, until `should_stop` reports true. Re-locks
-    /// briefly per iteration; never holds the lock across the sleep.
+    /// Follows `stream` past `since`, calling `on_line` for each new line,
+    /// until `on_line` returns false (its client can no longer be written
+    /// to) or `should_stop` returns true. `should_stop` is asked before every
+    /// wait, and an idle tail waits at most `TAIL_LIVENESS_INTERVAL`, so a
+    /// tail whose client has gone ends even when nothing is ever written.
+    /// The lock is held only to read; the wait releases it.
     pub fn tail_since(
         &self,
         stream: &str,
         mut since: u64,
-        mut on_line: impl FnMut(Line),
-        should_stop: impl Fn() -> bool,
+        mut on_line: impl FnMut(Line) -> bool,
+        mut should_stop: impl FnMut() -> bool,
     ) {
+        let pending =
+            |streams: &mut HashMap<String, StreamLog>, since: u64| match streams.get_mut(stream) {
+                Some(log) => log.read_range(since + 1, u64::MAX),
+                None => Vec::new(),
+            };
         while !should_stop() {
             let new_lines = {
                 let mut streams = self.streams.lock().unwrap();
-                match streams.get_mut(stream) {
-                    Some(log) => log.read_range(since + 1, u64::MAX),
-                    None => Vec::new(),
+                let mut lines = pending(&mut streams, since);
+                if lines.is_empty() {
+                    streams = self
+                        .ingested
+                        .wait_timeout(streams, TAIL_LIVENESS_INTERVAL)
+                        .unwrap()
+                        .0;
+                    lines = pending(&mut streams, since);
                 }
+                lines
             };
             for line in new_lines {
                 since = since.max(line.id);
-                on_line(line);
+                if !on_line(line) {
+                    return;
+                }
             }
-            std::thread::sleep(Duration::from_millis(20));
         }
     }
 
@@ -258,6 +283,7 @@ mod tests {
                 first_id,
                 |_line| {
                     received_tail.fetch_add(1, Ordering::SeqCst);
+                    true
                 },
                 || stop_tail.load(Ordering::SeqCst),
             );
@@ -271,8 +297,8 @@ mod tests {
             line: "second".into(),
         });
 
-        // A bounded poll rather than a fixed sleep: tail_since's own poll
-        // interval is 20ms, so this is a generous ceiling for the healthy
+        // A bounded poll rather than a fixed sleep: an ingest wakes the
+        // tail at once, so this is a generous ceiling for the healthy
         // case, not a bet against CI-runner scheduling contention
         // (github-ci-runners.md "a readiness budget is a ceiling, not a
         // sleep" -- a fixed 100ms wait here was observed failing for real
@@ -289,5 +315,89 @@ mod tests {
         tailer.join().unwrap();
 
         assert_eq!(received.load(Ordering::SeqCst), 1);
+    }
+
+    /// GH #197: a tail whose writes fail must end, not keep a thread.
+    #[test]
+    fn a_tail_ends_when_its_client_can_no_longer_be_written_to() {
+        let hub = Arc::new(Hub::new(scratch("write-fails")));
+        for n in 0..3 {
+            hub.dispatch(Request::Ingest {
+                stream: "s".into(),
+                line: format!("line {n}"),
+            });
+        }
+        let calls = AtomicUsize::new(0);
+        // A backstop, so a regression fails the assertion below instead of
+        // hanging the run: without it a tail that ignores the failed write
+        // would never stop at all.
+        let backstop = std::time::Instant::now() + Duration::from_secs(2);
+        hub.tail_since(
+            "s",
+            0,
+            |_line| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                false
+            },
+            || std::time::Instant::now() >= backstop,
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "it stopped at the first failed write"
+        );
+    }
+
+    /// GH #197: a tail on a stream that never gets a line must still ask
+    /// whether its client is there, rather than waiting forever.
+    #[test]
+    fn an_idle_tail_still_asks_whether_to_stop() {
+        let hub = Hub::new(scratch("idle-stop"));
+        let asked = AtomicUsize::new(0);
+        let started = std::time::Instant::now();
+        hub.tail_since(
+            "never-written",
+            0,
+            |_line| true,
+            || asked.fetch_add(1, Ordering::SeqCst) >= 2,
+        );
+        assert_eq!(asked.load(Ordering::SeqCst), 3);
+        assert!(
+            started.elapsed() < TAIL_LIVENESS_INTERVAL * 4,
+            "two idle waits took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The wait is on the ingest signal, not a sleep: a line arrives long
+    /// before the liveness interval would have woken the tail.
+    #[test]
+    fn an_ingest_wakes_a_waiting_tail_at_once() {
+        let hub = Arc::new(Hub::new(scratch("wake")));
+        let hub_tail = Arc::clone(&hub);
+        let tailer = std::thread::spawn(move || {
+            let mut woke = None;
+            let started = std::time::Instant::now();
+            hub_tail.tail_since(
+                "s",
+                0,
+                |_line| {
+                    woke = Some(started.elapsed());
+                    false
+                },
+                || false,
+            );
+            woke.unwrap()
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        hub.dispatch(Request::Ingest {
+            stream: "s".into(),
+            line: "wake up".into(),
+        });
+        let woke = tailer.join().unwrap();
+        assert!(
+            woke < Duration::from_millis(100) + TAIL_LIVENESS_INTERVAL / 2,
+            "the tail only noticed the line after {woke:?}"
+        );
     }
 }
