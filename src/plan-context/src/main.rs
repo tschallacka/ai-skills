@@ -558,7 +558,10 @@ fn read_command(args: &Args, plan: &Path) {
                 json_string(&next_read_command(args, id, view, Some(&token))),
             )
         } else if summary_excerpt {
-            ("null".into(), json_string(&next_read_command(args, id, "full", None)))
+            (
+                "null".into(),
+                json_string(&next_read_command(args, id, "full", None)),
+            )
         } else {
             ("null".into(), "null".into())
         };
@@ -591,7 +594,10 @@ fn read_command(args: &Args, plan: &Path) {
                 start + emitted,
                 total.saturating_sub(start + emitted)
             );
-            eprintln!("next_command={}", next_read_command(args, id, view, Some(&token)));
+            eprintln!(
+                "next_command={}",
+                next_read_command(args, id, view, Some(&token))
+            );
         } else if summary_excerpt {
             println!(
                 "excerpt=summary shows {total} of {} line(s); this is not the whole document. Re-read with --view full (which pages, and reports next_token until nothing is withheld) before drawing a conclusion from it.",
@@ -620,8 +626,18 @@ fn read_command(args: &Args, plan: &Path) {
 /// pinned and the token added. Page size may change between pages, so the
 /// budgets are kept only when the caller set them.
 fn next_read_command(args: &Args, id: &str, view: &str, token: Option<&str>) -> String {
-    let mut words = vec![reader_script("plan-context"), "read".into(), "--plan-dir".into()];
-    words.push(args.plan_dir.as_deref().unwrap_or(Path::new(".")).display().to_string());
+    let mut words = vec![
+        reader_script("plan-context"),
+        "read".into(),
+        "--plan-dir".into(),
+    ];
+    words.push(
+        args.plan_dir
+            .as_deref()
+            .unwrap_or(Path::new("."))
+            .display()
+            .to_string(),
+    );
     match id.strip_prefix("unit:") {
         Some(unit) => words.extend(["--unit".into(), unit.to_string()]),
         None => words.extend(["--document".into(), id.to_string()]),
@@ -642,7 +658,11 @@ fn next_read_command(args: &Args, id: &str, view: &str, token: Option<&str>) -> 
     if args.read_only {
         words.push("--read-only".into());
     }
-    words.iter().map(|word| shell_word(word)).collect::<Vec<_>>().join(" ")
+    words
+        .iter()
+        .map(|word| shell_word(word))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The script an agent runs, by its real path when the wrapper exported
