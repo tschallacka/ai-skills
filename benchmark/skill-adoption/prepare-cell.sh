@@ -45,6 +45,11 @@ if [ ! -f "$SCENARIO_JSON" ]; then
     exit 66
 fi
 
+# Every dual-surface skill must have its binaries staged before anything is
+# created, so a refused cell leaves no workspace and no abandoned registry line
+# behind (T2: the install used to succeed and ship a skill with no binary).
+wa_require_staged_binaries "$REPO_ROOT" || exit $?
+
 RESULTS_DIR="$HERE/results"
 mkdir -p "$RESULTS_DIR"
 
