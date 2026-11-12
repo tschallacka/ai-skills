@@ -229,6 +229,7 @@ scripts/update-ui-story
 scripts/update-work-unit
 scripts/validate-plan
 scripts/verify-fix-keys
+scripts/verify-skill-load
 scripts/verify-target
 EOF
             case "$(uname -s):$(uname -m)" in
