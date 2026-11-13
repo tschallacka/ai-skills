@@ -2203,6 +2203,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         "page" => page(&envelope, &mut tab, &mut frames),
         "read" if envelope.payload.get("csv").is_some() => csv_read(&envelope, &tab, &mut frames),
         "read" if envelope.payload.get("json").is_some() => json_read(&envelope, &tab, &mut frames),
+        "read" if envelope.payload.get("xml").is_some() => xml_read(&envelope, &tab, &mut frames),
         "read" => {
             // The documented read bounds (the client help's "Reading:" line):
             // range_start_line/range_end_line are one-based and INCLUSIVE on
@@ -2431,6 +2432,9 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         },
         "replace" if envelope.payload.get("json").is_some() => {
             json_replace(&envelope, &mut tab, &mut frames)
+        }
+        "replace" if envelope.payload.get("xml").is_some() => {
+            xml_replace(&envelope, &mut tab, &mut frames)
         }
         "replace" if envelope.payload.get("csv").is_some() => {
             csv_replace(&envelope, &mut tab, &mut frames)
@@ -3349,6 +3353,35 @@ fn json_read(envelope: &ai_text_editor::protocol::Envelope, tab: &Tab, frames: &
         ));
         return;
     }
+    if envelope.payload["json"].get("find").is_some() {
+        match ai_text_editor::json_address::find(tab.document.bytes(), &envelope.payload["json"]) {
+            Ok((found, total)) => {
+                let matches: Vec<Value> = found
+                    .iter()
+                    .map(|hit| {
+                        json!({
+                            "pointer": hit.pointer,
+                            "value": hit.value,
+                            "byte_start": hit.start,
+                            "byte_end": hit.end,
+                        })
+                    })
+                    .collect();
+                frames.push(response(
+                    &envelope.request_id,
+                    json!({
+                        "json_matches": matches,
+                        "json_match_total": total,
+                        "revision": tab.revision,
+                        "dirty": tab_dirty(tab),
+                        "disk_diverged": tab_disk_diverged(tab),
+                    }),
+                ));
+            }
+            Err((code, message)) => frames.push(error(&envelope.request_id, code, message)),
+        }
+        return;
+    }
     match ai_text_editor::json_address::read(tab.document.bytes(), &envelope.payload["json"]) {
         Ok(found) => frames.push(response(
             &envelope.request_id,
@@ -3419,48 +3452,157 @@ fn json_replace(
             return;
         }
     };
+    if let Some(payload) = splice_structured_edit(
+        envelope,
+        tab,
+        frames,
+        (edit.start, edit.end, &edit.replacement),
+        &["json", "op", "value", "value_text", "expected_value"],
+    ) {
+        payload.insert(
+            "json_change".into(),
+            json!({"op": op, "pointer": edit.pointer, "old": edit.old, "new": edit.new}),
+        );
+    }
+}
+
+/// Applies a structured address's resolved splice (`start..end` becomes
+/// `replacement`) through the ordinary byte-range `replace` -- an empty range
+/// as an insert -- so the revision guard, journal, undo and cursors are a
+/// replace's. `strip` names the address keys the byte-level verb must not
+/// see. Returns the success payload, for the caller to add what its address
+/// resolved to, or None when the edit was refused (the error is in frames).
+fn splice_structured_edit<'a>(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &mut Tab,
+    frames: &'a mut Vec<Value>,
+    (start, end, replacement): (usize, usize, &[u8]),
+    strip: &[&str],
+) -> Option<&'a mut serde_json::Map<String, Value>> {
     let mut spliced = envelope.clone();
     if let Some(map) = spliced.payload.as_object_mut() {
-        for key in ["json", "op", "value", "value_text", "expected_value"] {
-            map.remove(key);
+        for key in strip {
+            map.remove(*key);
         }
-        map.insert("range_start_byte".into(), json!(edit.start));
-        map.insert("range_end_byte".into(), json!(edit.end));
+        if start == end {
+            map.insert("offset".into(), json!(start));
+            map.insert("delete_len".into(), json!(0));
+        } else {
+            map.insert("range_start_byte".into(), json!(start));
+            map.insert("range_end_byte".into(), json!(end));
+        }
         map.insert(
             "bytes_base64".into(),
             json!(base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
-                &edit.replacement
+                replacement
             )),
         );
     }
     let before = frames.len();
-    if edit.start == edit.end {
-        // A pure insertion: replace with an empty range is an insert.
-        if let Some(map) = spliced.payload.as_object_mut() {
-            map.remove("range_start_byte");
-            map.remove("range_end_byte");
-            map.insert("offset".into(), json!(edit.start));
-            map.insert("delete_len".into(), json!(0));
-        }
-    }
     apply_edit_verb(&spliced, tab, frames);
     if frames[before..]
         .iter()
         .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
     {
-        return;
+        return None;
     }
-    if let Some(payload) = frames
+    frames
         .iter_mut()
         .rev()
         .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
         .and_then(|frame| frame.get_mut("payload"))
         .and_then(Value::as_object_mut)
-    {
+}
+
+/// `read` with an `xml` address: an attribute's value, an element's decoded
+/// text (or raw XML when it holds child elements), with the concrete path a
+/// predicate resolved to and the byte span.
+fn xml_read(envelope: &ai_text_editor::protocol::Envelope, tab: &Tab, frames: &mut Vec<Value>) {
+    if tab.large_file.is_some() {
+        frames.push(error(
+            &envelope.request_id,
+            "xml_large_file_unsupported",
+            "xml addressing needs the document in memory; this tab is a large-file tab",
+        ));
+        return;
+    }
+    match ai_text_editor::xml_address::read(tab.document.bytes(), &envelope.payload["xml"]) {
+        Ok(found) => frames.push(response(
+            &envelope.request_id,
+            json!({
+                "xml_value": found.value,
+                "xml_path": found.path,
+                "byte_start": found.start,
+                "byte_end": found.end,
+                "revision": tab.revision,
+                "dirty": tab_dirty(tab),
+                "disk_diverged": tab_disk_diverged(tab),
+            }),
+        )),
+        Err((code, message)) => frames.push(error(&envelope.request_id, code, message)),
+    }
+}
+
+/// `replace` with an `xml` address and an `op` (set, delete, append). `value`
+/// is text and is escaped; `value_text` is a raw XML child for append;
+/// `expected_value` is compared with the decoded current value. Only the
+/// addressed bytes change and the document must parse again.
+fn xml_replace(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &mut Tab,
+    frames: &mut Vec<Value>,
+) {
+    if tab.large_file.is_some() {
+        frames.push(error(
+            &envelope.request_id,
+            "xml_large_file_unsupported",
+            "xml addressing needs the document in memory; this tab is a large-file tab",
+        ));
+        return;
+    }
+    let payload = &envelope.payload;
+    let op = payload.get("op").and_then(Value::as_str).unwrap_or("set");
+    let text_of = |key: &str| -> Result<Option<String>, String> {
+        match payload.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(text)) => Ok(Some(text.clone())),
+            Some(Value::Number(number)) => Ok(Some(number.to_string())),
+            Some(Value::Bool(flag)) => Ok(Some(flag.to_string())),
+            Some(_) => Err(format!("with xml, {key} is text")),
+        }
+    };
+    let (value, expected) = match (text_of("value"), text_of("expected_value")) {
+        (Ok(value), Ok(expected)) => (value, expected),
+        (Err(why), _) | (_, Err(why)) => {
+            frames.push(error(&envelope.request_id, "xml_value_invalid", why));
+            return;
+        }
+    };
+    let edit = match ai_text_editor::xml_address::edit(
+        tab.document.bytes(),
+        &payload["xml"],
+        op,
+        value.as_deref(),
+        payload.get("value_text").and_then(Value::as_str),
+        expected.as_deref(),
+    ) {
+        Ok(edit) => edit,
+        Err((code, message)) => {
+            frames.push(error(&envelope.request_id, code, message));
+            return;
+        }
+    };
+    if let Some(payload) = splice_structured_edit(
+        envelope,
+        tab,
+        frames,
+        (edit.start, edit.end, &edit.replacement),
+        &["xml", "op", "value", "value_text", "expected_value"],
+    ) {
         payload.insert(
-            "json_change".into(),
-            json!({"op": op, "pointer": edit.pointer, "old": edit.old, "new": edit.new}),
+            "xml_change".into(),
+            json!({"op": op, "path": edit.path, "old": edit.old, "new": edit.new}),
         );
     }
 }

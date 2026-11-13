@@ -8052,3 +8052,105 @@ fn jsonl_edits_by_line_and_owned_files_are_refused() {
     );
     assert_eq!(std::fs::read_to_string(&owned).unwrap(), "{\"bugs\": []}\n");
 }
+
+/// JSON find: a read with {find: {...}} returns every matching object's
+/// concrete pointer through the server, so an edit can target it after.
+#[test]
+fn json_find_returns_the_pointer_of_every_matching_object() {
+    let harness = Harness::new("json-find");
+    let file = harness.write(
+        "board.json",
+        "{\"tasks\": [{\"id\": \"a\", \"done\": false}, {\"id\": \"b\", \"done\": true}]}\n",
+    );
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let found = harness.client(&["read", "-f", path, "--json", r#"{"find":{"done":true}}"#]);
+    assert!(found.status.success(), "{}", stderr_text(&found));
+    let payload = first_payload(&found);
+    assert_eq!(payload["json_match_total"], json!(1));
+    assert_eq!(payload["json_matches"][0]["pointer"], json!("/tasks/1"));
+}
+
+/// XML by path: a predicate step picks one element, set changes only its
+/// text or an attribute value (escaped), a missing attribute is added in the
+/// element's own quote style, append copies the siblings' indentation, delete
+/// takes the element's line, and comments and attribute order survive.
+#[test]
+fn xml_edits_by_path_leave_every_other_byte() {
+    let harness = Harness::new("xml-address");
+    let original = "<?xml version=\"1.0\"?>\n<!-- di -->\n<config xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n    <type name=\"A\">\n        <arguments>\n            <argument name=\"limit\" xsi:type=\"number\">10</argument>\n        </arguments>\n    </type>\n    <type name='B'/>\n    <type name=\"C\"/>\n</config>\n";
+    let file = harness.write("di.xml", original);
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let limit = r#"{"path":"/config/type[@name='A']/arguments/argument[@name='limit']"}"#;
+    let read = harness.client(&["read", "-f", path, "--xml", limit]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(first_payload(&read)["xml_value"], json!("10"));
+    let run = |args: &[&str]| {
+        let mut full = vec!["replace", "-f", path];
+        full.extend_from_slice(args);
+        let output = harness.client(&full);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            stderr_text(&output)
+        );
+        output
+    };
+    let set = run(&[
+        "--xml",
+        limit,
+        "--value",
+        "20 & up",
+        "--expected-value",
+        "10",
+    ]);
+    assert_eq!(first_payload(&set)["xml_change"]["old"], json!("10"));
+    run(&[
+        "--xml",
+        r#"{"path":"/config/type[@name='B']/@shared"}"#,
+        "--value",
+        "false",
+    ]);
+    run(&[
+        "--xml",
+        r#"{"path":"/config/type[@name='A']/arguments"}"#,
+        "--op",
+        "append",
+        "--value-json",
+        "<argument name=\"mode\">fast</argument>",
+    ]);
+    run(&[
+        "--xml",
+        r#"{"path":"/config/type[@name='C']"}"#,
+        "--op",
+        "delete",
+    ]);
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--xml",
+        limit,
+        "--value",
+        "1",
+        "--expected-value",
+        "10",
+    ]);
+    assert!(
+        refusal_text(&refused).contains("xml_expected_value_mismatch"),
+        "{}",
+        refusal_text(&refused)
+    );
+    let ambiguous = harness.client(&["read", "-f", path, "--xml", r#"{"path":"/config/type"}"#]);
+    assert!(
+        refusal_text(&ambiguous).contains("xml_path_ambiguous"),
+        "{}",
+        refusal_text(&ambiguous)
+    );
+    assert!(harness.client(&["save", "-f", path]).status.success());
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "<?xml version=\"1.0\"?>\n<!-- di -->\n<config xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n    <type name=\"A\">\n        <arguments>\n            <argument name=\"limit\" xsi:type=\"number\">20 &amp; up</argument>\n            <argument name=\"mode\">fast</argument>\n        </arguments>\n    </type>\n    <type name='B' shared='false'/>\n</config>\n"
+    );
+}

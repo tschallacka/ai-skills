@@ -497,6 +497,112 @@ fn address_object(address: &Value) -> Result<&serde_json::Map<String, Value>, Re
     ))
 }
 
+/// Results `find` returns at most; past this it reports `truncated`.
+pub const FIND_LIMIT: usize = 200;
+
+fn collect_matches(
+    bytes: &[u8],
+    node: &Node,
+    pointer: &str,
+    conditions: &serde_json::Map<String, Value>,
+    found: &mut Vec<Read>,
+    total: &mut usize,
+) {
+    if matches_where(bytes, node, conditions) {
+        *total += 1;
+        if found.len() < FIND_LIMIT {
+            found.push(Read {
+                pointer: pointer.to_owned(),
+                value: node_value(bytes, node),
+                start: node.start,
+                end: node.end,
+            });
+        }
+    }
+    match &node.kind {
+        Kind::Object(members) => {
+            for member in members {
+                let child = format!("{pointer}/{}", escape_token(&member.key));
+                collect_matches(bytes, &member.value, &child, conditions, found, total);
+            }
+        }
+        Kind::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                let child = format!("{pointer}/{index}");
+                collect_matches(bytes, item, &child, conditions, found, total);
+            }
+        }
+        Kind::Scalar => {}
+    }
+}
+
+/// `read` with `{find: {field: value, ...}}`: every object whose fields all
+/// match, anywhere under the address (`pointer`/`path` narrows where to look;
+/// none means the whole document), each with its concrete pointer -- the
+/// search that answers "which index is order abc" before an edit. A JSONL
+/// file (or one `line` of it) is searched record by record, pointers
+/// prefixed `line N`. Returns the matches (at most FIND_LIMIT) and the total.
+pub fn find(bytes: &[u8], address: &Value) -> Result<(Vec<Read>, usize), Refusal> {
+    let object = address_object(address)?;
+    let conditions = match object.get("find") {
+        Some(Value::Object(conditions)) if !conditions.is_empty() => conditions.clone(),
+        _ => {
+            return Err((
+                "json_address_invalid",
+                "find is an object of field: value pairs an object must all hold".into(),
+            ))
+        }
+    };
+    let mut found = Vec::new();
+    let mut total = 0;
+    let records: Vec<(usize, usize, Option<usize>)> = match scope(bytes, object)? {
+        (start, end, Some(line)) => vec![(start, end, Some(line))],
+        (start, end, None) => match parse(bytes, start, end) {
+            Ok(_) => vec![(start, end, None)],
+            // Not one JSON document: read it as JSONL, a record per line.
+            Err(_) => {
+                let mut lines = Vec::new();
+                let mut line_start = 0;
+                for (number, line) in bytes.split(|&b| b == b'\n').enumerate() {
+                    let mut line_end = line_start + line.len();
+                    if line_end > line_start && bytes[line_end - 1] == b'\r' {
+                        line_end -= 1;
+                    }
+                    if bytes[line_start..line_end]
+                        .iter()
+                        .any(|b| !b.is_ascii_whitespace())
+                    {
+                        lines.push((line_start, line_end, Some(number + 1)));
+                    }
+                    line_start += line.len() + 1;
+                }
+                lines
+            }
+        },
+    };
+    for (start, end, line) in records {
+        let root = parse(bytes, start, end)?;
+        let (base, prefix) = match walk(bytes, &root, &steps(object)?)? {
+            (Found::Value(node, _), pointer) => (node.clone(), pointer),
+            (Found::Slot(..), pointer) => {
+                return Err((
+                    "json_path_not_found",
+                    format!(
+                        "{} has no such member or element",
+                        pointer_or_root(&pointer)
+                    ),
+                ))
+            }
+        };
+        let prefix = match line {
+            Some(line) => format!("line {line}{prefix}"),
+            None => prefix,
+        };
+        collect_matches(bytes, &base, &prefix, &conditions, &mut found, &mut total);
+    }
+    Ok((found, total))
+}
+
 /// `read` with a json address.
 pub fn read(bytes: &[u8], address: &Value) -> Result<Read, Refusal> {
     let address = address_object(address)?;
@@ -916,6 +1022,31 @@ mod tests {
             apply(bytes, &appended),
             "{\"run\":1,\"meter\":0.5}\n{\"run\":2,\"meter\":0.7}\n{\"run\":3}\n"
         );
+    }
+
+    #[test]
+    fn find_returns_every_matching_object_with_its_pointer() {
+        let bytes = br#"{"board": {"tasks": [{"id": "a", "done": false}, {"id": "b", "done": true}], "archive": [{"id": "b", "done": true}]}}"#;
+        let (found, total) = find(bytes, &json!({"find": {"id": "b"}})).unwrap();
+        assert_eq!(total, 2);
+        let pointers: Vec<&str> = found.iter().map(|hit| hit.pointer.as_str()).collect();
+        assert_eq!(pointers, ["/board/tasks/1", "/board/archive/0"]);
+        let (narrowed, _) = find(
+            bytes,
+            &json!({"find": {"id": "b"}, "pointer": "/board/archive"}),
+        )
+        .unwrap();
+        assert_eq!(narrowed[0].pointer, "/board/archive/0");
+    }
+
+    #[test]
+    fn find_searches_a_jsonl_file_record_by_record() {
+        let bytes =
+            b"{\"run\":1,\"ok\":true}\n{\"run\":2,\"ok\":false}\n{\"run\":3,\"ok\":false}\n";
+        let (found, total) = find(bytes, &json!({"find": {"ok": false}})).unwrap();
+        assert_eq!(total, 2);
+        assert_eq!(found[0].pointer, "line 2");
+        assert_eq!(found[1].pointer, "line 3");
     }
 
     #[test]

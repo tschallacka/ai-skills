@@ -58,3 +58,4 @@ pub mod session;
 pub mod transport;
 pub mod verbosity;
 pub mod verbs;
+pub mod xml_address;

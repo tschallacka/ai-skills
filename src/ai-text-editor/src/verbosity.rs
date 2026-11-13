@@ -99,8 +99,13 @@ fn declared_tier(key: &str) -> Option<u8> {
         "csv_cells" | "csv_dialect" => 1,
         // A json `read`'s own answer, and what a json address resolved to
         // (the concrete pointer behind a where-step, the span) or changed.
-        "json_value" => 0,
+        "json_value" | "json_matches" => 0,
+        "json_match_total" => 1,
         "json_pointer" | "json_change" | "byte_start" | "byte_end" => 1,
+        // An xml `read`'s own answer, and the concrete path a predicate
+        // resolved to or what an xml `replace` changed.
+        "xml_value" => 0,
+        "xml_path" | "xml_change" => 1,
         // A stream's own framing. Dropping these would break the reader's
         // ability to reassemble the document at all.
         "stream" | "restart" => 0,

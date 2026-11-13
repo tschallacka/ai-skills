@@ -224,7 +224,26 @@ parsed JSON value written compactly. `--expected-value-json` compares as JSON,
 so `"3"` never matches `3`. Only that value's bytes change, an inserted item
 copies the file's own separator, the result must parse again, and a JSONL
 record must stay on one line. `BUGS.json`, `TODO.json` and `DECISIONS.json`
-are refused: `bugs`, `todo` and `decisions` own them.
+are refused: `bugs`, `todo` and `decisions` own them. To find where a record
+is before editing it, `read` with `{"find":{"id":"abc"}}` returns every object
+whose fields all match, anywhere under an optional `pointer`/`path` (a JSONL
+file record by record), each with its concrete pointer, as `json_matches` (at
+most 200) and `json_match_total`.
+
+An XML element or attribute is addressed with `--xml JSON` (MCP: `xml`) and
+an XPath subset: `{"path":"/config/type[@name='A']/arguments/argument[@name='limit']"}`,
+ending in `/@attr` for an attribute (names match literally, prefixes
+included: `/@xsi:type`). A step takes `[@name='value']`, `[@name]` and a
+1-based `[n]`; a step matching several elements is refused as
+`xml_path_ambiguous`. `read` returns `xml_value` (an attribute's value, an
+element's decoded text, or its raw XML when it holds child elements) and the
+concrete `xml_path`. `replace` takes `--op set` (the default: `--value` as an
+element's text or an attribute's value, escaped, adding a missing attribute in
+the element's own quote style), `delete` (the attribute, or the element with
+its line) or `append` (`--value-json` as raw XML, added as the last child at
+its siblings' indentation). `--expected-value` compares with the decoded value.
+Only those bytes change -- attribute order, quotes, comments and indentation
+are kept -- and the document must parse again.
 
 Every high-frequency flag has a short form (`-f`, `-l`, `-t`, `-o`, `-r`, …) —
 run `ai-text-editor help` or `man -l ai-text-editor.1` for the exact,

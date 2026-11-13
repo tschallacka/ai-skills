@@ -111,6 +111,7 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
         "read" => &[
             "csv",
             "json",
+            "xml",
             "cursor_id",
             "before",
             "after",
@@ -145,6 +146,7 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
             "values",
             "expected_value",
             "json",
+            "xml",
             "op",
             "value_text",
         ],
