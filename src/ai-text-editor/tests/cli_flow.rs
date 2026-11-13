@@ -7902,3 +7902,153 @@ fn csv_keeps_a_bom_semicolon_crlf_dialect_byte_for_byte() {
         b"\xEF\xBB\xBFsku;name\r\n\"A1\";Apple\r\nB2;\"Pear; ripe\"\r\n".to_vec()
     );
 }
+
+/// JSON by address: a where-step picks an id-keyed element, set changes only
+/// that value's bytes (a 2.17e-06 elsewhere is not respelt), insert and
+/// append copy the file's own separator, delete takes its separator with it,
+/// and expected_value compares as JSON.
+#[test]
+fn json_edits_by_pointer_and_where_step_leave_every_other_byte() {
+    let harness = Harness::new("json-address");
+    let original = "{\n  \"tasks\": [\n    {\"id\": \"a\", \"title\": \"One\", \"score\": 2.17e-06},\n    {\"id\": \"b\", \"title\": \"Two\"}\n  ]\n}\n";
+    let file = harness.write("board.json", original);
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let run = |args: &[&str]| {
+        let mut full = vec!["replace", "-f", path];
+        full.extend_from_slice(args);
+        let output = harness.client(&full);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            stderr_text(&output)
+        );
+        output
+    };
+
+    let read = harness.client(&[
+        "read",
+        "-f",
+        path,
+        "--json",
+        r#"{"path":["tasks",{"id":"b"},"title"]}"#,
+    ]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(first_payload(&read)["json_value"], json!("Two"));
+    assert_eq!(
+        first_payload(&read)["json_pointer"],
+        json!("/tasks/1/title")
+    );
+
+    let set = run(&[
+        "--json",
+        r#"{"path":["tasks",{"id":"b"},"title"]}"#,
+        "--value",
+        "Deux",
+    ]);
+    assert_eq!(first_payload(&set)["json_change"]["old"], json!("Two"));
+    run(&[
+        "--json",
+        r#"{"pointer":"/tasks"}"#,
+        "--op",
+        "append",
+        "--value-json",
+        r#"{"id":"c"}"#,
+    ]);
+    run(&[
+        "--json",
+        r#"{"pointer":"/tasks/0/done"}"#,
+        "--op",
+        "insert",
+        "--value-json",
+        "true",
+    ]);
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--json",
+        r#"{"pointer":"/tasks/0/done"}"#,
+        "--value-json",
+        "false",
+        "--expected-value",
+        "true",
+    ]);
+    assert!(
+        refusal_text(&refused).contains("json_expected_value_mismatch"),
+        "the string \"true\" must not match the boolean true: {}",
+        refusal_text(&refused)
+    );
+    run(&[
+        "--json",
+        r#"{"path":["tasks",{"id":"c"}]}"#,
+        "--op",
+        "delete",
+    ]);
+    assert!(harness.client(&["save", "-f", path]).status.success());
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "{\n  \"tasks\": [\n    {\"id\": \"a\", \"title\": \"One\", \"score\": 2.17e-06, \"done\": true},\n    {\"id\": \"b\", \"title\": \"Deux\"}\n  ]\n}\n"
+    );
+}
+
+/// JSONL by line: only the addressed line is parsed and changed, append_line
+/// adds a record without touching earlier lines, and a file another tool owns
+/// is refused rather than edited around that tool.
+#[test]
+fn jsonl_edits_by_line_and_owned_files_are_refused() {
+    let harness = Harness::new("jsonl-address");
+    let file = harness.write(
+        "runs.jsonl",
+        "{\"run\":1,\"meter\":0.5}\n{\"run\":2,\"meter\":0.7}\n",
+    );
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let set = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--json",
+        r#"{"line":2,"pointer":"/meter"}"#,
+        "--value-json",
+        "0.9",
+    ]);
+    assert!(set.status.success(), "{}", stderr_text(&set));
+    let appended = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--json",
+        "{}",
+        "--op",
+        "append_line",
+        "--value-json",
+        r#"{"run":3,"meter":1.1}"#,
+    ]);
+    assert!(appended.status.success(), "{}", stderr_text(&appended));
+    assert!(harness.client(&["save", "-f", path]).status.success());
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "{\"run\":1,\"meter\":0.5}\n{\"run\":2,\"meter\":0.9}\n{\"run\":3,\"meter\":1.1}\n"
+    );
+
+    let owned = harness.write("BUGS.json", "{\"bugs\": []}\n");
+    harness.open(&owned);
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        owned.to_str().unwrap(),
+        "--json",
+        r#"{"pointer":"/bugs"}"#,
+        "--op",
+        "append",
+        "--value-json",
+        "{}",
+    ]);
+    assert!(
+        refusal_text(&refused).contains("json_file_owned"),
+        "{}",
+        refusal_text(&refused)
+    );
+    assert_eq!(std::fs::read_to_string(&owned).unwrap(), "{\"bugs\": []}\n");
+}

@@ -139,14 +139,24 @@ fn main() {
     }
     // CSV/TSV addressing: --csv takes the address as JSON, e.g.
     // '{"where":{"sku":"A1"},"column":"qty"}'; --values a JSON list.
-    for (argument, field) in [("--csv", "csv"), ("--values", "values")] {
+    for (argument, field) in [
+        ("--csv", "csv"),
+        ("--values", "values"),
+        ("--json", "json"),
+        ("--expected-value-json", "expected_value"),
+    ] {
         if let Some(value) = option(&args, &[argument]) {
             let parsed: Value = serde_json::from_str(&value)
                 .unwrap_or_else(|error| die(&format!("{argument} must be JSON: {error}")));
             payload.insert(field.into(), parsed);
         }
     }
-    for (argument, field) in [("--value", "value"), ("--expected-value", "expected_value")] {
+    for (argument, field) in [
+        ("--value", "value"),
+        ("--expected-value", "expected_value"),
+        ("--op", "op"),
+        ("--value-json", "value_text"),
+    ] {
         if let Some(value) = option(&args, &[argument]) {
             payload.insert(field.into(), Value::String(value));
         }
@@ -593,6 +603,7 @@ fn help() {
     println!("Anchor and symbol addressing (replace/move/copy, T114): --range-start-match TEXT --range-end-before-match TEXT resolve a span server-side by content instead of position -- the span runs from the start match's own beginning up to (not including) the end match's beginning, so an endpoint is never hand-inferred. Both are required together; add --range-match-regex to read them as Rust regexes instead of exact text. Either matching zero or more than one time is refused by name (range_start_match_not_found/range_start_match_ambiguous, and the range_end_before_match equivalents) rather than silently resolved to the first occurrence. --symbol NAME resolves to that name's own defining extent in CodeGraph's index (.codegraph/codegraph.db) for this file; refused as symbol_unavailable with no index, symbol_not_found with no matching node, or symbol_ambiguous if more than one node shares the name. None of these may be combined with each other, a range, match_id, or a bare offset/delete_len/cursor_id -- exactly one addressing scheme per request.");
     println!("move/copy relocate or duplicate a span server-side with no content in the request or response -- the server already holds the bytes. The source is a span, addressed exactly like replace's own (--range-start-line/--range-end-line, --range-start-byte/--range-end-byte, --match-id, --range-start-match/--range-end-before-match, or --symbol; a bare -o/-d/-C is refused by name, not silently ignored). The destination is a point: --dest-offset N (a byte position) or --dest-line N (1-based, insert immediately before that line, text tabs only; one past the last line appends at end of file) -- exactly one of the two. --expected-text/--expected-bytes-base64 verify the source span first, same as replace. Both are one atomic operation (one revision, one undo step) even though move performs two splices internally; a destination strictly inside the source span is refused as move_destination_inside_source.");
     println!("CSV/TSV cells (read and replace): --csv JSON names cells by row or by key, not by byte: {{\"row\":5765,\"column\":\"potatoes\"}}, {{\"where\":{{\"sku\":\"A1\",\"store_view_code\":\"\"}},\"column\":[4,5,6]}}, or {{\"all\":true,\"column\":\"qty\"}}. row is a 1-based data row (the header is not counted); where pairs must all match, and more than one matching row is refused without \"all\":true; column is a header name, a 1-based index or a list (omitted: the whole row); \"header\":false for a file without one; \"delimiter\" overrides detection. read returns the decoded cells; replace writes --value TEXT into every cell (or --values JSON-list, one per cell), quoting only where it must, and --expected-value TEXT refuses when the cells hold something else. Only the addressed cells' bytes change; the BOM, delimiter and line endings are kept and reported as csv_dialect. A packed cell (color=Red,size=M) is one cell; addressing does not reach inside it.");
+    println!("JSON/JSONL values (read and replace): --json JSON names a value: {{\"pointer\":\"/orders/3/qty\"}}, {{\"path\":[\"tasks\",{{\"id\":\"abc\"}},\"title\"]}} (a {{field:value}} step picks the one array element whose fields match), and {{\"line\":2,\"pointer\":\"/meter\"}} for JSONL (only that line is parsed). replace takes --op set|insert|append|delete|append_line (default set) and the value as --value-json JSON (any JSON, written exactly as typed, so key order and number spelling are kept; --value TEXT is a JSON string), with --expected-value-json JSON refusing when the address holds something else. Only that value's bytes change, inserted items copy the file's own separator, the result must parse again, a JSONL record stays on one line, and BUGS.json/TODO.json/DECISIONS.json are refused (use bugs/todo/decisions).");
     println!("Reading: -b/--before N -B/--after N (line window around the cursor), -o/--offset N -L/--length N (a BYTE window of the text, snapped to UTF-8 boundaries), --range-start-line N --range-end-line N (an inclusive line window on text tabs), --range-start-byte N --range-end-byte N (a half-open byte window on raw and hex tabs).");
     println!("Paging search results: -n/--limit N, --pager-key KEY, --historical, and the page command's -o/--offset N; --order forward|reverse applies to search responses. A search command itself refuses -o/--offset: the offset pages an existing result set, it never trims a fresh scan.");
     println!("Presentation: -p/--presentation structured|text|paging|stream; paging/stream readers must restart after the FILE EDITED delimiter.");

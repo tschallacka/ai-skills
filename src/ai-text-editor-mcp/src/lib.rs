@@ -796,7 +796,22 @@ fn tool_definitions() -> Vec<Value> {
     ));
     // CSV/TSV addressing: declared on exactly the verbs `ai_text_editor::verbs`
     // gives each key to, in one place.
-    let csv_keys: [(&str, Value); 4] = [
+    let csv_keys: [(&str, Value); 7] = [
+        (
+            "value_text",
+            json!({"type": "string", "description": "With json: the new value as JSON text, written exactly as typed once it parses, so an object keeps its key order and a number its spelling (2.17e-06 stays 2.17e-06). Use it instead of value when the bytes matter: value is a parsed JSON value, written compactly, and a JSON object's key order does not survive parsing."}),
+        ),
+        (
+            "json",
+            json!({
+                "type": "object",
+                "description": "A JSON or JSONL value address, resolved to the exact bytes of that value so key order, spacing, number spelling and every other value stay byte for byte. {pointer: an RFC 6901 pointer such as /orders/3/qty | path: a list of steps -- a key, a 0-based index, \"-\" (one past the end), or a {field: value} map picking the one array element whose fields all match (refused as json_where_ambiguous if several do), line: the 1-based line of a JSONL file (only that line is parsed)}. read returns json_value and the concrete json_pointer a match resolved to.",
+            }),
+        ),
+        (
+            "op",
+            json!({"type": "string", "enum": ["set", "insert", "append", "delete", "append_line"], "description": "With json: set (default; the value must exist) replaces it; insert adds a new object key, or an array element before an index (or at \"-\"); append adds to the end of the array the address names; delete removes the member or element with its separator; append_line adds a JSONL record after the last line without touching the others. Inserted items copy the file's own separator and colon style. The result must parse again, a JSONL record must stay on one line, and BUGS.json/TODO.json/DECISIONS.json are refused (their own tools write them)."}),
+        ),
         (
             "csv",
             json!({
@@ -806,7 +821,7 @@ fn tool_definitions() -> Vec<Value> {
         ),
         (
             "value",
-            json!({"type": "string", "description": "With csv: the text written into every addressed cell, quoted only when it has to be (it holds the delimiter, a quote or a line break). \"\" blanks the cell."}),
+            json!({"description": "With csv: the text written into every addressed cell, quoted only when it has to be (it holds the delimiter, a quote or a line break); \"\" blanks the cell. With json: the JSON value to write -- any JSON, an object or array included, and \"3\" is a string where 3 is a number."}),
         ),
         (
             "values",
@@ -814,7 +829,7 @@ fn tool_definitions() -> Vec<Value> {
         ),
         (
             "expected_value",
-            json!({"description": "With csv: what the addressed cells hold now, as one string for every cell or a list with one per cell. Checked before anything is written; a mismatch is refused as csv_expected_value_mismatch with the actual values."}),
+            json!({"description": "With csv: what the addressed cells hold now, as one string for every cell or a list with one per cell. With json: the JSON value the address holds now, compared as JSON (so \"3\" does not match 3). Checked before anything is written; a mismatch is refused with the actual value."}),
         ),
     ];
     for (name, _, props, _) in tools.iter_mut() {
