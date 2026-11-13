@@ -92,6 +92,11 @@ fn declared_tier(key: &str) -> Option<u8> {
         // Terminal facts of a verb that has no other content: without these
         // the answer is empty rather than terse.
         "saved" | "closed" | "restored" | "resolved" | "transaction" | "job" | "id" => 0,
+        // A csv `read`'s own answer: the addressed cells, like a read's text.
+        "cells" => 0,
+        // What a csv address resolved to and wrote, and the file's dialect:
+        // verification of the edit, as offset/delete_len are for a replace.
+        "csv_cells" | "csv_dialect" => 1,
         // A stream's own framing. Dropping these would break the reader's
         // ability to reassemble the document at all.
         "stream" | "restart" => 0,

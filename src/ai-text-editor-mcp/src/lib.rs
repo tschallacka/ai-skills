@@ -794,6 +794,36 @@ fn tool_definitions() -> Vec<Value> {
             .collect(),
         vec!["job_id", "resume_token"],
     ));
+    // CSV/TSV addressing: declared on exactly the verbs `ai_text_editor::verbs`
+    // gives each key to, in one place.
+    let csv_keys: [(&str, Value); 4] = [
+        (
+            "csv",
+            json!({
+                "type": "object",
+                "description": "A CSV/TSV cell address, resolved to the exact bytes of each cell so nothing else in the file changes. {row: 1-based data row (the header is not counted) | where: {column: value, ...} (every pair must match), column: a header name, a 1-based index, or a list of them (omitted: every column), all: true to address every matching row (a where matching several rows is refused without it, as is naming no row), header: whether the first line is a header (default true; false addresses columns by index only), delimiter: one character, overriding detection (tab for .tsv, otherwise the most frequent of , ; tab | on the first line)}. The BOM, delimiter and line endings are kept and reported back as csv_dialect. Addressing stops at the cell: a packed value such as color=Red,size=M is one opaque cell.",
+            }),
+        ),
+        (
+            "value",
+            json!({"type": "string", "description": "With csv: the text written into every addressed cell, quoted only when it has to be (it holds the delimiter, a quote or a line break). \"\" blanks the cell."}),
+        ),
+        (
+            "values",
+            json!({"type": "array", "items": {"type": "string"}, "description": "With csv: one text per addressed cell, in the order the cells are reported (row by row, columns in the order named). An alternative to value."}),
+        ),
+        (
+            "expected_value",
+            json!({"description": "With csv: what the addressed cells hold now, as one string for every cell or a list with one per cell. Checked before anything is written; a mismatch is refused as csv_expected_value_mismatch with the actual values."}),
+        ),
+    ];
+    for (name, _, props, _) in tools.iter_mut() {
+        for (key, schema) in &csv_keys {
+            if ai_text_editor::verbs::reads_payload_key(name, key) {
+                props.push((key, schema.clone()));
+            }
+        }
+    }
     tools
         .into_iter()
         .map(|(name, description, props, required)| {

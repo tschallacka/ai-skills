@@ -197,6 +197,19 @@ recovery choices where there are any — so exit status plus stderr is the
 complete story of any call; a silent success-shaped output means the work is
 in the journal, not yet that it is on disk.
 
+A CSV or TSV file can be read and edited by cell instead of by byte:
+`--csv JSON` (MCP: `csv`) on `read` and `replace` names cells by `row` (a
+1-based data row; the header is not counted) or `where` (column: value pairs
+that must all match, so a catalog row is `{"sku":"A1","store_view_code":""}`),
+and `column` (a header name, a 1-based index, or a list). A `where` matching
+several rows is refused unless `"all":true`; `"header":false` addresses a file
+without one by index. `read` returns the decoded cells; `replace` writes
+`--value` into each (or `--values`, one per cell), quoting only where it must,
+and `--expected-value` refuses if the cells hold something else. Only the
+addressed cells' bytes change: the BOM, delimiter (detected; tab for `.tsv`)
+and line endings are kept and reported as `csv_dialect`. Addressing stops at
+the cell, so a packed value such as `color=Red,size=M` is one cell.
+
 Every high-frequency flag has a short form (`-f`, `-l`, `-t`, `-o`, `-r`, …) —
 run `ai-text-editor help` or `man -l ai-text-editor.1` for the exact,
 current list rather than trusting prose here to have kept up with it.
