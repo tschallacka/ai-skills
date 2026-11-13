@@ -2202,6 +2202,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         "cursor" => cursor(&envelope, &mut tab, &mut frames),
         "page" => page(&envelope, &mut tab, &mut frames),
         "read" if envelope.payload.get("csv").is_some() => csv_read(&envelope, &tab, &mut frames),
+        "read" if envelope.payload.get("json").is_some() => json_read(&envelope, &tab, &mut frames),
         "read" => {
             // The documented read bounds (the client help's "Reading:" line):
             // range_start_line/range_end_line are one-based and INCLUSIVE on
@@ -2428,6 +2429,9 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                 frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, tab.document.bytes()), "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "mode": tab.document.mode})))
             }
         },
+        "replace" if envelope.payload.get("json").is_some() => {
+            json_replace(&envelope, &mut tab, &mut frames)
+        }
         "replace" if envelope.payload.get("csv").is_some() => {
             csv_replace(&envelope, &mut tab, &mut frames)
         }
@@ -3331,6 +3335,133 @@ fn csv_replace(
             .collect();
         payload.insert("csv_cells".into(), json!(written));
         payload.insert("csv_dialect".into(), csv_dialect_json(&dialect));
+    }
+}
+
+/// `read` with a `json` address: the value there, decoded, with the concrete
+/// pointer a where-step resolved to and the value's byte span.
+fn json_read(envelope: &ai_text_editor::protocol::Envelope, tab: &Tab, frames: &mut Vec<Value>) {
+    if tab.large_file.is_some() {
+        frames.push(error(
+            &envelope.request_id,
+            "json_large_file_unsupported",
+            "json addressing needs the document in memory; this tab is a large-file tab",
+        ));
+        return;
+    }
+    match ai_text_editor::json_address::read(tab.document.bytes(), &envelope.payload["json"]) {
+        Ok(found) => frames.push(response(
+            &envelope.request_id,
+            json!({
+                "json_value": found.value,
+                "json_pointer": found.pointer,
+                "byte_start": found.start,
+                "byte_end": found.end,
+                "revision": tab.revision,
+                "dirty": tab_dirty(tab),
+                "disk_diverged": tab_disk_diverged(tab),
+            }),
+        )),
+        Err((code, message)) => frames.push(error(&envelope.request_id, code, message)),
+    }
+}
+
+/// `replace` with a `json` address and an `op` (set, insert, append, delete,
+/// append_line). `value` and `expected_value` are JSON values, so "3" and 3
+/// stay distinct. Only the addressed value's bytes change; the result must
+/// parse again. A file another tool owns (BUGS/TODO/DECISIONS.json) is
+/// refused, so this cannot become the way around that tool. The edit goes
+/// through the ordinary byte-range replace: guard, journal and undo apply.
+fn json_replace(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &mut Tab,
+    frames: &mut Vec<Value>,
+) {
+    if tab.large_file.is_some() {
+        frames.push(error(
+            &envelope.request_id,
+            "json_large_file_unsupported",
+            "json addressing needs the document in memory; this tab is a large-file tab",
+        ));
+        return;
+    }
+    let file_name = tab
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if let Some((_, owner)) = ai_text_editor::json_address::OWNED_FILES
+        .iter()
+        .find(|(name, _)| *name == file_name)
+    {
+        frames.push(error(
+            &envelope.request_id,
+            "json_file_owned",
+            format!(
+                "{file_name} is written by the {owner} command, which keeps its ids, schema and history straight; use {owner} instead of editing it here"
+            ),
+        ));
+        return;
+    }
+    let payload = &envelope.payload;
+    let op = payload.get("op").and_then(Value::as_str).unwrap_or("set");
+    let edit = match ai_text_editor::json_address::edit(
+        tab.document.bytes(),
+        &payload["json"],
+        op,
+        payload.get("value"),
+        payload.get("value_text").and_then(Value::as_str),
+        payload.get("expected_value"),
+    ) {
+        Ok(edit) => edit,
+        Err((code, message)) => {
+            frames.push(error(&envelope.request_id, code, message));
+            return;
+        }
+    };
+    let mut spliced = envelope.clone();
+    if let Some(map) = spliced.payload.as_object_mut() {
+        for key in ["json", "op", "value", "value_text", "expected_value"] {
+            map.remove(key);
+        }
+        map.insert("range_start_byte".into(), json!(edit.start));
+        map.insert("range_end_byte".into(), json!(edit.end));
+        map.insert(
+            "bytes_base64".into(),
+            json!(base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                &edit.replacement
+            )),
+        );
+    }
+    let before = frames.len();
+    if edit.start == edit.end {
+        // A pure insertion: replace with an empty range is an insert.
+        if let Some(map) = spliced.payload.as_object_mut() {
+            map.remove("range_start_byte");
+            map.remove("range_end_byte");
+            map.insert("offset".into(), json!(edit.start));
+            map.insert("delete_len".into(), json!(0));
+        }
+    }
+    apply_edit_verb(&spliced, tab, frames);
+    if frames[before..]
+        .iter()
+        .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+    {
+        return;
+    }
+    if let Some(payload) = frames
+        .iter_mut()
+        .rev()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
+        .and_then(|frame| frame.get_mut("payload"))
+        .and_then(Value::as_object_mut)
+    {
+        payload.insert(
+            "json_change".into(),
+            json!({"op": op, "pointer": edit.pointer, "old": edit.old, "new": edit.new}),
+        );
     }
 }
 

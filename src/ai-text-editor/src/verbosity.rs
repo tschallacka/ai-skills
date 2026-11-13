@@ -97,6 +97,10 @@ fn declared_tier(key: &str) -> Option<u8> {
         // What a csv address resolved to and wrote, and the file's dialect:
         // verification of the edit, as offset/delete_len are for a replace.
         "csv_cells" | "csv_dialect" => 1,
+        // A json `read`'s own answer, and what a json address resolved to
+        // (the concrete pointer behind a where-step, the span) or changed.
+        "json_value" => 0,
+        "json_pointer" | "json_change" | "byte_start" | "byte_end" => 1,
         // A stream's own framing. Dropping these would break the reader's
         // ability to reassemble the document at all.
         "stream" | "restart" => 0,

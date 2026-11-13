@@ -210,6 +210,22 @@ addressed cells' bytes change: the BOM, delimiter (detected; tab for `.tsv`)
 and line endings are kept and reported as `csv_dialect`. Addressing stops at
 the cell, so a packed value such as `color=Red,size=M` is one cell.
 
+A JSON or JSONL value is addressed the same way, with `--json JSON` (MCP:
+`json`): `{"pointer":"/orders/3/qty"}` (RFC 6901), or `{"path":["tasks",
+{"id":"abc"},"title"]}`, where a `{field: value}` step picks the one array
+element whose fields match, so an id-keyed array needs no index. A JSONL file
+adds `"line": N`, and only that line is parsed. `read` returns `json_value` and
+the concrete `json_pointer`. `replace` takes `--op set` (the default), `insert`
+(a new key, or an element before an index or at `-`), `append`, `delete`, or
+`append_line` (a new JSONL record after the last, never touching the others).
+The value goes in as `--value-json JSON` (MCP: `value_text`), written exactly
+as typed so its key order and number spelling survive, or as MCP `value`, a
+parsed JSON value written compactly. `--expected-value-json` compares as JSON,
+so `"3"` never matches `3`. Only that value's bytes change, an inserted item
+copies the file's own separator, the result must parse again, and a JSONL
+record must stay on one line. `BUGS.json`, `TODO.json` and `DECISIONS.json`
+are refused: `bugs`, `todo` and `decisions` own them.
+
 Every high-frequency flag has a short form (`-f`, `-l`, `-t`, `-o`, `-r`, …) —
 run `ai-text-editor help` or `man -l ai-text-editor.1` for the exact,
 current list rather than trusting prose here to have kept up with it.
