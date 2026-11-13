@@ -106,7 +106,10 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
         "open" => &["document_mode"],
         "capabilities" | "resources" | "history" | "jump_points" => &[],
         "begin_transaction" | "end_transaction" | "restore" | "undo" | "redo" | "save" => &[],
+        // `csv`: a CSV/TSV cell address (row or where, column), see
+        // `csv_address`; on replace with `value`/`values`/`expected_value`.
         "read" => &[
+            "csv",
             "cursor_id",
             "before",
             "after",
@@ -136,6 +139,10 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
             "range_end_before_match",
             "range_match_regex",
             "symbol",
+            "csv",
+            "value",
+            "values",
+            "expected_value",
         ],
         // T113: the source span is addressed exactly like `replace`'s own
         // (a range, a match_id, an anchor pair, or a symbol — never a bare

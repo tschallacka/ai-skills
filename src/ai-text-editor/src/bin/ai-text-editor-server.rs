@@ -2201,6 +2201,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         }
         "cursor" => cursor(&envelope, &mut tab, &mut frames),
         "page" => page(&envelope, &mut tab, &mut frames),
+        "read" if envelope.payload.get("csv").is_some() => csv_read(&envelope, &tab, &mut frames),
         "read" => {
             // The documented read bounds (the client help's "Reading:" line):
             // range_start_line/range_end_line are one-based and INCLUSIVE on
@@ -2427,6 +2428,9 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                 frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, tab.document.bytes()), "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "mode": tab.document.mode})))
             }
         },
+        "replace" if envelope.payload.get("csv").is_some() => {
+            csv_replace(&envelope, &mut tab, &mut frames)
+        }
         "replace" | "insert" => apply_edit_verb(&envelope, &mut tab, &mut frames),
         // T113: relocate/duplicate a span server-side with no content in the
         // request or response — the server already holds the bytes. Large-tab
@@ -3143,6 +3147,191 @@ fn restore_document(
         &envelope.request_id,
         json!({"restored": true, "normalize_nfc": false, "revision": revision}),
     ));
+}
+
+/// The csv address's dialect, as reported back so a caller sees what it is
+/// editing (BOM, delimiter, line ending) without re-reading the file.
+fn csv_dialect_json(dialect: &ai_text_editor::csv_address::Dialect) -> Value {
+    json!({
+        "delimiter": (dialect.delimiter as char).to_string(),
+        "bom": dialect.bom,
+        "line_ending": dialect.line_ending,
+        "header": dialect.header,
+    })
+}
+
+fn csv_resolve(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &Tab,
+) -> Result<
+    (
+        ai_text_editor::csv_address::Dialect,
+        Vec<ai_text_editor::csv_address::Cell>,
+    ),
+    (&'static str, String),
+> {
+    if tab.large_file.is_some() {
+        return Err((
+            "csv_large_file_unsupported",
+            "csv addressing needs the whole document in memory; this tab is a large-file tab"
+                .into(),
+        ));
+    }
+    let extension = tab.path.extension().and_then(|ext| ext.to_str());
+    ai_text_editor::csv_address::resolve(tab.document.bytes(), extension, &envelope.payload["csv"])
+}
+
+/// `read` with a `csv` address: the addressed cells, decoded, each with its
+/// row, column, header name and byte span, plus the file's dialect.
+fn csv_read(envelope: &ai_text_editor::protocol::Envelope, tab: &Tab, frames: &mut Vec<Value>) {
+    match csv_resolve(envelope, tab) {
+        Ok((dialect, cells)) => {
+            let cells: Vec<Value> = cells
+                .iter()
+                .map(|cell| {
+                    json!({
+                        "row": cell.row,
+                        "column": cell.column,
+                        "name": cell.name,
+                        "value": cell.value,
+                        "byte_start": cell.start,
+                        "byte_end": cell.end,
+                    })
+                })
+                .collect();
+            frames.push(response(
+                &envelope.request_id,
+                json!({
+                    "cells": cells,
+                    "csv_dialect": csv_dialect_json(&dialect),
+                    "revision": tab.revision,
+                    "dirty": tab_dirty(tab),
+                    "disk_diverged": tab_disk_diverged(tab),
+                }),
+            ));
+        }
+        Err((code, message)) => frames.push(error(&envelope.request_id, code, message)),
+    }
+}
+
+/// `replace` with a `csv` address: writes `value` into every addressed cell
+/// (or `values`, one per cell), quoting only where the format needs it and
+/// leaving every other byte as it was. `expected_value` (one string for
+/// every cell, or one per cell) is checked first and refuses on mismatch.
+/// The splice then goes through the ordinary byte-range `replace`, so the
+/// revision guard, journal, undo and cursors are exactly a replace's.
+fn csv_replace(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &mut Tab,
+    frames: &mut Vec<Value>,
+) {
+    let (dialect, cells) = match csv_resolve(envelope, tab) {
+        Ok(resolved) => resolved,
+        Err((code, message)) => {
+            frames.push(error(&envelope.request_id, code, message));
+            return;
+        }
+    };
+    let as_text = |value: &Value| match value {
+        Value::String(text) => text.clone(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    };
+    let payload = &envelope.payload;
+    let values: Vec<String> = match (payload.get("value"), payload.get("values")) {
+        (Some(value), None) => vec![as_text(value); cells.len()],
+        (None, Some(Value::Array(list))) if list.len() == cells.len() => {
+            list.iter().map(as_text).collect()
+        }
+        (None, Some(Value::Array(list))) => {
+            frames.push(error(
+                &envelope.request_id,
+                "csv_values_count",
+                format!(
+                    "values has {} entries but the address names {} cells; give one per cell, or a single value for all",
+                    list.len(),
+                    cells.len()
+                ),
+            ));
+            return;
+        }
+        _ => {
+            frames.push(error(
+                &envelope.request_id,
+                "csv_value_missing",
+                "a csv replace takes value (written into every addressed cell) or values (one per cell); \"\" blanks a cell",
+            ));
+            return;
+        }
+    };
+    if let Some(expected) = payload.get("expected_value") {
+        let expected: Vec<String> = match expected {
+            Value::Array(list) => list.iter().map(as_text).collect(),
+            single => vec![as_text(single); cells.len()],
+        };
+        let actual: Vec<&str> = cells.iter().map(|cell| cell.value.as_str()).collect();
+        if expected.len() != actual.len() || expected.iter().zip(&actual).any(|(a, b)| a != b) {
+            frames.push(error_details(
+                &envelope.request_id,
+                "csv_expected_value_mismatch",
+                "the addressed cells do not hold expected_value, so nothing was written; read them again",
+                json!({"expected": expected, "actual": actual}),
+            ));
+            return;
+        }
+    }
+    let (start, end, middle) = match ai_text_editor::csv_address::splice(
+        tab.document.bytes(),
+        dialect.delimiter,
+        &cells,
+        &values,
+    ) {
+        Ok(spliced) => spliced,
+        Err((code, message)) => {
+            frames.push(error(&envelope.request_id, code, message));
+            return;
+        }
+    };
+    let mut spliced = envelope.clone();
+    if let Some(map) = spliced.payload.as_object_mut() {
+        for key in ["csv", "value", "values", "expected_value"] {
+            map.remove(key);
+        }
+        map.insert("range_start_byte".into(), json!(start));
+        map.insert("range_end_byte".into(), json!(end));
+        map.insert(
+            "bytes_base64".into(),
+            json!(base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                &middle
+            )),
+        );
+    }
+    let before = frames.len();
+    apply_edit_verb(&spliced, tab, frames);
+    if frames[before..]
+        .iter()
+        .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+    {
+        return;
+    }
+    if let Some(payload) = frames
+        .iter_mut()
+        .rev()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
+        .and_then(|frame| frame.get_mut("payload"))
+        .and_then(Value::as_object_mut)
+    {
+        let written: Vec<Value> = cells
+            .iter()
+            .zip(&values)
+            .map(|(cell, new)| {
+                json!({"row": cell.row, "column": cell.column, "name": cell.name, "old": cell.value, "new": new})
+            })
+            .collect();
+        payload.insert("csv_cells".into(), json!(written));
+        payload.insert("csv_dialect".into(), csv_dialect_json(&dialect));
+    }
 }
 
 /// The body of a single `replace`/`insert` request, applied against an

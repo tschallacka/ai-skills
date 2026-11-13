@@ -7758,3 +7758,147 @@ fn bulk_edit_then_a_standalone_read_lands_on_the_same_tab_no_duplicate_server() 
         );
     }
 }
+
+/// CSV/TSV addressing, with the three cases it was asked for: read a column
+/// by name; set row N's "potatoes" to "10 tonnes"; blank row N's columns 4,
+/// 5 and 6. Only the addressed cells' bytes change.
+#[test]
+fn csv_addresses_cells_by_column_name_row_and_index() {
+    let harness = Harness::new("csv-examples");
+    let file = harness.write(
+        "harvest.csv",
+        "farm,potatoes,beets,kale,leek,corn\nnorth,3 tonnes,1,2,3,4\nsouth,\"5 tonnes, wet\",5,6,7,8\n",
+    );
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+
+    let column = harness.client(&[
+        "read",
+        "-f",
+        path,
+        "--csv",
+        r#"{"all":true,"column":"potatoes"}"#,
+    ]);
+    assert!(column.status.success(), "{}", stderr_text(&column));
+    let cells = first_payload(&column)["cells"].clone();
+    assert_eq!(cells[0]["value"], json!("3 tonnes"), "{cells}");
+    assert_eq!(cells[1]["value"], json!("5 tonnes, wet"), "{cells}");
+
+    let set = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--csv",
+        r#"{"row":2,"column":"potatoes"}"#,
+        "--value",
+        "10 tonnes",
+    ]);
+    assert!(set.status.success(), "{}", stderr_text(&set));
+    let written = first_payload(&set)["csv_cells"].clone();
+    assert_eq!(written[0]["old"], json!("5 tonnes, wet"), "{written}");
+
+    let blank = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--csv",
+        r#"{"row":2,"column":[4,5,6]}"#,
+        "--value",
+        "",
+    ]);
+    assert!(blank.status.success(), "{}", stderr_text(&blank));
+    let saved = harness.client(&["save", "-f", path]);
+    assert!(saved.status.success(), "{}", stderr_text(&saved));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "farm,potatoes,beets,kale,leek,corn\nnorth,3 tonnes,1,2,3,4\nsouth,10 tonnes,5,,,\n"
+    );
+}
+
+/// `where` is ANDed over columns, one row per key per store view as in a
+/// catalog import: a key matching several rows is refused without all:true,
+/// and expected_value refuses when the cells hold something else.
+#[test]
+fn csv_where_matches_on_every_condition_and_guards_by_expected_value() {
+    let harness = Harness::new("csv-where");
+    let file = harness.write(
+        "catalog.csv",
+        "sku,store_view_code,name\nA1,,Apple\nA1,nl,Appel\n",
+    );
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let ambiguous = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--csv",
+        r#"{"where":{"sku":"A1"},"column":"name"}"#,
+        "--value",
+        "x",
+    ]);
+    assert!(refusal_text(&ambiguous).contains("csv_where_ambiguous"));
+    let guarded = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--csv",
+        r#"{"where":{"sku":"A1","store_view_code":"nl"},"column":"name"}"#,
+        "--value",
+        "Appeltje",
+        "--expected-value",
+        "Peer",
+    ]);
+    assert!(refusal_text(&guarded).contains("csv_expected_value_mismatch"));
+    let written = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--csv",
+        r#"{"where":{"sku":"A1","store_view_code":"nl"},"column":"name"}"#,
+        "--value",
+        "Appeltje",
+        "--expected-value",
+        "Appel",
+    ]);
+    assert!(written.status.success(), "{}", stderr_text(&written));
+    assert!(harness.client(&["save", "-f", path]).status.success());
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "sku,store_view_code,name\nA1,,Apple\nA1,nl,Appeltje\n"
+    );
+}
+
+/// An Excel export -- BOM, ';' delimiter, CRLF -- is detected, reported, and
+/// kept byte for byte; a value holding the delimiter is quoted, and no other
+/// cell is requoted.
+#[test]
+fn csv_keeps_a_bom_semicolon_crlf_dialect_byte_for_byte() {
+    let harness = Harness::new("csv-dialect");
+    let file = harness.path("export.csv");
+    std::fs::write(
+        &file,
+        b"\xEF\xBB\xBFsku;name\r\n\"A1\";Apple\r\nB2;Pear\r\n",
+    )
+    .unwrap();
+    harness.open(&file);
+    let path = file.to_str().unwrap();
+    let set = harness.client(&[
+        "replace",
+        "-f",
+        path,
+        "--csv",
+        r#"{"where":{"sku":"B2"},"column":"name"}"#,
+        "--value",
+        "Pear; ripe",
+    ]);
+    assert!(set.status.success(), "{}", stderr_text(&set));
+    let dialect = first_payload(&set)["csv_dialect"].clone();
+    assert_eq!(dialect["delimiter"], json!(";"), "{dialect}");
+    assert_eq!(dialect["bom"], json!(true), "{dialect}");
+    assert_eq!(dialect["line_ending"], json!("\r\n"), "{dialect}");
+    assert!(harness.client(&["save", "-f", path]).status.success());
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        b"\xEF\xBB\xBFsku;name\r\n\"A1\";Apple\r\nB2;\"Pear; ripe\"\r\n".to_vec()
+    );
+}
