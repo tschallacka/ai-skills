@@ -25,6 +25,8 @@ or a plain Read/Edit/Write.
   full `Read` is about to spend context pulling in whole, and that a search
   hit's own byte range addresses a later `replace` directly -- no need to
   re-quote the matched text as Edit's `old_string` requires.
+- **`PreToolUse`, matched to `Bash` and `Edit|Write|MultiEdit|Grep`.** Inert
+  unless strict mode is on; see "Strict mode" below.
 - **`hooks/editor-token`.** Mints a token: `--why '<reason>' --command '<exact
   command>'`. Refuses a placeholder reason (under 15 characters). Prints
   `EDIT_OK=<token>` to prefix the authorised command with.
@@ -51,6 +53,46 @@ hasn't changed since I read it," which Edit's check cannot see at all. The
 current wording leads with that distinction instead of leaving it implicit,
 because listing journaling and expected_text as parallel features let a real
 session read right past the one that actually mattered for its task.
+
+## Strict mode (optional, recommended)
+
+The default above leaves the choice with the agent, and an agent told to use
+`grep` or `sed` by something injected into its context takes that instruction
+over a reminder. Strict mode removes the choice. It is off unless you turn it on:
+
+```bash
+installer install --agent claude --skill ai-text-editor --editor-gate strict
+```
+
+An interactive install asks, marked as recommended. `--yes` and an "All" answer
+never choose it. A reinstall keeps whatever was chosen, and `--editor-gate current`
+turns it back off.
+
+With it on, `hooks/pre-tool-use-strict.sh` hands every call to
+`ai-text-editor-server strict-gate`, the one editor binary every integration mode
+installs, and these are denied with **no token**, because an
+agent can mint a token itself:
+
+- the native `Edit`, `Write` and `MultiEdit` tools, and native `Grep` on one file
+- `grep`, `rg`, `ack` or `ag` on one file, including `grep x < file` and
+  `cat`, `head` or `tail` of a file piped into one
+- `sed` and `awk` used as a search over one file, and `perl -ne` or `ruby -ne`
+- an inline or small script that only reads one file and searches it
+- `echo`, `printf`, `tee` or a heredoc `cat` writing to a real path
+
+Still allowed: plan mode and its plan file; searching a command's output, such as
+`git log | grep x` or `tail -f log | grep x`; searching many files; non-search
+reads such as `sed -n '10,20p' file`; and shell writes to temp paths and `/dev`.
+
+Two things to know before relying on it:
+
+- **It fails closed.** A missing server binary, or one older than this plugin, denies
+  every gated call and says to re-run the installer. Start a session with
+  `EDITOR_GATE_OFF=1` to get out of that; a prefix on an agent's own command
+  cannot set it, because the hook reads the harness's environment.
+- **It reads shell text, so it is not a sandbox.** `cp`, `patch`, `git apply` and
+  `ed` still write files, and a large script is not inspected. It stops the reflex
+  and an injected instruction, not an agent determined to get around it.
 
 ## State and token store
 

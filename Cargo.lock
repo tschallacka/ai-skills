@@ -1890,6 +1890,7 @@ dependencies = [
  "serde_json",
  "stale-lock",
  "tailpipe-server-rs",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

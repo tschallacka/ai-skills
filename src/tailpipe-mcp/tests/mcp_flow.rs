@@ -123,6 +123,36 @@ fn scratch() -> PathBuf {
     dir
 }
 
+/// Stops the server a test autostarted, found by the unique directory on its
+/// command line. Left running it holds this test's inherited handles on Windows,
+/// so whatever reads the suite's output never sees end of file.
+struct StopAutostartedServer(String);
+
+impl Drop for StopAutostartedServer {
+    fn drop(&mut self) {
+        let mut command = if cfg!(windows) {
+            let mut powershell = Command::new("powershell");
+            powershell.args(["-NoProfile", "-NonInteractive", "-Command"]);
+            powershell.arg(format!(
+                "Get-CimInstance Win32_Process -Filter \"Name='tailpipe-server-rs.exe'\" | \
+                 Where-Object {{ $_.CommandLine -like '*{}*' }} | \
+                 ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}",
+                self.0
+            ));
+            powershell
+        } else {
+            let mut pkill = Command::new("pkill");
+            pkill.args(["-f", &self.0]);
+            pkill
+        };
+        let _ = command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
 fn unique() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -252,6 +282,7 @@ impl Drop for Harness {
 fn the_adapter_autostarts_tailpipe_server_rs_with_no_manual_start() {
     ensure_built(&sibling_bin_dir(), "tailpipe-server-rs");
     let dir = scratch();
+    let stop = StopAutostartedServer(dir.file_name().unwrap().to_string_lossy().into_owned());
     let endpoint = dir.join("tailpipe.sock");
     assert!(!endpoint.exists(), "nothing should be listening yet");
 
@@ -285,6 +316,7 @@ fn the_adapter_autostarts_tailpipe_server_rs_with_no_manual_start() {
 
     let _ = adapter.kill();
     let _ = adapter.wait();
+    drop(stop);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
