@@ -4,6 +4,22 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
+      "id": "T3",
+      "title": "ai-text-editor: syntax-check every edit and warn of breakage; refuse save on new errors until acknowledged",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Agents editing through ai-text-editor (the editor gate forces every edit there) break code often -- a closing brace lost in a replace, two lines deleted with a scene block -- and see it only several calls later when the page or build throws, because unlike native Edit the editor surfaces no diagnostics. Agreed design (Tschallacka, 2026-11-13, Q3a/Q4a/Q5b): (1) run a check on every insert/replace/bulk_edit against the in-memory buffer, before save, and report it in that edit's own response; (2) report only errors the edit INTRODUCED (diagnostics before vs after, near the edited range), so a file already broken does not nag on every edit; a transaction checks once at end_transaction; (3) save is refused while edit-introduced syntax errors stand, until the caller passes an explicit acknowledgement. Phase 1: cheap per-language checkers, no daemon -- node --check (js/mjs/cjs), php -l, bash -n, python3 -m py_compile, the editor's own JSON/XML parsers. Phase 2: warm per-language LSPs held by the editor server for what checkers cannot cover (inline <script> in HTML via vscode-html-language-server, CSS, YAML, Vue, TS), discovered on PATH, filtered to syntax-class diagnostics, with a timeout that reports 'check pending' instead of blocking the edit. Absent tooling degrades to 'unchecked', never to a refusal.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "ai-text-editor/SKILL.md"
+      ],
+      "note": null,
+      "created_at": "2026-11-13T11:29:15Z",
+      "updated_at": "2026-11-13T11:29:15Z"
+    },
+    {
       "id": "T2",
       "title": "benchmark/skill-adoption prepare-cell.sh silently ships a skill dir with no binary unless staged by hand",
       "status": "open",

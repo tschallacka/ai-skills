@@ -13,7 +13,7 @@
       "reproduce": "Through the MCP adapter, under one session identity: open a second file at default verbosity, open the target file with verbosity 0, call replace with a range_start_match that matches nothing, then call save naming the target by file.",
       "observed": "replace is refused correctly with range_start_match_not_found, then save is refused with \"save carries a revision guard and <file> has no tab in this workspace\", telling the caller to open a file it just opened. Reopening returns the same tab id, so the tab was not destroyed.",
       "expected": "A refused replace changes nothing, so the following save finds the tab and succeeds, as it does in every variant below.",
-      "mechanism": "Not established. The message is the guarded-verb arm of resolve in src/ai-text-editor/src/client.rs (around line 392), reached when discovery returns Err, so the refusal is client-side routing rather than tab state. A verbosity 0 open response carries no session_token, which is the likely link, but why a failed replace differs from a successful one was not traced.",
+      "mechanism": "Three client-side faults in src/ai-text-editor/src/client.rs. (1) refresh_token deletes the (identity, file) session cache before recovering a token and leaves the rewrite to the caller, which only rewrites on success; a verbosity 0 open caches no token, so the next guarded verb refreshes, and when it is then refused the cache stays deleted; with a second tab the identity lookup no longer serves this file and per-file discovery has no record for a file added to a running workspace, so the next guarded verb refuses with 'has no tab'. (2) The create-parents check lived only in autostart_server, so an open served by a running workspace skipped it and created nothing. (3) resolve keyed the endpoint record to wait for before autostart created missing parents; canonical_or_near recovers one missing level only, so with two or more the raw and canonical keys differ through a symlink (macOS /tmp) and a cold open reported 'never announced an endpoint'.",
       "surfaces": [
         "ai-text-editor",
         "ai-text-editor-mcp"
@@ -21,9 +21,53 @@
       "fix": null,
       "verification": null,
       "found_by": "",
-      "notes": "Measured 2026-11-05 on the installed MCP binary and on a build of origin/master plus the strict-gate branch, each with fresh session ids. Fails: 1 and 3 extra tabs with verbosity 0 on all calls; open at verbosity 0 then failed replace and save at default. Passes: no extra tab at verbosity 0; open at default verbosity then failed replace; open at verbosity 0 then save directly; open at verbosity 0 then successful replace and save. The CLI with a fresh single-tab session also passes. Batching calls is not a factor. No data is at risk: the file is untouched and reopening recovers. Separately, once and not isolated: open with acknowledge_create_parents at verbosity 0 did not create the missing directory, and save failed with save_failed; the same call at default verbosity had created it earlier.",
+      "notes": "Measured 2026-11-05 on the installed MCP binary and on a build of origin/master plus the strict-gate branch, each with fresh session ids. Fails: 1 and 3 extra tabs with verbosity 0 on all calls; open at verbosity 0 then failed replace and save at default. Passes: no extra tab at verbosity 0; open at default verbosity then failed replace; open at verbosity 0 then save directly; open at verbosity 0 then successful replace and save. The CLI with a fresh single-tab session also passes. Batching calls is not a factor. No data is at risk: the file is untouched and reopening recovers. Separately, once and not isolated: open with acknowledge_create_parents at verbosity 0 did not create the missing directory, and save failed with save_failed; the same call at default verbosity had created it earlier. Second sighting 2026-11-12, during GH #194/#195 work: open with acknowledge_create_parents: true at verbosity 0 did not create the missing src/update-ui-story/tests/ directory, and the following save failed with save_failed. Matches the not-isolated observation in this entry's notes, so that half is now seen twice. Third sighting 2026-11-12, and at verbosity 1, so the create-parents half is not specific to verbosity 0: open with acknowledge_create_parents: true and verbosity: 1 on a path under a missing directory returned a tab, but save failed with save_failed naming the missing parent. Creating the directory by hand and saving again worked. Mechanism established and fixed 2026-11-12 in PR #205 (commit 4dc30bf9, branch bug/b9-editor-tab-and-create-parents), not yet merged. Reproduced on master's binaries with a stdio probe of ai-text-editor-mcp under a throwaway identity: two tabs plus a refused replace makes save refuse; a matching replace, or a single tab, saves. All five probe variants save on the branch; three new mcp_flow tests each fail against master's client.rs. Status and fix keys to be set once #205 merges.",
       "created_at": "2026-11-05T12:39:14Z",
-      "updated_at": "2026-11-05T12:39:14Z"
+      "updated_at": "2026-11-12T22:20:34Z"
+    },
+    {
+      "id": "B10",
+      "title": "tailpipe: the client and MCP autostart tests leave a tailpipe-server-rs running after every run",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run cargo test -p tailpipe-client-rs -p tailpipe-mcp, then list processes: ps -axo pid,etime,command | awk '/tailpipe-server-rs/'.",
+      "observed": "Each run leaves two servers, one on /tmp/tailpipe-autostart-<pid>-3/tailpipe.sock (client cli_flow) and one on /tmp/tailpipe-mcp-flow-<pid>-2/tailpipe.sock (mcp mcp_flow), both from target/debug. They never exit: on 2026-11-12 this machine held 14, the oldest 7 days old, each with its socket and snapshots directory under /tmp.",
+      "expected": "A test that autostarts a server stops it (and removes its /tmp directory) when the test ends, pass or fail.",
+      "mechanism": "Not traced. The autostart path spawns the server detached so it outlives the client that started it, which is the intended production behaviour; the tests appear not to stop it afterwards. The server's 15-minute idle eviction removes streams, not the process.",
+      "surfaces": [
+        "tailpipe-client-rs",
+        "tailpipe-mcp"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "GH #197 work, 2026-11-12",
+      "notes": "Already fixed on an unmerged branch: commit 9d1aea64 (\"tailpipe: stop the server the autostart tests start\") on editor-gate-strict-mode, PR #196, adds a StopAutostartedServer guard (pkill -f on the test's unique directory) to both tests. Verified 2026-11-12: with that commit's two test files on current master, cargo test -p tailpipe-client-rs -p tailpipe-mcp (33 tests) left no new server (9 before, 9 after); master's files leave two per run. Closes when PR #196 merges.",
+      "created_at": "2026-11-12T21:48:55Z",
+      "updated_at": "2026-11-12T22:01:39Z"
+    },
+    {
+      "id": "B11",
+      "title": "ai-text-editor: match_ids from one search go stale after an edit, contrary to 65702913's sibling-hit shift",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "CLI, current master build (target/debug, 2026-11-12): file 'alpha x\\nbeta x\\ngamma x\\n', open, search -m exact_text -q x --limit 10 (3 hits, match_ids <id>#0..#2), then replace --match-id <id>#0 -t XXXXX --no-autosave. MCP (installed binary): regex search with many hits in cli_flow.rs, replace hit #0 via match_id (text 5 bytes longer, no line change), then replace hit #3 via its match_id.",
+      "observed": "CLI: the very first replace by a match_id from a fresh search is refused match_id_stale ('no live result set has this id'). MCP: the first replace applied, then every other match_id from the same search (12 tried) was refused match_id_stale.",
+      "expected": "Commit 65702913 says a stored hit wholly before or after an edited span is re-addressed by the edit's size change rather than discarded, so sibling hits survive an edit to one of them; on the CLI a match_id from the search just made should resolve at all.",
+      "mechanism": "Not traced. The CLI case suggests the result set is not found across separate client connections (per-connection or per-token storage, or a refreshed session token pointing elsewhere); the MCP case suggests the shift path drops the whole result set when one hit is replaced. Untested whether the installed MCP binary predates 65702913 (its mtime is normalised, so it cannot be told from the file).",
+      "surfaces": [
+        "ai-text-editor",
+        "ai-text-editor-mcp"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "editor-card work, 2026-11-12",
+      "notes": null,
+      "created_at": "2026-11-12T23:43:06Z",
+      "updated_at": "2026-11-12T23:43:06Z"
     }
   ]
 }
