@@ -22,11 +22,11 @@
 
 use crate::register::{Bug, Register};
 
-/// The register version this binary writes. Bumped for alpha.9 in lockstep
+/// The register version this binary writes. Bumped for alpha.10 in lockstep
 /// with every other register skill's SUPPORTED and package.json's own
-/// version; no register's own shape changed this release (three bug fixes
-/// in ai-text-editor/tailpipe, not a data-format change here).
-pub const SUPPORTED: &str = "2.0.0-alpha.9";
+/// version; no register's own shape changed this release (installer and
+/// skill fixes, not a data-format change here).
+pub const SUPPORTED: &str = "2.0.0-alpha.10";
 
 pub struct Unconvertible {
     pub id: String,
