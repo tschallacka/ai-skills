@@ -351,9 +351,14 @@ fn a_forgotten_wait_still_reaches_the_agent_through_its_own_auto_registered_rule
         "did you see this",
     );
 
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A ceiling counted in polls, not a wall-clock deadline: a CI runner that
+    // pauses the guest lets a fixed `now() + 5s` expire while the adapter is
+    // frozen mid-delivery, and the loop then gives up on a spool that fills
+    // the moment it resumes (.agents/knowledge/github-ci-runners.md, the B384
+    // mechanism; reproduced here by SIGSTOPping chat-mcp for 7 s across the
+    // send). 600 x 50 ms is a 30 s ceiling a healthy run never approaches.
     let mut spooled = String::new();
-    while Instant::now() < deadline {
+    for _ in 0..600 {
         if let Ok(text) = std::fs::read_to_string(&spool) {
             spooled = text;
             if !spooled.is_empty() {

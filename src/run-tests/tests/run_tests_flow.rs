@@ -199,6 +199,16 @@ impl Repo {
     /// wrongly observes lock refusal (exit 75) as if it were a real test
     /// failure.
     fn run(&self, args: &[&str]) -> Output {
+        self.run_with_timeout(args, "3")
+    }
+
+    /// `run`'s 3 s per-item timeout exists for the hanging-script cases,
+    /// which wait for it to fire. An item that does real work under it --
+    /// `cargo test` compiling a crate from nothing -- is a wall-clock bet a
+    /// paused CI runner or a loaded host loses
+    /// (.agents/knowledge/github-ci-runners.md), so it passes a ceiling sized
+    /// for that work instead.
+    fn run_with_timeout(&self, args: &[&str], timeout_seconds: &str) -> Output {
         let binary = env!("CARGO_BIN_EXE_run-tests");
         Command::new(binary)
             .args(args)
@@ -206,7 +216,7 @@ impl Repo {
             .env("AI_SKILLS_RESOURCE_LIMIT", "0")
             .env("AI_SKILLS_ALLOW_CONCURRENT", "1")
             .env("RUN_TESTS_BASH", which_bash())
-            .env("AI_SKILLS_TEST_TIMEOUT", "3")
+            .env("AI_SKILLS_TEST_TIMEOUT", timeout_seconds)
             .output()
             .unwrap()
     }
@@ -302,10 +312,13 @@ fn a_crate_is_discovered_and_run_via_cargo_test() {
     );
     let select = repo.dir.join("select.txt");
     fs::write(&select, "src/trivial\n").unwrap();
-    let output = repo.run(&["--select-file", "select.txt"]);
+    let output = repo.run_with_timeout(&["--select-file", "select.txt"], "300");
     let out = stdout(&output);
     assert!(out.contains("cargo-trivial"));
-    assert!(out.contains("PASS") || out.contains("UNCONFIGURED"));
+    assert!(
+        out.contains("PASS") || out.contains("UNCONFIGURED"),
+        "the trivial crate neither passed nor reported unconfigured:\n{out}"
+    );
 }
 
 #[test]
