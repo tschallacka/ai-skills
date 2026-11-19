@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const SESSION: &str = "bridge-owner";
 const NICK: &str = "bridge";
@@ -21,14 +21,22 @@ fn bin_dir() -> PathBuf {
         .to_path_buf()
 }
 
+/// One home per test. Both tests run as threads of one process, so the pid
+/// alone is shared; the counter keeps them apart. The suffix used to be
+/// `Instant::now().elapsed().subsec_nanos()`, the age of an Instant made a
+/// moment earlier, which is nearly always 0. The two tests then shared a
+/// home: one read the other's server.port and session file, and one's
+/// cleanup deleted the other's, which failed both in turn.
 fn scratch() -> PathBuf {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
     let root = std::env::var_os("TMPDIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
     let dir = root.join(format!(
         "chat-mcp-bridge-owner-{}-{}",
         std::process::id(),
-        Instant::now().elapsed().subsec_nanos()
+        NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).expect("scratch home");
     dir
