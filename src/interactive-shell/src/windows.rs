@@ -559,9 +559,10 @@ mod tests {
         backend.resize(100, 30).expect("resize");
 
         backend.write(b"exit\r\n").expect("write exit command");
-        let deadline = Instant::now() + Duration::from_secs(5);
+        // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+        // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
         let mut exit_code = None;
-        while Instant::now() < deadline {
+        for _ in 0..100 {
             if let Ok(Some(code)) = backend.try_wait() {
                 exit_code = Some(code);
                 break;

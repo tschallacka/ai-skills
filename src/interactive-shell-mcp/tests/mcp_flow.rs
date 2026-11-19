@@ -229,8 +229,12 @@ fn starting_without_command_resumes_a_previously_saved_sessions_command() {
     // (B370 hit the same class of thing in chat-server-rs's own tests and
     // settled on the same 20s bound for the same reason).
     let socket = harness.scratch.join("sockets/flow-resume/term.sock");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while socket.exists() && std::time::Instant::now() < deadline {
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+    for _ in 0..1000 {
+        if !socket.exists() {
+            break;
+        }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     assert!(

@@ -23,7 +23,7 @@ mod support;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use support::{spawn_server, ChildGuard};
 
@@ -214,16 +214,15 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
     // which appends to the log slightly after that -- poll rather than assert
     // immediately.
     let wait_for_sender = |fragment: &str, timeout: Duration| -> Option<String> {
-        let deadline = Instant::now() + timeout;
-        loop {
+        // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+        // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+        for _ in 0..(timeout.as_millis() / 100).max(1) {
             if let Some(found) = sender_of(fragment) {
                 return Some(found);
             }
-            if Instant::now() >= deadline {
-                return None;
-            }
             thread::sleep(Duration::from_millis(100));
         }
+        sender_of(fragment)
     };
     assert_eq!(
         wait_for_sender("through the owner", Duration::from_secs(5)).as_deref(),
@@ -301,9 +300,10 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
     );
 
     peer_send(second, "into the joined channel");
-    let deadline = Instant::now() + Duration::from_secs(6);
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
     let mut followed = false;
-    while Instant::now() < deadline {
+    for _ in 0..30 {
         if tail_log.lock().unwrap().contains("into the joined channel") {
             followed = true;
             break;
@@ -346,9 +346,10 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
         String::from_utf8_lossy(&leave1.stdout).contains("the tail is stopping"),
         "leave on the last channel should say the tail is stopping"
     );
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
     let mut stopped = false;
-    while Instant::now() < deadline {
+    for _ in 0..40 {
         if matches!(tail_guard.0.try_wait(), Ok(Some(_))) {
             stopped = true;
             break;
@@ -428,9 +429,10 @@ fn a_running_tail_owns_its_connection_and_serves_verbs_on_it() {
 
     peer_send(chan, "first of two");
     peer_send(second, "second of two");
-    let deadline = Instant::now() + Duration::from_secs(8);
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
     let mut both = false;
-    while Instant::now() < deadline {
+    for _ in 0..40 {
         let log = tail2_log.lock().unwrap();
         if log.contains("first of two") && log.contains("second of two") {
             both = true;

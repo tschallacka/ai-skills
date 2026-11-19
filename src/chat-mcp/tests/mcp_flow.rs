@@ -1029,9 +1029,13 @@ fn by_default_notices_are_queued_for_the_hook_and_nothing_is_pushed() {
 
     harness.other_sends("#flow", "lunch anyone");
     harness.other_sends("#flow", "the deploy failed");
-    let deadline = Instant::now() + NOTICE_WAIT;
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
     let mut lines = spooled(&harness.home);
-    while Instant::now() < deadline && lines.len() < 2 {
+    for _ in 0..NOTICE_WAIT.as_millis() / 100 {
+        if lines.len() >= 2 {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(100));
         lines = spooled(&harness.home);
     }

@@ -16,7 +16,7 @@ use crate::transport::{
 use stale_lock::StaleLock;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// What a caller already knows going in, from its own flags or arguments.
 /// `method` and `file` decide, together, which of the paths below apply —
@@ -696,8 +696,9 @@ pub fn autostart_server(request: &ResolveRequest, file: &Path) -> Result<Option<
             file.display()
         )
     })?;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+    for _ in 0..200 {
         if has_live_endpoint(&discovery) {
             let _ = std::fs::remove_file(&log_path);
             #[cfg(unix)]
@@ -706,7 +707,7 @@ pub fn autostart_server(request: &ResolveRequest, file: &Path) -> Result<Option<
             return Ok(Some(auth_token));
         }
         if child.try_wait().is_ok_and(|status| status.is_some()) {
-            break; // no point waiting out the deadline on an exited spawn
+            break; // no point waiting out the ceiling on an exited spawn
         }
         std::thread::sleep(Duration::from_millis(50));
     }

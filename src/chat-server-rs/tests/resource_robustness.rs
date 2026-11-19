@@ -12,7 +12,7 @@ use std::io::{Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use support::{run_client, spawn_server, ChildGuard, ScratchDir};
 
@@ -273,9 +273,10 @@ fn one_idle_subscriber_does_not_wedge_the_broadcast_path() {
         .unwrap();
     let _watcher_guard = ChildGuard(watcher);
 
-    let deadline = Instant::now() + Duration::from_secs(20);
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
     let mut watcher_joined = false;
-    while Instant::now() < deadline {
+    for _ in 0..100 {
         if watcher_log.lock().unwrap().contains("End of /NAMES list") {
             watcher_joined = true;
             break;
@@ -293,9 +294,10 @@ fn one_idle_subscriber_does_not_wedge_the_broadcast_path() {
         "the send to the joined watcher stalled: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let deadline = Instant::now() + Duration::from_secs(20);
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
     let mut delivered = false;
-    while Instant::now() < deadline {
+    for _ in 0..100 {
         if watcher_log
             .lock()
             .unwrap()
