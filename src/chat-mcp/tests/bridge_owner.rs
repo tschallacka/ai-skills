@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const SESSION: &str = "bridge-owner";
 const NICK: &str = "bridge";
@@ -21,14 +21,22 @@ fn bin_dir() -> PathBuf {
         .to_path_buf()
 }
 
+/// One home per test. Both tests run as threads of one process, so the pid
+/// alone is shared; the counter keeps them apart. The suffix used to be
+/// `Instant::now().elapsed().subsec_nanos()`, the age of an Instant made a
+/// moment earlier, which is nearly always 0. The two tests then shared a
+/// home: one read the other's server.port and session file, and one's
+/// cleanup deleted the other's, which failed both in turn.
 fn scratch() -> PathBuf {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
     let root = std::env::var_os("TMPDIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
     let dir = root.join(format!(
         "chat-mcp-bridge-owner-{}-{}",
         std::process::id(),
-        Instant::now().elapsed().subsec_nanos()
+        NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).expect("scratch home");
     dir
@@ -351,9 +359,14 @@ fn a_forgotten_wait_still_reaches_the_agent_through_its_own_auto_registered_rule
         "did you see this",
     );
 
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A ceiling counted in polls, not a wall-clock deadline: a CI runner that
+    // pauses the guest lets a fixed `now() + 5s` expire while the adapter is
+    // frozen mid-delivery, and the loop then gives up on a spool that fills
+    // the moment it resumes (.agents/knowledge/github-ci-runners.md, the B384
+    // mechanism; reproduced here by SIGSTOPping chat-mcp for 7 s across the
+    // send). 600 x 50 ms is a 30 s ceiling a healthy run never approaches.
     let mut spooled = String::new();
-    while Instant::now() < deadline {
+    for _ in 0..600 {
         if let Ok(text) = std::fs::read_to_string(&spool) {
             spooled = text;
             if !spooled.is_empty() {

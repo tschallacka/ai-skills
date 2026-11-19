@@ -7,7 +7,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tailpipe_server_rs::protocol::{Request, Response};
 use tailpipe_server_rs::transport::Stream;
 
@@ -44,6 +44,41 @@ fn server_binary_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
+/// Windows only: clear the inherit flag on this process's own standard
+/// handles before spawning the server. `Command` creates every child with
+/// `bInheritHandles` set, so a handle that is inheritable here reaches the
+/// child even when the child's stdio is redirected elsewhere. Ours usually
+/// are inheritable, because our parent passed them to us. The long-lived
+/// server then holds our caller's stdout and stderr pipes open, and a caller
+/// waiting for EOF on them (an MCP host, a test's `wait_with_output`) waits
+/// for as long as the server lives. Unix descriptors are close-on-exec, so
+/// nothing leaks there. `Stdio::inherit()` duplicates the handle afresh, so a
+/// later spawn that wants our stdio still gets it.
+#[cfg(windows)]
+fn keep_own_std_handles_out_of_children() {
+    use std::ffi::c_void;
+    extern "system" {
+        fn GetStdHandle(which: u32) -> *mut c_void;
+        fn SetHandleInformation(handle: *mut c_void, mask: u32, flags: u32) -> i32;
+    }
+    const STD_INPUT_HANDLE: u32 = -10i32 as u32;
+    const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
+    const STD_ERROR_HANDLE: u32 = -12i32 as u32;
+    const HANDLE_FLAG_INHERIT: u32 = 0x1;
+    let invalid = usize::MAX as *mut c_void;
+    for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: GetStdHandle takes no pointers. SetHandleInformation only
+        // runs on a handle GetStdHandle returned, after the null and invalid
+        // checks, and a failure leaves the handle as it was.
+        unsafe {
+            let handle = GetStdHandle(which);
+            if !handle.is_null() && handle != invalid {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
+}
+
 /// Start `tailpipe-server-rs` at `endpoint` if nothing answers there yet,
 /// and return once it does (or the attempt fails). A `StaleLock` next to the
 /// endpoint coordinates two callers racing to notice the same missing
@@ -69,6 +104,8 @@ fn autostart(endpoint: &Path) -> std::io::Result<()> {
     let log_path = endpoint.with_extension(format!("start-{}.log", std::process::id()));
     let log = std::fs::File::create(&log_path)?;
     let log_capture = log.try_clone()?;
+    #[cfg(windows)]
+    keep_own_std_handles_out_of_children();
     let mut child = std::process::Command::new(&binary)
         .arg(endpoint)
         .arg("--snapshot-dir")
@@ -85,14 +122,15 @@ fn autostart(endpoint: &Path) -> std::io::Result<()> {
                 endpoint.display()
             ))
         })?;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+    for _ in 0..200 {
         if Stream::connect(endpoint).is_ok() {
             let _ = std::fs::remove_file(&log_path);
             return Ok(());
         }
         if child.try_wait().is_ok_and(|status| status.is_some()) {
-            break; // no point waiting out the deadline on an exited spawn
+            break; // no point waiting out the ceiling on an exited spawn
         }
         std::thread::sleep(Duration::from_millis(50));
     }

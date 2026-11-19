@@ -22,24 +22,35 @@
 //! `~/.cargo/env` is the same shape, for the same reason -- one place to
 //! read or change the actual logic, no risk of the copies drifting.
 
+// Everything gated `not(windows)` below is the Unix rc-file mechanism, which
+// only the Unix `ensure_shared_bin_on_path` reaches; Windows edits the
+// registry instead. Left ungated, a Windows build sees it all as dead code,
+// and `-D warnings` turns that into a compile failure on the MSVC leg.
+#[cfg(not(windows))]
 use crate::backup;
+#[cfg(not(windows))]
 use crate::permissions;
 use crate::shared_bin;
+#[cfg(not(windows))]
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[cfg(not(windows))]
 const MARKER_OPEN: &str = "# >>> tsch-ai-skills path >>>";
+#[cfg(not(windows))]
 const MARKER_CLOSE: &str = "# <<< tsch-ai-skills path <<<";
 
 /// `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/env` -- the one file
 /// every rc guard below sources. Not itself on `PATH`; it is `.`-sourced.
+#[cfg(not(windows))]
 pub fn env_file_path(home: &Path) -> PathBuf {
     shared_bin::xdg_config_home_or(home)
         .join("tsch-ai-skills")
         .join("env")
 }
 
+#[cfg(not(windows))]
 fn env_file_content(home: &Path) -> String {
     let bin = shared_bin::shared_bin_dir(home);
     let bin = bin.to_string_lossy();
@@ -58,6 +69,7 @@ fn env_file_content(home: &Path) -> String {
 /// install (a different `$HOME`, a renamed shared-bin convention) is exactly
 /// the case this must still catch, so this always recomputes and compares
 /// rather than skipping because the file merely exists.
+#[cfg(not(windows))]
 fn write_env_file(home: &Path) -> io::Result<bool> {
     let path = env_file_path(home);
     let content = env_file_content(home);
@@ -76,6 +88,7 @@ fn write_env_file(home: &Path) -> io::Result<bool> {
     Ok(true)
 }
 
+#[cfg(not(windows))]
 fn guard_block(env_file: &Path) -> String {
     let path = env_file.to_string_lossy();
     format!("{MARKER_OPEN}\n[ -f \"{path}\" ] && . \"{path}\"\n{MARKER_CLOSE}\n")
@@ -85,6 +98,7 @@ fn guard_block(env_file: &Path) -> String {
 /// shebang line if the file has one, otherwise as the very first line --
 /// unless the marker is already there, in which case this touches nothing.
 /// Creates the file (and its parent directory) if it does not exist yet.
+#[cfg(not(windows))]
 fn ensure_guard_at_top(path: &Path, env_file: &Path) -> io::Result<bool> {
     let existing = fs::read_to_string(path).unwrap_or_default();
     if existing.contains(MARKER_OPEN) {
@@ -118,6 +132,7 @@ fn ensure_guard_at_top(path: &Path, env_file: &Path) -> io::Result<bool> {
 /// finds as a login shell and ignores the rest entirely: creating a
 /// `.bash_profile` where none existed would silently stop that shell from
 /// ever reading `.profile` again, for anything else that file does.
+#[cfg(not(windows))]
 fn unix_rc_targets(home: &Path) -> Vec<PathBuf> {
     let mut targets = vec![
         home.join(".zshenv"),  // every zsh invocation: login, interactive, script
@@ -228,8 +243,7 @@ mod windows {
         if status.success() {
             Ok(())
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
+            Err(io::Error::other(
                 "reg.exe add HKCU\\Environment /v Path failed",
             ))
         }
@@ -266,6 +280,7 @@ pub fn ensure_shared_bin_on_path(home: &Path) -> io::Result<PathEnvOutcome> {
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
     fn write(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
@@ -274,6 +289,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn env_file_content_prepends_the_shared_bin_dir() {
         let home = tempfile::tempdir().unwrap();
         let content = env_file_content(home.path());
@@ -282,6 +298,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn write_env_file_creates_it_and_reports_changed() {
         let home = tempfile::tempdir().unwrap();
         let path = env_file_path(home.path());
@@ -291,6 +308,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn write_env_file_is_idempotent_on_unchanged_content() {
         let home = tempfile::tempdir().unwrap();
         assert!(write_env_file(home.path()).unwrap());
@@ -301,6 +319,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn write_env_file_rewrites_a_stale_copy() {
         let home = tempfile::tempdir().unwrap();
         let path = env_file_path(home.path());
@@ -313,6 +332,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn ensure_guard_at_top_creates_a_new_file_with_the_guard_first() {
         let home = tempfile::tempdir().unwrap();
         let target = home.path().join(".bashrc");
@@ -324,6 +344,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn ensure_guard_at_top_is_idempotent() {
         let home = tempfile::tempdir().unwrap();
         let target = home.path().join(".zshenv");
@@ -335,6 +356,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn ensure_guard_at_top_goes_before_existing_content_so_later_lines_still_win() {
         let home = tempfile::tempdir().unwrap();
         let target = home.path().join(".bashrc");
@@ -351,6 +373,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn ensure_guard_at_top_preserves_a_leading_shebang() {
         let home = tempfile::tempdir().unwrap();
         let target = home.path().join(".profile");
@@ -370,6 +393,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn unix_rc_targets_excludes_bash_profile_when_absent() {
         let home = tempfile::tempdir().unwrap();
         let targets = unix_rc_targets(home.path());
@@ -380,6 +404,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn unix_rc_targets_includes_bash_profile_when_present() {
         let home = tempfile::tempdir().unwrap();
         write(&home.path().join(".bash_profile"), "echo existing\n");

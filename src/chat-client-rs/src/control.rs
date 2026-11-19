@@ -1059,13 +1059,14 @@ mod tests {
                 )
             }
         });
-        let deadline = SystemTime::now() + Duration::from_secs(10);
-        loop {
+        // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+        // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+        for _ in 0..1000 {
             for pending in control.take_pending() {
                 assert_eq!(pending.request.verb, "names");
                 pending.answer(Reply::ok(vec!["alice".into(), "bob".into()]));
             }
-            if asked.is_finished() || SystemTime::now() > deadline {
+            if asked.is_finished() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -1173,13 +1174,14 @@ mod tests {
                 )
             }
         });
-        let deadline = SystemTime::now() + Duration::from_secs(10);
-        loop {
+        // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+        // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+        for _ in 0..1000 {
             for pending in control.take_pending() {
                 assert_eq!(pending.request.verb, "names");
                 pending.answer(Reply::ok(vec!["alice".into(), "bob".into()]));
             }
-            if asked.is_finished() || SystemTime::now() > deadline {
+            if asked.is_finished() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -1299,8 +1301,12 @@ mod tests {
         std::thread::spawn(move || {
             await_reply(&queued, Request::default(), Duration::from_secs(5));
         });
-        let deadline = SystemTime::now() + Duration::from_secs(5);
-        while !inner.waiting.load(Ordering::Acquire) && SystemTime::now() < deadline {
+        // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+        // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+        for _ in 0..1000 {
+            if inner.waiting.load(Ordering::Acquire) {
+                break;
+            }
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(

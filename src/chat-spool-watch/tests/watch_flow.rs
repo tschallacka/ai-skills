@@ -107,8 +107,12 @@ fn the_heartbeat_exists_while_it_runs_and_is_gone_after_a_clean_exit() {
         .spawn()
         .unwrap();
     let beat = state.join("interrupts/sess-3").join(".watcher");
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while !beat.is_file() && std::time::Instant::now() < deadline {
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+    for _ in 0..100 {
+        if beat.is_file() {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(beat.is_file(), "no heartbeat while the watcher runs");

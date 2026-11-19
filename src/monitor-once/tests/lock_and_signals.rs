@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const BIN: &str = env!("CARGO_BIN_EXE_monitor-once");
 
@@ -22,8 +22,9 @@ fn scratch(name: &str) -> PathBuf {
 
 /// The watched command's process group, read from the lock once it is recorded.
 fn wait_for_group(lock: &Path) -> i32 {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+    for _ in 0..100 {
         if let Ok(text) = fs::read_to_string(lock) {
             if let Some(group) = text
                 .lines()
@@ -35,12 +36,9 @@ fn wait_for_group(lock: &Path) -> i32 {
                 }
             }
         }
-        assert!(
-            Instant::now() < deadline,
-            "the lock never recorded the watch's group"
-        );
         thread::sleep(Duration::from_millis(50));
     }
+    panic!("the lock never recorded the watch's group");
 }
 
 fn group_alive(group: i32) -> bool {
@@ -105,13 +103,17 @@ fn a_killed_monitor_leaves_the_lock_held_while_its_watch_lives() {
         "a second start is refused while the watch lives"
     );
     signal(-group, libc::SIGTERM);
-    thread::sleep(Duration::from_millis(300));
-    let allowed = start(&dir, "watch", &["true"]).wait().unwrap();
-    assert_eq!(
-        allowed.code(),
-        Some(0),
-        "once the watch is gone the lock is free"
-    );
+    // Retried, not a fixed 300 ms: the group's exit is not instant on a
+    // loaded host, and a start while it lives is refused with 75.
+    let mut allowed = None;
+    for _ in 0..100 {
+        allowed = start(&dir, "watch", &["true"]).wait().unwrap().code();
+        if allowed != Some(75) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(allowed, Some(0), "once the watch is gone the lock is free");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -122,7 +124,7 @@ fn different_nicks_run_the_same_watch_and_one_nick_runs_it_once() {
         Command::new(BIN)
             .args(["--name", "watch", "--nick", nick, "--dir"])
             .arg(&dir)
-            .args(["--", "sleep", "1"])
+            .args(["--", "sleep", "5"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -130,7 +132,17 @@ fn different_nicks_run_the_same_watch_and_one_nick_runs_it_once() {
     };
     let mut alice = start_as("agent-alice");
     let mut bob = start_as("agent-bob");
-    thread::sleep(Duration::from_millis(200));
+    // Polled, not a fixed 200 ms: under a loaded gate the second spawn had
+    // not written its pid file yet. The watch sleeps 5 s, so it is still
+    // running when the same-nick refusal below is checked.
+    let both =
+        || dir.join("watch.agent-alice.pid").exists() && dir.join("watch.agent-bob.pid").exists();
+    for _ in 0..100 {
+        if both() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
     assert!(dir.join("watch.agent-alice.pid").exists());
     assert!(dir.join("watch.agent-bob.pid").exists());
     let again = start_as("agent-alice").wait().unwrap();

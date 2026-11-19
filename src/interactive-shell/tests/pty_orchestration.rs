@@ -317,12 +317,15 @@ fn observation_driven_exploration_across_nano_mc_and_less() {
     send_raw(&nano_dir, "59");
     wait_for_rows(&nano_dir, "Write to File:");
     send_key(&nano_dir, "ENTER");
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while std::time::Instant::now() < deadline
-        && !fs::read_to_string(&target)
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+    for _ in 0..100 {
+        if fs::read_to_string(&target)
             .unwrap_or_default()
             .contains("Hello World")
-    {
+        {
+            break;
+        }
         thread::sleep(Duration::from_millis(100));
     }
     assert!(
@@ -397,12 +400,15 @@ fn observation_driven_exploration_across_nano_mc_and_less() {
     send_key(&mc_dir_sock, "CTRL-O");
     wait_for_rows(&mc_dir_sock, "Write to File:");
     send_key(&mc_dir_sock, "ENTER");
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while std::time::Instant::now() < deadline
-        && !fs::read_to_string(&target)
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+    for _ in 0..100 {
+        if fs::read_to_string(&target)
             .unwrap_or_default()
             .contains("EDITED")
-    {
+        {
+            break;
+        }
         thread::sleep(Duration::from_millis(100));
     }
     assert!(

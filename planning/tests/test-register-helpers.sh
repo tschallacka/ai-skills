@@ -226,13 +226,20 @@ jq -e --arg id T8888 '.tasks[] | select(.id == $id
 out="$(run_todoup T8888 --detail 'detail two' --blocked-on —)"
 case "$out" in *Updated*) : ;; *) fail "todo-update --detail/--blocked-on refused: $out" ;; esac
 
+# The parent is filed here rather than named from the live register: a
+# release's `bugs migrate` archives every closed entry, so any id this test
+# hard-coded out of BUGS.json (it once named B2) disappears at the next bump.
+out="$(run_bugadd --title 'Flag probe parent defect' --reproduce 'bash x' --observed o \
+    --expected e --severity minor)"
+pid="$(printf '%s' "$out" | grep -oE 'B[0-9]+' | head -1)"
+case "$out" in *'Filed '"$pid"*) : ;; *) fail "the flag probe's parent defect was refused: $out" ;; esac
 out="$(run_bugadd --title 'Flag probe defect' --reproduce 'bash x' --observed o \
     --expected e --severity minor --mechanism 'off-by-one loop' \
-    --parent B2 --surfaces 'planning/scripts/a.sh')"
+    --parent "$pid" --surfaces 'planning/scripts/a.sh')"
 bid="$(printf '%s' "$out" | grep -oE 'B[0-9]+' | head -1)"
 case "$out" in *'Filed '"$bid"*) : ;; *) fail "flag-rich bug-add refused: $out" ;; esac
-jq -e --arg id "$bid" '.bugs[] | select(.id == $id
-    and .mechanism == "off-by-one loop" and .parent == "B2")' "$bugs" >/dev/null \
+jq -e --arg id "$bid" --arg pid "$pid" '.bugs[] | select(.id == $id
+    and .mechanism == "off-by-one loop" and .parent == $pid)' "$bugs" >/dev/null \
     || fail "bug-add flags (--mechanism/--parent) did not all land"
 out="$(run_bugup "$bid" --reason 'probe reason' --mechanism 'second mechanism' --append-note 'appended')"
 case "$out" in *Updated*) : ;; *) fail "bug-update --reason/--mechanism/--append-note refused: $out" ;; esac

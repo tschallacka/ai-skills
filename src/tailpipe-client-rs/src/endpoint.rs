@@ -74,7 +74,11 @@ mod tests {
         assert_eq!(resolved, home.join("tailpipe.sock"));
     }
 
+    // Unix only: the length limit is `sun_path`'s, so `fits` is always true
+    // where there is no unix socket, nothing ever falls back, and this
+    // test's own precondition assert fired on the Windows leg by design.
     #[test]
+    #[cfg(unix)]
     fn a_long_home_falls_back_to_a_short_tagged_tmp_path() {
         // The exact path this bug was filed from: a disposable per-cell HOME
         // under the skill-adoption benchmark harness.

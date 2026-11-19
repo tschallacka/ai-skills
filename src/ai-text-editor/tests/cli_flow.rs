@@ -2129,8 +2129,9 @@ fn process_alive(pid: u32) -> bool {
 }
 
 fn wait_for_death(pid: u32, seconds: u64) -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
-    while std::time::Instant::now() < deadline {
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
+    for _ in 0..seconds * 4 {
         if !process_alive(pid) {
             return true;
         }

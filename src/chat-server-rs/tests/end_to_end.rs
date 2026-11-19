@@ -16,7 +16,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use support::{
     free_udp_port, run_client, spawn_server, stderr_string, stdout_string, ChatServer, ChildGuard,
@@ -259,9 +259,10 @@ fn an_idle_tail_survives_silence_and_wakes_on_a_pushed_message() {
         "wake send failed: {}",
         stderr_string(&send_output)
     );
-    let deadline = Instant::now() + Duration::from_secs(3);
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
     let mut woke = false;
-    while Instant::now() < deadline {
+    for _ in 0..100 {
         if log.lock().unwrap().contains("wake wakee now") {
             woke = true;
             break;
@@ -734,9 +735,10 @@ fn tail_mentions_mention_exit_exits_on_a_mention_from_a_peer() {
         "mention send failed: {}",
         stderr_string(&send_out)
     );
-    let deadline = Instant::now() + Duration::from_secs(12);
+    // A ceiling counted in polls, not a wall-clock deadline: a paused CI runner resumes the count
+    // instead of finding it already spent (.agents/knowledge/github-ci-runners.md).
     let mut exited = false;
-    while Instant::now() < deadline {
+    for _ in 0..60 {
         if matches!(ment_child.try_wait(), Ok(Some(_))) {
             exited = true;
             break;
