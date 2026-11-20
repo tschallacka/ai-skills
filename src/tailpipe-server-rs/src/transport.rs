@@ -50,6 +50,10 @@ mod imp {
             self.0.try_clone().map(Stream)
         }
 
+        pub fn set_read_timeout(&self, timeout: Option<std::time::Duration>) -> io::Result<()> {
+            self.0.set_read_timeout(timeout)
+        }
+
         /// Nothing to prove on a Unix socket: the filesystem already limited
         /// who could reach it.
         pub fn authenticate(&mut self) -> io::Result<bool> {
@@ -158,6 +162,10 @@ mod imp {
                 stream: self.stream.try_clone()?,
                 expect: None,
             })
+        }
+
+        pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+            self.stream.set_read_timeout(timeout)
         }
 
         /// Reads the nonce line an accepted connection must open with. Done

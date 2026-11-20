@@ -37,11 +37,12 @@ impl StreamLog {
     /// Every retained line with `from <= id <= to`.
     pub fn read_range(&mut self, from: u64, to: u64) -> Vec<Line> {
         self.touch();
-        self.lines
-            .iter()
-            .filter(|line| line.id >= from && line.id <= to)
-            .cloned()
-            .collect()
+        // Ids are pushed in increasing order, so the range is found by binary
+        // search: a tail polls this many times a second, and a linear scan of
+        // a long stream on every poll is what held a server at a full core.
+        let start = self.lines.partition_point(|line| line.id < from);
+        let end = self.lines.partition_point(|line| line.id <= to);
+        self.lines[start..end.max(start)].to_vec()
     }
 
     /// Every retained line matching `query` under `mode`. A malformed regex
