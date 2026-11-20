@@ -105,13 +105,16 @@ impl Hub {
     }
 
     /// Long-polls `stream` for lines past `since`, calling `on_line` for
-    /// each as they appear, until `should_stop` reports true. Re-locks
-    /// briefly per iteration; never holds the lock across the sleep.
+    /// each as they appear, until `should_stop` reports true or `on_line`
+    /// returns false (the line could not be delivered). Re-locks briefly per
+    /// iteration; never holds the lock across the sleep. A live tail is a
+    /// reader, so its polls keep the stream from eviction; that is why the
+    /// caller must stop it once its client has gone.
     pub fn tail_since(
         &self,
         stream: &str,
         mut since: u64,
-        mut on_line: impl FnMut(Line),
+        mut on_line: impl FnMut(Line) -> bool,
         should_stop: impl Fn() -> bool,
     ) {
         while !should_stop() {
@@ -124,7 +127,9 @@ impl Hub {
             };
             for line in new_lines {
                 since = since.max(line.id);
-                on_line(line);
+                if !on_line(line) {
+                    return;
+                }
             }
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -258,6 +263,7 @@ mod tests {
                 first_id,
                 |_line| {
                     received_tail.fetch_add(1, Ordering::SeqCst);
+                    true
                 },
                 || stop_tail.load(Ordering::SeqCst),
             );
@@ -289,5 +295,25 @@ mod tests {
         tailer.join().unwrap();
 
         assert_eq!(received.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_tail_whose_line_cannot_be_delivered_returns() {
+        let hub = Arc::new(Hub::new(scratch("undeliverable")));
+        hub.dispatch(Request::Ingest {
+            stream: "s".into(),
+            line: "only".into(),
+        });
+        let hub_tail = Arc::clone(&hub);
+        // should_stop never fires: only the failed delivery can end it.
+        let tailer = std::thread::spawn(move || hub_tail.tail_since("s", 0, |_| false, || false));
+        for _ in 0..500 {
+            if tailer.is_finished() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(tailer.is_finished(), "a tail with no reader kept polling");
+        tailer.join().unwrap();
     }
 }

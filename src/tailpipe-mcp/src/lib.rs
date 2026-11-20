@@ -9,7 +9,7 @@
 
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tailpipe_server_rs::protocol::{Request, Response, SearchMode};
 
 /// The MCP server-level pitch, shown to the client once at `initialize` --
@@ -139,28 +139,29 @@ fn wait_result(received: Option<Response>) -> Result<Value, String> {
 }
 
 /// Blocks (bounded by `timeout_seconds`) for a line past `since` on `stream`.
-/// Spawns tailpipe_client_rs::client::tail on its own thread and races it
-/// against the timeout with a channel, since tail's own long-poll loop has
-/// no stop signal of its own -- the thread outlives a timed-out wait, which
-/// is an accepted tradeoff for a tool that is called occasionally rather
-/// than in a tight loop.
+/// The tail ends with the call -- on the first line or at the timeout -- and
+/// its connection closes with it. It used to run on a thread that outlived
+/// the call, and each such thread kept a server-side tail polling for the
+/// life of both processes: a monitor calling `wait` in a loop held a
+/// tailpipe server at a full core.
 pub fn wait(
     endpoint: &Path,
     stream: &str,
     since: u64,
     timeout_seconds: u64,
 ) -> Result<Value, String> {
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let endpoint = endpoint.to_path_buf();
-    let stream = stream.to_string();
-    std::thread::spawn(move || {
-        let _ = tailpipe_client_rs::client::tail(&endpoint, &stream, since, move |response| {
-            let _ = sender.send(response);
-        });
-    });
-    let received = receiver
-        .recv_timeout(Duration::from_secs(timeout_seconds))
-        .ok();
+    let deadline = Instant::now() + Duration::from_secs(timeout_seconds);
+    let mut received = None;
+    let _ = tailpipe_client_rs::client::tail_until(
+        endpoint,
+        stream,
+        since,
+        |response| {
+            received = Some(response);
+            false
+        },
+        || Instant::now() >= deadline,
+    );
     wait_result(received)
 }
 

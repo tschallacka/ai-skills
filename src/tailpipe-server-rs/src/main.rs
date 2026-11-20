@@ -5,8 +5,9 @@
 //! that decodes and dispatches requests against the shared Hub, and one
 //! dedicated eviction-sweep thread on a timer.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tailpipe_server_rs::hub::Hub;
@@ -120,6 +121,17 @@ fn serve_connection(hub: &Arc<Hub>, mut stream: Stream) {
         since,
     } = request
     {
+        // A tail client sends nothing after its request, so the next read
+        // returns only when it hangs up. Without this a quiet stream's tail
+        // never learns its client left (nothing is written to fail), and every
+        // abandoned tail polled on for the life of the server.
+        let gone = Arc::new(AtomicBool::new(false));
+        let gone_watch = Arc::clone(&gone);
+        std::thread::spawn(move || {
+            let mut sink = [0u8; 256];
+            while matches!(reader.read(&mut sink), Ok(n) if n > 0) {}
+            gone_watch.store(true, Ordering::SeqCst);
+        });
         hub.tail_since(
             &name,
             since,
@@ -127,9 +139,9 @@ fn serve_connection(hub: &Arc<Hub>, mut stream: Stream) {
                 let response = Response::Lines {
                     lines: vec![received],
                 };
-                let _ = writeln!(stream, "{}", serde_json::to_string(&response).unwrap());
+                writeln!(stream, "{}", serde_json::to_string(&response).unwrap()).is_ok()
             },
-            || false,
+            || gone.load(Ordering::SeqCst),
         );
         return;
     }
@@ -176,6 +188,9 @@ fn main() {
             }
             Err(error) => {
                 eprintln!("tailpipe-server-rs: accept failed: {error}");
+                // An accept that keeps failing (out of descriptors) must not
+                // turn this loop into a spin.
+                std::thread::sleep(Duration::from_millis(100));
             }
         }
     }

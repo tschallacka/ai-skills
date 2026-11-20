@@ -184,6 +184,32 @@ pub fn tail(
     since: u64,
     mut on_line: impl FnMut(Response),
 ) -> std::io::Result<()> {
+    tail_until(
+        endpoint,
+        stream_name,
+        since,
+        |response| {
+            on_line(response);
+            true
+        },
+        || false,
+    )
+}
+
+/// How often a blocked `tail_until` read looks up to ask `should_stop`.
+const TAIL_STOP_CHECK: Duration = Duration::from_millis(200);
+
+/// `tail` that can end: it returns once `on_line` returns false or
+/// `should_stop` reports true, and closing its connection there is what
+/// lets the server stop polling for it. A tail left blocked on a quiet
+/// stream after its caller lost interest is a server thread polling forever.
+pub fn tail_until(
+    endpoint: &Path,
+    stream_name: &str,
+    since: u64,
+    mut on_line: impl FnMut(Response) -> bool,
+    should_stop: impl Fn() -> bool,
+) -> std::io::Result<()> {
     let mut stream = connect_autostarting(endpoint)?;
     writeln!(
         stream,
@@ -194,15 +220,37 @@ pub fn tail(
         })
         .unwrap()
     )?;
+    stream.set_read_timeout(Some(TAIL_STOP_CHECK))?;
     let mut reader = BufReader::new(stream);
+    // read_until keeps what it consumed before a timeout, so a line split
+    // across one is completed by the next read rather than lost.
+    let mut line = Vec::new();
     loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 {
+        if should_stop() {
             return Ok(());
         }
-        match serde_json::from_str(line.trim_end()) {
-            Ok(response) => on_line(response),
-            Err(_) => continue,
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) => return Ok(()),
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue
+            }
+            Err(error) => return Err(error),
+        }
+        if line.last() != Some(&b'\n') {
+            continue;
+        }
+        let parsed = serde_json::from_slice(line.trim_ascii_end());
+        line.clear();
+        if let Ok(response) = parsed {
+            if !on_line(response) {
+                return Ok(());
+            }
         }
     }
 }
